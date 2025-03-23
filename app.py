@@ -1,38 +1,39 @@
+# app.py
 import os
-from flask import Flask, request, abort
-from linebot import LineBotApi, WebhookHandler
-from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
+import logging
+from dotenv import load_dotenv
+from modules import create_app
+from flask import request, abort
 
-app = Flask(__name__)
+# 載入環境變數
+load_dotenv()
 
-CHANNEL_SECRET = os.getenv("CHANNEL_SECRET")
-CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
+# 創建應用實例
+app = create_app()
 
-line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
-handler = WebhookHandler(CHANNEL_SECRET)
+# 設定日誌
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
+# 顯示配置信息
+# 使用 with app.app_context() 替代 before_first_request
+def show_config():
+    logger.info(f"Channel token: {app.config.get('LINE_CHANNEL_TOKEN')}")
+    logger.info(f"Database URL: {app.config.get('SQLALCHEMY_DATABASE_URI')}")
+
+# 在應用啟動前執行配置顯示
+with app.app_context():
+    show_config()
+
+# 主路由（健康檢查）
 @app.route("/")
 def hello():
-    return "Hello from minimal_flask with LINE Bot!"
+    return "派班系統已啟動！"
 
-@app.route("/callback", methods=['POST'])
-def callback():
-    signature = request.headers['X-Line-Signature']
-    body = request.get_data(as_text=True)
-    try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
-        abort(400)
-    return "OK"
-
-@handler.add(MessageEvent, message=TextMessage)
-def handle_text_message(event):
-    user_text = event.message.text
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(text=f"你說了: {user_text}")
-    )
-
-# Gunicorn 啟動時，不要再寫 if __name__ == "__main__": app.run(...)
-# 因為 Render 會用 Gunicorn (Start Command) 來啟動
+# 啟動應用
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 3000))
+    app.run(host="0.0.0.0", port=port)
