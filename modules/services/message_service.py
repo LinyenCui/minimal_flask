@@ -13,7 +13,8 @@ from modules.handlers.trip_query_handler import (
     handle_query_fixed_trips, handle_trip_details, create_query_fixed_trips_quick_reply,
     handle_query_today_trips
 )
-from linebot.v3.messaging import TextMessage
+from modules.services.report_service import handle_generate_weekly_report
+from linebot.v3.messaging import TextMessage, QuickReply, QuickReplyItem, MessageAction
 
 # 建立日誌記錄器
 logger = logging.getLogger(__name__)
@@ -75,6 +76,39 @@ def handle_message(message_text, user_id, in_group=False):
             # 直接查詢當天的所有班次，不需選擇日期
             logger.info("查詢當天所有班次")
             return create_text_message(handle_query_today_trips())
+            
+        # 生成周報表命令
+        elif command in ["生成周報表", "生成週報表", "生成周報", "生成週報"]:
+            # 如果只是命令，提供類別選擇
+            if not args:
+                logger.info("生成周報表，返回類別選項")
+                # 創建Quick Reply
+                quick_reply = QuickReply(items=[
+                    QuickReplyItem(
+                        action=MessageAction(
+                            label="診所",
+                            text="生成周報表 診所"
+                        )
+                    ),
+                    QuickReplyItem(
+                        action=MessageAction(
+                            label="東洋",
+                            text="生成周報表 東洋"
+                        )
+                    ),
+                    QuickReplyItem(
+                        action=MessageAction(
+                            label="全部",
+                            text="生成周報表 全部"
+                        )
+                    )
+                ])
+                return TextMessage(text="請選擇要生成報表的類別：", quick_reply=quick_reply)
+            else:
+                # 調用報表生成處理函數
+                logger.info(f"生成周報表，參數: {args}")
+                result = handle_generate_weekly_report(message_text)
+                return create_text_message(result)
         
         # 幫助命令，可以在這裡加入更多功能的說明
         elif command in ["幫助", "help", "?", "h"]:
@@ -109,6 +143,7 @@ def create_help_message():
         "• 確認取消 [班次ID] - 確認取消班次\n"
         "• 確認請假 [班次ID] - 確認請假班次\n"
         "• 確認衝突 [班次ID] - 確認衝突班次\n"
+        "• 生成周報表 [類別] - 生成上週班次報表\n"
         "• 幫助 - 顯示此幫助訊息\n\n"
         "如在群組中使用，請在命令前添加前綴：!、# 或 /\n"
         "例如：!預約、#幫助"

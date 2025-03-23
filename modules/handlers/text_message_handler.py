@@ -218,6 +218,29 @@ def process_text_message(event):
                 send_text(reply_token, f"Flex消息處理錯誤，使用文本版本：\n{result}")
                 return
             
+        # 更新已完成班次
+        elif message_text == "更新已完成班次":
+            from modules.services.scheduler_service import update_completed_trips
+            result_text = update_completed_trips()
+            reply_text(reply_token, result_text)
+            return
+            
+        # 生成周報表
+        elif message_text.startswith("生成周報表") or message_text.startswith("生成週報表") or message_text.startswith("生成周報") or message_text.startswith("生成週報"):
+            try:
+                logger.info(f"處理生成周報表命令: {message_text}")
+                from modules.services.report_service import handle_generate_weekly_report
+                
+                # 調用報表生成函數
+                result = handle_generate_weekly_report(message_text)
+                reply_text(reply_token, result)
+                return
+            except Exception as e:
+                logger.error(f"處理生成周報表時出錯: {e}")
+                traceback.print_exc()
+                reply_text(reply_token, f"生成報表失敗: {str(e)}")
+                return
+            
         # 其他命令...可以繼續添加
         else:
             reply_text(reply_token, "未識別的命令。請使用「幫助」查看可用命令。")
