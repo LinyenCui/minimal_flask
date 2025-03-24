@@ -1,0 +1,132 @@
+=== 資料庫結構導出 ===
+
+找到 5 個資料表：
+
+--- 資料表：completed_trips ---
+欄位結構：
+  - id: integer, 不可為空, 預設值: nextval('completed_trips_id_seq'::regclass)
+  - date: date, 不可為空, 預設值: 無預設值
+  - start_point: character varying(100), 可為空, 預設值: 無預設值
+  - via_point: character varying(100), 可為空, 預設值: 無預設值
+  - end_point: character varying(100), 可為空, 預設值: 無預設值
+  - meter_fare: integer, 可為空, 預設值: 無預設值
+  - extra_fare: integer, 可為空, 預設值: 無預設值
+  - actual_fare: integer, 可為空, 預設值: 無預設值
+  - category: character varying(50), 可為空, 預設值: 無預設值
+  - driver_id: integer, 可為空, 預設值: 無預設值
+  - remarks: text, 可為空, 預設值: 無預設值
+  - created_at: timestamp without time zone, 可為空, 預設值: CURRENT_TIMESTAMP
+主鍵：
+  - id
+外鍵：
+  - start_point 參照 customers.short_name
+  - via_point 參照 customers.short_name
+  - end_point 參照 customers.short_name
+  - driver_id 參照 drivers.id
+
+資料表中沒有資料。
+
+--- 資料表：customers ---
+欄位結構：
+  - id: integer, 不可為空, 預設值: 無預設值
+  - name: character varying(100), 不可為空, 預設值: 無預設值
+  - address: character varying(200), 不可為空, 預設值: 無預設值
+  - short_name: character varying(50), 可為空, 預設值: 無預設值
+  - category: character varying(50), 可為空, 預設值: 無預設值
+  - remarks: text, 可為空, 預設值: 無預設值
+主鍵：
+  - id
+
+資料範例（最多10筆）：
+  id, name, address, short_name, category, remarks
+  1, 東洋先端科技, 台南市安南區工業三路50號, 東洋, 東洋, NULL
+  2, 謝智超達恩診所, 台南市中西區西門路二段375號3樓, 診所, 診所, NULL
+  3, 台南高鐵站, 台南市歸仁區歸仁大道, 高鐵站, 東洋, NULL
+  4, 林明煌, 台南市南區文南路71號, 文南71, 東洋, NULL
+  5, 胡昌吉, 台南市永康區大灣二街, 大灣二街, 診所, NULL
+  6, 中華北路, 台南市北區台南市北區中華北路一段105巷, 中華北路, 診所, NULL
+  7, 和緯路二段, 台南市北區和緯路二段152號, 和緯152, 診所, NULL
+  8, 北門路二段, 台南市北區北門路二段527巷口, 北門二段, 診所, NULL
+  9, 小北路, 台南市北區小北路16號, 小北路, 診所, NULL
+  10, 民德路, 台南市北區民德路105巷, 民德105, 診所, NULL
+
+--- 資料表：drivers ---
+欄位結構：
+  - id: integer, 不可為空, 預設值: 無預設值
+  - name: character varying(50), 不可為空, 預設值: 無預設值
+  - plate_number: character varying(20), 可為空, 預設值: 無預設值
+  - car_brand: character varying(50), 可為空, 預設值: 無預設值
+  - car_model: character varying(50), 可為空, 預設值: 無預設值
+主鍵：
+  - id
+
+資料範例（最多10筆）：
+  id, name, plate_number, car_brand, car_model
+  5386, 崔林彥, TDE-5386, Toyota, RAV4
+  28530, 涂文峰, 留空後補, Toyota, RAV4
+  533, 黃清池, 留空後補, Toyota, Camry
+  61553, 蘇木山, 留空後補, Toyota, Camry
+  61367, 王華南, 留空後補, Toyota, Cross
+  61379, 黃榮章, 留空後補, Toyota, Camry
+
+--- 資料表：fixed_schedules ---
+欄位結構：
+  - id: integer, 不可為空, 預設值: 無預設值
+  - route_number: character varying(10), 可為空, 預設值: 無預設值
+  - departure_time: time without time zone, 不可為空, 預設值: 無預設值
+  - start_point: character varying(100), 可為空, 預設值: 無預設值
+  - via_point: character varying(100), 可為空, 預設值: 無預設值
+  - end_point: character varying(100), 可為空, 預設值: 無預設值
+  - base_fare: integer, 可為空, 預設值: 無預設值
+  - surcharge: integer, 可為空, 預設值: 無預設值
+  - total_fare: integer, 可為空, 預設值: 無預設值
+  - category: character varying(50), 可為空, 預設值: 無預設值
+  - driver_id: character varying(10), 可為空, 預設值: 無預設值
+主鍵：
+  - id
+
+資料範例（最多10筆）：
+  id, route_number, departure_time, start_point, via_point, end_point, base_fare, surcharge, total_fare, category, driver_id
+  1, 135, 05:20:00, 大灣三街, NULL, 診所, 275, NULL, 275, 診所, 533
+  2, 135, 07:30:00, 中華北路, NULL, 診所, 135, NULL, 135, 診所, 533
+  3, 135, 08:00:00, 和緯152, NULL, 診所, 105, NULL, 105, 診所, 533
+  4, 135, 15:25:00, 北門二段, 小北路+民德105, 診所, 165, NULL, 165, 診所, 533
+  5, 135, 10:40:00, 診所, NULL, 大灣二街, 275, NULL, 275, 診所, 533
+  6, 135, 11:30:00, 永大路, NULL, 診所, 280, NULL, 280, 診所, 533
+  7, 135, 12:10:00, 診所, NULL, 中華北路, 135, NULL, 135, 診所, 533
+  8, 135, 12:35:00, 診所, NULL, 和緯152, 105, NULL, 105, 診所, 533
+  9, 135, 09:50:00, 仁和路, NULL, 診所, 220, NULL, 220, 診所, 533
+  10, 135, 14:40:00, 診所, NULL, 仁和路, 220, NULL, 220, 診所, 533
+
+--- 資料表：trips ---
+欄位結構：
+  - trip_id: integer, 不可為空, 預設值: nextval('trips_trip_id_seq'::regclass)
+  - fixed_trip_id: integer, 可為空, 預設值: 無預設值
+  - week_number: integer, 可為空, 預設值: 無預設值
+  - date: date, 可為空, 預設值: 無預設值
+  - time: time without time zone, 可為空, 預設值: 無預設值
+  - start_point: character varying(100), 可為空, 預設值: 無預設值
+  - via_point: character varying(100), 可為空, 預設值: 無預設值
+  - end_point: character varying(100), 可為空, 預設值: 無預設值
+  - meter_fare: integer, 可為空, 預設值: 無預設值
+  - extra_fare: integer, 可為空, 預設值: 無預設值
+  - actual_fare: integer, 可為空, 預設值: 無預設值
+  - category: character varying(50), 可為空, 預設值: 無預設值
+  - driver_id: integer, 可為空, 預設值: 無預設值
+  - status: character varying(20), 可為空, 預設值: 無預設值
+主鍵：
+  - trip_id
+外鍵：
+  - fixed_trip_id 參照 fixed_schedules.id
+  - start_point 參照 customers.short_name
+  - via_point 參照 customers.short_name
+  - end_point 參照 customers.short_name
+  - driver_id 參照 drivers.id
+
+資料範例（最多10筆）：
+  trip_id, fixed_trip_id, week_number, date, time, start_point, via_point, end_point, meter_fare, extra_fare, actual_fare, category, driver_id, status
+  2, NULL, NULL, 2025-03-09, 05:30:00, 高鐵站, NULL, 東洋, NULL, NULL, NULL, 東洋, 5386, 準備
+  3, NULL, NULL, 2025-03-09, 11:30:00, 東洋, NULL, 高鐵站, NULL, NULL, NULL, 東洋, 28530, 準備
+  4, NULL, NULL, 2025-03-09, 13:00:00, 高鐵站, NULL, 東洋, NULL, NULL, NULL, 東洋, 533, 準備
+
+=== 導出完成 ===

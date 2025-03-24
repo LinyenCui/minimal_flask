@@ -1,0 +1,19 @@
+# 嘗試導入 trip_handler 模塊
+try:
+    from handlers.trip_handler import handle_query_trips as trip_handler_query_trips
+except ImportError as e:
+    logger.error(f"導入 trip_handler 模塊失敗: {str(e)}")
+    # 如果導入失敗，使用本地函數
+    def trip_handler_query_trips():
+        return "無法導入 trip_handler 模塊。使用本地函數代替。"
+
+# 在 handle_text_message 函數中更新命令處理部分
+if message_text == "查詢班次":
+    logger.info("執行查詢班次命令")
+    try:
+        reply_text = trip_handler_query_trips()
+    except Exception as e:
+        logger.error(f"查詢班次錯誤: {str(e)}")
+        reply_text = f"查詢班次功能出錯: {str(e)}"
+
+from handlers import trip_handler, driver_handler, booking_handler 

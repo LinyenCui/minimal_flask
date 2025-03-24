@@ -1,0 +1,114 @@
+from sqlalchemy import Column, Integer, String, ForeignKey, Date, Time, Boolean, DateTime, Float, create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship, sessionmaker
+from datetime import datetime
+import os
+
+Base = declarative_base()
+
+class Client(Base):
+    __tablename__ = 'clients'
+    
+    client_id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(60))  # 客户名称
+    address = Column(String(120))  # 地址
+    short_name = Column(String(30), unique=True)  # 简称，用于快速引用
+    category = Column(String(30))  # 分类：东洋/诊所/其他
+    remarks = Column(String(90))  # 备注
+
+class Driver(Base):
+    __tablename__ = 'drivers'
+    
+    driver_id = Column(String(10), primary_key=True)  # 司机ID
+    name = Column(String(60))  # 司机姓名
+    license_plate = Column(String(20))  # 车牌号
+    car_brand = Column(String(30))  # 车辆品牌
+    car_model = Column(String(30))  # 车辆型号
+
+class FixedTrip(Base):
+    __tablename__ = 'fixed_trips'
+    
+    fixed_trip_id = Column(Integer, primary_key=True, autoincrement=True)
+    cycle = Column(String(30))  # 周期，如"monday,wednesday,friday"
+    time = Column(String(10))  # 时间，如"08:30"
+    start_point = Column(String(30), ForeignKey('clients.short_name'))
+    via_point = Column(String(30), ForeignKey('clients.short_name'), nullable=True)
+    end_point = Column(String(30), ForeignKey('clients.short_name'))
+    meter_fare = Column(Integer)  # 表价
+    extra_fare = Column(Integer)  # 加成
+    actual_fare = Column(Integer)  # 实收
+    category = Column(String(30))  # 分类
+    driver_id = Column(String(10), ForeignKey('drivers.driver_id'), nullable=True)
+    
+    # 关系
+    start = relationship("Client", foreign_keys=[start_point])
+    via = relationship("Client", foreign_keys=[via_point])
+    end = relationship("Client", foreign_keys=[end_point])
+    driver = relationship("Driver")
+
+class Trip(Base):
+    __tablename__ = 'trips'
+    
+    trip_id = Column(Integer, primary_key=True, autoincrement=True)
+    fixed_trip_id = Column(Integer, ForeignKey('fixed_trips.fixed_trip_id'), nullable=True)
+    week_number = Column(Integer)  # ISO周数
+    date = Column(Date, nullable=False)
+    time = Column(String(10), nullable=False)  # 时间，如"08:30"
+    start_point = Column(String(30), ForeignKey('clients.short_name'))
+    via_point = Column(String(30), ForeignKey('clients.short_name'), nullable=True)
+    end_point = Column(String(30), ForeignKey('clients.short_name'))
+    meter_fare = Column(Integer)  # 表价
+    extra_fare = Column(Integer)  # 加成
+    actual_fare = Column(Integer)  # 实收
+    category = Column(String(30))  # 分类
+    driver_id = Column(String(10), ForeignKey('drivers.driver_id'), nullable=True)
+    status = Column(String(10), default='待派')  # 状态：待派/准备/取消/请假/冲突/完成
+    
+    # 关系
+    fixed_trip = relationship("FixedTrip")
+    start = relationship("Client", foreign_keys=[start_point])
+    via = relationship("Client", foreign_keys=[via_point])
+    end = relationship("Client", foreign_keys=[end_point])
+    driver = relationship("Driver")
+
+# 数据库初始化函数
+def init_db():
+    # 获取数据库URL
+    DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/dispatch_system")
+    
+    # 创建引擎
+    engine = create_engine(DATABASE_URL)
+    
+    # 创建所有表
+    Base.metadata.create_all(engine)
+    
+    # 创建会话
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    
+    # 添加一些初始数据（如果需要）
+    # 检查是否已有客户数据
+    if session.query(Client).count() == 0:
+        # 添加一些示例客户
+        clients = [
+            Client(name="洗肾诊所", address="台南市永康区大湾二街", short_name="大湾诊所", category="诊所", remarks="固定接送"),
+            Client(name="东洋公司", address="台南市北区中华北路一段", short_name="东洋公司", category="东洋", remarks="公务出行"),
+        ]
+        session.add_all(clients)
+    
+    # 检查是否已有司机数据
+    if session.query(Driver).count() == 0:
+        # 添加一些示例司机
+        drivers = [
+            Driver(driver_id="5386", name="崔林彦", license_plate="TDE-5386", car_brand="Toyota", car_model="RAV4"),
+        ]
+        session.add_all(drivers)
+    
+    session.commit()
+    session.close()
+    
+    return engine
+
+# 如果直接运行此文件，则初始化数据库
+if __name__ == "__main__":
+    init_db()

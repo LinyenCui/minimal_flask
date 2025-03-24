@@ -1,0 +1,72 @@
+   table_name    |  column_name   |          data_type          | is_nullable |               column_default                
+-----------------+----------------+-----------------------------+-------------+---------------------------------------------
+ completed_trips | id             | integer                     | NO          | nextval('completed_trips_id_seq'::regclass)
+ completed_trips | date           | date                        | NO          | 
+ completed_trips | start_point    | character varying           | YES         | 
+ completed_trips | via_point      | character varying           | YES         | 
+ completed_trips | end_point      | character varying           | YES         | 
+ completed_trips | meter_fare     | integer                     | YES         | 
+ completed_trips | extra_fare     | integer                     | YES         | 
+ completed_trips | actual_fare    | integer                     | YES         | 
+ completed_trips | category       | character varying           | YES         | 
+ completed_trips | driver_id      | integer                     | YES         | 
+ completed_trips | remarks        | text                        | YES         | 
+ completed_trips | created_at     | timestamp without time zone | YES         | CURRENT_TIMESTAMP
+ completed_trips | unique_code    | character varying           | YES         | 
+ customers       | id             | integer                     | NO          | 
+ customers       | name           | character varying           | NO          | 
+ customers       | address        | character varying           | NO          | 
+ customers       | short_name     | character varying           | YES         | 
+ customers       | category       | character varying           | YES         | 
+ customers       | remarks        | text                        | YES         | 
+ drivers         | id             | integer                     | NO          | 
+ drivers         | name           | character varying           | NO          | 
+ drivers         | plate_number   | character varying           | YES         | 
+ drivers         | car_brand      | character varying           | YES         | 
+ drivers         | car_model      | character varying           | YES         | 
+ fixed_schedules | id             | integer                     | NO          | 
+ fixed_schedules | route_number   | character varying           | YES         | 
+ fixed_schedules | departure_time | time without time zone      | NO          | 
+ fixed_schedules | start_point    | character varying           | YES         | 
+ fixed_schedules | via_point      | character varying           | YES         | 
+ fixed_schedules | end_point      | character varying           | YES         | 
+ fixed_schedules | base_fare      | integer                     | YES         | 
+ fixed_schedules | surcharge      | integer                     | YES         | 
+ fixed_schedules | total_fare     | integer                     | YES         | 
+ fixed_schedules | category       | character varying           | YES         | 
+ fixed_schedules | driver_id      | character varying           | YES         | 
+ fixed_schedules | direction      | character varying           | YES         | 
+ persons         | id             | integer                     | NO          | nextval('persons_id_seq'::regclass)
+ persons         | name           | character varying           | NO          | 
+ persons         | contact        | character varying           | YES         | 
+ persons         | email          | character varying           | YES         | 
+ persons         | role           | character varying           | YES         | 
+ persons         | remarks        | text                        | YES         | 
+ trips           | trip_id        | integer                     | NO          | nextval('trips_trip_id_seq'::regclass)
+ trips           | fixed_trip_id  | integer                     | YES         | 
+ trips           | week_number    | integer                     | YES         | 
+ trips           | date           | date                        | YES         | 
+ trips           | time           | time without time zone      | YES         | 
+ trips           | start_point    | character varying           | YES         | 
+ trips           | via_point      | character varying           | YES         | 
+ trips           | end_point      | character varying           | YES         | 
+ trips           | meter_fare     | integer                     | YES         | 
+ trips           | extra_fare     | integer                     | YES         | 
+ trips           | actual_fare    | integer                     | YES         | 
+ trips           | category       | character varying           | YES         | 
+ trips           | driver_id      | integer                     | YES         | 
+ trips           | status         | character varying           | YES         | 
+ trips           | unique_code    | character varying           | YES         | 
+(57 rows)
+
+   table_name    |  column_name  | referenced_table | referenced_column 
+-----------------+---------------+------------------+-------------------
+ completed_trips | driver_id     | drivers          | id
+ completed_trips | end_point     | customers        | short_name
+ completed_trips | start_point   | customers        | short_name
+ trips           | driver_id     | drivers          | id
+ trips           | end_point     | customers        | short_name
+ trips           | fixed_trip_id | fixed_schedules  | id
+ trips           | start_point   | customers        | short_name
+(7 rows)
+

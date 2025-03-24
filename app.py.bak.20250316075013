@@ -1,0 +1,3408 @@
+import os
+from flask import Flask, request, abort
+from linebot.v3.exceptions import InvalidSignatureError
+from linebot.v3.webhooks import MessageEvent, TextMessageContent
+from linebot.v3.messaging import (
+    Configuration,
+    ApiClient,
+    MessagingApi,
+    ReplyMessageRequest,
+    TextMessage,
+    FlexMessage,
+    FlexContainer
+)
+from dotenv import load_dotenv
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import text as sql_text
+import re
+from datetime import datetime, date, timedelta
+import logging
+from flask_apscheduler import APScheduler
+from flask import current_app
+import pandas as pd
+import openpyxl
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+import pickle
+# 從 handlers 模塊導入需要的函數
+from handlers.trip_handler import handle_pending_trips
+from handlers.driver_handler import handle_assign_driver
+from handle_booking_flex import handle_booking_start, handle_booking_message
+# 導入models中的db實例
+from models import db
+
+# 設置日誌
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
+
+# 加載環境變量
+load_dotenv()
+
+# 獲取環境變量
+channel_access_token = os.environ.get('LINE_CHANNEL_TOKEN')
+channel_secret = os.environ.get('LINE_CHANNEL_SECRET')
+database_url = os.environ.get('DATABASE_URL')
+
+# 檢查環境變量
+if not channel_access_token or not channel_secret:
+    raise ValueError("LINE_CHANNEL_TOKEN 或 LINE_CHANNEL_SECRET 環境變量未設置")
+if not database_url:
+    raise ValueError("DATABASE_URL 環境變量未設置")
+
+# 配置數據庫
+app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# 使用models.py中的db實例，並初始化
+db.init_app(app)
+
+# 創建並設置資料庫引擎
+from sqlalchemy import create_engine
+app.config['DB_ENGINE'] = create_engine(database_url)
+
+# 配置 LINE Bot API
+configuration = Configuration(access_token=channel_access_token)
+api_client = ApiClient(configuration)
+messaging_api = MessagingApi(api_client)
+
+# 嘗試導入 WebhookParser
+try:
+    from linebot.v3.webhook import WebhookParser
+    parser = WebhookParser(channel_secret)
+    print("成功導入 WebhookParser")
+except ImportError:
+    try:
+        from linebot.v3.webhooks import WebhookParser
+        parser = WebhookParser(channel_secret)
+        print("從 webhooks 導入 WebhookParser")
+    except ImportError:
+        from linebot import WebhookParser
+        parser = WebhookParser(channel_secret)
+        print("使用舊版本 WebhookParser")
+
+print(f"Channel token: {os.environ.get('LINE_CHANNEL_TOKEN')}")
+print(f"Database URL: {os.environ.get('DATABASE_URL')}")
+
+# 用戶狀態字典，用於跟踪對話狀態
+user_states = {}
+
+# 初始化排程器
+scheduler = APScheduler()
+
+# 在應用啟動時初始化排程器
+def init_scheduler(app):
+    scheduler.init_app(app)
+    scheduler.start()
+    
+    # 應用啟動時，處理所有已過期的班次
+    with app.app_context():
+        update_completed_trips()
+    
+    # 應用啟動時，初始化所有沒有唯一識別碼的班次
+    with app.app_context():
+        try:
+            print("正在初始化班次唯一識別碼...")
+            result = initialize_unique_codes()
+            print(result)
+        except Exception as e:
+            print(f"初始化班次唯一識別碼時出錯: {e}")
+    
+    # 應用啟動時，安排所有未來班次的自動更新任務
+    with app.app_context():
+        schedule_all_trip_updates(app)
+    
+    # 每天午夜執行一次，安排新的班次更新任務
+    scheduler.add_job(id='schedule_daily_updates', 
+                     func=schedule_all_trip_updates, 
+                     args=[app],
+                     trigger='cron', 
+                     hour=0, 
+                     minute=0)
+    
+    # 每小時執行一次，處理可能遺漏的過期班次
+    scheduler.add_job(id='hourly_update_completed', 
+                     func=lambda: update_completed_trips(),
+                     trigger='cron', 
+                     hour='*', 
+                     minute=0)
+    
+    # 每小時執行一次，檢查並更新沒有唯一識別碼的班次
+    scheduler.add_job(id='hourly_update_unique_codes', 
+                     func=lambda: initialize_unique_codes(),
+                     trigger='cron', 
+                     hour='*', 
+                     minute=30)
+
+# 安排所有未來班次的自動更新任務
+def schedule_all_trip_updates(app):
+    with app.app_context():
+        try:
+            # 獲取當前日期和時間
+            now = datetime.now()
+            
+            # 查詢所有狀態為"準備"且時間在未來的班次
+            query = """
+            SELECT 
+                t.trip_id, 
+                t.date, 
+                t.time
+            FROM 
+                trips t
+            WHERE 
+                t.status = '準備'
+                AND (t.date > :current_date OR (t.date = :current_date AND t.time > :current_time))
+            ORDER BY
+                t.date, t.time
+            """
+            
+            future_trips = db.session.execute(
+                sql_text(query), 
+                {
+                    "current_date": now.date(),
+                    "current_time": now.time()
+                }
+            ).fetchall()
+            
+            # 為每個未來班次安排更新任務
+            for trip in future_trips:
+                trip_id = trip[0]
+                trip_date = trip[1]
+                trip_time = trip[2]
+                
+                # 計算執行時間（班次時間後5分鐘）
+                execution_time = datetime.combine(trip_date, trip_time) + timedelta(minutes=5)
+                
+                # 如果執行時間已經過去，跳過
+                if execution_time < now:
+                    continue
+                
+                # 創建任務ID
+                job_id = f"update_trip_{trip_id}"
+                
+                # 檢查任務是否已經存在
+                existing_job = scheduler.get_job(job_id)
+                if existing_job:
+                    continue
+                
+                # 安排任務
+                scheduler.add_job(
+                    id=job_id,
+                    func=update_single_trip,
+                    args=[app, trip_id],
+                    trigger='date',
+                    run_date=execution_time
+                )
+                
+                print(f"已安排班次 #{trip_id} 的自動更新任務，執行時間：{execution_time}")
+            
+        except Exception as e:
+            error_msg = f"安排班次更新任務失敗: {str(e)}"
+            print(error_msg)
+
+# 更新單個班次的狀態
+def update_single_trip(app, trip_id):
+    with app.app_context():
+        try:
+            # 獲取當前日期和時間
+            now = datetime.now()
+            
+            # 查詢班次信息
+            query = """
+            SELECT 
+                t.trip_id, 
+                t.date, 
+                t.time, 
+                t.start_point, 
+                t.via_point,
+                t.end_point, 
+                t.meter_fare,
+                t.extra_fare,
+                t.category,
+                t.driver_id,
+                t.status,
+                t.unique_code,
+                t.fixed_trip_id
+            FROM 
+                trips t
+            WHERE 
+                t.trip_id = :trip_id
+            """
+            
+            trip = db.session.execute(sql_text(query), {"trip_id": trip_id}).fetchone()
+            
+            if not trip:
+                print(f"[{now}] 找不到班次 #{trip_id}")
+                return
+            
+            # 如果班次狀態不是"準備"，跳過
+            if trip[10] != '準備':
+                print(f"[{now}] 班次 #{trip_id} 狀態不是「準備」，跳過更新")
+                return
+            
+            unique_code = trip[11]
+            
+            # 如果沒有唯一識別碼，生成一個
+            if not unique_code:
+                if trip[12]:  # fixed_trip_id
+                    # 計算一年中的第幾天和第幾周
+                    day_of_year = trip[1].timetuple().tm_yday
+                    _, week_number, _ = trip[1].isocalendar()
+                    unique_code = f"{trip[12]}_{day_of_year}_{week_number}"
+                else:
+                    unique_code = f"T_{trip_id}"
+                    # 對於非固定班次，也需要計算週數
+                    _, week_number, _ = trip[1].isocalendar()
+                
+                # 更新班次的唯一識別碼和週數
+                update_query = """
+                UPDATE trips 
+                SET unique_code = :unique_code, week_number = :week_number
+                WHERE trip_id = :trip_id
+                """
+                
+                db.session.execute(
+                    sql_text(update_query), 
+                    {
+                        "unique_code": unique_code,
+                        "week_number": week_number,
+                        "trip_id": trip_id
+                    }
+                )
+            
+            # 檢查是否已經在completed_trips表中
+            check_query = """
+            SELECT COUNT(*) FROM completed_trips 
+            WHERE unique_code = :unique_code
+            """
+            
+            existing_count = db.session.execute(
+                sql_text(check_query), 
+                {"unique_code": unique_code}
+            ).fetchone()[0]
+            
+            if existing_count > 0:
+                print(f"[{now}] 班次 #{trip_id} 已經在已完成班次表中，跳過更新")
+                return
+            
+            # 插入到completed_trips表
+            insert_query = """
+            INSERT INTO completed_trips 
+            (date, start_point, via_point, end_point, meter_fare, extra_fare, category, driver_id, unique_code) 
+            VALUES 
+            (:date, :start_point, :via_point, :end_point, :meter_fare, :extra_fare, :category, :driver_id, :unique_code)
+            """
+            
+            db.session.execute(
+                sql_text(insert_query), 
+                {
+                    "date": trip[1],
+                    "start_point": trip[3],
+                    "via_point": trip[4],
+                    "end_point": trip[5],
+                    "meter_fare": trip[6],
+                    "extra_fare": trip[7],
+                    "category": trip[8],
+                    "driver_id": trip[9],
+                    "unique_code": unique_code
+                }
+            )
+            
+            # 更新trips表中的狀態為"已完成"
+            update_query = "UPDATE trips SET status = '已完成' WHERE trip_id = :trip_id"
+            db.session.execute(sql_text(update_query), {"trip_id": trip_id})
+            
+            # 提交事務
+            db.session.commit()
+            
+            print(f"[{now}] 成功更新班次 #{trip_id} 為已完成")
+            
+        except Exception as e:
+            # 發生錯誤時回滾事務
+            db.session.rollback()
+            error_msg = f"更新班次 #{trip_id} 失敗: {str(e)}"
+            print(f"[{now}] {error_msg}")
+
+# 測試數據庫連接
+@app.route("/test_db", methods=['GET'])
+def test_db():
+    try:
+        # 執行簡單查詢
+        result = db.session.execute(sql_text("SELECT 1")).fetchone()
+        if result:
+            return "數據庫連接成功！"
+        else:
+            return "數據庫連接失敗：無法執行查詢"
+    except Exception as e:
+        return f"數據庫連接錯誤: {str(e)}"
+
+@app.route("/")
+def hello():
+    return "Hello from minimal_flask with LINE Bot!"
+
+@app.route("/callback", methods=['POST'])
+def callback():
+    # 獲取 X-Line-Signature 請求頭
+    signature = request.headers['X-Line-Signature']
+    
+    # 獲取請求體
+    body = request.get_data(as_text=True)
+    app.logger.info("Request body: " + body)
+    
+    # 處理 webhook 請求
+    try:
+        events = parser.parse(body, signature)
+        for event in events:
+            # 檢查是否是文本消息
+            if event.type == "message" and event.message.type == "text":
+                message_text = event.message.text
+                source_type = event.source.type
+                
+                # 如果是群組消息，檢查是否有@機器人
+                if source_type == 'group' or source_type == 'room':
+                    # 獲取機器人的LINE ID（通常是@開頭的ID）
+                    bot_id = os.environ.get('LINE_BOT_ID', 'Linyan')  # 使用環境變量或默認值
+                    
+                    # 檢查消息中是否@了機器人
+                    # 注意：LINE可能會將@username轉換為不同的格式，所以我們需要檢查多種可能
+                    is_mentioned = False
+                    
+                    # 檢查常見的@格式
+                    if f"@{bot_id}" in message_text or f"＠{bot_id}" in message_text:
+                        is_mentioned = True
+                    
+                    # 有些LINE客戶端可能會添加不可見字符，所以我們也檢查消息是否以@開頭
+                    elif message_text.lstrip().startswith(f"@{bot_id}") or message_text.lstrip().startswith(f"＠{bot_id}"):
+                        is_mentioned = True
+                    
+                    # 如果沒有被@，則不處理
+                    if not is_mentioned:
+                        continue
+                    
+                    # 被@了，去除@部分
+                    message_text = re.sub(r'@\S+\s*', '', message_text).strip()
+                    message_text = re.sub(r'＠\S+\s*', '', message_text).strip()
+                    
+                    # 如果去除@後消息為空，則不處理
+                    if not message_text:
+                        continue
+                    
+                    # 更新event.message.text為處理後的文本
+                    event.message.text = message_text
+                
+                # 處理消息
+                handle_text_message(event)
+    except InvalidSignatureError:
+        abort(400)
+    except Exception as e:
+        print(f"發生錯誤: {e}")
+        abort(500)
+
+    return 'OK'
+
+def handle_text_message(event):
+    """處理文本消息"""
+    message_text = event.message.text
+    reply_token = event.reply_token
+    user_id = event.source.user_id
+    
+    # 檢查用戶是否在預約流程中（使用新的Flex Message預約功能）
+    from handle_booking_flex import booking_states
+    if user_id in booking_states:
+        try:
+            response = handle_booking_message(user_id, message_text, booking_states)
+            if response:
+                # 檢查返回的消息類型
+                if isinstance(response, dict) and "type" in response and response["type"] == "text":
+                    # 文本消息
+                    messaging_api.reply_message(
+                        ReplyMessageRequest(
+                            reply_token=reply_token,
+                            messages=[TextMessage(text=response["text"])]
+                        )
+                    )
+                elif isinstance(response, TextMessage):
+                    # 這是TextMessage對象
+                    messaging_api.reply_message(
+                        ReplyMessageRequest(
+                            reply_token=reply_token,
+                            messages=[response]
+                        )
+                    )
+                elif isinstance(response, FlexMessage):
+                    # 這是FlexMessage對象
+                    messaging_api.reply_message(
+                        ReplyMessageRequest(
+                            reply_token=reply_token,
+                            messages=[response]
+                        )
+                    )
+                else:
+                    # 將返回值轉換為文本消息
+                    print(f"未知的響應類型: {type(response)}, 內容: {response}")
+                    try:
+                        if isinstance(response, str):
+                            text_message = response
+                        else:
+                            text_message = str(response)
+                        
+                        messaging_api.reply_message(
+                            ReplyMessageRequest(
+                                reply_token=reply_token,
+                                messages=[TextMessage(text=text_message)]
+                            )
+                        )
+                    except Exception as e:
+                        print(f"轉換響應為文本時出錯: {e}")
+                        # 清除用戶狀態
+                        if user_id in booking_states:
+                            del booking_states[user_id]
+                        messaging_api.reply_message(
+                            ReplyMessageRequest(
+                                reply_token=reply_token,
+                                messages=[TextMessage(text="處理預約消息時出錯，請重新開始預約流程。")]
+                            )
+                        )
+                return
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            # 清除用戶狀態
+            if user_id in booking_states:
+                del booking_states[user_id]
+            reply_text = f"處理預約消息時出錯: {str(e)}\n請重新開始預約流程。"
+            messaging_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=reply_token,
+                    messages=[TextMessage(text=reply_text)]
+                )
+            )
+            return
+    
+    # 檢查用戶是否在舊的預約流程中
+    if user_id in user_states and user_states[user_id]['state'] == 'booking':
+        handle_booking_conversation(event, user_id, message_text)
+        return
+    
+    # 處理查詢班次命令
+    elif message_text.startswith("查詢班次"):
+        try:
+            # 檢查handle_query_trips_flex函數是否存在
+            print(f"嘗試解析日期: {message_text.split()[1] if len(message_text.split()) > 1 else '今天'}")
+            import app as app_module
+            if hasattr(app_module, 'handle_query_trips_flex'):
+                print("handle_query_trips_flex函數存在，嘗試調用")
+                # 確保在Flask應用上下文中執行
+                with app.app_context():
+                    bubble, error_message = app_module.handle_query_trips_flex(message_text)
+                    if bubble:
+                        try:
+                            flex_message = FlexMessage(alt_text="班次查詢結果", contents=FlexContainer.from_dict(bubble))
+                            messaging_api.reply_message(
+                                ReplyMessageRequest(
+                                    reply_token=reply_token,
+                                    messages=[flex_message]
+                                )
+                            )
+                            return
+                        except Exception as e:
+                            import traceback
+                            traceback.print_exc()
+                            reply_text = f"顯示Flex Message時出錯: {str(e)}\n改用文本版本顯示。"
+                            # 如果Flex Message失敗，使用文本版本
+                            reply_text += "\n\n" + handle_query_trips(message_text)
+                    else:
+                        reply_text = error_message
+            else:
+                print("handle_query_trips_flex函數不存在，使用文本版本")
+                reply_text = "Flex Message功能尚未完全實現，使用文本版本顯示。\n\n" + handle_query_trips(message_text)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            # 如果出錯，使用文本版本
+            reply_text = f"處理Flex Message時出錯: {str(e)}\n改用文本版本顯示。"
+            reply_text += "\n\n" + handle_query_trips(message_text)
+    
+    # 處理查詢固定班次命令
+    elif message_text.startswith("查詢固定班次"):
+        try:
+            # 檢查handle_query_fixed_trips_flex函數是否存在
+            print(f"嘗試使用Flex Message查詢固定班次: {message_text}")
+            import app as app_module
+            if hasattr(app_module, 'handle_query_fixed_trips_flex'):
+                print("handle_query_fixed_trips_flex函數存在，嘗試調用")
+                # 確保在Flask應用上下文中執行
+                with app.app_context():
+                    bubble, error_message = app_module.handle_query_fixed_trips_flex(message_text)
+                    if bubble:
+                        try:
+                            flex_message = FlexMessage(alt_text="固定班次查詢結果", contents=FlexContainer.from_dict(bubble))
+                            messaging_api.reply_message(
+                                ReplyMessageRequest(
+                                    reply_token=reply_token,
+                                    messages=[flex_message]
+                                )
+                            )
+                            return
+                        except Exception as e:
+                            import traceback
+                            traceback.print_exc()
+                            reply_text = f"顯示Flex Message時出錯: {str(e)}\n改用文本版本顯示。"
+                            # 如果Flex Message失敗，使用文本版本
+                            reply_text += "\n\n" + handle_query_fixed_trips(message_text)
+                    else:
+                        reply_text = error_message
+            else:
+                print("handle_query_fixed_trips_flex函數不存在，使用文本版本")
+                reply_text = "Flex Message功能尚未完全實現，使用文本版本顯示。\n\n" + handle_query_fixed_trips(message_text)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            # 如果出錯，使用文本版本
+            reply_text = f"處理Flex Message時出錯: {str(e)}\n改用文本版本顯示。"
+            reply_text += "\n\n" + handle_query_fixed_trips(message_text)
+    
+    # 待派班次
+    elif message_text == "待派班次":
+        reply_text = handle_pending_trips()
+    
+    # 指派司機
+    elif message_text.startswith("指派"):
+        reply_text = handle_assign_driver(message_text)
+    
+    # 開始預約流程（使用新的Flex Message預約功能）
+    elif message_text == "預約":
+        try:
+            # 使用新的Flex Message預約功能，默認類別為"診所"
+            response = handle_booking_start(user_id, category="診所")
+            if response:
+                # 檢查返回的消息類型
+                if isinstance(response, TextMessage) or isinstance(response, FlexMessage):
+                    messaging_api.reply_message(
+                        ReplyMessageRequest(
+                            reply_token=reply_token,
+                            messages=[response]
+                        )
+                    )
+                else:
+                    # 將返回值轉換為文本消息
+                    print(f"未知的響應類型: {type(response)}, 內容: {response}")
+                    messaging_api.reply_message(
+                        ReplyMessageRequest(
+                            reply_token=reply_token,
+                            messages=[TextMessage(text="預約系統暫時無法使用，請稍後重試。")]
+                        )
+                    )
+                return
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            # 清除用戶狀態
+            if user_id in booking_states:
+                del booking_states[user_id]
+            reply_text = f"啟動預約流程時出錯: {str(e)}\n請稍後重試。"
+            messaging_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=reply_token,
+                    messages=[TextMessage(text=reply_text)]
+                )
+            )
+            return
+    
+    # 東洋預約
+    elif message_text == "東洋預約":
+        try:
+            # 使用新的Flex Message預約功能，類別為"東洋"
+            response = handle_booking_start(user_id, category="東洋")
+            if response:
+                # 檢查返回的消息類型
+                if isinstance(response, TextMessage) or isinstance(response, FlexMessage):
+                    messaging_api.reply_message(
+                        ReplyMessageRequest(
+                            reply_token=reply_token,
+                            messages=[response]
+                        )
+                    )
+                else:
+                    # 將返回值轉換為文本消息
+                    print(f"未知的響應類型: {type(response)}, 內容: {response}")
+                    messaging_api.reply_message(
+                        ReplyMessageRequest(
+                            reply_token=reply_token,
+                            messages=[TextMessage(text="預約系統暫時無法使用，請稍後重試。")]
+                        )
+                    )
+                return
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            # 清除用戶狀態
+            if user_id in booking_states:
+                del booking_states[user_id]
+            reply_text = f"啟動東洋預約流程時出錯: {str(e)}\n請稍後重試。"
+            messaging_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=reply_token,
+                    messages=[TextMessage(text=reply_text)]
+                )
+            )
+            return
+    
+    # 匯入固定班次（一整周）
+    elif message_text.startswith("匯入固定班次"):
+        reply_text = handle_import_fixed_trips_week(message_text)
+    
+    # 更改班次狀態
+    elif message_text.startswith("更改狀態"):
+        reply_text = handle_change_status(message_text)
+    
+    # 修改班次狀態（新命令）
+    elif message_text.startswith("修改狀態"):
+        reply_text = handle_update_trip_status(message_text)
+    
+    # 確認取消班次
+    elif message_text.startswith("確認取消"):
+        reply_text = handle_confirm_cancel_trip(message_text)
+    
+    # 確認請假班次
+    elif message_text.startswith("確認請假"):
+        reply_text = handle_confirm_leave_trip(message_text)
+    
+    # 班次詳情
+    elif message_text.startswith("班次詳情"):
+        try:
+            parts = message_text.split()
+            if len(parts) < 2:
+                reply_text = "命令格式不正確。正確格式：班次詳情 [ID]"
+            else:
+                trip_id = int(parts[1])
+                reply_text = handle_trip_details(trip_id)
+        except ValueError:
+            reply_text = "班次ID必須是數字。"
+        except Exception as e:
+            reply_text = f"處理班次詳情命令時發生錯誤: {str(e)}"
+    
+    # 更新已完成班次
+    elif message_text == "更新已完成班次":
+        reply_text = update_completed_trips()
+    
+    # 幫助 - 使用 Flex Message
+    elif message_text == "幫助":
+        try:
+            # 創建幫助信息的 Flex Message
+            help_bubble = {
+                "type": "bubble",
+                "header": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "可用命令列表",
+                            "weight": "bold",
+                            "size": "md",
+                            "color": "#ffffff"
+                        }
+                    ],
+                    "backgroundColor": "#4682B4",
+                    "paddingTop": "8px",
+                    "paddingBottom": "8px"
+                },
+                "body": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "button",
+                            "action": {
+                                "type": "message",
+                                "label": "🔍 查詢班次",
+                                "text": "查詢班次"
+                            },
+                            "style": "primary",
+                            "color": "#1E90FF",
+                            "margin": "sm",
+                            "height": "sm"
+                        },
+                        {
+                            "type": "button",
+                            "action": {
+                                "type": "message",
+                                "label": "📝 預約",
+                                "text": "預約"
+                            },
+                            "style": "primary",
+                            "color": "#27ACB2",
+                            "margin": "sm",
+                            "height": "sm"
+                        },
+                        {
+                            "type": "button",
+                            "action": {
+                                "type": "message",
+                                "label": "📋 查詢固定班次",
+                                "text": "查詢固定班次"
+                            },
+                            "style": "primary",
+                            "color": "#6A5ACD",
+                            "margin": "sm",
+                            "height": "sm"
+                        },
+                        {
+                            "type": "button",
+                            "action": {
+                                "type": "message",
+                                "label": "📊 生成週報",
+                                "text": "生成週報"
+                            },
+                            "style": "primary",
+                            "color": "#FF6347",
+                            "margin": "sm",
+                            "height": "sm"
+                        },
+                        {
+                            "type": "button",
+                            "action": {
+                                "type": "message",
+                                "label": "🔄 修改班次狀態",
+                                "text": "修改狀態 [班次ID] [新狀態]"
+                            },
+                            "style": "primary",
+                            "color": "#FF8C00",
+                            "margin": "sm",
+                            "height": "sm"
+                        },
+                        {
+                            "type": "button",
+                            "action": {
+                                "type": "message",
+                                "label": "📄 顯示文字版幫助",
+                                "text": "幫助文字"
+                            },
+                            "style": "secondary",
+                            "margin": "sm",
+                            "height": "sm"
+                        }
+                    ]
+                },
+                "footer": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "點擊按鈕執行相應命令",
+                            "size": "xs",
+                            "color": "#888888",
+                            "align": "center"
+                        }
+                    ]
+                }
+            }
+            
+            # 創建 FlexMessage
+            flex_message = FlexMessage(
+                alt_text="幫助信息",
+                contents=FlexContainer.from_dict(help_bubble)
+            )
+            
+            # 發送 FlexMessage
+            messaging_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=reply_token,
+                    messages=[flex_message]
+                )
+            )
+            return
+        except Exception as e:
+            print(f"創建幫助 Flex Message 時出錯: {e}")
+            traceback.print_exc()
+            reply_text = get_help_text()
+    
+    # 幫助文字 - 顯示純文本幫助信息
+    elif message_text == "幫助文字":
+        reply_text = get_help_text()
+    
+    # 生成周報表
+    elif message_text.startswith("生成周報表"):
+        reply_text = handle_generate_weekly_report(message_text)
+    
+    # 顯示文字版幫助
+    elif message_text == "顯示文字版幫助":
+        reply_text = (
+            "📋 可用命令列表：\n\n"
+            "1. 查詢班次 - 查詢今天的班次\n"
+            "2. 查詢班次 [日期] - 查詢指定日期的班次\n"
+            "3. 查詢固定班次 - 查詢今天的固定班次\n"
+            "4. 查詢固定班次 [日期] - 查詢指定日期的固定班次\n"
+            "5. 預約 - 開始預約流程\n"
+            "6. 東洋預約 - 開始東洋預約流程\n"
+            "7. 生成週報 - 生成上週的班次報表\n"
+            "8. 班次詳情 [ID] - 查看特定班次的詳細信息\n"
+            "9. 修改狀態 [班次ID] [新狀態] - 修改班次的狀態\n"
+            "10. 幫助 - 顯示此幫助信息\n"
+            "11. 顯示文字版幫助 - 顯示文字版幫助信息\n\n"
+            "🔹 日期格式：\n"
+            "- YYYY-MM-DD (例如: 2025-03-15)\n"
+            "- MM/DD (例如: 3/15)\n"
+            "- 今天、明天、後天\n"
+            "- 一三五 - 查詢本周星期一、三、五的班次\n"
+            "- 二四六 - 查詢本周星期二、四、六的班次\n\n"
+            "🔹 可用狀態：\n"
+            "- 待派：班次尚未指派司機\n"
+            "- 準備：班次已指派司機並準備執行\n"
+            "- 取消：班次已被取消\n"
+            "- 衝突：班次出現衝突，無法由原定司機完成\n"
+            "- 請假：客戶請假，影響後續週期的固定班次\n"
+            "- 完成：班次已正常完成"
+        )
+    
+    else:
+        # 默認回覆
+        reply_text = f"您發送了: {message_text}\n\n請輸入「幫助」查看可用命令。"
+    
+    # 創建回覆消息請求
+    reply_message_request = ReplyMessageRequest(
+        reply_token=reply_token,
+        messages=[TextMessage(text=reply_text)]
+    )
+    
+    # 發送回覆
+    messaging_api.reply_message(reply_message_request)
+
+def handle_booking_conversation(event, user_id, message_text):
+    """處理預約對話流程"""
+    reply_token = event.reply_token
+    current_step = user_states[user_id]['step']
+    
+    try:
+        # 根據當前步驟處理用戶輸入
+        if current_step == 'date':
+            # 驗證日期格式
+            try:
+                # 嘗試解析日期
+                input_date = parse_date_input(message_text)
+                
+                # 檢查是否為過去的日期
+                today = date.today()
+                if input_date < today:
+                    # 如果是過去的日期，嘗試使用明年的同一天
+                    if input_date.replace(year=today.year + 1) > today:
+                        input_date = input_date.replace(year=today.year + 1)
+                    else:
+                        raise ValueError("不能預約過去的日期")
+                
+                user_states[user_id]['data']['date'] = input_date
+                user_states[user_id]['step'] = 'time'
+                reply_text = "請輸入預約時間（格式：HH:MM 或 HHMM）："
+            except ValueError as e:
+                reply_text = f"日期格式不正確或日期無效: {str(e)}\n請使用以下格式之一：\n- YYYY-MM-DD（例如：2023-03-15）\n- MM-DD（例如：03-15）"
+        
+        elif current_step == 'time':
+            # 驗證時間格式
+            try:
+                # 嘗試解析時間
+                if ":" in message_text:
+                    hour, minute = message_text.split(":")
+                    departure_time = datetime.strptime(f"{hour.zfill(2)}:{minute.zfill(2)}", "%H:%M").time()
+                else:
+                    # 假設格式為 HHMM 或 HMM
+                    if len(message_text) == 3:  # HMM
+                        hour = message_text[0]
+                        minute = message_text[1:3]
+                    else:  # HHMM
+                        hour = message_text[0:2]
+                        minute = message_text[2:4]
+                    departure_time = datetime.strptime(f"{hour.zfill(2)}:{minute.zfill(2)}", "%H:%M").time()
+                
+                # 檢查是否為過去的時間（如果是今天）
+                booking_date = user_states[user_id]['data']['date']
+                today = date.today()
+                now = datetime.now().time()
+                
+                if booking_date == today and departure_time < now:
+                    raise ValueError("不能預約過去的時間")
+                
+                user_states[user_id]['data']['time'] = departure_time
+                user_states[user_id]['step'] = 'start_point'
+                reply_text = "請輸入起點："
+            except ValueError as e:
+                reply_text = f"時間格式不正確或時間無效: {str(e)}\n請使用以下格式之一：\n- HH:MM（例如：09:30）\n- HHMM（例如：0930）"
+        
+        elif current_step == 'start_point':
+            # 保存起點
+            if not message_text.strip():
+                reply_text = "起點不能為空，請輸入起點："
+            else:
+                user_states[user_id]['data']['start_point'] = message_text.strip()
+                user_states[user_id]['step'] = 'via_point'
+                reply_text = "請輸入途經點（如無請輸入「無」或「-」）："
+        
+        elif current_step == 'via_point':
+            # 保存途經點（可選）
+            via_point = message_text.strip()
+            if via_point in ['無', '-', 'N/A', '不需要', '沒有']:
+                user_states[user_id]['data']['via_point'] = None
+            else:
+                user_states[user_id]['data']['via_point'] = via_point
+            
+            user_states[user_id]['step'] = 'end_point'
+            reply_text = "請輸入終點（如無請輸入「無」或「-」）："
+        
+        elif current_step == 'end_point':
+            # 保存終點（可選）
+            end_point = message_text.strip()
+            if end_point in ['無', '-', 'N/A', '不需要', '沒有']:
+                user_states[user_id]['data']['end_point'] = None
+            else:
+                user_states[user_id]['data']['end_point'] = end_point
+            
+            user_states[user_id]['step'] = 'confirm'
+            
+            # 顯示預約信息並請求確認
+            booking_data = user_states[user_id]['data']
+            confirm_text = "請確認預約信息：\n\n"
+            confirm_text += f"日期：{booking_data['date']}\n"
+            confirm_text += f"時間：{booking_data['time'].strftime('%H:%M')}\n"
+            confirm_text += f"起點：{booking_data['start_point']}\n"
+            
+            if booking_data.get('via_point'):
+                confirm_text += f"途經：{booking_data['via_point']}\n"
+            else:
+                confirm_text += "途經：無\n"
+            
+            if booking_data.get('end_point'):
+                confirm_text += f"終點：{booking_data['end_point']}\n"
+            else:
+                confirm_text += "終點：無\n"
+            
+            confirm_text += f"類別：{booking_data['category']}\n\n"
+            confirm_text += "確認預約請回覆「確認」，取消請回覆「取消」："
+            
+            reply_text = confirm_text
+        
+        elif current_step == 'confirm':
+            # 處理確認或取消
+            if message_text.strip() == "確認":
+                # 保存預約到數據庫
+                booking_data = user_states[user_id]['data']
+                
+                # 創建新的班次記錄
+                insert_query = """
+                INSERT INTO trips 
+                (date, time, start_point, via_point, end_point, category, status) 
+                VALUES 
+                (:date, :time, :start_point, :via_point, :end_point, :category, '待派')
+                RETURNING trip_id
+                """
+                
+                result = db.session.execute(
+                    sql_text(insert_query), 
+                    {
+                        "date": booking_data['date'],
+                        "time": booking_data['time'],
+                        "start_point": booking_data['start_point'],
+                        "via_point": booking_data.get('via_point'),
+                        "end_point": booking_data.get('end_point'),
+                        "category": booking_data['category']
+                    }
+                )
+                new_trip_id = result.fetchone()[0]
+                
+                # 生成唯一識別碼
+                unique_code = f"T_{new_trip_id}"
+                
+                # 計算一年中的第幾周
+                _, week_number, _ = booking_data['date'].isocalendar()
+                
+                # 更新班次的唯一識別碼和週數
+                update_query = """
+                UPDATE trips 
+                SET unique_code = :unique_code, week_number = :week_number
+                WHERE trip_id = :trip_id
+                """
+                
+                db.session.execute(
+                    sql_text(update_query), 
+                    {
+                        "unique_code": unique_code,
+                        "week_number": week_number,
+                        "trip_id": new_trip_id
+                    }
+                )
+                
+                db.session.commit()
+                
+                # 發送確認消息
+                reply_text = (
+                    "✅ 預約成功！\n\n"
+                    f"班次ID: {new_trip_id}\n"
+                    f"日期：{booking_data['date']}\n"
+                    f"時間：{booking_data['time'].strftime('%H:%M')}\n"
+                    f"起點：{booking_data['start_point']}\n"
+                )
+                
+                if booking_data.get('via_point'):
+                    reply_text += f"途經：{booking_data['via_point']}\n"
+                else:
+                    reply_text += "途經：無\n"
+                
+                if booking_data.get('end_point'):
+                    reply_text += f"終點：{booking_data['end_point']}\n"
+                else:
+                    reply_text += "終點：無\n"
+                
+                reply_text += (
+                    f"類別：{booking_data['category']}\n"
+                    f"狀態：待派\n\n"
+                    "我們會盡快為您指派司機。"
+                )
+                
+                # 清除用戶狀態
+                del user_states[user_id]
+            
+            elif message_text.strip() == "取消":
+                reply_text = "您已取消預約。"
+                # 清除用戶狀態
+                del user_states[user_id]
+            
+            else:
+                reply_text = "請回覆「確認」或「取消」："
+        
+        # 創建回覆消息請求
+        reply_message_request = ReplyMessageRequest(
+            reply_token=reply_token,
+            messages=[TextMessage(text=reply_text)]
+        )
+        
+        # 發送回覆
+        response = messaging_api.reply_message(reply_message_request)
+        print(f"回覆發送成功: {response}")
+    
+    except Exception as e:
+        # 發生錯誤，清除用戶狀態並發送錯誤消息
+        del user_states[user_id]
+        
+        error_text = f"預約過程中發生錯誤: {str(e)}\n請重新開始預約流程。"
+        
+        reply_message_request = ReplyMessageRequest(
+            reply_token=reply_token,
+            messages=[TextMessage(text=error_text)]
+        )
+        
+        response = messaging_api.reply_message(reply_message_request)
+        print(f"回覆發送成功: {response}")
+
+def parse_date_input(date_input):
+    """解析各種格式的日期輸入"""
+    print(f"嘗試解析日期: {date_input}")
+    
+    today = date.today()
+    current_year = today.year
+    
+    # 嘗試解析完整日期格式 (YYYY-MM-DD)
+    if re.match(r'^\d{4}-\d{1,2}-\d{1,2}$', date_input):
+        return datetime.strptime(date_input, "%Y-%m-%d").date()
+    
+    # 嘗試解析簡短日期格式 (MM-DD)
+    elif re.match(r'^\d{1,2}-\d{1,2}$', date_input):
+        parsed_date = datetime.strptime(f"{current_year}-{date_input}", "%Y-%m-%d").date()
+        # 如果日期已經過去，假設是明年的日期
+        if parsed_date < today:
+            parsed_date = parsed_date.replace(year=current_year + 1)
+        return parsed_date
+    
+    # 嘗試解析斜線日期格式 (MM/DD)
+    elif re.match(r'^\d{1,2}/\d{1,2}$', date_input):
+        month, day = date_input.split('/')
+        parsed_date = datetime.strptime(f"{current_year}-{month}-{day}", "%Y-%m-%d").date()
+        # 如果日期已經過去，假設是明年的日期
+        if parsed_date < today:
+            parsed_date = parsed_date.replace(year=current_year + 1)
+        return parsed_date
+    
+    # 嘗試解析中文日期格式 (MM月DD日)
+    elif re.match(r'^\d{1,2}月\d{1,2}日$', date_input):
+        month, day = re.findall(r'\d+', date_input)
+        parsed_date = datetime.strptime(f"{current_year}-{month}-{day}", "%Y-%m-%d").date()
+        # 如果日期已經過去，假設是明年的日期
+        if parsed_date < today:
+            parsed_date = parsed_date.replace(year=current_year + 1)
+        return parsed_date
+    
+    # 嘗試解析數字日期格式 (MMDD)
+    elif re.match(r'^\d{3,4}$', date_input):
+        if len(date_input) == 3:  # 例如 "125" 表示 1月25日
+            month = date_input[0]
+            day = date_input[1:3]
+        else:  # 例如 "0125" 表示 1月25日
+            month = date_input[0:2]
+            day = date_input[2:4]
+        parsed_date = datetime.strptime(f"{current_year}-{month}-{day}", "%Y-%m-%d").date()
+        # 如果日期已經過去，假設是明年的日期
+        if parsed_date < today:
+            parsed_date = parsed_date.replace(year=current_year + 1)
+        return parsed_date
+    
+    # 嘗試解析星期幾 (一, 二, 三, 四, 五, 六, 日)
+    elif date_input in ['一', '二', '三', '四', '五', '六', '日']:
+        weekday_map = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6}
+        target_weekday = weekday_map[date_input]
+        current_weekday = today.weekday()
+        
+        # 計算到目標星期幾的天數
+        days_ahead = (target_weekday - current_weekday) % 7
+        if days_ahead == 0:
+            days_ahead = 7  # 如果是同一天，則取下一周的同一天
+        
+        return today + timedelta(days=days_ahead)
+    
+    # 嘗試解析星期幾組合 (一三五, 二四六)
+    elif date_input in ['一三五', '二四六']:
+        weekday_map = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6}
+        
+        if date_input == '一三五':
+            weekdays = [0, 2, 4]  # 星期一、三、五
+        else:  # 二四六
+            weekdays = [1, 3, 5]  # 星期二、四、六
+        
+        current_weekday = today.weekday()
+        
+        # 找到下一個符合的星期幾
+        for days_ahead in range(1, 8):
+            target_date = today + timedelta(days=days_ahead)
+            if target_date.weekday() in weekdays:
+                return target_date
+        
+        # 如果沒有找到（理論上不會發生），返回今天
+        return today
+    
+    # 嘗試解析相對日期 ("今天", "明天", "後天")
+    elif date_input == "今天":
+        return today
+    elif date_input == "明天":
+        return today + timedelta(days=1)
+    elif date_input == "後天":
+        return today + timedelta(days=2)
+    
+    # 無法識別的格式
+    else:
+        raise ValueError("無法識別的日期格式")
+
+def handle_trip_details(trip_id):
+    try:
+        # 查詢特定班次的詳細信息
+        query = """
+        SELECT 
+            t.trip_id, 
+            t.date, 
+            t.time, 
+            t.start_point, 
+            t.via_point,
+            t.end_point, 
+            t.status,
+            d.id as driver_id,
+            d.plate_number,
+            t.category,
+            t.fixed_trip_id
+        FROM 
+            trips t
+        LEFT JOIN 
+            drivers d ON t.driver_id = d.id
+        WHERE 
+            t.trip_id = :trip_id
+        """
+        
+        trip = db.session.execute(sql_text(query), {"trip_id": trip_id}).fetchone()
+        
+        if not trip:
+            return f"找不到ID為 {trip_id} 的班次。"
+        
+        # 格式化班次詳細信息
+        reply_text = f"📋 班次 #{trip_id} 詳細信息：\n\n"
+        
+        # 格式化日期為友好格式
+        trip_date = trip[1]
+        weekday_names = ["一", "二", "三", "四", "五", "六", "日"]
+        weekday = weekday_names[trip_date.weekday()]
+        formatted_date = f"{trip_date.month}/{trip_date.day} (星期{weekday})"
+        
+        reply_text += f"日期：{formatted_date}\n"
+        reply_text += f"時間：{trip[2].strftime('%H:%M') if trip[2] else '未設置'}\n"
+        reply_text += f"起點：{trip[3] or '未指定'}\n"
+        
+        if trip[4]:  # via_point
+            reply_text += f"途經：{trip[4]}\n"
+            
+        reply_text += f"終點：{trip[5] or '未指定'}\n"
+        reply_text += f"狀態：{trip[6] or '未指定'}\n"
+        
+        if trip[7]:  # driver_id
+            # 使用黃色小車表情符號代替"司機#"
+            reply_text += f"司機：🚕{trip[7]}\n"
+            if trip[8]:  # plate_number
+                reply_text += f"車牌：{trip[8]}\n"
+        else:
+            reply_text += "司機：未指派\n"
+        
+        reply_text += f"類別：{trip[9] or '未分類'}\n"
+        
+        # 如果是固定班次，查詢基本車資
+        fixed_trip_id = trip[10]
+        if fixed_trip_id:
+            fare_query = "SELECT base_fare FROM fixed_schedules WHERE id = :id"
+            fare_result = db.session.execute(sql_text(fare_query), {"id": fixed_trip_id}).fetchone()
+            if fare_result and fare_result[0]:
+                reply_text += f"基本車資：{fare_result[0]} 元\n"
+        
+        # 添加修改狀態的提示
+        reply_text += f"\n💡 提示：您可以使用「修改狀態 {trip_id} 新狀態」來更改此班次的狀態。\n可用狀態：待派、準備、取消、衝突、請假、完成"
+        
+        return reply_text
+        
+    except Exception as e:
+        return f"查詢班次詳情錯誤: {str(e)}"
+
+def handle_import_fixed_trips_week(message_text):
+    try:
+        # 獲取當前日期
+        today = date.today()
+        
+        # 計算本周的開始日期（星期日）
+        days_since_sunday = today.weekday() + 1 if today.weekday() < 6 else 0
+        week_start = today - timedelta(days=days_since_sunday)
+        
+        # 計算本周的日期範圍（星期日到星期六）
+        dates = [week_start + timedelta(days=i) for i in range(7)]
+        
+        # 檢查是否已經匯入過
+        check_query = f"""
+        SELECT COUNT(*) FROM trips 
+        WHERE date >= '{dates[0]}' AND date <= '{dates[6]}' AND fixed_trip_id IS NOT NULL
+        """
+        
+        existing_count = db.session.execute(sql_text(check_query)).fetchone()[0]
+        
+        if existing_count > 0:
+            # 格式化日期範圍
+            date_range = f"{dates[0].month}/{dates[0].day}-{dates[6].month}/{dates[6].day}"
+            return f"本周 ({date_range}) 的固定班次已經匯入過了。如需重新匯入，請先刪除該日期範圍的班次。"
+        
+        # 在匯入新班次之前，先將所有未完成的班次移到已完成班次表
+        # 這確保了不會丟失任何班次信息
+        update_completed_trips()
+        
+        # 清空班次總覽表
+        delete_query = "DELETE FROM trips"
+        db.session.execute(sql_text(delete_query))
+        
+        # 匯入每一天的固定班次
+        total_inserted = 0
+        for import_date in dates:
+            # 獲取星期幾（1-7，其中1是星期一）
+            weekday = import_date.isoweekday()
+            
+            # 查詢符合當天星期的固定班次
+            query = f"""
+            SELECT 
+                id, 
+                route_number, 
+                departure_time, 
+                start_point, 
+                via_point, 
+                end_point, 
+                base_fare, 
+                surcharge, 
+                total_fare, 
+                category, 
+                driver_id,
+                direction
+            FROM 
+                fixed_schedules
+            WHERE 
+                route_number LIKE '%{weekday}%'
+            """
+            
+            fixed_trips = db.session.execute(sql_text(query)).fetchall()
+            
+            # 匯入固定班次到班次總覽表
+            for trip in fixed_trips:
+                fixed_trip_id = trip[0]
+                
+                # 計算一年中的第幾天和第幾周
+                day_of_year = import_date.timetuple().tm_yday
+                _, week_number, _ = import_date.isocalendar()
+                
+                # 生成唯一識別碼
+                unique_code = f"{fixed_trip_id}_{day_of_year}_{week_number}"
+                
+                insert_query = """
+                INSERT INTO trips 
+                (fixed_trip_id, date, time, start_point, via_point, end_point, 
+                 meter_fare, extra_fare, category, driver_id, status, unique_code, week_number) 
+                VALUES 
+                (:fixed_trip_id, :date, :time, :start_point, :via_point, :end_point, 
+                 :meter_fare, :extra_fare, :category, :driver_id, '準備', :unique_code, :week_number)
+                """
+                
+                db.session.execute(
+                    sql_text(insert_query), 
+                    {
+                        "fixed_trip_id": fixed_trip_id,
+                        "date": import_date,
+                        "time": trip[2],
+                        "start_point": trip[3],
+                        "via_point": trip[4],
+                        "end_point": trip[5],
+                        "meter_fare": trip[6],
+                        "extra_fare": trip[7],
+                        "category": trip[9],
+                        "driver_id": trip[10],
+                        "unique_code": unique_code,
+                        "week_number": week_number
+                    }
+                )
+                total_inserted += 1
+        
+        db.session.commit()
+        
+        # 格式化日期範圍
+        date_range = f"{dates[0].month}/{dates[0].day}-{dates[6].month}/{dates[6].day}"
+        
+        return f"✅ 成功匯入 {total_inserted} 筆固定班次到本周 ({date_range})。"
+        
+    except Exception as e:
+        # 發生錯誤時回滾事務
+        db.session.rollback()
+        return f"匯入固定班次失敗: {str(e)}"
+
+def handle_query_fixed_trips(message_text=None):
+    try:
+        # 解析日期參數（如果有）
+        if message_text and len(message_text.split()) > 1:
+            try:
+                # 嘗試解析指定日期
+                query_date = parse_date_input(message_text.split()[1])
+            except ValueError as e:
+                return f"日期格式不正確: {str(e)}\n\n支持的格式：\n- YYYY-MM-DD (例如: 2025-03-11)\n- MM-DD (例如: 03-11)\n- MM/DD (例如: 3/11)\n- MM月DD日 (例如: 3月11日)\n- MMDD (例如: 0311)\n- 今天, 明天, 後天"
+        else:
+            # 默認使用今天的日期
+            query_date = date.today()
+        
+        # 查詢指定日期的固定班次
+        query = f"""
+        SELECT 
+            t.trip_id, 
+            t.time, 
+            t.start_point, 
+            t.via_point,
+            t.end_point, 
+            fs.direction,
+            t.status,
+            d.id as driver_id  -- 改為查詢司機ID而不是姓名
+        FROM 
+            trips t
+        JOIN
+            fixed_schedules fs ON t.fixed_trip_id = fs.id
+        LEFT JOIN 
+            drivers d ON t.driver_id = d.id
+        WHERE 
+            t.date = '{query_date}'
+        ORDER BY 
+            t.time
+        """
+        
+        trips = db.session.execute(sql_text(query)).fetchall()
+        
+        if not trips:
+            # 使用友好的日期格式
+            weekday_names = ["一", "二", "三", "四", "五", "六", "日"]
+            weekday = weekday_names[query_date.weekday()]
+            formatted_date = f"{query_date.month}/{query_date.day} (星期{weekday})"
+            return f"{formatted_date} 沒有固定班次。"
+        
+        # 格式化班次信息為簡潔的列表
+        # 使用友好的日期格式
+        weekday_names = ["一", "二", "三", "四", "五", "六", "日"]
+        weekday = weekday_names[query_date.weekday()]
+        formatted_date = f"{query_date.month}/{query_date.day} (星期{weekday})"
+        reply_text = f"📅 {formatted_date} 固定班次總覽：\n\n"
+        
+        for trip in trips:
+            trip_id = trip[0]
+            time_val = trip[1].strftime("%H:%M") if trip[1] else "--:--"
+            direction = trip[5] or "來"  # 默認為"來"
+            
+            # 根據方向決定顯示起點還是終點
+            if direction == "來":
+                location = trip[2] or "未指定"  # 起點
+            else:  # "回"
+                location = trip[4] or "未指定"  # 終點
+            
+            status = trip[6] or "未指定"
+            driver_id = trip[7] or "未指派"  # 使用司機ID
+            
+            # 根據狀態添加不同的表情符號
+            status_emoji = {
+                "準備": "🟢",
+                "完成": "✅",
+                "取消": "❌",
+                "衝突": "⚠️",
+                "請假": "🔵"
+            }.get(status, "⚪")
+            
+            # 使用黃色小車表情符號代替"司機#"
+            # 格式化為簡潔的一行，添加班次ID，使用司機ID
+            reply_text += f"{status_emoji} #{trip_id} {time_val} {location}{direction} - 🚕{driver_id}\n"
+        
+        reply_text += "\n輸入「班次詳情 [ID]」查看特定班次的詳細信息。"
+        
+        return reply_text
+        
+    except Exception as e:
+        return f"查詢固定班次錯誤: {str(e)}"
+
+def handle_change_status(message_text):
+    try:
+        # 解析參數
+        parts = message_text.split()
+        if len(parts) < 3:
+            return "更改狀態命令格式不正確。正確格式：更改狀態 [班次ID] [新狀態]"
+        
+        trip_id = int(parts[1])
+        new_status = parts[2]
+        
+        # 檢查狀態是否有效
+        valid_statuses = ["準備", "完成", "取消", "衝突", "請假"]
+        if new_status not in valid_statuses:
+            return f"無效的狀態。有效狀態包括：{', '.join(valid_statuses)}"
+        
+        
+        # 檢查班次是否存在
+        check_query = "SELECT trip_id, status FROM trips WHERE trip_id = :trip_id"
+        trip = db.session.execute(sql_text(check_query), {"trip_id": trip_id}).fetchone()
+        
+        if not trip:
+            return f"找不到ID為 {trip_id} 的班次。"
+        
+        # 更新班次狀態
+        update_query = """
+        UPDATE trips 
+        SET status = :status 
+        WHERE trip_id = :trip_id
+        """
+        
+        db.session.execute(
+            sql_text(update_query), 
+            {
+                "status": new_status,
+                "trip_id": trip_id
+            }
+        )
+        db.session.commit()
+        
+        return f"✅ 已成功將班次 {trip_id} 的狀態更改為 '{new_status}'。"
+        
+    except ValueError:
+        return "班次ID必須是數字。"
+    except Exception as e:
+        # 發生錯誤時回滾事務
+        db.session.rollback()
+        return f"更改狀態失敗: {str(e)}"
+
+def get_help_text():
+    return """可用命令：
+1. 查詢班次 [日期] - 查看班次，可選指定日期
+   支持格式：YYYY-MM-DD, MM-DD, MM/DD, 一三五, 二四六
+2. 查詢固定班次 [日期] - 查看固定班次，可選指定日期
+3. 待派班次 - 查看所有待派的班次
+4. 指派 [班次ID] [司機ID] - 為班次指派司機
+5. 預約 - 開始預約新班次
+6. 匯入固定班次 - 匯入本周的固定班次
+7. 更改狀態 [班次ID] [新狀態] - 更改班次狀態
+   有效狀態：準備, 完成, 取消, 衝突, 請假
+8. 班次詳情 [ID] - 查看特定班次的詳細信息
+9. 更新已完成班次 - 將已過時間且狀態為"準備"的班次標記為"已完成"
+10. 生成周報表 [類別] - 生成上周的班次報表，可選指定類別
+11. 幫助 - 顯示此幫助信息"""
+
+def format_date_for_display(date_obj):
+    """格式化日期為友好顯示格式"""
+    # 獲取星期幾的中文表示
+    weekday_names = ["一", "二", "三", "四", "五", "六", "日"]
+    weekday = weekday_names[date_obj.weekday()]
+    
+    # 格式化為 "MM/DD (星期X)"
+    return f"{date_obj.month}/{date_obj.day} (星期{weekday})"
+
+def update_completed_trips():
+    """
+    自動更新已完成的班次：
+    1. 查找所有狀態為"準備"且時間已過的班次
+    2. 將它們標記為"已完成"
+    3. 將它們複製到已完成班次資料表
+    """
+    try:
+        print(f"[{datetime.now()}] 開始執行更新已完成班次任務...")
+        
+        # 獲取當前日期和時間
+        now = datetime.now()
+        current_date = now.date()
+        current_time = now.time()
+        
+        print(f"[{now}] 當前日期: {current_date}, 當前時間: {current_time}")
+        
+        # 使用應用上下文和DB_ENGINE進行數據庫操作
+        with current_app.app_context():
+            engine = current_app.config['DB_ENGINE']
+            with engine.connect() as conn:
+                # 開始事務
+                trans = conn.begin()
+                try:
+                    # 查詢所有狀態為"準備"且時間已過的班次
+                    query = """
+                    SELECT 
+                        t.trip_id
+                    FROM 
+                        trips t
+                    WHERE 
+                        t.status = '準備'
+                        AND (t.date < :current_date OR (t.date = :current_date AND t.time < :current_time))
+                    """
+                    
+                    completed_trips = conn.execute(
+                        sql_text(query), 
+                        {
+                            "current_date": current_date,
+                            "current_time": current_time
+                        }
+                    ).fetchall()
+                    
+                    print(f"[{now}] 找到 {len(completed_trips)} 個需要更新的班次")
+                    
+                    if not completed_trips:
+                        print(f"[{now}] 沒有需要更新的已完成班次")
+                        return "沒有需要更新的已完成班次。"
+                    
+                    # 更新每個班次
+                    updated_count = 0
+                    error_count = 0
+                    skipped_count = 0
+                    
+                    for trip in completed_trips:
+                        trip_id = trip[0]
+                        print(f"[{now}] 處理班次 #{trip_id}")
+                        
+                        # 查詢班次信息
+                        query = """
+                        SELECT 
+                            t.trip_id, 
+                            t.date, 
+                            t.time, 
+                            t.start_point, 
+                            t.via_point,
+                            t.end_point, 
+                            t.meter_fare,
+                            t.extra_fare,
+                            t.category,
+                            t.driver_id,
+                            t.status,
+                            t.unique_code,
+                            t.fixed_trip_id
+                        FROM 
+                            trips t
+                        WHERE 
+                            t.trip_id = :trip_id
+                        """
+                        
+                        trip_info = conn.execute(sql_text(query), {"trip_id": trip_id}).fetchone()
+                        
+                        if not trip_info:
+                            print(f"[{now}] 找不到班次 #{trip_id}，可能已被刪除")
+                            error_count += 1
+                            continue
+                        
+                        # 如果班次狀態不是"準備"，跳過
+                        if trip_info[10] != '準備':
+                            print(f"[{now}] 班次 #{trip_id} 狀態為「{trip_info[10]}」，不是「準備」，跳過更新")
+                            skipped_count += 1
+                            continue
+                        
+                        unique_code = trip_info[11]
+                        print(f"[{now}] 班次 #{trip_id} 的唯一識別碼: {unique_code}")
+                        
+                        # 如果沒有唯一識別碼，生成一個
+                        if not unique_code:
+                            print(f"[{now}] 班次 #{trip_id} 沒有唯一識別碼，嘗試生成...")
+                            
+                            try:
+                                date_obj = trip_info[1]
+                                fixed_trip_id = trip_info[12]
+                                
+                                if not date_obj:
+                                    print(f"[{now}] 班次 #{trip_id} 沒有日期信息，無法生成唯一識別碼")
+                                    error_count += 1
+                                    continue
+                                
+                                # 計算一年中的第幾天和第幾周
+                                try:
+                                    day_of_year = date_obj.timetuple().tm_yday
+                                    _, week_number, _ = date_obj.isocalendar()
+                                    print(f"[{now}] 班次 #{trip_id} 日期: {date_obj}, 一年中的第 {day_of_year} 天, 第 {week_number} 周")
+                                except Exception as e:
+                                    print(f"[{now}] 計算班次 #{trip_id} 的日期信息時出錯: {e}")
+                                    error_count += 1
+                                    continue
+                                
+                                if fixed_trip_id:
+                                    unique_code = f"{fixed_trip_id}_{day_of_year}_{week_number}"
+                                    print(f"[{now}] 班次 #{trip_id} 是固定班次 (ID: {fixed_trip_id})，生成唯一識別碼: {unique_code}")
+                                else:
+                                    unique_code = f"T_{trip_id}"
+                                    print(f"[{now}] 班次 #{trip_id} 是臨時班次，生成唯一識別碼: {unique_code}")
+                                
+                                # 更新班次的唯一識別碼和週數
+                                update_query = """
+                                UPDATE trips 
+                                SET unique_code = :unique_code, week_number = :week_number
+                                WHERE trip_id = :trip_id
+                                """
+                                
+                                conn.execute(
+                                    sql_text(update_query), 
+                                    {
+                                        "unique_code": unique_code,
+                                        "week_number": week_number,
+                                        "trip_id": trip_id
+                                    }
+                                )
+                                print(f"[{now}] 成功更新班次 #{trip_id} 的唯一識別碼為 {unique_code}")
+                            except Exception as e:
+                                print(f"[{now}] 生成或更新班次 #{trip_id} 的唯一識別碼時出錯: {e}")
+                                error_count += 1
+                                continue
+                        
+                        # 檢查是否已經在completed_trips表中
+                        try:
+                            check_query = """
+                            SELECT COUNT(*) as count FROM completed_trips 
+                            WHERE unique_code = :unique_code
+                            """
+                            
+                            existing_result = conn.execute(
+                                sql_text(check_query), 
+                                {"unique_code": unique_code}
+                            ).fetchone()
+                            
+                            existing_count = existing_result.count if existing_result else 0
+                            
+                            if existing_count > 0:
+                                print(f"[{now}] 班次 #{trip_id} (唯一識別碼: {unique_code}) 已經在已完成班次表中，跳過更新")
+                                skipped_count += 1
+                                continue
+                        except Exception as e:
+                            print(f"[{now}] 檢查班次 #{trip_id} 是否已在已完成班次表中時出錯: {e}")
+                            error_count += 1
+                            continue
+                        
+                        # 插入到completed_trips表
+                        try:
+                            insert_query = """
+                            INSERT INTO completed_trips 
+                            (date, start_point, via_point, end_point, meter_fare, extra_fare, category, driver_id, unique_code) 
+                            VALUES 
+                            (:date, :start_point, :via_point, :end_point, :meter_fare, :extra_fare, :category, :driver_id, :unique_code)
+                            """
+                            
+                            conn.execute(
+                                sql_text(insert_query), 
+                                {
+                                    "date": trip_info[1],
+                                    "start_point": trip_info[3],
+                                    "via_point": trip_info[4],
+                                    "end_point": trip_info[5],
+                                    "meter_fare": trip_info[6],
+                                    "extra_fare": trip_info[7],
+                                    "category": trip_info[8],
+                                    "driver_id": trip_info[9],
+                                    "unique_code": unique_code
+                                }
+                            )
+                            print(f"[{now}] 成功將班次 #{trip_id} 插入到已完成班次表中")
+                        except Exception as e:
+                            print(f"[{now}] 將班次 #{trip_id} 插入到已完成班次表中時出錯: {e}")
+                            error_count += 1
+                            continue
+                        
+                        # 更新trips表中的狀態為"已完成"
+                        try:
+                            update_query = "UPDATE trips SET status = '已完成' WHERE trip_id = :trip_id"
+                            conn.execute(sql_text(update_query), {"trip_id": trip_id})
+                            print(f"[{now}] 成功將班次 #{trip_id} 的狀態更新為「已完成」")
+                            updated_count += 1
+                        except Exception as e:
+                            print(f"[{now}] 更新班次 #{trip_id} 的狀態時出錯: {e}")
+                            error_count += 1
+                            continue
+                    
+                    # 提交事務
+                    trans.commit()
+                    print(f"[{now}] 成功提交所有更新")
+                    
+                    print(f"[{now}] 更新已完成班次任務結束。成功: {updated_count}, 跳過: {skipped_count}, 錯誤: {error_count}")
+                    return f"✅ 成功更新 {updated_count} 筆已完成班次。跳過: {skipped_count}, 錯誤: {error_count}"
+                    
+                except Exception as e:
+                    # 發生錯誤時回滾事務
+                    trans.rollback()
+                    print(f"[{now}] 處理班次更新時出錯，已回滾: {e}")
+                    import traceback
+                    print(traceback.format_exc())
+                    raise
+        
+    except Exception as e:
+        print(f"[{datetime.now()}] 更新已完成班次任務失敗: {e}")
+        import traceback
+        print(traceback.format_exc())
+        error_msg = f"更新已完成班次失敗: {str(e)}"
+        return error_msg
+
+def handle_query_trips(message_text=None):
+    try:
+        # 獲取今天的日期
+        today = date.today()
+        
+        # 解析日期參數（如果有）
+        query_dates = [today]  # 默認使用今天的日期
+        
+        if message_text and len(message_text.split()) > 1:
+            date_str = message_text.split()[1]
+            
+            # 處理星期組合
+            if date_str == "一三五":
+                # 計算本周的星期一、三、五的日期
+                weekday_map = {0: "一", 2: "三", 4: "五"}
+                query_dates = []
+                
+                # 計算本周的開始日期（星期日）
+                days_since_sunday = today.weekday() + 1 if today.weekday() < 6 else 0
+                week_start = today - timedelta(days=days_since_sunday)
+                
+                for days_offset, weekday_name in weekday_map.items():
+                    weekday_date = week_start + timedelta(days=days_offset + 1)  # +1 是因為星期日是一周的第一天
+                    # 只包含今天和未來的日期
+                    if weekday_date >= today:
+                        query_dates.append(weekday_date)
+                
+                if not query_dates:
+                    return "本周剩餘的星期一、三、五已經沒有班次了。"
+                
+            elif date_str == "二四六":
+                # 計算本周的星期二、四、六的日期
+                weekday_map = {1: "二", 3: "四", 5: "六"}
+                query_dates = []
+                
+                # 計算本周的開始日期（星期日）
+                days_since_sunday = today.weekday() + 1 if today.weekday() < 6 else 0
+                week_start = today - timedelta(days=days_since_sunday)
+                
+                for days_offset, weekday_name in weekday_map.items():
+                    weekday_date = week_start + timedelta(days=days_offset + 1)  # +1 是因為星期日是一周的第一天
+                    # 只包含今天和未來的日期
+                    if weekday_date >= today:
+                        query_dates.append(weekday_date)
+                
+                if not query_dates:
+                    return "本周剩餘的星期二、四、六已經沒有班次了。"
+                
+            else:
+                # 嘗試解析單個日期
+                try:
+                    query_date = parse_date_input(date_str)
+                    query_dates = [query_date]
+                except ValueError as e:
+                    return f"日期格式不正確: {str(e)}\n\n支持的格式：\n- YYYY-MM-DD (例如: 2025-03-11)\n- MM-DD (例如: 03-11)\n- MM/DD (例如: 3/11)\n- MM月DD日 (例如: 3月11日)\n- MMDD (例如: 0311)\n- 一三五 - 查詢本周星期一、三、五的班次\n- 二四六 - 查詢本周星期二、四、六的班次"
+        
+        # 查詢指定日期的班次，不包括"已完成"狀態的班次
+        all_trips = []
+        
+        for query_date in query_dates:
+            query = f"""
+            SELECT 
+                t.trip_id, 
+                t.date,
+                t.time, 
+                t.start_point, 
+                t.end_point, 
+                COALESCE(fs.direction, '來') as direction,
+                t.status,
+                t.driver_id
+            FROM 
+                trips t
+            LEFT JOIN
+                fixed_schedules fs ON t.fixed_trip_id = fs.id
+            WHERE 
+                t.date = '{query_date}'
+                AND t.status != '已完成'
+            ORDER BY 
+                t.date, t.time
+            """
+            
+            trips = db.session.execute(sql_text(query)).fetchall()
+            all_trips.extend(trips)
+        
+        if not all_trips:
+            if len(query_dates) == 1:
+                # 使用友好的日期格式
+                weekday_names = ["一", "二", "三", "四", "五", "六", "日"]
+                weekday = weekday_names[query_dates[0].weekday()]
+                formatted_date = f"{query_dates[0].month}/{query_dates[0].day} (星期{weekday})"
+                return f"{formatted_date} 沒有安排班次。"
+            else:
+                return "指定的日期沒有安排班次。"
+        
+        # 格式化班次信息
+        if len(query_dates) == 1:
+            # 單一日期的情況
+            weekday_names = ["一", "二", "三", "四", "五", "六", "日"]
+            weekday = weekday_names[query_dates[0].weekday()]
+            formatted_date = f"{query_dates[0].month}/{query_dates[0].day} (星期{weekday})"
+            reply_text = f"📅 {formatted_date} 班次總覽：\n\n"
+        else:
+            # 多個日期的情況
+            if date_str == "一三五":
+                reply_text = f"📅 本周星期一、三、五班次總覽：\n\n"
+            elif date_str == "二四六":
+                reply_text = f"📅 本周星期二、四、六班次總覽：\n\n"
+            else:
+                reply_text = f"📅 多日班次總覽：\n\n"
+        
+        # 按日期分組顯示
+        current_date = None
+        
+        for trip in all_trips:
+            trip_id = trip[0]
+            trip_date = trip[1]
+            time_val = trip[2].strftime("%H:%M") if trip[2] else "--:--"
+            direction = trip[5]  # "來" 或 "回"
+            
+            # 根據方向決定顯示起點還是終點
+            if direction == "來":
+                location = trip[3] or "未指定"  # 起點
+            else:  # "回"
+                location = trip[4] or "未指定"  # 終點
+            
+            status = trip[6] or "未指定"
+            driver_id = trip[7] or "未指派"
+            
+            # 如果日期變了，添加日期標題
+            if current_date != trip_date:
+                current_date = trip_date
+                weekday_names = ["一", "二", "三", "四", "五", "六", "日"]
+                weekday = weekday_names[current_date.weekday()]
+                date_str = f"{current_date.month}/{current_date.day} (星期{weekday})"
+                reply_text += f"\n【{date_str}】\n"
+            
+            # 根據狀態添加不同的表情符號
+            status_emoji = {
+                "準備": "🟢",
+                "完成": "✅",
+                "取消": "❌",
+                "衝突": "⚠️",
+                "請假": "🔵",
+                "待派": "🟠"
+            }.get(status, "⚪")
+            
+            # 使用黃色小車表情符號代替"司機#"
+            reply_text += f"{status_emoji} #{trip_id} {time_val} {location}{direction} - 🚕{driver_id}\n"
+        
+        reply_text += "\n輸入「班次詳情 [ID]」查看特定班次的詳細信息。"
+        
+        return reply_text
+        
+    except Exception as e:
+        return f"查詢班次錯誤: {str(e)}"
+
+def handle_clear_all_trips():
+    try:
+        # 先將所有已完成的班次複製到completed_trips表
+        copy_query = """
+        INSERT INTO completed_trips 
+        (date, start_point, via_point, end_point, meter_fare, extra_fare, category, driver_id) 
+        SELECT 
+            date, 
+            start_point, 
+            via_point, 
+            end_point, 
+            meter_fare, 
+            extra_fare, 
+            category, 
+            driver_id 
+        FROM 
+            trips 
+        WHERE 
+            status = '已完成'
+            AND trip_id NOT IN (
+                SELECT trip_id FROM completed_trips WHERE trip_id IS NOT NULL
+            )
+        """
+        
+        db.session.execute(sql_text(copy_query))
+        
+        # 獲取已完成班次的數量
+        completed_count_query = """
+        SELECT COUNT(*) FROM trips WHERE status = '已完成'
+        """
+        
+        completed_count = db.session.execute(sql_text(completed_count_query)).fetchone()[0]
+        
+        # 刪除所有班次
+        delete_query = "DELETE FROM trips"
+        db.session.execute(sql_text(delete_query))
+        
+        db.session.commit()
+        
+        return f"✅ 已清除所有班次。{completed_count} 筆已完成班次已複製到已完成班次資料表。"
+        
+    except Exception as e:
+        # 發生錯誤時回滾事務
+        db.session.rollback()
+        error_msg = f"清除班次失敗: {str(e)}"
+        return error_msg
+
+def generate_weekly_report(category=None):
+    try:
+        # 獲取日期範圍
+        today = datetime.now().date()
+        # 如果今天是星期日(weekday=6)，則days_since_sunday=0；否則days_since_sunday=weekday+1
+        days_since_sunday = today.weekday() + 1 if today.weekday() < 6 else 0
+        # 獲取本週日
+        this_sunday = today - timedelta(days=days_since_sunday)
+        # 獲取上週日和上週六
+        last_sunday = this_sunday - timedelta(days=7)
+        last_saturday = last_sunday + timedelta(days=6)
+        
+        # 查詢數據
+        query_params = {
+            "start_date": last_sunday,
+            "end_date": last_saturday
+        }
+        
+        query = """
+        SELECT 
+            ct.id,
+            ct.date, 
+            ct.start_point, 
+            ct.via_point, 
+            ct.end_point, 
+            ct.meter_fare, 
+            ct.extra_fare,
+            COALESCE(ct.meter_fare, 0) + COALESCE(ct.extra_fare, 0) as actual_fare,
+            ct.driver_id
+        FROM 
+            completed_trips ct
+        WHERE 
+            ct.date >= :start_date AND ct.date <= :end_date
+        """
+        
+        if category:
+            query += " AND ct.category = :category"
+            query_params["category"] = category
+            
+        query += " ORDER BY ct.date, ct.id"
+        
+        with db.engine.connect() as conn:
+            result = conn.execute(db.text(query), query_params)
+            completed_trips = result.fetchall()
+        
+        if not completed_trips:
+            category_text = f"類別「{category}」的" if category else ""
+            return f"上周沒有{category_text}已完成的班次。", None
+        
+        # 創建DataFrame
+        df = pd.DataFrame(completed_trips)
+        df.columns = ['ID', '日期', '起點', '途經點', '終點', '錶價', '加成', '實收', '司機編號']
+        
+        # 處理日期和星期
+        df['日期'] = pd.to_datetime(df['日期'])
+        weekday_map = {0: '一', 1: '二', 2: '三', 3: '四', 4: '五', 5: '六', 6: '日'}
+        df['星期'] = df['日期'].dt.dayofweek.map(weekday_map)
+        df['日期'] = df['日期'].dt.strftime('%Y-%m-%d')
+        
+        # 重排列順序
+        df = df[['ID', '日期', '星期', '起點', '途經點', '終點', '司機編號', '錶價', '加成', '實收']]
+        
+        # 計算總計
+        total_meter_fare = df['錶價'].sum()
+        total_extra_fare = df['加成'].sum() if df['加成'].notna().any() else 0
+        total_actual_fare = df['實收'].sum()
+        
+        # 按司機分組統計
+        driver_stats = df.groupby('司機編號').agg({
+            'ID': 'count',
+            '實收': 'sum'
+        }).reset_index()
+        driver_stats.columns = ['司機編號', '班次數', '金額']
+        
+        # 創建Excel文件
+        report_date = datetime.now().strftime('%Y%m%d')
+        category_suffix = f"_{category}" if category else ""
+        filename = f"weekly_report{category_suffix}_{report_date}.xlsx"
+        
+        # 直接使用 openpyxl 創建工作簿
+        workbook = openpyxl.Workbook()
+        worksheet = workbook.active
+        worksheet.title = '班次詳情'
+        
+        # 添加標題
+        title = f"診所班次請款單 ({last_sunday.strftime('%Y/%m/%d')} - {last_saturday.strftime('%Y/%m/%d')})"
+        worksheet.cell(row=1, column=1).value = title
+        worksheet.merge_cells('A1:J1')
+        
+        # 添加表頭
+        headers = ['ID', '日期', '星期', '起點', '途經點', '終點', '司機編號', '錶價', '加成', '實收']
+        for col_num, header in enumerate(headers, 1):
+            worksheet.cell(row=2, column=col_num).value = header
+        
+        # 添加數據
+        for row_num, row_data in enumerate(df.values, 3):
+            for col_num, cell_value in enumerate(row_data, 1):
+                worksheet.cell(row=row_num, column=col_num).value = cell_value
+        
+        # 添加總計行
+        total_row = len(df) + 3
+        worksheet.cell(row=total_row, column=9).value = "加總:"
+        worksheet.cell(row=total_row, column=10).value = total_actual_fare
+        
+        # 添加司機統計
+        driver_stats_row = total_row + 3  # 在總計行下方留出空行
+        
+        # 添加司機統計標題
+        worksheet.cell(row=driver_stats_row, column=1).value = "司機統計:"
+        worksheet.cell(row=driver_stats_row, column=1).font = Font(name='微軟正黑體', size=12, bold=True)
+        
+        # 添加司機統計表頭
+        driver_stats_headers = ['司機編號', '班次數', '金額']
+        for col_num, header in enumerate(driver_stats_headers, 1):
+            cell = worksheet.cell(row=driver_stats_row + 1, column=col_num)
+            cell.value = header
+            cell.font = Font(name='微軟正黑體', size=11, bold=True)
+            cell.alignment = Alignment(horizontal='center')
+            cell.fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')  # 淺藍色
+        
+        # 添加司機統計數據
+        for row_num, row_data in enumerate(driver_stats.values, driver_stats_row + 2):
+            for col_num, cell_value in enumerate(row_data, 1):
+                cell = worksheet.cell(row=row_num, column=col_num)
+                cell.value = cell_value
+                if col_num == 3:  # 金額列
+                    cell.alignment = Alignment(horizontal='right')
+                    cell.number_format = '#,##0'
+        
+        # 設置列寬
+        column_widths = {
+            'A': 10,  # ID
+            'B': 15,  # 日期
+            'C': 8,   # 星期
+            'D': 15,  # 起點
+            'E': 20,  # 途經點
+            'F': 15,  # 終點
+            'G': 12,  # 司機編號
+            'H': 12,  # 錶價
+            'I': 12,  # 加成
+            'J': 12,  # 實收
+        }
+        
+        for col_letter, width in column_widths.items():
+            worksheet.column_dimensions[col_letter].width = width
+        
+        # 添加基本樣式
+        # 標題樣式
+        title_cell = worksheet.cell(row=1, column=1)
+        title_cell.font = Font(name='微軟正黑體', size=16, bold=True)
+        title_cell.alignment = Alignment(horizontal='center', vertical='center')
+        title_cell.fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+        title_cell.font = Font(name='微軟正黑體', size=16, bold=True, color='FFFFFF')
+        
+        # 表頭樣式
+        header_font = Font(name='微軟正黑體', size=12, bold=True, color='FFFFFF')
+        header_fill = PatternFill(start_color='5B9BD5', end_color='5B9BD5', fill_type='solid')
+        header_alignment = Alignment(horizontal='center', vertical='center')
+        
+        for col in range(1, len(headers) + 1):
+            cell = worksheet.cell(row=2, column=col)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+        
+        # 數據行樣式 - 交替行顏色
+        for row in range(3, len(df) + 3):
+            for col in range(1, len(headers) + 1):
+                cell = worksheet.cell(row=row, column=col)
+                # 交替行顏色
+                if row % 2 == 0:
+                    cell.fill = PatternFill(start_color='EDF2F9', end_color='EDF2F9', fill_type='solid')  # 淺藍色
+                
+                # 數字列右對齊
+                if col in [8, 9, 10]:  # 錶價、加成、實收列
+                    cell.alignment = Alignment(horizontal='right', vertical='center')
+                    if isinstance(cell.value, (int, float)):
+                        cell.number_format = '#,##0'
+                else:
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+        
+        # 總計行樣式
+        total_label = worksheet.cell(row=total_row, column=9)
+        total_label.font = Font(name='微軟正黑體', size=12, bold=True)
+        total_label.alignment = Alignment(horizontal='right', vertical='center')
+        total_label.fill = PatternFill(start_color='BDD7EE', end_color='BDD7EE', fill_type='solid')  # 中藍色
+        
+        total_cell = worksheet.cell(row=total_row, column=10)
+        total_cell.font = Font(name='微軟正黑體', size=12, bold=True)
+        total_cell.alignment = Alignment(horizontal='right', vertical='center')
+        total_cell.number_format = '#,##0'
+        total_cell.fill = PatternFill(start_color='BDD7EE', end_color='BDD7EE', fill_type='solid')  # 中藍色
+        
+        # 添加邊框
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        # 為主表格添加邊框
+        for row in range(1, len(df) + 4):  # 包括標題、表頭、數據和總計行
+            for col in range(1, len(headers) + 1):
+                worksheet.cell(row=row, column=col).border = thin_border
+        
+        # 為司機統計表添加邊框
+        for row in range(driver_stats_row + 1, driver_stats_row + 2 + len(driver_stats)):
+            for col in range(1, 4):
+                worksheet.cell(row=row, column=col).border = thin_border
+        
+        # 保存工作簿
+        workbook.save(filename)
+        
+        category_text = f"類別「{category}」的" if category else ""
+        return f"已生成上周 ({last_sunday.strftime('%m/%d')} - {last_saturday.strftime('%m/%d')}) {category_text}報表。", filename
+        
+    except Exception as e:
+        return f"生成報表失敗: {str(e)}", None
+
+def handle_generate_weekly_report(text):
+    # 解析命令參數
+    parts = text.strip().split()
+    category = None
+    
+    if len(parts) > 1:
+        category = parts[1]
+    
+    # 類別與文件夾 ID 的映射
+    CATEGORY_FOLDER_MAPPING = {
+        "診所": "1Wwp1xIxnn9m9qlvX_BwpE30K0AgLVdYe",  # 診所文件夾 ID
+        "東洋": "1dctU8QPRWNPn57LxpcYTeKKcsGn_dLOU"   # 東洋文件夾 ID
+    }
+    
+    # 根據類別獲取對應的文件夾ID
+    folder_id = None
+    if category and category in CATEGORY_FOLDER_MAPPING:
+        folder_id = CATEGORY_FOLDER_MAPPING[category]
+    
+    try:
+        # 在應用上下文中執行報表生成
+        with app.app_context():
+            result, filename = generate_weekly_report(category)
+        
+        if filename:
+            # 上傳到Google Drive
+            drive_url = upload_to_google_drive(filename, folder_id)
+            if drive_url:
+                return f"{result}\n報表已上傳到Google Drive: {drive_url}"
+            else:
+                return f"{result}\n報表已生成，但上傳到Google Drive失敗。"
+        else:
+            return result
+    except Exception as e:
+        return f"生成報表時出錯: {str(e)}"
+
+# 添加 Google Drive API 相關導入（如果尚未添加）
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+import os
+import pickle
+
+# 定義 Google Drive API 範圍
+SCOPES = ['https://www.googleapis.com/auth/drive.file']
+
+# 添加上傳到 Google Drive 的函數
+def upload_to_google_drive(file_path, folder_id=None):
+    try:
+        creds = None
+        # token.pickle 存儲用戶的訪問和刷新令牌
+        if os.path.exists('token.pickle'):
+            with open('token.pickle', 'rb') as token:
+                creds = pickle.load(token)
+                
+        # 如果沒有有效憑證，或者憑證已過期
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                # 如果沒有 token.pickle 文件，則從 credentials.json 創建新的憑證
+                if not os.path.exists('credentials.json'):
+                    return "上傳失敗：找不到 credentials.json 文件"
+                    
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    'credentials.json', SCOPES)
+                creds = flow.run_local_server(port=0)
+                
+            # 保存憑證以供下次使用
+            with open('token.pickle', 'wb') as token:
+                pickle.dump(creds, token)
+
+        # 創建 Drive API 客戶端
+        service = build('drive', 'v3', credentials=creds)
+        
+        # 準備上傳文件
+        file_name = os.path.basename(file_path)
+        file_metadata = {'name': file_name}
+        
+        # 如果指定了文件夾 ID，則將文件上傳到該文件夾
+        if folder_id:
+            file_metadata['parents'] = [folder_id]
+        
+        # 上傳文件
+        media = MediaFileUpload(file_path, resumable=True)
+        file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id'
+        ).execute()
+        
+        file_id = file.get('id')
+        
+        # 創建分享鏈接 - 設置文件權限為任何人都可以查看
+        permission = {
+            'type': 'anyone',
+            'role': 'reader'
+        }
+        
+        service.permissions().create(
+            fileId=file_id,
+            body=permission
+        ).execute()
+        
+        # 獲取文件的分享鏈接
+        file = service.files().get(
+            fileId=file_id,
+            fields='webViewLink'
+        ).execute()
+        
+        share_link = file.get('webViewLink')
+        
+        return f"文件已上傳到 Google Drive，分享鏈接: {share_link}"
+    
+    except Exception as e:
+        return f"上傳到 Google Drive 失敗: {str(e)}"
+
+# 初始化排程器
+init_scheduler(app)
+
+def generate_unique_code(trip_id, date_obj, fixed_trip_id=None):
+    """生成班次的唯一識別碼，使用一年中的第幾天和第幾周"""
+    # 計算一年中的第幾天（1-366）
+    day_of_year = date_obj.timetuple().tm_yday
+    
+    # 計算一年中的第幾周
+    _, week_number, _ = date_obj.isocalendar()
+    
+    if fixed_trip_id:
+        # 固定班次：固定班次ID_太陽日_周數
+        return f"{fixed_trip_id}_{day_of_year}_{week_number}"
+    else:
+        # 臨時班次：T_班次ID
+        return f"T_{trip_id}"
+
+def initialize_unique_codes():
+    """初始化所有沒有唯一識別碼的班次"""
+    try:
+        print(f"[{datetime.now()}] 開始初始化班次唯一識別碼...")
+        
+        # 使用應用上下文和DB_ENGINE進行數據庫操作
+        with current_app.app_context():
+            engine = current_app.config['DB_ENGINE']
+            with engine.connect() as conn:
+                # 開始事務
+                trans = conn.begin()
+                try:
+                    # 查詢所有沒有唯一識別碼的班次
+                    query = """
+                    SELECT 
+                        trip_id, 
+                        date, 
+                        fixed_trip_id
+                    FROM 
+                        trips
+                    WHERE 
+                        unique_code IS NULL
+                    """
+                    
+                    trips = conn.execute(sql_text(query)).fetchall()
+                    print(f"[{datetime.now()}] 找到 {len(trips)} 個沒有唯一識別碼的班次")
+                    
+                    # 為每個班次生成並更新唯一識別碼
+                    updated_trips_count = 0
+                    for trip in trips:
+                        try:
+                            trip_id = trip[0]
+                            date_obj = trip[1]
+                            fixed_trip_id = trip[2]
+                            
+                            if not date_obj:
+                                print(f"[{datetime.now()}] 班次 #{trip_id} 沒有日期信息，無法生成唯一識別碼")
+                                continue
+                            
+                            # 計算一年中的第幾天和第幾周
+                            day_of_year = date_obj.timetuple().tm_yday
+                            _, week_number, _ = date_obj.isocalendar()
+                            
+                            # 生成唯一識別碼
+                            if fixed_trip_id:
+                                unique_code = f"{fixed_trip_id}_{day_of_year}_{week_number}"
+                                print(f"[{datetime.now()}] 班次 #{trip_id} 是固定班次 (ID: {fixed_trip_id})，生成唯一識別碼: {unique_code}")
+                            else:
+                                unique_code = f"T_{trip_id}"
+                                print(f"[{datetime.now()}] 班次 #{trip_id} 是臨時班次，生成唯一識別碼: {unique_code}")
+                            
+                            # 更新班次的唯一識別碼和週數
+                            update_query = """
+                            UPDATE trips 
+                            SET unique_code = :unique_code, week_number = :week_number
+                            WHERE trip_id = :trip_id
+                            """
+                            
+                            conn.execute(
+                                sql_text(update_query), 
+                                {
+                                    "unique_code": unique_code,
+                                    "week_number": week_number,
+                                    "trip_id": trip_id
+                                }
+                            )
+                            updated_trips_count += 1
+                            print(f"[{datetime.now()}] 成功更新班次 #{trip_id} 的唯一識別碼為 {unique_code}")
+                        except Exception as e:
+                            print(f"[{datetime.now()}] 更新班次 #{trip_id} 的唯一識別碼時出錯: {e}")
+                            import traceback
+                            print(traceback.format_exc())
+                    
+                    # 查詢所有沒有唯一識別碼的已完成班次
+                    completed_query = """
+                    SELECT 
+                        id, 
+                        date
+                    FROM 
+                        completed_trips
+                    WHERE 
+                        unique_code IS NULL
+                    """
+                    
+                    completed_trips = conn.execute(sql_text(completed_query)).fetchall()
+                    print(f"[{datetime.now()}] 找到 {len(completed_trips)} 個沒有唯一識別碼的已完成班次")
+                    
+                    # 為每個已完成班次生成並更新唯一識別碼
+                    updated_completed_count = 0
+                    for trip in completed_trips:
+                        try:
+                            trip_id = trip[0]
+                            
+                            # 生成唯一識別碼（臨時班次）
+                            unique_code = f"C_{trip_id}"
+                            print(f"[{datetime.now()}] 已完成班次 #{trip_id} 生成唯一識別碼: {unique_code}")
+                            
+                            # 更新已完成班次的唯一識別碼
+                            update_query = """
+                            UPDATE completed_trips 
+                            SET unique_code = :unique_code 
+                            WHERE id = :id
+                            """
+                            
+                            conn.execute(
+                                sql_text(update_query), 
+                                {
+                                    "unique_code": unique_code,
+                                    "id": trip_id
+                                }
+                            )
+                            updated_completed_count += 1
+                            print(f"[{datetime.now()}] 成功更新已完成班次 #{trip_id} 的唯一識別碼為 {unique_code}")
+                        except Exception as e:
+                            print(f"[{datetime.now()}] 更新已完成班次 #{trip_id} 的唯一識別碼時出錯: {e}")
+                            import traceback
+                            print(traceback.format_exc())
+                    
+                    # 提交事務
+                    trans.commit()
+                    print(f"[{datetime.now()}] 成功提交所有更新")
+                    
+                    print(f"[{datetime.now()}] 初始化班次唯一識別碼任務結束。成功更新班次: {updated_trips_count}, 已完成班次: {updated_completed_count}")
+                    return f"✅ 成功初始化 {updated_trips_count} 筆班次和 {updated_completed_count} 筆已完成班次的唯一識別碼。"
+                    
+                except Exception as e:
+                    # 發生錯誤時回滾事務
+                    trans.rollback()
+                    print(f"[{datetime.now()}] 初始化班次唯一識別碼時出錯，已回滾: {e}")
+                    import traceback
+                    print(traceback.format_exc())
+                    raise
+        
+    except Exception as e:
+        print(f"[{datetime.now()}] 初始化班次唯一識別碼任務失敗: {e}")
+        import traceback
+        print(traceback.format_exc())
+        error_msg = f"初始化唯一識別碼失敗: {str(e)}"
+        return error_msg
+
+# 修改應用監聽端口為3000
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=3000, debug=True)
+
+@app.route("/initialize_unique_codes", methods=['GET'])
+def initialize_unique_codes_route():
+    try:
+        result = initialize_unique_codes()
+        return result
+    except Exception as e:
+        return f"初始化唯一識別碼失敗: {str(e)}"
+
+def get_help_flex_page2():
+    """返回第二頁 Flex Message 格式的幫助信息"""
+    help_bubble = {
+        "type": "bubble",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": "可用命令列表 (續)",
+                    "weight": "bold",
+                    "size": "xl",
+                    "color": "#ffffff"
+                }
+            ],
+            "backgroundColor": "#4682B4"
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "6",
+                            "weight": "bold",
+                            "size": "sm",
+                            "flex": 1
+                        },
+                            {
+                            "type": "text",
+                            "text": "匯入固定班次",
+                            "weight": "bold",
+                            "size": "sm",
+                            "flex": 5
+                        }
+                    ],
+                    "margin": "md"
+                },
+                {
+                    "type": "text",
+                    "text": "匯入本周的固定班次",
+                    "size": "xs",
+                    "color": "#8c8c8c",
+                    "wrap": True,
+                    "margin": "sm"
+                },
+                {
+                    "type": "separator",
+                    "margin": "md"
+                },
+                {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "7",
+                            "weight": "bold",
+                            "size": "sm",
+                            "flex": 1
+                        },
+                            {
+                            "type": "text",
+                            "text": "更改狀態 [班次ID] [新狀態]",
+                            "weight": "bold",
+                            "size": "sm",
+                            "flex": 5
+                        }
+                    ],
+                    "margin": "md"
+                },
+                {
+                    "type": "text",
+                    "text": "更改班次狀態",
+                    "size": "xs",
+                    "color": "#8c8c8c",
+                    "wrap": True,
+                    "margin": "sm"
+                },
+                {
+                    "type": "text",
+                    "text": "有效狀態：準備, 完成, 取消, 衝突, 請假",
+                    "size": "xs",
+                    "color": "#8c8c8c",
+                    "wrap": True,
+                    "margin": "none"
+                },
+                {
+                    "type": "separator",
+                    "margin": "md"
+                },
+                {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "8",
+                            "weight": "bold",
+                            "size": "sm",
+                            "flex": 1
+                        },
+                            {
+                            "type": "text",
+                            "text": "班次詳情 [ID]",
+                            "weight": "bold",
+                            "size": "sm",
+                            "flex": 5
+                        }
+                    ],
+                    "margin": "md"
+                },
+                {
+                    "type": "text",
+                    "text": "查看特定班次的詳細信息",
+                    "size": "xs",
+                    "color": "#8c8c8c",
+                    "wrap": True,
+                    "margin": "sm"
+                },
+                {
+                    "type": "separator",
+                    "margin": "md"
+                },
+                {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "9",
+                            "weight": "bold",
+                            "size": "sm",
+                            "flex": 1
+                        },
+                            {
+                            "type": "text",
+                            "text": "更新已完成班次",
+                            "weight": "bold",
+                            "size": "sm",
+                            "flex": 5
+                        }
+                    ],
+                    "margin": "md"
+                },
+                {
+                    "type": "text",
+                    "text": "將已過時間且狀態為\\\"準備\\\"的班次標記為\\\"已完成\\\"",
+                    "size": "xs",
+                    "color": "#8c8c8c",
+                    "wrap": True,
+                    "margin": "sm"
+                },
+                {
+                    "type": "separator",
+                    "margin": "md"
+                },
+                {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "10",
+                            "weight": "bold",
+                            "size": "sm",
+                            "flex": 1
+                        },
+                            {
+                            "type": "text",
+                            "text": "生成周報表 [類別]",
+                            "weight": "bold",
+                            "size": "sm",
+                            "flex": 5
+                        }
+                    ],
+                    "margin": "md"
+                },
+                {
+                    "type": "text",
+                    "text": "生成上周的班次報表，可選指定類別",
+                    "size": "xs",
+                    "color": "#8c8c8c",
+                    "wrap": True,
+                    "margin": "sm"
+                }
+            ],
+            "spacing": "sm",
+            "paddingAll": "13px"
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "button",
+                    "action": {
+                        "type": "message",
+                        "label": "返回第一頁",
+                        "text": "幫助"
+                    },
+                    "style": "primary",
+                    "color": "#4682B4"
+                }
+            ]
+        }
+    }
+    
+    return help_bubble
+
+def handle_query_trips_flex(message_text=None):
+    """返回Flex Message格式的班次查詢結果"""
+    try:
+        print(f"handle_query_trips_flex被調用，參數: {message_text}")
+        # 解析日期參數（如果有）
+        query_dates = []
+        current_date = None
+        
+        # 獲取今天的日期
+        today = date.today()
+        print(f"今天日期: {today}")
+        
+        if message_text and len(message_text.split()) > 1:
+            date_str = message_text.split()[1]
+            print(f"解析日期參數: {date_str}")
+            
+            # 處理特殊日期關鍵字
+            if date_str == "今天":
+                query_dates = [today]
+                print("使用今天的日期")
+            elif date_str == "明天":
+                query_dates = [today + timedelta(days=1)]
+                print("使用明天的日期")
+            elif date_str == "後天":
+                query_dates = [today + timedelta(days=2)]
+                print("使用後天的日期")
+            elif date_str == "一三五":
+                # 計算本周的星期一、三、五的日期
+                weekday_map = {0: "一", 2: "三", 4: "五"}
+                
+                # 計算本周的開始日期（星期日）
+                days_since_sunday = today.weekday() + 1 if today.weekday() < 6 else 0
+                week_start = today - timedelta(days=days_since_sunday)
+                print(f"本周開始日期: {week_start}")
+                
+                for days_offset, weekday_name in weekday_map.items():
+                    weekday_date = week_start + timedelta(days=days_offset + 1)  # +1 是因為星期日是一周的第一天
+                    # 只包含今天和未來的日期
+                    if weekday_date >= today:
+                        query_dates.append(weekday_date)
+                
+                print(f"一三五日期: {query_dates}")
+                if not query_dates:
+                    return None, "本周剩餘的星期一、三、五已經沒有班次了。"
+                
+            elif date_str == "二四六":
+                # 計算本周的星期二、四、六的日期
+                weekday_map = {1: "二", 3: "四", 5: "六"}
+                
+                # 計算本周的開始日期（星期日）
+                days_since_sunday = today.weekday() + 1 if today.weekday() < 6 else 0
+                week_start = today - timedelta(days=days_since_sunday)
+                print(f"本周開始日期: {week_start}")
+                
+                for days_offset, weekday_name in weekday_map.items():
+                    weekday_date = week_start + timedelta(days=days_offset + 1)  # +1 是因為星期日是一周的第一天
+                    # 只包含今天和未來的日期
+                    if weekday_date >= today:
+                        query_dates.append(weekday_date)
+                
+                print(f"二四六日期: {query_dates}")
+                if not query_dates:
+                    return None, "本周剩餘的星期二、四、六已經沒有班次了。"
+                
+            else:
+                # 嘗試解析單個日期
+                try:
+                    print(f"嘗試解析日期: {date_str}")
+                    query_date = parse_date_input(date_str)
+                    query_dates = [query_date]
+                    print(f"解析結果: {query_date}")
+                except ValueError as e:
+                    print(f"日期解析錯誤: {str(e)}")
+                    return None, f"日期格式不正確: {str(e)}\n\n支持的格式：\n- YYYY-MM-DD (例如: 2025-03-11)\n- MM-DD (例如: 03-11)\n- MM/DD (例如: 3/11)\n- MM月DD日 (例如: 3月11日)\n- MMDD (例如: 0311)\n- 一三五 - 查詢本周星期一、三、五的班次\n- 二四六 - 查詢本周星期二、四、六的班次"
+        else:
+            # 默認使用今天的日期
+            query_dates = [today]
+            print("使用默認日期（今天）")
+        
+        # 查詢指定日期的班次，不包括"已完成"狀態的班次
+        all_trips = []
+        
+        # 確保在Flask應用上下文中執行
+        with app.app_context():
+            for query_date in query_dates:
+                query = f"""
+                SELECT 
+                    t.trip_id, 
+                    t.date,
+                    t.time, 
+                    t.start_point, 
+                    t.end_point, 
+                    COALESCE(fs.direction, '來') as direction,
+                    t.status,
+                    t.driver_id
+                FROM 
+                    trips t
+                LEFT JOIN
+                    fixed_schedules fs ON t.fixed_trip_id = fs.id
+                WHERE 
+                    t.date = '{query_date}'
+                    AND t.status != '已完成'
+                ORDER BY 
+                    t.date, t.time
+                """
+                
+                print(f"執行SQL查詢: {query}")
+                trips = db.session.execute(sql_text(query)).fetchall()
+                print(f"查詢結果: {len(trips)} 條記錄")
+                all_trips.extend(trips)
+        
+        print(f"總共找到 {len(all_trips)} 條班次記錄")
+        if not all_trips:
+            if len(query_dates) == 1:
+                # 使用友好的日期格式
+                weekday_names = ["一", "二", "三", "四", "五", "六", "日"]
+                weekday = weekday_names[query_dates[0].weekday()]
+                formatted_date = f"{query_dates[0].month}/{query_dates[0].day} (星期{weekday})"
+                return None, f"{formatted_date} 沒有安排班次。"
+            else:
+                return None, "指定的日期沒有安排班次。"
+        
+        # 創建Flex Message內容
+        bubble = {
+            "type": "bubble",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "班次查詢結果",
+                        "weight": "bold",
+                        "size": "md",
+                        "color": "#ffffff"
+                    }
+                ],
+                "backgroundColor": "#4682B4",
+                "paddingTop": "8px",
+                "paddingBottom": "8px",
+                "paddingStart": "12px",
+                "paddingEnd": "12px"
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [],
+                "spacing": "md"
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "輸入「班次詳情 [ID]」查看詳細信息",
+                        "size": "xs",
+                        "color": "#888888",
+                        "wrap": True,
+                        "align": "center"
+                    }
+                ]
+            }
+        }
+        
+        # 添加日期分組和班次信息
+        current_date = None
+        date_group = None
+        
+        for trip in all_trips:
+            trip_id = trip[0]
+            trip_date = trip[1]
+            time_val = trip[2].strftime("%H:%M") if trip[2] else "--:--"
+            direction = trip[5]  # "來" 或 "回"
+            
+            # 根據方向決定顯示起點還是終點
+            if direction == "來":
+                location = trip[3] or "未指定"  # 起點
+            else:  # "回"
+                location = trip[4] or "未指定"  # 終點
+            
+            status = trip[6] or "未指定"
+            driver_id = trip[7] or "未指派"
+            
+            # 如果日期變了，添加日期標題
+            if current_date != trip_date:
+                current_date = trip_date
+                weekday_names = ["一", "二", "三", "四", "五", "六", "日"]
+                weekday = weekday_names[current_date.weekday()]
+                date_str = f"{current_date.month}/{current_date.day} (星期{weekday})"
+                
+                # 添加日期分隔線
+                if date_group is not None:
+                    bubble["body"]["contents"].append({
+                        "type": "separator",
+                        "margin": "md"
+                    })
+                
+                # 添加日期標題
+                bubble["body"]["contents"].append({
+                    "type": "text",
+                    "text": f"【{date_str}】",
+                    "weight": "bold",
+                    "size": "md",
+                    "margin": "md"
+                })
+                
+                date_group = []
+            
+            # 根據狀態添加不同的表情符號
+            status_emoji = {
+                "準備": "🟢",
+                "完成": "✅",
+                "取消": "❌",
+                "衝突": "⚠️",
+                "請假": "🔵",
+                "待派": "🟠"
+            }.get(status, "⚪")
+            
+            # 添加班次信息
+            trip_box = {
+                "type": "box",
+                "layout": "horizontal",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": f"{status_emoji} #{trip_id}",
+                        "size": "xs",
+                        "flex": 3
+                    },
+                    {
+                        "type": "text",
+                        "text": time_val,
+                        "size": "xs",
+                        "flex": 2
+                    },
+                    {
+                        "type": "text",
+                        "text": f"{location}{direction}",
+                        "size": "xs",
+                        "flex": 5,
+                        "wrap": True
+                    },
+                    {
+                        "type": "text",
+                        "text": f"🚕{driver_id}",
+                        "size": "xs",
+                        "flex": 2,
+                        "align": "end"
+                    }
+                ],
+                "margin": "sm",
+                "action": {
+                    "type": "message",
+                    "text": f"班次詳情 {trip_id}"
+                }
+            }
+            
+            bubble["body"]["contents"].append(trip_box)
+        
+        print("成功創建Flex Message")
+        return bubble, None
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"處理查詢班次時出錯: {str(e)}")
+        return None, f"查詢班次錯誤: {str(e)}"
+
+def handle_query_fixed_trips_flex(message_text=None):
+    """返回Flex Message格式的固定班次查詢結果"""
+    try:
+        print(f"handle_query_fixed_trips_flex被調用，參數: {message_text}")
+        # 解析日期參數（如果有）
+        if message_text and len(message_text.split()) > 1:
+            try:
+                # 嘗試解析指定日期
+                print(f"嘗試解析日期: {message_text.split()[1]}")
+                query_date = parse_date_input(message_text.split()[1])
+                print(f"解析結果: {query_date}")
+            except ValueError as e:
+                print(f"日期解析錯誤: {str(e)}")
+                return None, f"日期格式不正確: {str(e)}\n\n支持的格式：\n- YYYY-MM-DD (例如: 2025-03-11)\n- MM-DD (例如: 03-11)\n- MM/DD (例如: 3/11)\n- MM月DD日 (例如: 3月11日)\n- MMDD (例如: 0311)\n- 今天, 明天, 後天"
+        else:
+            # 默認使用今天的日期
+            query_date = date.today()
+            print(f"使用默認日期（今天）: {query_date}")
+        
+        # 確保在Flask應用上下文中執行
+        with app.app_context():
+            # 查詢指定日期的固定班次
+            query = f"""
+            SELECT 
+                t.trip_id, 
+                t.time, 
+                t.start_point, 
+                t.via_point,
+                t.end_point, 
+                fs.direction,
+                t.status,
+                d.id as driver_id
+            FROM 
+                trips t
+            JOIN
+                fixed_schedules fs ON t.fixed_trip_id = fs.id
+            LEFT JOIN 
+                drivers d ON t.driver_id = d.id
+            WHERE 
+                t.date = '{query_date}'
+            ORDER BY 
+                t.time
+            """
+            
+            print(f"執行SQL查詢: {query}")
+            trips = db.session.execute(sql_text(query)).fetchall()
+            print(f"查詢結果: {len(trips)} 條記錄")
+        
+        if not trips:
+            # 使用友好的日期格式
+            weekday_names = ["一", "二", "三", "四", "五", "六", "日"]
+            weekday = weekday_names[query_date.weekday()]
+            formatted_date = f"{query_date.month}/{query_date.day} (星期{weekday})"
+            print(f"沒有找到固定班次: {formatted_date}")
+            return None, f"{formatted_date} 沒有固定班次。"
+        
+        # 使用友好的日期格式
+        weekday_names = ["一", "二", "三", "四", "五", "六", "日"]
+        weekday = weekday_names[query_date.weekday()]
+        formatted_date = f"{query_date.month}/{query_date.day} (星期{weekday})"
+        print(f"格式化日期: {formatted_date}")
+        
+        # 創建Flex Message內容
+        bubble = {
+            "type": "bubble",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": f"固定班次 {formatted_date}",
+                        "weight": "bold",
+                        "size": "md",
+                        "color": "#ffffff"
+                    }
+                ],
+                "backgroundColor": "#4682B4",
+                "paddingTop": "8px",
+                "paddingBottom": "8px",
+                "paddingStart": "12px",
+                "paddingEnd": "12px"
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "box",
+                        "layout": "horizontal",
+                        "contents": [
+                            {
+                                "type": "text",
+                                "text": "班次",
+                                "size": "xs",
+                                "color": "#aaaaaa",
+                                "flex": 3
+                            },
+                            {
+                                "type": "text",
+                                "text": "時間",
+                                "size": "xs",
+                                "color": "#aaaaaa",
+                                "flex": 2
+                            },
+                            {
+                                "type": "text",
+                                "text": "地點",
+                                "size": "xs",
+                                "color": "#aaaaaa",
+                                "flex": 5
+                            },
+                            {
+                                "type": "text",
+                                "text": "司機",
+                                "size": "xs",
+                                "color": "#aaaaaa",
+                                "flex": 2,
+                                "align": "end"
+                            }
+                        ],
+                        "margin": "xs"
+                    },
+                    {
+                        "type": "separator",
+                        "margin": "sm"
+                    }
+                ],
+                "spacing": "md"
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "輸入「班次詳情 [ID]」查看詳細信息",
+                        "size": "xs",
+                        "color": "#888888",
+                        "wrap": True,
+                        "align": "center"
+                    }
+                ]
+            }
+        }
+        
+        # 添加班次信息
+        for trip in trips:
+            trip_id = trip[0]
+            time_val = trip[1].strftime("%H:%M") if trip[1] else "--:--"
+            direction = trip[5] or "來"  # 默認為"來"
+            
+            # 根據方向決定顯示起點還是終點
+            if direction == "來":
+                location = trip[2] or "未指定"  # 起點
+            else:  # "回"
+                location = trip[4] or "未指定"  # 終點
+            
+            status = trip[6] or "未指定"
+            driver_id = trip[7] or "未指派"
+            
+            # 根據狀態添加不同的表情符號
+            status_emoji = {
+                "準備": "🟢",
+                "完成": "✅",
+                "取消": "❌",
+                "衝突": "⚠️",
+                "請假": "🔵",
+                "待派": "🟠"
+            }.get(status, "⚪")
+            
+            # 添加班次信息
+            trip_box = {
+                "type": "box",
+                "layout": "horizontal",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": f"{status_emoji} #{trip_id}",
+                        "size": "xs",
+                        "flex": 3
+                    },
+                    {
+                        "type": "text",
+                        "text": time_val,
+                        "size": "xs",
+                        "flex": 2
+                    },
+                    {
+                        "type": "text",
+                        "text": f"{location}{direction}",
+                        "size": "xs",
+                        "flex": 5,
+                        "wrap": True
+                    },
+                    {
+                        "type": "text",
+                        "text": f"🚕{driver_id}",
+                        "size": "xs",
+                        "flex": 2,
+                        "align": "end"
+                    }
+                ],
+                "margin": "sm",
+                "action": {
+                    "type": "message",
+                    "text": f"班次詳情 {trip_id}"
+                }
+            }
+            
+            bubble["body"]["contents"].append(trip_box)
+        
+        print("成功創建固定班次Flex Message")
+        return bubble, None
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"處理查詢固定班次時出錯: {str(e)}")
+        return None, f"查詢固定班次錯誤: {str(e)}"
+        return f"設置請假狀態失敗: {str(e)}"
+
+# 定義狀態修改相關函數
+def handle_update_trip_status(message_text):
+    """處理修改班次狀態的請求"""
+    try:
+        # 解析命令格式：修改狀態 [班次ID] [新狀態]
+        parts = message_text.split()
+        if len(parts) < 3:
+            return "命令格式不正確。正確格式：修改狀態 [班次ID] [新狀態]\n\n可用狀態：待派、準備、取消、衝突、請假、完成"
+        
+        trip_id = parts[1]
+        new_status = parts[2]
+        
+        # 檢查狀態是否有效
+        valid_statuses = ["待派", "準備", "取消", "衝突", "請假", "完成"]
+        if new_status not in valid_statuses:
+            return f"無效的狀態：{new_status}\n\n可用狀態：待派、準備、取消、衝突、請假、完成"
+        
+        # 查詢當前班次信息
+        query = """
+        SELECT 
+            t.trip_id, 
+            t.date, 
+            t.time, 
+            t.status,
+            t.fixed_trip_id,
+            d.id as driver_id
+        FROM 
+            trips t
+        LEFT JOIN 
+            drivers d ON t.driver_id = d.id
+        WHERE 
+            t.trip_id = :trip_id
+        """
+        
+        trip = db.session.execute(sql_text(query), {"trip_id": trip_id}).fetchone()
+        
+        if not trip:
+            return f"找不到ID為 {trip_id} 的班次。"
+        
+        current_status = trip[3]
+        fixed_trip_id = trip[4]
+        driver_id = trip[5]
+        
+        # 狀態轉換邏輯
+        if new_status == "準備" and current_status == "待派" and not driver_id:
+            return f"無法將班次 #{trip_id} 的狀態從「{current_status}」更改為「{new_status}」。\n班次必須先指派司機才能設為準備狀態。"
+        
+        if new_status == "取消":
+            # 確認取消操作
+            return f"您確定要取消班次 #{trip_id} 嗎？\n請回覆「確認取消 {trip_id}」進行確認，或回覆其他內容取消操作。"
+        
+        if new_status == "請假" and fixed_trip_id:
+            # 確認請假操作
+            return f"您確定要將班次 #{trip_id} 設為請假狀態嗎？\n這將影響後續週期的固定班次。\n請回覆「確認請假 {trip_id}」進行確認，或回覆其他內容取消操作。"
+        
+        # 更新數據庫中的班次狀態
+        update_query = """
+        UPDATE trips
+        SET status = :new_status
+        WHERE trip_id = :trip_id
+        RETURNING trip_id
+        """
+        
+        result = db.session.execute(sql_text(update_query), {
+            "trip_id": trip_id,
+            "new_status": new_status
+        })
+        
+        # 提交事務
+        db.session.commit()
+        
+        # 檢查是否找到並更新了班次
+        updated_trip = result.fetchone()
+        if not updated_trip:
+            return f"找不到ID為 {trip_id} 的班次。"
+        
+        # 根據狀態提供不同的回覆
+        status_messages = {
+            "待派": f"✅ 班次 #{trip_id} 的狀態已更新為「待派」，等待指派司機。",
+            "準備": f"✅ 班次 #{trip_id} 的狀態已更新為「準備」，已準備執行。",
+            "衝突": f"⚠️ 班次 #{trip_id} 的狀態已更新為「衝突」，表示該班次無法由原定司機完成，需要診所方面自行解決。",
+            "完成": f"✅ 班次 #{trip_id} 的狀態已更新為「完成」，班次已順利執行完畢。"
+        }
+        
+        return status_messages.get(new_status, f"✅ 班次 #{trip_id} 的狀態已更新為「{new_status}」。")
+        
+    except Exception as e:
+        # 回滾事務
+        db.session.rollback()
+        return f"修改班次狀態失敗: {str(e)}"
+
+def handle_confirm_cancel_trip(message_text):
+    """處理確認取消班次的請求"""
+    try:
+        # 解析命令格式：確認取消 [班次ID]
+        parts = message_text.split()
+        if len(parts) < 2:
+            return "命令格式不正確。正確格式：確認取消 [班次ID]"
+        
+        trip_id = parts[1]
+        
+        # 查詢班次信息
+        query = """
+        SELECT 
+            t.trip_id, 
+            t.date, 
+            t.time, 
+            t.status,
+            t.fixed_trip_id
+        FROM 
+            trips t
+        WHERE 
+            t.trip_id = :trip_id
+        """
+        
+        trip = db.session.execute(sql_text(query), {"trip_id": trip_id}).fetchone()
+        
+        if not trip:
+            return f"找不到ID為 {trip_id} 的班次。"
+        
+        # 更新數據庫中的班次狀態為取消
+        update_query = """
+        UPDATE trips
+        SET status = '取消'
+        WHERE trip_id = :trip_id
+        RETURNING trip_id
+        """
+        
+        result = db.session.execute(sql_text(update_query), {
+            "trip_id": trip_id
+        })
+        
+        # 提交事務
+        db.session.commit()
+        
+        # 檢查是否找到並更新了班次
+        updated_trip = result.fetchone()
+        if not updated_trip:
+            return f"找不到ID為 {trip_id} 的班次。"
+        
+        # 構建取消通知
+        date_str = trip[1]
+        time_str = trip[2]
+        
+        return f"✅ 班次 #{trip_id} 已成功取消。\n\n日期：{date_str}\n時間：{time_str}"
+        
+    except Exception as e:
+        # 回滾事務
+        db.session.rollback()
+        return f"取消班次失敗: {str(e)}"
+
+def handle_confirm_leave_trip(message_text):
+    """處理確認請假班次的請求"""
+    try:
+        # 解析命令格式：確認請假 [班次ID]
+        parts = message_text.split()
+        if len(parts) < 2:
+            return "命令格式不正確。正確格式：確認請假 [班次ID]"
+        
+        trip_id = parts[1]
+        
+        # 查詢班次信息
+        query = """
+        SELECT 
+            t.trip_id, 
+            t.date, 
+            t.time, 
+            t.status,
+            t.fixed_trip_id
+        FROM 
+            trips t
+        WHERE 
+            t.trip_id = :trip_id
+        """
+        
+        trip = db.session.execute(sql_text(query), {"trip_id": trip_id}).fetchone()
+        
+        if not trip:
+            return f"找不到ID為 {trip_id} 的班次。"
+        
+        fixed_trip_id = trip[4]
+        
+        # 檢查是否為固定班次
+        if not fixed_trip_id:
+            return f"班次 #{trip_id} 不是固定班次，無法設置為請假狀態。"
+        
+        # 更新數據庫中的班次狀態為請假
+        update_query = """
+        UPDATE trips
+        SET status = '請假'
+        WHERE trip_id = :trip_id
+        RETURNING trip_id
+        """
+        
+        result = db.session.execute(sql_text(update_query), {
+            "trip_id": trip_id
+        })
+        
+        # 提交事務
+        db.session.commit()
+        
+        # 檢查是否找到並更新了班次
+        updated_trip = result.fetchone()
+        if not updated_trip:
+            return f"找不到ID為 {trip_id} 的班次。"
+        
+        # 構建請假通知
+        date_str = trip[1]
+        time_str = trip[2]
+        
+        return f"✅ 班次 #{trip_id} 已設為請假狀態。\n\n日期：{date_str}\n時間：{time_str}\n\n注意：這將影響後續週期的固定班次。"
+        
+    except Exception as e:
+        # 回滾事務
+        db.session.rollback()
+        return f"設置請假狀態失敗: {str(e)}"

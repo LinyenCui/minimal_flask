@@ -1,0 +1,89 @@
+--- app.py (原始版本)
++++ app.py (修改版本)
+@@ -1,6 +1,8 @@
+ import os
+ from flask import Flask, request, abort, jsonify, render_template
+ from linebot.v3.exceptions import InvalidSignatureError
++from linebot.v3.messaging import Configuration, ApiClient, MessagingApi, ReplyMessageRequest, TextMessage
++from linebot.v3.messaging import FlexMessage, FlexContainer
+ 
+ # 導入處理函數
+ from handlers.driver_handler import handle_pending_trips, handle_assign_driver
+@@ -384,6 +386,42 @@ def handle_text_message(event):
+     # 待派班次
+     elif message_text == "待派班次":
+         reply_text = handle_pending_trips()
++    
++    # 幫助 - 使用 Flex Message
++    elif message_text == "幫助":
++        # 使用 JSON 字符串創建 Flex Message
++        help_bubble_json = """
++        {
++            "type": "bubble",
++            "header": {
++                "type": "box",
++                "layout": "vertical",
++                "contents": [
++                    {
++                        "type": "text",
++                        "text": "可用命令列表",
++                        "weight": "bold",
++                        "size": "md",
++                        "color": "#ffffff"
++                    }
++                ],
++                "backgroundColor": "#4682B4",
++                "paddingAll": "8px"
++            },
++            "body": {
++                "type": "box",
++                "layout": "vertical",
++                "contents": [
++                    // ... 命令列表內容 ...
++                ],
++                "spacing": "xs",
++                "paddingAll": "10px"
++            }
++        }
++        """
++        
++        # 創建 Flex Message 並發送
++        // ... Flex Message 創建和發送代碼 ...
++        return
+         
+     # 指派司機
+     elif message_text.startswith("指派"):
+@@ -447,6 +485,11 @@ def handle_text_message(event):
+     elif message_text == "更新已完成班次":
+         reply_text = update_completed_trips()
+     
++    # 幫助文字 - 顯示純文本幫助信息
++    elif message_text == "幫助文字":
++        reply_text = get_help_text()
++    
++    
+     # 生成周報表
+     elif message_text.startswith("生成周報表"):
+         reply_text = handle_generate_weekly_report(message_text)
+@@ -1500,6 +1543,21 @@ def get_help_text():
+     return help_text
+ 
+ 
++def get_help_flex():
++    """
++    返回 Flex Message 格式的幫助信息
++    """
++    # 創建 Flex Message JSON
++    help_bubble_json = """
++    {
++        // ... Flex Message JSON 結構 ...
++    }
++    """
++    
++    # 返回 Flex Container
++    return FlexContainer.from_json(help_bubble_json)
++
++
+ def format_date_for_display(date_obj):
+     """格式化日期為顯示格式"""
+     weekday_mapping = {

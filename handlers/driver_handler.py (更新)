@@ -1,0 +1,76 @@
+# 添加查詢司機班次功能
+def handle_query_driver_trips(message_text):
+    try:
+        # 解析參數
+        parts = message_text.split()
+        if len(parts) < 3:
+            return "查車命令格式不正確。正確格式：查車 [司機ID] [日期]"
+        
+        driver_id = parts[1]
+        date_str = parts[2]
+        
+        # 解析日期
+        try:
+            query_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            raise ValueError(f"日期格式不正確: {date_str}。請使用 YYYY-MM-DD 格式。")
+        
+        # 查詢司機當天的班次
+        query = """
+        SELECT 
+            t.trip_id, 
+            t.time, 
+            t.start_point, 
+            t.via_point, 
+            t.end_point, 
+            t.meter_fare, 
+            t.actual_fare, 
+            t.status 
+        FROM 
+            trips t 
+        WHERE 
+            t.driver_id = :driver_id 
+            AND t.date = :date 
+        ORDER BY 
+            t.time
+        """
+        
+        trips = db.session.execute(
+            sql_text(query), 
+            {
+                "driver_id": driver_id,
+                "date": query_date
+            }
+        ).fetchall()
+        
+        if not trips:
+            return f"司機 {driver_id} 在 {date_str} 沒有安排班次。"
+        
+        # 格式化班次信息
+        reply_text = f"司機 {driver_id} 在 {date_str} 的班次：\n\n"
+        for trip in trips:
+            trip_id = trip[0]
+            departure_time = trip[1].strftime("%H:%M") if trip[1] else "未設置"
+            start_point = trip[2] or "未指定"
+            via_point = trip[3] or ""
+            end_point = trip[4] or "未指定"
+            meter_fare = trip[5] or 0
+            actual_fare = trip[6] or 0
+            status = trip[7] or "未指定"
+            
+            reply_text += f"班次ID: {trip_id}\n"
+            reply_text += f"時間: {departure_time}\n"
+            reply_text += f"起點: {start_point}\n"
+            if via_point:
+                reply_text += f"途經: {via_point}\n"
+            reply_text += f"終點: {end_point}\n"
+            reply_text += f"表價: {meter_fare}\n"
+            reply_text += f"實收: {actual_fare}\n"
+            reply_text += f"狀態: {status}\n"
+            reply_text += "-------------------\n"
+        
+        return reply_text
+    except ValueError as e:
+        return f"查車失敗: {str(e)}"
+    except Exception as e:
+        return f"查車失敗: {str(e)}" 

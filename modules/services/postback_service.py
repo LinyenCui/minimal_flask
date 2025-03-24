@@ -22,6 +22,7 @@ from modules.flex_designs.booking_flex import (
 )
 from modules.handlers.trip_handler import handle_query_trips, handle_trip_details, handle_change_status
 from modules.services.trip_detail_service import handle_trip_details_flex
+from modules.services.report_service import handle_generate_weekly_report
 from linebot.v3.messaging import QuickReply, QuickReplyItem, PostbackAction
 
 # 建立日誌記錄器
@@ -48,6 +49,42 @@ def handle_postback(event):
         if action == 'query_trips':
             result = handle_query_trips('查詢班次')
             reply_text(reply_token, result)
+            
+        elif action == 'generate_report':
+            # 處理生成報表請求
+            category = params.get('category')
+            if category:
+                logger.info(f"處理生成報表postback，類別: {category}")
+                result = handle_generate_weekly_report(f"生成周報表 {category}")
+                reply_text(reply_token, result)
+            else:
+                # 如果沒有類別，創建Quick Reply
+                quick_reply = QuickReply(items=[
+                    QuickReplyItem(
+                        action=PostbackAction(
+                            label="診所",
+                            data="action=generate_report&category=診所",
+                            display_text="生成周報表 診所"
+                        )
+                    ),
+                    QuickReplyItem(
+                        action=PostbackAction(
+                            label="東洋",
+                            data="action=generate_report&category=東洋",
+                            display_text="生成周報表 東洋"
+                        )
+                    ),
+                    QuickReplyItem(
+                        action=PostbackAction(
+                            label="全部",
+                            data="action=generate_report&category=全部",
+                            display_text="生成周報表 全部"
+                        )
+                    )
+                ])
+                text = "請選擇要生成報表的類別："
+                message = create_text_message(text, quick_reply=quick_reply)
+                reply_message(reply_token, message)
             
         elif action == 'view_trip' and 'trip_id' in params:
             trip_id = params['trip_id']

@@ -1,0 +1,105 @@
+# 資料庫結構
+
+資料庫名稱: dispatch_db
+
+## 表名: completed_trips
+
+| 列名 | 數據類型 | 長度 | 可為空 | 默認值 |
+|------|----------|------|--------|--------|
+| id | integer | - | 否 | nextval('completed_trips_id_seq'::regclass) |
+| date | date | - | 否 | - |
+| start_point | character varying | 100 | 是 | - |
+| via_point | character varying | 100 | 是 | - |
+| end_point | character varying | 100 | 是 | - |
+| meter_fare | integer | - | 是 | - |
+| extra_fare | integer | - | 是 | - |
+| actual_fare | integer | - | 是 | - |
+| category | character varying | 50 | 是 | - |
+| driver_id | integer | - | 是 | - |
+| remarks | text | - | 是 | - |
+| created_at | timestamp without time zone | - | 是 | CURRENT_TIMESTAMP |
+
+**主鍵:** id
+
+**外鍵:**
+- start_point -> customers.short_name
+- via_point -> customers.short_name
+- end_point -> customers.short_name
+- driver_id -> drivers.id
+
+
+## 表名: customers
+
+| 列名 | 數據類型 | 長度 | 可為空 | 默認值 |
+|------|----------|------|--------|--------|
+| id | integer | - | 否 | - |
+| name | character varying | 100 | 否 | - |
+| address | character varying | 200 | 否 | - |
+| short_name | character varying | 50 | 是 | - |
+| category | character varying | 50 | 是 | - |
+| remarks | text | - | 是 | - |
+
+**主鍵:** id
+
+
+## 表名: drivers
+
+| 列名 | 數據類型 | 長度 | 可為空 | 默認值 |
+|------|----------|------|--------|--------|
+| id | integer | - | 否 | - |
+| name | character varying | 50 | 否 | - |
+| plate_number | character varying | 20 | 是 | - |
+| car_brand | character varying | 50 | 是 | - |
+| car_model | character varying | 50 | 是 | - |
+
+**主鍵:** id
+
+
+## 表名: fixed_schedules
+
+| 列名 | 數據類型 | 長度 | 可為空 | 默認值 |
+|------|----------|------|--------|--------|
+| id | integer | - | 否 | - |
+| route_number | character varying | 10 | 是 | - |
+| departure_time | time without time zone | - | 否 | - |
+| start_point | character varying | 100 | 是 | - |
+| via_point | character varying | 100 | 是 | - |
+| end_point | character varying | 100 | 是 | - |
+| base_fare | integer | - | 是 | - |
+| surcharge | integer | - | 是 | - |
+| total_fare | integer | - | 是 | - |
+| category | character varying | 50 | 是 | - |
+| driver_id | character varying | 10 | 是 | - |
+
+**主鍵:** id
+
+
+## 表名: trips
+
+| 列名 | 數據類型 | 長度 | 可為空 | 默認值 |
+|------|----------|------|--------|--------|
+| trip_id | integer | - | 否 | nextval('trips_trip_id_seq'::regclass) |
+| fixed_trip_id | integer | - | 是 | - |
+| week_number | integer | - | 是 | - |
+| date | date | - | 是 | - |
+| time | time without time zone | - | 是 | - |
+| start_point | character varying | 100 | 是 | - |
+| via_point | character varying | 100 | 是 | - |
+| end_point | character varying | 100 | 是 | - |
+| meter_fare | integer | - | 是 | - |
+| extra_fare | integer | - | 是 | - |
+| actual_fare | integer | - | 是 | - |
+| category | character varying | 50 | 是 | - |
+| driver_id | integer | - | 是 | - |
+| status | character varying | 20 | 是 | - |
+
+**主鍵:** trip_id
+
+**外鍵:**
+- fixed_trip_id -> fixed_schedules.id
+- start_point -> customers.short_name
+- via_point -> customers.short_name
+- end_point -> customers.short_name
+- driver_id -> drivers.id
+
+

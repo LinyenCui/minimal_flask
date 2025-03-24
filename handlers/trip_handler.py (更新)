@@ -1,0 +1,266 @@
+from models import db
+from sqlalchemy import text as sql_text
+from datetime import datetime
+
+# 添加待派班次查詢功能
+def handle_pending_trips():
+    try:
+        # 查詢所有待派班次
+        query = """
+        SELECT 
+            t.trip_id, 
+            t.date,
+            t.time, 
+            t.start_point, 
+            t.via_point,
+            t.end_point
+        FROM 
+            trips t
+        WHERE 
+            t.status = '待派'
+        ORDER BY 
+            t.date, t.time
+        """
+        
+        pending_trips = db.session.execute(sql_text(query)).fetchall()
+        
+        if not pending_trips:
+            return "目前沒有待派的班次。"
+        else:
+            # 查詢所有司機
+            drivers_query = "SELECT id, name FROM drivers ORDER BY id"
+            drivers = db.session.execute(sql_text(drivers_query)).fetchall()
+            
+            # 格式化待派班次信息
+            reply_text = "📋 待派班次列表：\n\n"
+            for trip in pending_trips:
+                trip_id = trip[0]
+                trip_date = trip[1]
+                departure_time = trip[2].strftime("%H:%M") if trip[2] else "未設置"
+                start_point = trip[3] or "未指定"
+                via_point = trip[4] or ""
+                end_point = trip[5] or "未指定"
+                
+                reply_text += f"班次ID: {trip_id}\n"
+                reply_text += f"日期: {trip_date}\n"
+                reply_text += f"時間: {departure_time}\n"
+                reply_text += f"起點: {start_point}\n"
+                if via_point:
+                    reply_text += f"途經: {via_point}\n"
+                reply_text += f"終點: {end_point}\n"
+                reply_text += "-------------------\n"
+            
+            # 添加可用司機列表
+            reply_text += "\n🚗 可用司機列表：\n\n"
+            for driver in drivers:
+                driver_id = driver[0]
+                driver_name = driver[1]
+                reply_text += f"司機ID: {driver_id}, 姓名: {driver_name}\n"
+            
+            reply_text += "\n使用 '指派 [班次ID] [司機ID]' 來指派司機。"
+            return reply_text
+    except Exception as e:
+        return f"查詢待派班次錯誤: {str(e)}"
+
+# 添加更改班次狀態功能
+def handle_change_status(message_text):
+    try:
+        # 解析參數
+        parts = message_text.split()
+        if len(parts) < 3:
+            return "更改狀態命令格式不正確。正確格式：更改狀態 [班次ID] [新狀態]"
+        
+        trip_id = int(parts[1])
+        new_status = parts[2]
+        
+        # 檢查狀態是否有效
+        valid_statuses = ['準備', '待派', '取消', '衝突', '完成']
+        if new_status not in valid_statuses:
+            raise ValueError(f"無效的狀態: {new_status}。有效狀態: {', '.join(valid_statuses)}")
+        
+        # 檢查班次是否存在
+        trip_query = "SELECT trip_id, status FROM trips WHERE trip_id = :trip_id"
+        trip = db.session.execute(sql_text(trip_query), {"trip_id": trip_id}).fetchone()
+        
+        if not trip:
+            raise ValueError(f"找不到ID為 {trip_id} 的班次")
+        
+        # 更新當前班次狀態
+        update_query = """
+        UPDATE trips 
+        SET status = :new_status 
+        WHERE trip_id = :trip_id
+        """
+        db.session.execute(
+            sql_text(update_query), 
+            {
+                "new_status": new_status,
+                "trip_id": trip_id
+            }
+        )
+        db.session.commit()
+        
+        # 發送確認消息
+        return f"✅ 已成功將班次 {trip_id} 的狀態更改為 '{new_status}'。"
+    except ValueError as e:
+        return f"更改狀態失敗: {str(e)}"
+    except Exception as e:
+        return f"更改狀態失敗: {str(e)}"
+
+# 添加匯入固定班次功能
+def handle_import_fixed_trips(message_text):
+    try:
+        # 解析參數
+        parts = message_text.split()
+        if len(parts) < 2:
+            return "匯入固定班次命令格式不正確。正確格式：匯入固定 [日期]"
+        
+        target_date_str = parts[1]
+        
+        # 解析日期
+        try:
+            target_date = datetime.strptime(target_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            raise ValueError(f"日期格式不正確: {target_date_str}。請使用 YYYY-MM-DD 格式。")
+        
+        # 獲取星期幾 (0=星期一, 6=星期日)
+        weekday = target_date.weekday()
+        weekday_num = str(weekday + 1)  # 轉換為 1-7 表示
+        
+        # 查詢匹配當天的固定班次
+        fixed_trips_query = f"""
+        SELECT 
+            id, 
+            route_number, 
+            departure_time, 
+            start_point, 
+            via_point, 
+            end_point, 
+            base_fare, 
+            surcharge, 
+            total_fare, 
+            category, 
+            driver_id 
+        FROM 
+            fixed_schedules 
+        WHERE 
+            route_number LIKE '%{weekday_num}%'
+        """
+        
+        fixed_trips = db.session.execute(sql_text(fixed_trips_query)).fetchall()
+        
+        if not fixed_trips:
+            return f"沒有找到適用於 {target_date_str} (星期{weekday_num}) 的固定班次。"
+        
+        # 檢查是否已存在
+        imported_count = 0
+        for trip in fixed_trips:
+            fixed_trip_id = trip[0]
+            departure_time = trip[2]
+            start_point = trip[3]
+            end_point = trip[5]
+            
+            # 檢查是否已存在相同的班次
+            check_query = """
+            SELECT trip_id 
+            FROM trips 
+            WHERE date = :date 
+            AND time = :time 
+            AND start_point = :start_point 
+            AND end_point = :end_point
+            """
+            
+            existing = db.session.execute(
+                sql_text(check_query), 
+                {
+                    "date": target_date,
+                    "time": departure_time,
+                    "start_point": start_point,
+                    "end_point": end_point
+                }
+            ).fetchone()
+            
+            if not existing:
+                # 計算週數
+                week_number = target_date.isocalendar()[1]
+                
+                # 插入新班次
+                insert_query = """
+                INSERT INTO trips 
+                (fixed_trip_id, week_number, date, time, start_point, via_point, end_point, 
+                meter_fare, extra_fare, actual_fare, category, driver_id, status) 
+                VALUES 
+                (:fixed_trip_id, :week_number, :date, :time, :start_point, :via_point, :end_point, 
+                :meter_fare, :extra_fare, :actual_fare, :category, :driver_id, '準備')
+                """
+                
+                db.session.execute(
+                    sql_text(insert_query), 
+                    {
+                        "fixed_trip_id": fixed_trip_id,
+                        "week_number": week_number,
+                        "date": target_date,
+                        "time": departure_time,
+                        "start_point": start_point,
+                        "via_point": trip[4],
+                        "end_point": end_point,
+                        "meter_fare": trip[6],
+                        "extra_fare": trip[7],
+                        "actual_fare": trip[8],
+                        "category": trip[9],
+                        "driver_id": trip[10]
+                    }
+                )
+                imported_count += 1
+        
+        db.session.commit()
+        
+        if imported_count > 0:
+            return f"✅ 已成功匯入 {imported_count} 筆固定班次到 {target_date_str}。"
+        else:
+            return f"所有適用於 {target_date_str} 的固定班次已存在，無需重複匯入。"
+    except ValueError as e:
+        return f"匯入固定班次失敗: {str(e)}"
+    except Exception as e:
+        return f"匯入固定班次失敗: {str(e)}"
+
+# 添加更新班次狀態功能
+def handle_update_status():
+    try:
+        # 獲取當前日期和時間
+        now = datetime.now()
+        today = now.date()
+        current_time = now.time()
+        
+        # 更新過期的"準備"狀態班次為"完成"
+        past_date_query = """
+        UPDATE trips 
+        SET status = '完成' 
+        WHERE status = '準備' AND date < :today
+        """
+        
+        db.session.execute(
+            sql_text(past_date_query), 
+            {"today": today}
+        )
+        
+        # 更新當天已過時間的"準備"狀態班次為"完成"
+        past_time_query = """
+        UPDATE trips 
+        SET status = '完成' 
+        WHERE status = '準備' AND date = :today AND time < :current_time
+        """
+        
+        db.session.execute(
+            sql_text(past_time_query), 
+            {
+                "today": today,
+                "current_time": current_time
+            }
+        )
+        
+        db.session.commit()
+        
+        return "✅ 已成功更新班次狀態。過期的班次已標記為'完成'。"
+    except Exception as e:
+        return f"更新班次狀態失敗: {str(e)}" 

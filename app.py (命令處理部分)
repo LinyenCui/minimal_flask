@@ -1,0 +1,168 @@
+# 根據不同的命令執行不同的操作
+if message_text == "查詢班次":
+    logger.info("執行查詢班次命令")
+    print("執行查詢班次命令")
+    try:
+        reply_text = handle_query_trips()
+        print(f"查詢班次結果: {reply_text[:50]}...")
+    except Exception as e:
+        logger.error(f"查詢班次錯誤: {str(e)}")
+        print(f"查詢班次錯誤: {str(e)}")
+        reply_text = f"查詢班次功能出錯: {str(e)}"
+elif message_text == "待派班次":
+    logger.info("執行待派班次命令")
+    try:
+        reply_text = trip_handler.handle_pending_trips()
+    except Exception as e:
+        logger.error(f"待派班次錯誤: {str(e)}")
+        reply_text = f"待派班次功能出錯: {str(e)}"
+elif message_text.startswith("指派"):
+    logger.info("執行指派司機命令")
+    try:
+        reply_text = driver_handler.handle_assign_driver(message_text)
+    except Exception as e:
+        logger.error(f"指派司機錯誤: {str(e)}")
+        reply_text = f"指派司機功能出錯: {str(e)}"
+# ... 其他命令也類似處理 ... 
+
+def handle_query_trips():
+    try:
+        print("開始執行 handle_query_trips 函數")
+        # 獲取今天的日期
+        today = date.today()
+        print(f"今天的日期: {today}")
+        
+        # 先返回一個簡單的測試回覆，確認函數被調用
+        return f"這是查詢班次功能的測試回覆。今天是 {today}。"
+        
+        # 以下代碼暫時注釋掉，等確認函數被正確調用後再啟用
+        # 查詢今天的班次
+        # query = f"""
+        # SELECT 
+        #     t.trip_id, 
+        #     t.date, 
+        #     t.time, 
+        #     t.start_point, 
+        #     t.via_point,
+        #     t.end_point, 
+        #     t.status,
+        #     d.name as driver_name
+        # FROM 
+        #     trips t
+        # LEFT JOIN 
+        #     drivers d ON t.driver_id = d.id
+        # WHERE 
+        #     t.date = '{today}'
+        # ORDER BY 
+        #     t.time
+        # """
+        
+        # trips = db.session.execute(sql_text(query)).fetchall()
+        
+        # if not trips:
+        #     return f"今天 ({today}) 沒有安排班次。"
+        # else:
+        #     # 格式化班次信息
+        #     reply_text = f"今天 ({today}) 班次信息：\n\n"
+        #     for trip in trips:
+        #         trip_id = trip[0]
+        #         departure_time = trip[2].strftime("%H:%M") if trip[2] else "未設置"
+        #         start_point = trip[3] or "未指定"
+        #         via_point = trip[4] or ""
+        #         end_point = trip[5] or "未指定"
+        #         status = trip[6] or "未指定"
+        #         driver_name = trip[7] or "未指派"
+        #         
+        #         reply_text += f"班次ID: {trip_id}\n"
+        #         reply_text += f"時間: {departure_time}\n"
+        #         reply_text += f"起點: {start_point}\n"
+        #         if via_point:
+        #             reply_text += f"途經: {via_point}\n"
+        #         reply_text += f"終點: {end_point}\n"
+        #         reply_text += f"狀態: {status}\n"
+        #         reply_text += f"司機: {driver_name}\n"
+        #         reply_text += "-------------------\n"
+        #     return reply_text
+    except Exception as e:
+        print(f"handle_query_trips 錯誤: {str(e)}")
+        return f"查詢班次錯誤: {str(e)}"
+
+def handle_pending_trips():
+    try:
+        # 查詢所有待派班次
+        query = """
+        SELECT 
+            t.trip_id, 
+            t.date,
+            t.time, 
+            t.start_point, 
+            t.via_point,
+            t.end_point
+        FROM 
+            trips t
+        WHERE 
+            t.status = '待派'
+        ORDER BY 
+            t.date, t.time
+        """
+        
+        pending_trips = db.session.execute(sql_text(query)).fetchall()
+        
+        if not pending_trips:
+            return "目前沒有待派的班次。"
+        else:
+            # 查詢所有司機
+            drivers_query = "SELECT id, name FROM drivers ORDER BY id"
+            drivers = db.session.execute(sql_text(drivers_query)).fetchall()
+            
+            # 格式化待派班次信息
+            reply_text = "📋 待派班次列表：\n\n"
+            for trip in pending_trips:
+                trip_id = trip[0]
+                trip_date = trip[1]
+                departure_time = trip[2].strftime("%H:%M") if trip[2] else "未設置"
+                start_point = trip[3] or "未指定"
+                via_point = trip[4] or ""
+                end_point = trip[5] or "未指定"
+                
+                reply_text += f"班次ID: {trip_id}\n"
+                reply_text += f"日期: {trip_date}\n"
+                reply_text += f"時間: {departure_time}\n"
+                reply_text += f"起點: {start_point}\n"
+                if via_point:
+                    reply_text += f"途經: {via_point}\n"
+                reply_text += f"終點: {end_point}\n"
+                reply_text += "-------------------\n"
+            
+            # 添加可用司機列表
+            reply_text += "\n🚗 可用司機列表：\n\n"
+            for driver in drivers:
+                driver_id = driver[0]
+                driver_name = driver[1]
+                reply_text += f"司機ID: {driver_id}, 姓名: {driver_name}\n"
+            
+            reply_text += "\n使用 '指派 [班次ID] [司機ID]' 來指派司機。"
+            return reply_text
+    except Exception as e:
+        return f"查詢待派班次錯誤: {str(e)}"
+
+def get_help_text():
+    return """📋 可用命令列表（更新版本）：
+
+1️⃣ 基本查詢
+- 查詢班次：查看今天的班次
+- 待派班次：查看所有待派的班次
+- 查車 [司機ID] [日期]：查詢指定司機在指定日期的班次
+
+2️⃣ 班次管理
+- 預約：開始預約新班次
+- 指派 [班次ID] [司機ID]：為班次指派司機
+- 更改狀態 [班次ID] [新狀態]：更改班次狀態（準備/待派/取消/衝突/完成）
+- 匯入固定 [日期]：匯入指定日期的固定班次
+- 更新狀態：更新所有過期班次的狀態
+
+如需更多協助，請聯繫系統管理員。
+
+這是更新後的幫助文本。"""
+
+print(f"收到消息: {message_text}") 
