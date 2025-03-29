@@ -24,6 +24,7 @@ wheels/
 venv/
 ENV/
 env/
+new_venv/
 .env
 .env.dev
 
