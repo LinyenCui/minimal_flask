@@ -1,12 +1,28 @@
 # app.py
 import os
-import logging
 from dotenv import load_dotenv
+
+# 檢查是否在本地運行
+is_local = __name__ == "__main__"
+
+if is_local:
+    print("本地開發環境：加載 .env.dev")
+    load_dotenv('.env.dev', override=True)
+else:
+    print("生產環境：加載 .env")
+    load_dotenv('.env', override=True)
+
+# 驗證配置
+print(f"使用的 Channel Secret: {os.environ.get('LINE_CHANNEL_SECRET')}")
+print(f"使用的 Channel Token: {os.environ.get('LINE_CHANNEL_TOKEN')}")
+
+# 其他的 import
+import logging
 from modules import create_app
 from flask import request, abort
 from modules.services.scheduler_service import (
-    schedule_all_trip_updates, 
-    update_completed_trips, 
+    schedule_all_trip_updates,
+    update_completed_trips,
     initialize_unique_codes
 )
 from flask_apscheduler import APScheduler
@@ -23,9 +39,6 @@ if flask_version.startswith("3."):
 else:
     print("使用 Flask 2.x 或更早版本兼容模式")
 
-# 載入環境變數
-load_dotenv()
-
 # 創建應用實例
 app = create_app()
 
@@ -37,14 +50,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # 顯示配置信息
-# 使用 with app.app_context() 替代 before_first_request
 def show_config():
     logger.info(f"Channel token: {app.config.get('LINE_CHANNEL_TOKEN')}")
     logger.info(f"Database URL: {app.config.get('SQLALCHEMY_DATABASE_URI')}")
+    logger.info(f"Channel Secret: {app.config.get('LINE_CHANNEL_SECRET')}")
 
 # 在應用啟動前執行配置顯示
 with app.app_context():
     show_config()
+
+# 在創建 app 時
+app.config['LINE_CHANNEL_SECRET'] = os.environ.get('LINE_CHANNEL_SECRET')
 
 # 主路由（健康檢查）
 @app.route("/")

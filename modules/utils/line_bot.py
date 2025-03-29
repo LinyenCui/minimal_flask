@@ -15,7 +15,6 @@ from linebot.v3.messaging import (
     MessageAction
 )
 from linebot.v3.exceptions import InvalidSignatureError
-from modules.config import LINE_CHANNEL_TOKEN, LINE_CHANNEL_SECRET
 from flask import current_app
 from linebot.v3 import WebhookParser
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
@@ -23,22 +22,37 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent
 # 設置日誌
 logger = logging.getLogger(__name__)
 
-# 配置 LINE Bot API
-configuration = Configuration(access_token=LINE_CHANNEL_TOKEN)
-api_client = ApiClient(configuration)
-messaging_api = MessagingApi(api_client)
+def get_parser():
+    """獲取LINE Webhook解析器"""
+    # 優先從 Flask 配置中獲取
+    channel_secret = current_app.config.get('LINE_CHANNEL_SECRET')
+    
+    # 如果配置中沒有，則嘗試從環境變量獲取
+    if not channel_secret:
+        channel_secret = os.environ.get('LINE_CHANNEL_SECRET')
+        
+    if not channel_secret:
+        raise ValueError("LINE_CHANNEL_SECRET not found in config or environment variables")
+    
+    # 添加詳細的日誌
+    logger.info(f"Channel Secret length: {len(channel_secret)}")
+    logger.info(f"Channel Secret bytes: {[ord(c) for c in channel_secret]}")
+    logger.info(f"Channel Secret from config: {current_app.config.get('LINE_CHANNEL_SECRET')}")
+    logger.info(f"Channel Secret from env: {os.environ.get('LINE_CHANNEL_SECRET')}")
+    
+    # 去除可能的空白字符
+    channel_secret = channel_secret.strip()
+    logger.info("Using Channel Secret from configuration")
+    return WebhookParser(channel_secret)
 
-# 嘗試導入 WebhookParser
-try:
-    parser = WebhookParser(LINE_CHANNEL_SECRET)
-    logger.info("成功導入 WebhookParser")
-except ImportError:
-    try:
-        parser = WebhookParser(LINE_CHANNEL_SECRET)
-        logger.info("從 webhooks 導入 WebhookParser")
-    except ImportError:
-        parser = WebhookParser(LINE_CHANNEL_SECRET)
-        logger.info("使用舊版本 WebhookParser")
+def get_line_bot_api():
+    """獲取LINE Messaging API客戶端"""
+    channel_token = current_app.config.get('LINE_CHANNEL_TOKEN')
+    logger.info(f"Using Channel Token: {channel_token}")
+    
+    configuration = Configuration(access_token=channel_token)
+    api_client = ApiClient(configuration)
+    return MessagingApi(api_client)
 
 def reply_message(reply_token, messages):
     """回覆訊息的通用方法"""
@@ -93,21 +107,6 @@ def create_message_action(label, text):
         label=label,
         text=text
     )
-
-# 初始化Line Bot相關物件
-def get_parser():
-    """獲取LINE Webhook解析器"""
-    channel_secret = current_app.config.get('LINE_CHANNEL_SECRET')
-    return WebhookParser(channel_secret)
-
-def get_line_bot_api():
-    """獲取LINE Messaging API客戶端"""
-    channel_token = current_app.config.get('LINE_CHANNEL_TOKEN')
-    
-    # 正確的初始化方式
-    configuration = Configuration(access_token=channel_token)
-    api_client = ApiClient(configuration)
-    return MessagingApi(api_client)
 
 # 發送回覆訊息
 def reply_text(reply_token, text):
