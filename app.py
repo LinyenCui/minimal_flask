@@ -3,14 +3,17 @@ import os
 from dotenv import load_dotenv
 
 # 檢查是否在本地運行
-is_local = __name__ == "__main__"
+is_local = os.environ.get('FLASK_ENV') == 'development'
 
+# 環境變量加載邏輯
 if is_local:
     print("本地開發環境：加載 .env.dev")
     load_dotenv('.env.dev', override=True)
-else:
-    print("生產環境：加載 .env")
+elif not os.environ.get('RENDER'):  # 如果不是在 Render 上運行
+    print("非 Render 環境：加載 .env")
     load_dotenv('.env', override=True)
+else:
+    print("Render 環境：使用 Render 環境變量")
 
 # 驗證配置
 print(f"使用的 Channel Secret: {os.environ.get('LINE_CHANNEL_SECRET')}")
