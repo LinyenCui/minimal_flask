@@ -23,8 +23,10 @@ if flask_version.startswith("3."):
 else:
     print("使用 Flask 2.x 或更早版本兼容模式")
 
-# 載入環境變數
-load_dotenv()
+# 載入環境變數（只在ENV_LOADED不为TRUE时加载）
+if os.environ.get('ENV_LOADED') != 'TRUE':
+    load_dotenv()
+    os.environ['ENV_LOADED'] = 'TRUE'
 
 # 創建應用實例
 app = create_app()

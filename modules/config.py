@@ -2,7 +2,10 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# 检查是否已经加载过环境变量
+if os.environ.get('ENV_LOADED') != 'TRUE':
+    load_dotenv()
+    os.environ['ENV_LOADED'] = 'TRUE'
 
 # LINE Bot設定
 LINE_CHANNEL_TOKEN = os.environ.get('LINE_CHANNEL_TOKEN')
