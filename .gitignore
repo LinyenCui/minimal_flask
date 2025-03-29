@@ -6,3 +6,11 @@ __pycache__/
 venv/
 .DS_Store
 
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.env.*
+!.env.example
+venv/
+new_venv/
