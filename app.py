@@ -102,6 +102,23 @@ with app.app_context():
     from modules.services.scheduler_service import schedule_all_trip_updates
     schedule_all_trip_updates(app)
 
+# 在app.py中，添加在其他路由定义之后
+@app.route('/test_env')
+def test_env():
+    import os
+    import sys
+    import platform
+    import time
+    
+    return {
+        'python_version': sys.version,
+        'platform': platform.platform(),
+        'env_vars': {k: v for k, v in os.environ.items() if not k.startswith('LINE') and not k.startswith('DATABASE')},  # 过滤敏感信息
+        'tz': time.tzname,
+        'current_time': str(datetime.datetime.now()),
+        'app_config': {k: str(v) for k, v in app.config.items() if not k.startswith('LINE') and not k.startswith('DATABASE')}  # 过滤敏感信息
+    }
+
 # 啟動應用
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 3000))
