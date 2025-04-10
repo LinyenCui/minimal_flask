@@ -16,10 +16,20 @@ def get_drive_service():
     """獲取Google Drive服務並認證"""
     SCOPES = ['https://www.googleapis.com/auth/drive']
     
-    # 從環境變量獲取憑證JSON字符串
-    creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
-    
     try:
+        # 首先尝试使用Secret File
+        secret_file_path = '/etc/secrets/credentials.json'
+        if os.path.exists(secret_file_path):
+            logger.info(f"使用Secret File: {secret_file_path}")
+            credentials = service_account.Credentials.from_service_account_file(
+                secret_file_path, scopes=SCOPES)
+            service = build('drive', 'v3', credentials=credentials)
+            return service
+        
+        # 如果Secret File不存在，尝试从环境变量获取
+        logger.info("Secret File不存在，尝试从环境变量获取凭证")
+        creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+        
         if creds_json:
             # 使用環境變量中的憑證內容（適用於Render部署）
             # 創建臨時文件
