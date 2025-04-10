@@ -38,3 +38,7 @@ new_venv/
 .DS_Store
 Thumbs.db
 
+# Google API credentials
+*.json
+!package.json
+

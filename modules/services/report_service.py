@@ -10,22 +10,14 @@ from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from flask import current_app
 from sqlalchemy import text
 
-# Google Drive API 相關導入
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-import pickle
-
 # 從模型模組導入數據庫連接
 from modules.models.base import db
 
+# 導入app.py中定義的Google Drive上傳功能
+from app import upload_file_to_drive
+
 # 建立日誌記錄器
 logger = logging.getLogger(__name__)
-
-# 定義 Google Drive API 範圍
-SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
 def generate_weekly_report(category=None):
     """
@@ -303,83 +295,19 @@ def upload_to_google_drive(file_path, folder_id=None):
     """
     try:
         logger.info(f"嘗試上傳文件到Google Drive: {file_path}")
-        creds = None
-        # token.pickle 存儲用戶的訪問和刷新令牌
-        if os.path.exists('token.pickle'):
-            with open('token.pickle', 'rb') as token:
-                creds = pickle.load(token)
-                logger.info("已從token.pickle加載憑證")
-                
-        # 如果沒有有效憑證，或者憑證已過期
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                logger.info("憑證已過期，嘗試刷新")
-                creds.refresh(Request())
-            else:
-                # 如果沒有 token.pickle 文件，則從 credentials.json 創建新的憑證
-                if not os.path.exists('credentials.json'):
-                    logger.error("找不到credentials.json文件")
-                    return "上傳失敗：找不到 credentials.json 文件"
-                
-                logger.info("嘗試從credentials.json創建新憑證")
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    'credentials.json', SCOPES)
-                creds = flow.run_local_server(port=0)
-                
-            # 保存憑證以供下次使用
-            with open('token.pickle', 'wb') as token:
-                pickle.dump(creds, token)
-                logger.info("已保存新憑證到token.pickle")
-
-        # 創建 Drive API 客戶端
-        service = build('drive', 'v3', credentials=creds)
-        logger.info("已創建Google Drive API客戶端")
         
-        # 準備上傳文件
-        file_name = os.path.basename(file_path)
-        file_metadata = {'name': file_name}
+        # 使用app.py中定義的上傳函數
+        success, result = upload_file_to_drive(file_path, folder_id=folder_id)
         
-        # 如果指定了文件夾 ID，則將文件上傳到該文件夾
-        if folder_id:
-            file_metadata['parents'] = [folder_id]
-            logger.info(f"指定上傳到文件夾ID: {folder_id}")
-        
-        # 上傳文件
-        media = MediaFileUpload(file_path, resumable=True)
-        file = service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id'
-        ).execute()
-        
-        file_id = file.get('id')
-        logger.info(f"文件已上傳，ID: {file_id}")
-        
-        # 創建分享鏈接 - 設置文件權限為任何人都可以查看
-        permission = {
-            'type': 'anyone',
-            'role': 'reader'
-        }
-        
-        service.permissions().create(
-            fileId=file_id,
-            body=permission
-        ).execute()
-        logger.info("已設置文件權限為公開可讀")
-        
-        # 獲取文件的分享鏈接
-        file = service.files().get(
-            fileId=file_id,
-            fields='webViewLink'
-        ).execute()
-        
-        share_link = file.get('webViewLink')
-        logger.info(f"分享鏈接: {share_link}")
-        
-        return share_link
+        if success:
+            logger.info(f"文件上傳成功，分享鏈接: {result}")
+            return result
+        else:
+            logger.error(f"上傳到Google Drive失敗: {result}")
+            return f"上傳到Google Drive失敗: {result}"
     
     except Exception as e:
-        logger.error(f"上傳到Google Drive失敗: {str(e)}", exc_info=True)
+        logger.error(f"上傳到Google Drive過程中出錯: {str(e)}", exc_info=True)
         return f"上傳到Google Drive失敗: {str(e)}"
 
 def handle_generate_weekly_report(text):
