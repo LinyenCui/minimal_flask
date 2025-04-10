@@ -6,6 +6,8 @@ from sqlalchemy import text
 from database import engine, Session
 from flask import current_app
 import traceback
+# 導入時區相關函數
+from modules.utils.taiwan_time import get_taiwan_time, get_taiwan_date
 
 from modules.models.base import db
 
@@ -98,10 +100,10 @@ def update_completed_trips():
     3. 將它們複製到已完成班次資料表
     """
     try:
-        print(f"[{datetime.now()}] 開始執行更新已完成班次任務...")
+        print(f"[{get_taiwan_time()}] 開始執行更新已完成班次任務...")
         
-        # 獲取當前日期和時間
-        now = datetime.now()
+        # 獲取當前日期和時間 (使用台灣時間)
+        now = get_taiwan_time()
         current_date = now.date()
         current_time = now.time()
         

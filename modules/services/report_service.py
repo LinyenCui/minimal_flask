@@ -9,6 +9,7 @@ import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from flask import current_app
 from sqlalchemy import text
+from modules.utils.taiwan_time import get_taiwan_time, get_taiwan_date
 
 # 從模型模組導入數據庫連接
 from modules.models.base import db
@@ -31,7 +32,7 @@ def generate_weekly_report(category=None):
     """
     try:
         # 獲取日期範圍
-        today = datetime.now().date()
+        today = get_taiwan_date()
         days_since_sunday = today.weekday() + 1 if today.weekday() < 6 else 0
         last_sunday = today - timedelta(days=days_since_sunday + 7)
         last_saturday = last_sunday + timedelta(days=6)
@@ -106,7 +107,7 @@ def generate_weekly_report(category=None):
         driver_stats.columns = ['司機編號', '班次數', '金額']
         
         # 創建Excel文件
-        report_date = datetime.now().strftime('%Y%m%d')
+        report_date = get_taiwan_date().strftime('%Y%m%d')
         category_suffix = f"_{category}" if category and category != "全部" else ""
         filename = f"weekly_report{category_suffix}_{report_date}.xlsx"
         

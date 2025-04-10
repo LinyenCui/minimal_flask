@@ -1,6 +1,15 @@
 # app.py
 import os
 from dotenv import load_dotenv
+import time
+from datetime import datetime, timezone, timedelta, date
+
+# 設置時區為台灣時間（UTC+8）
+os.environ['TZ'] = 'Asia/Taipei'
+try:
+    time.tzset()  # 這個只能在Unix/Linux/MacOS上使用
+except AttributeError:
+    pass  # Windows不支持這個函數
 
 # 檢查是否在本地運行
 is_local = os.environ.get('FLASK_ENV') == 'development'
@@ -23,11 +32,6 @@ print(f"使用的 Channel Token: {os.environ.get('LINE_CHANNEL_TOKEN')}")
 import logging
 from modules import create_app
 from flask import request, abort
-from modules.services.scheduler_service import (
-    schedule_all_trip_updates,
-    update_completed_trips,
-    initialize_unique_codes
-)
 from flask_apscheduler import APScheduler
 import flask
 import sqlalchemy
@@ -79,47 +83,23 @@ with app.app_context():
     # 初始化排程器
     scheduler.init_app(app)
     
-    # 添加每日更新任務
-    scheduler.add_job(
-        id='schedule_daily_updates',
-        func=schedule_all_trip_updates,
-        args=[app],
-        trigger='cron',
-        hour=0,
-        minute=0,
-        replace_existing=True
-    )
-    
-    # 添加每小時更新已完成班次的任務
-    scheduler.add_job(
-        id='hourly_update_completed',
-        func=update_completed_trips,
-        trigger='cron',
-        hour='*',
-        minute=0,
-        replace_existing=True
-    )
-    
-    # 添加每小時更新唯一識別碼的任務
-    scheduler.add_job(
-        id='hourly_update_unique_codes',
-        func=initialize_unique_codes,
-        trigger='cron',
-        hour='*',
-        minute=30,
-        replace_existing=True
-    )
+    # 使用scheduler_service中的init_scheduler函數初始化排程任務
+    from modules.services.scheduler_service import init_scheduler
+    init_scheduler(app)
     
     # 啟動排程器
     scheduler.start()
     
     # 應用啟動時，處理所有已過期的班次
+    from modules.services.scheduler_service import update_completed_trips
     update_completed_trips()
     
     # 應用啟動時，初始化所有沒有唯一識別碼的班次
+    from modules.services.scheduler_service import initialize_unique_codes
     initialize_unique_codes()
     
     # 應用啟動時，安排所有未來班次的自動更新任務
+    from modules.services.scheduler_service import schedule_all_trip_updates
     schedule_all_trip_updates(app)
 
 # 啟動應用

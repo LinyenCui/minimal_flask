@@ -24,6 +24,8 @@ from modules.handlers.trip_handler import handle_query_trips, handle_trip_detail
 from modules.services.trip_detail_service import handle_trip_details_flex
 from modules.services.report_service import handle_generate_weekly_report
 from linebot.v3.messaging import QuickReply, QuickReplyItem, PostbackAction
+# 導入時區相關函數
+from modules.utils.taiwan_time import get_taiwan_time, get_taiwan_date
 
 # 建立日誌記錄器
 logger = logging.getLogger(__name__)

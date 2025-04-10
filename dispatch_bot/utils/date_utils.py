@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, date
+from datetime import datetime, timedelta, date, timezone
 
 def parse_date_input(date_input):
     """解析各種格式的日期輸入"""
@@ -53,12 +53,22 @@ def parse_time_input(time_input):
     else:
         raise ValueError("無法識別的時間格式")
 
+# 台灣時區功能
+def get_taiwan_time():
+    """獲取台灣時間（UTC+8）"""
+    taiwan_tz = timezone(timedelta(hours=8))
+    return datetime.now(taiwan_tz)
+
+def get_taiwan_date():
+    """獲取台灣日期"""
+    return get_taiwan_time().date()
+
 def is_past_date(check_date):
     """檢查是否為過去的日期"""
-    return check_date < date.today()
+    return check_date < get_taiwan_date()
 
 def is_past_time(check_date, check_time):
     """檢查是否為過去的時間"""
-    today = date.today()
-    now = datetime.now().time()
+    today = get_taiwan_date()
+    now = get_taiwan_time().time()
     return check_date == today and check_time < now 

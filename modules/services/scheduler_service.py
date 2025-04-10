@@ -1,7 +1,8 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
 from flask import current_app
 import traceback
+from modules.utils.taiwan_time import get_taiwan_time, get_taiwan_date
 
 from modules.models.base import db
 
@@ -10,7 +11,8 @@ def schedule_all_trip_updates(app):
     with app.app_context():
         try:
             # 獲取當前日期和時間
-            now = datetime.now()
+            now = get_taiwan_time()
+            taiwan_tz = timezone(timedelta(hours=8))
             
             # 查詢所有狀態為"準備"且時間在未來的班次
             query = """
@@ -30,7 +32,7 @@ def schedule_all_trip_updates(app):
             future_trips = db.session.execute(
                 text(query), 
                 {
-                    "current_date": now.date(),
+                    "current_date": get_taiwan_date(),
                     "current_time": now.time()
                 }
             ).fetchall()
@@ -42,7 +44,9 @@ def schedule_all_trip_updates(app):
                 trip_time = trip[2]
                 
                 # 計算執行時間（班次時間後5分鐘）
-                execution_time = datetime.combine(trip_date, trip_time) + timedelta(minutes=5)
+                # 使用timezone添加时区信息
+                execution_datetime = datetime.combine(trip_date, trip_time)
+                execution_time = execution_datetime.replace(tzinfo=taiwan_tz) + timedelta(minutes=5)
                 
                 # 如果執行時間已經過去，跳過
                 if execution_time < now:
@@ -62,7 +66,8 @@ def schedule_all_trip_updates(app):
                     func=update_single_trip,
                     args=[current_app._get_current_object(), trip_id],
                     trigger='date',
-                    run_date=execution_time
+                    run_date=execution_time,
+                    timezone='Asia/Taipei'
                 )
                 
                 current_app.logger.info(f"已安排班次 #{trip_id} 的自動更新任務，執行時間：{execution_time}")
@@ -77,7 +82,7 @@ def update_single_trip(app, trip_id):
     with app.app_context():
         try:
             # 獲取當前日期和時間
-            now = datetime.now()
+            now = get_taiwan_time()
             
             # 查詢班次信息
             query = """
@@ -204,11 +209,11 @@ def update_completed_trips():
     3. 將它們複製到已完成班次資料表
     """
     try:
-        now = datetime.now()
+        now = get_taiwan_time()
         current_app.logger.info(f"開始執行更新已完成班次任務...")
         
         # 獲取當前日期和時間
-        current_date = now.date()
+        current_date = get_taiwan_date()
         current_time = now.time()
         
         current_app.logger.info(f"當前日期: {current_date}, 當前時間: {current_time}")
@@ -411,7 +416,7 @@ def update_completed_trips():
 def initialize_unique_codes():
     """初始化所有沒有唯一識別碼的班次"""
     try:
-        now = datetime.now()
+        now = get_taiwan_time()
         current_app.logger.info(f"開始初始化班次唯一識別碼...")
         
         # 查詢所有沒有唯一識別碼的班次
@@ -526,4 +531,39 @@ def initialize_unique_codes():
         db.session.rollback()
         current_app.logger.error(f"初始化班次唯一識別碼任務失敗: {e}")
         traceback.print_exc()
-        return f"初始化唯一識別碼失敗: {str(e)}" 
+        return f"初始化唯一識別碼失敗: {str(e)}"
+
+# 創建初始化排程任務的函數
+def init_scheduler(app):
+    """初始化排程任務"""
+    # 在每個排程任務定義中添加時區
+    app.scheduler.add_job(
+        id='schedule_daily_updates',
+        func=schedule_all_trip_updates,
+        args=[app],
+        trigger='cron',
+        hour=0,
+        minute=0,
+        timezone='Asia/Taipei',  # 添加時區
+        replace_existing=True
+    )
+
+    app.scheduler.add_job(
+        id='hourly_update_completed',
+        func=lambda: update_completed_trips(),
+        trigger='cron',
+        hour='*',
+        minute=0,
+        timezone='Asia/Taipei',  # 添加時區
+        replace_existing=True
+    )
+
+    app.scheduler.add_job(
+        id='hourly_update_unique_codes',
+        func=lambda: initialize_unique_codes(),
+        trigger='cron',
+        hour='*',
+        minute=30,
+        timezone='Asia/Taipei',  # 添加時區
+        replace_existing=True
+    ) 

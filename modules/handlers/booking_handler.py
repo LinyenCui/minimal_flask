@@ -17,6 +17,7 @@ from modules.flex_designs.booking_flex import (
     get_booking_success_flex
 )
 from modules.models.base import db
+from modules.utils.taiwan_time import get_taiwan_time, get_taiwan_date
 
 # 建立日誌記錄器
 logger = logging.getLogger(__name__)
@@ -123,7 +124,7 @@ def handle_date_input(user_id, message_text, states):
     try:
         # 解析日期輸入
         selected_date = None
-        today = date.today()
+        today = get_taiwan_date()
         
         # 處理特殊日期輸入
         if message_text == "今天":
@@ -185,7 +186,7 @@ def handle_time_input(user_id, message_text, states):
         # 檢查時間是否是過去的時間
         selected_date = states[user_id]["date"]
         date_obj = datetime.strptime(selected_date, "%Y-%m-%d").date()
-        now = datetime.now()
+        now = get_taiwan_time()
         
         if date_obj == now.date() and time_obj < now.time():
             return create_text_message("無法預約過去的時間。請選擇未來的時間。")
