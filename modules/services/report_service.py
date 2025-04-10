@@ -13,8 +13,8 @@ from sqlalchemy import text
 # 從模型模組導入數據庫連接
 from modules.models.base import db
 
-# 導入app.py中定義的Google Drive上傳功能
-from app import upload_file_to_drive
+# 導入Google Drive服務
+from modules.services.drive_service import upload_file_to_drive
 
 # 建立日誌記錄器
 logger = logging.getLogger(__name__)
@@ -296,7 +296,7 @@ def upload_to_google_drive(file_path, folder_id=None):
     try:
         logger.info(f"嘗試上傳文件到Google Drive: {file_path}")
         
-        # 使用app.py中定義的上傳函數
+        # 使用drive_service模組中的上傳函數
         success, result = upload_file_to_drive(file_path, folder_id=folder_id)
         
         if success:

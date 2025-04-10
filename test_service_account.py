@@ -7,7 +7,7 @@
 
 import os
 import sys
-from app import get_drive_service, upload_file_to_drive
+from modules.services.drive_service import get_drive_service, upload_file_to_drive
 
 def test_drive_connection():
     """測試Google Drive連接"""
