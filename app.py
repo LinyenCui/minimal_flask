@@ -25,8 +25,10 @@ else:
     print("Render 環境：使用 Render 環境變量")
 
 # 驗證配置
-print(f"使用的 Channel Secret: {os.environ.get('LINE_CHANNEL_SECRET')}")
-print(f"使用的 Channel Token: {os.environ.get('LINE_CHANNEL_TOKEN')}")
+secret = os.environ.get('LINE_CHANNEL_SECRET')
+token = os.environ.get('LINE_CHANNEL_TOKEN')
+print(f"使用的 Channel Secret: {secret[:6]}...{secret[-4:]}" if secret else "未设置")
+print(f"使用的 Channel Token: {token[:6]}...{token[-4:]}" if token else "未设置")
 
 # 其他的 import
 import logging
@@ -58,9 +60,13 @@ logger = logging.getLogger(__name__)
 
 # 顯示配置信息
 def show_config():
-    logger.info(f"Channel token: {app.config.get('LINE_CHANNEL_TOKEN')}")
-    logger.info(f"Database URL: {app.config.get('SQLALCHEMY_DATABASE_URI')}")
-    logger.info(f"Channel Secret: {app.config.get('LINE_CHANNEL_SECRET')}")
+    token = app.config.get('LINE_CHANNEL_TOKEN')
+    secret = app.config.get('LINE_CHANNEL_SECRET')
+    db_url = app.config.get('SQLALCHEMY_DATABASE_URI')
+    
+    logger.info(f"Channel token: {token[:6]}...{token[-4:]}" if token else "未设置")
+    logger.info(f"Database URL: {'*'*10}" if db_url else "未设置")
+    logger.info(f"Channel Secret: {secret[:6]}...{secret[-4:]}" if secret else "未设置")
 
 # 在應用啟動前執行配置顯示
 with app.app_context():

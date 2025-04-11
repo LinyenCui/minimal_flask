@@ -18,6 +18,7 @@ from linebot.v3.exceptions import InvalidSignatureError
 from flask import current_app
 from linebot.v3 import WebhookParser
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
+from dotenv import load_dotenv
 
 # 設置日誌
 logger = logging.getLogger(__name__)
@@ -29,16 +30,26 @@ def get_parser():
     
     # 如果配置中沒有，則嘗試從環境變量獲取
     if not channel_secret:
+        # 直接从本地环境变量文件获取
+        load_dotenv('.env.dev', override=True)
         channel_secret = os.environ.get('LINE_CHANNEL_SECRET')
         
     if not channel_secret:
         raise ValueError("LINE_CHANNEL_SECRET not found in config or environment variables")
     
-    # 添加詳細的日誌
+    # 修改後的日誌
     logger.info(f"Channel Secret length: {len(channel_secret)}")
-    logger.info(f"Channel Secret bytes: {[ord(c) for c in channel_secret]}")
-    logger.info(f"Channel Secret from config: {current_app.config.get('LINE_CHANNEL_SECRET')}")
-    logger.info(f"Channel Secret from env: {os.environ.get('LINE_CHANNEL_SECRET')}")
+    if current_app.config.get('LINE_CHANNEL_SECRET'):
+        cs_config = current_app.config.get('LINE_CHANNEL_SECRET')
+        logger.info(f"Channel Secret from config: {cs_config[:6]}...{cs_config[-4:]}")
+    else:
+        logger.info("Channel Secret from config: 未设置")
+    
+    if os.environ.get('LINE_CHANNEL_SECRET'):
+        cs_env = os.environ.get('LINE_CHANNEL_SECRET')
+        logger.info(f"Channel Secret from env: {cs_env[:6]}...{cs_env[-4:]}")
+    else:
+        logger.info("Channel Secret from env: 未设置")
     
     # 去除可能的空白字符
     channel_secret = channel_secret.strip()
@@ -47,10 +58,22 @@ def get_parser():
 
 def get_line_bot_api():
     """獲取LINE Messaging API客戶端"""
-    channel_token = current_app.config.get('LINE_CHANNEL_TOKEN')
-    logger.info(f"Using Channel Token: {channel_token}")
+    # 優先從 Flask 配置中獲取
+    token = current_app.config.get('LINE_CHANNEL_TOKEN')
     
-    configuration = Configuration(access_token=channel_token)
+    # 如果配置中沒有，則嘗試從環境變量獲取
+    if not token:
+        # 直接从本地环境变量文件获取
+        load_dotenv('.env.dev', override=True)
+        token = os.environ.get('LINE_CHANNEL_TOKEN')
+    
+    if not token:
+        logger.error("LINE_CHANNEL_TOKEN not found in config or environment variables")
+        raise ValueError("LINE_CHANNEL_TOKEN not found in config or environment variables")
+        
+    logger.info(f"Using Channel Token: {token[:6]}...{token[-4:]}" if token else "未设置")
+    
+    configuration = Configuration(access_token=token)
     api_client = ApiClient(configuration)
     return MessagingApi(api_client)
 
