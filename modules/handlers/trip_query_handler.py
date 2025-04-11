@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timedelta
 from sqlalchemy.sql import text
 import re
+from flask import current_app
 
 from modules.models.base import db
 from modules.utils.line_bot import create_flex_message, create_text_message
@@ -17,6 +18,7 @@ from linebot.v3.messaging import (
 from modules.services.trip_service import get_trips_by_date, get_trip_details
 from modules.views.trip_view import format_trips_flex, format_trip_details_flex
 from linebot.models import TextSendMessage
+from modules.utils.helpers import get_taiwan_time, get_taiwan_date
 
 # 建立日誌記錄器
 logger = logging.getLogger(__name__)
@@ -403,7 +405,7 @@ def handle_trip_details(message_text=None):
 
 def parse_date_input(date_input):
     """解析各種格式的日期輸入"""
-    today = datetime.now()
+    today = get_taiwan_time()
     
     # 處理特殊關鍵字
     if date_input in ["今天", "today"]:

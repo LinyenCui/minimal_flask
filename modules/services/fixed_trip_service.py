@@ -1,10 +1,10 @@
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
 from sqlalchemy import text as sql_text
 from flask import current_app
 import traceback
 
 from modules.models.base import db
-from modules.utils.helpers import parse_date_input
+from modules.utils.helpers import parse_date_input, get_taiwan_time, get_taiwan_date
 
 def handle_query_fixed_trips_flex(message_text=None):
     """返回Flex Message格式的固定班次查詢結果"""
@@ -21,9 +21,9 @@ def handle_query_fixed_trips_flex(message_text=None):
                 current_app.logger.error(f"日期解析錯誤: {str(e)}")
                 return None, f"日期格式不正確: {str(e)}\n\n支持的格式：\n- YYYY-MM-DD (例如: 2025-03-11)\n- MM-DD (例如: 03-11)\n- MM/DD (例如: 3/11)\n- MM月DD日 (例如: 3月11日)\n- MMDD (例如: 0311)\n- 今天, 明天, 後天"
         else:
-            # 默認使用今天的日期
-            query_date = date.today()
-            current_app.logger.info(f"使用默認日期（今天）: {query_date}")
+            # 默認使用今天的台灣時間日期
+            query_date = get_taiwan_date()
+            current_app.logger.info(f"使用默認日期（今天台灣時間）: {query_date}")
         
         # 查詢指定日期的固定班次
         query = f"""
@@ -236,8 +236,8 @@ def handle_query_fixed_trips(message_text=None):
             except ValueError as e:
                 return f"日期格式不正確: {str(e)}\n\n支持的格式：\n- YYYY-MM-DD (例如: 2025-03-11)\n- MM-DD (例如: 03-11)\n- MM/DD (例如: 3/11)\n- MM月DD日 (例如: 3月11日)\n- MMDD (例如: 0311)\n- 今天, 明天, 後天"
         else:
-            # 默認使用今天的日期
-            query_date = date.today()
+            # 默認使用今天的台灣時間日期
+            query_date = get_taiwan_date()
         
         # 查詢指定日期的固定班次
         query = f"""

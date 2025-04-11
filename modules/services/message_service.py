@@ -15,6 +15,8 @@ from modules.handlers.trip_query_handler import (
 )
 from modules.services.report_service import handle_generate_weekly_report
 from linebot.v3.messaging import TextMessage, QuickReply, QuickReplyItem, MessageAction
+# 導入時區相關函數
+from modules.utils.taiwan_time import get_taiwan_time, get_taiwan_date
 
 # 建立日誌記錄器
 logger = logging.getLogger(__name__)

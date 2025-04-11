@@ -1,15 +1,12 @@
 # modules/config.py
 import os
-from dotenv import load_dotenv
-
-# 检查是否已经加载过环境变量
-if os.environ.get('ENV_LOADED') != 'TRUE':
-    load_dotenv()
-    os.environ['ENV_LOADED'] = 'TRUE'
 
 # LINE Bot設定
 LINE_CHANNEL_TOKEN = os.environ.get('LINE_CHANNEL_TOKEN')
 LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
+
+print(f"使用的 Channel Secret: {LINE_CHANNEL_SECRET}")
+print(f"使用的 Channel Token: {LINE_CHANNEL_TOKEN}")
 
 # 資料庫設定
 DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/dispatch_db')

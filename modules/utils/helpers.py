@@ -3,7 +3,17 @@
 """
 import re
 from modules.config import COMMAND_PREFIXES
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
+
+# 台灣時區功能
+def get_taiwan_time():
+    """獲取台灣時間（UTC+8）"""
+    taiwan_tz = timezone(timedelta(hours=8))
+    return datetime.now(taiwan_tz)
+
+def get_taiwan_date():
+    """獲取台灣日期"""
+    return get_taiwan_time().date()
 
 # 用戶狀態字典，用於跟踪對話狀態
 user_states = {}
@@ -138,7 +148,7 @@ def should_process_message(message_text, source_type):
 def parse_date_input(date_input):
     """解析各種格式的日期輸入"""
     
-    today = date.today()
+    today = get_taiwan_date()
     current_year = today.year
     
     # 嘗試解析完整日期格式 (YYYY-MM-DD)
