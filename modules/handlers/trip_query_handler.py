@@ -475,4 +475,30 @@ def handle_trip_details(trip_id):
     if trip:
         return format_trip_details_flex(trip)
     else:
-        return TextSendMessage(text=f"找不到班次 #{trip_id}") 
+        return TextSendMessage(text=f"找不到班次 #{trip_id}")
+
+def handle_query_trips_flex(text):
+    # 從命令文本中提取日期
+    date_str = None
+    # 嘗試匹配格式如"查詢班次 4/10"或"查詢班次 2025-04-10"的日期
+    date_match = re.search(r'(\d{1,4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2})', text)
+    
+    if date_match:
+        date_str = date_match.group(1)
+        # 轉換日期格式
+        try:
+            # 處理 MM/DD 格式
+            if re.match(r'\d{1,2}/\d{1,2}', date_str):
+                month, day = map(int, date_str.split('/'))
+                query_date = datetime(datetime.now().year, month, day).date()
+            # 處理 YYYY-MM-DD 格式
+            else:
+                query_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            # 日期格式錯誤
+            return None, f"日期格式錯誤: {date_str}，請使用 MM/DD 或 YYYY-MM-DD 格式"
+    else:
+        # 使用今天的日期
+        query_date = datetime.now().date()
+    
+    return query_date, None 

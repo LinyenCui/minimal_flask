@@ -83,10 +83,10 @@ def handle_import_fixed_trips_week(message_text):
                 insert_query = """
                 INSERT INTO trips 
                 (fixed_trip_id, date, time, start_point, via_point, end_point, 
-                 meter_fare, extra_fare, category, driver_id, status, unique_code, week_number) 
+                 meter_fare, extra_fare, category, driver_id, status, unique_code, week_number, trip_type) 
                 VALUES 
                 (:fixed_trip_id, :date, :time, :start_point, :via_point, :end_point, 
-                 :meter_fare, :extra_fare, :category, :driver_id, '準備', :unique_code, :week_number)
+                 :meter_fare, :extra_fare, :category, :driver_id, '準備', :unique_code, :week_number, 'fixed')
                 """
                 
                 db.session.execute(

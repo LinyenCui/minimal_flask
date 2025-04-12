@@ -17,6 +17,7 @@ class Trip(db.Model):
     category = db.Column(db.String(50))
     driver_id = db.Column(db.Integer, db.ForeignKey('drivers.id'))
     status = db.Column(db.String(20))
+    trip_type = db.Column(db.String(20), default='fixed')  # 'fixed' 固定班次或 'temp' 临时班次
     
     # 關聯
     fixed_schedule = db.relationship('FixedSchedule', foreign_keys=[fixed_trip_id])

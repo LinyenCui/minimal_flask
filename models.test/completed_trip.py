@@ -16,7 +16,6 @@ class CompletedTrip(db.Model):
     driver_id = db.Column(db.Integer, db.ForeignKey('drivers.id'))
     remarks = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.now)
-    trip_type = db.Column(db.String(20), default='fixed')  # 'fixed' 固定班次或 'temp' 临时班次
     
     # 關聯
     start = db.relationship('Customer', foreign_keys=[start_point])

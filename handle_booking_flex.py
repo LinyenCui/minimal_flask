@@ -538,8 +538,8 @@ def handle_confirm_input(user_id, message_text, booking_states):
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    INSERT INTO trips (date, time, start_point, via_point, end_point, status, category)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO trips (date, time, start_point, via_point, end_point, status, category, trip_type)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING trip_id
                     """,
                     (
@@ -549,7 +549,8 @@ def handle_confirm_input(user_id, message_text, booking_states):
                         booking_data["via_point"],
                         booking_data["end_point"],
                         "待派",
-                        booking_data["category"]
+                        booking_data["category"],
+                        "temp"
                     )
                 )
                 

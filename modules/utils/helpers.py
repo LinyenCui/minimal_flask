@@ -157,43 +157,60 @@ def parse_date_input(date_input):
     
     # 嘗試解析簡短日期格式 (MM-DD)
     elif re.match(r'^\d{1,2}-\d{1,2}$', date_input):
-        parsed_date = datetime.strptime(f"{current_year}-{date_input}", "%Y-%m-%d").date()
-        # 如果日期已經過去，假設是明年的日期
-        if parsed_date < today:
-            parsed_date = parsed_date.replace(year=current_year + 1)
-        return parsed_date
+        month, day = map(int, date_input.split('-'))
+        try:
+            parsed_date = date(current_year, month, day)
+            # 如果日期已過去超過30天，假設是明年的日期
+            days_difference = (today - parsed_date).days
+            if days_difference > 30:
+                parsed_date = date(current_year + 1, month, day)
+            return parsed_date
+        except ValueError as e:
+            raise ValueError(f"无效的日期: {month}-{day}")
     
     # 嘗試解析斜線日期格式 (MM/DD)
     elif re.match(r'^\d{1,2}/\d{1,2}$', date_input):
-        month, day = date_input.split('/')
-        parsed_date = datetime.strptime(f"{current_year}-{month}-{day}", "%Y-%m-%d").date()
-        # 如果日期已經過去，假設是明年的日期
-        if parsed_date < today:
-            parsed_date = parsed_date.replace(year=current_year + 1)
-        return parsed_date
+        month, day = map(int, date_input.split('/'))
+        try:
+            parsed_date = date(current_year, month, day)
+            # 如果日期已過去超過30天，假設是明年的日期
+            days_difference = (today - parsed_date).days
+            if days_difference > 30:
+                parsed_date = date(current_year + 1, month, day)
+            return parsed_date
+        except ValueError as e:
+            raise ValueError(f"无效的日期: {month}/{day}")
     
     # 嘗試解析中文日期格式 (MM月DD日)
     elif re.match(r'^\d{1,2}月\d{1,2}日$', date_input):
-        month, day = re.findall(r'\d+', date_input)
-        parsed_date = datetime.strptime(f"{current_year}-{month}-{day}", "%Y-%m-%d").date()
-        # 如果日期已經過去，假設是明年的日期
-        if parsed_date < today:
-            parsed_date = parsed_date.replace(year=current_year + 1)
-        return parsed_date
+        month, day = map(int, re.findall(r'\d+', date_input))
+        try:
+            parsed_date = date(current_year, month, day)
+            # 如果日期已過去超過30天，假設是明年的日期
+            days_difference = (today - parsed_date).days
+            if days_difference > 30:
+                parsed_date = date(current_year + 1, month, day)
+            return parsed_date
+        except ValueError as e:
+            raise ValueError(f"无效的日期: {month}月{day}日")
     
     # 嘗試解析數字日期格式 (MMDD)
     elif re.match(r'^\d{3,4}$', date_input):
         if len(date_input) == 3:  # 例如 "125" 表示 1月25日
-            month = date_input[0]
-            day = date_input[1:3]
+            month = int(date_input[0])
+            day = int(date_input[1:3])
         else:  # 例如 "0125" 表示 1月25日
-            month = date_input[0:2]
-            day = date_input[2:4]
-        parsed_date = datetime.strptime(f"{current_year}-{month}-{day}", "%Y-%m-%d").date()
-        # 如果日期已經過去，假設是明年的日期
-        if parsed_date < today:
-            parsed_date = parsed_date.replace(year=current_year + 1)
-        return parsed_date
+            month = int(date_input[0:2])
+            day = int(date_input[2:4])
+        try:
+            parsed_date = date(current_year, month, day)
+            # 如果日期已過去超過30天，假設是明年的日期
+            days_difference = (today - parsed_date).days
+            if days_difference > 30:
+                parsed_date = date(current_year + 1, month, day)
+            return parsed_date
+        except ValueError as e:
+            raise ValueError(f"无效的日期: {month:02d}{day:02d}")
     
     # 嘗試解析星期幾 (一, 二, 三, 四, 五, 六, 日)
     elif date_input in ['一', '二', '三', '四', '五', '六', '日']:

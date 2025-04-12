@@ -1065,9 +1065,9 @@ def handle_booking_conversation(event, user_id, message_text):
                 # 創建新的班次記錄
                 insert_query = """
                 INSERT INTO trips 
-                (date, time, start_point, via_point, end_point, category, status) 
+                (date, time, start_point, via_point, end_point, category, status, trip_type) 
                 VALUES 
-                (:date, :time, :start_point, :via_point, :end_point, :category, '待派')
+                (:date, :time, :start_point, :via_point, :end_point, :category, '待派', 'temp')
                 RETURNING trip_id
                 """
                 

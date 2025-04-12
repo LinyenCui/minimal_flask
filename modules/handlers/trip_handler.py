@@ -11,6 +11,7 @@ from modules.models.driver import Driver
 from modules.models.customer import Customer
 from modules.utils.helpers import parse_date_input
 from modules.utils.line_bot import reply_text, reply_flex  # 添加必要的LINE Bot工具函数
+from modules.utils.taiwan_time import get_taiwan_time
 
 logger = logging.getLogger(__name__)
 
@@ -260,15 +261,23 @@ def handle_change_status(message_text):
         new_status = parts[2]
         
         # 檢查狀態是否有效
-        valid_statuses = ['準備', '待派', '取消', '衝突', '請假', '完成']
-        if new_status not in valid_statuses:
-            return f"無效的狀態: {new_status}。有效狀態: {', '.join(valid_statuses)}"
+        user_modifiable_statuses = ['準備', '待派', '取消', '衝突', '請假']
+        if new_status not in user_modifiable_statuses:
+            return f"無效的狀態: {new_status}。用戶可修改的狀態: {', '.join(user_modifiable_statuses)}\n註：「完成」狀態由系統自動更新。"
         
         # 檢查班次是否存在
         trip = db.session.query(Trip).filter(Trip.trip_id == trip_id).first()
         
         if not trip:
             return f"找不到ID為 {trip_id} 的班次"
+        
+        # 檢查班次時間是否已過
+        current_time = get_taiwan_time()
+        trip_datetime = datetime.combine(trip.date, trip.time)
+        
+        # 如果班次時間已過，不允許修改狀態
+        if trip_datetime < current_time:
+            return f"⚠️ 無法修改已過時間的班次狀態。班次 {trip_id} 的時間 ({trip.date.strftime('%Y-%m-%d')} {trip.time.strftime('%H:%M')}) 已過。"
         
         # 更新狀態
         trip.status = new_status

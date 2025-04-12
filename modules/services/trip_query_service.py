@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from sqlalchemy import text as sql_text
 from flask import current_app
 import traceback
+import re
 
 from modules.models.base import db
 from modules.utils.helpers import parse_date_input
@@ -12,8 +13,9 @@ def handle_query_trips_flex(message_text=None):
     """返回Flex Message格式的班次查詢結果"""
     try:
         current_app.logger.info(f"handle_query_trips_flex被調用，參數: {message_text}")
-        # 獲取今天的日期
-        today = date.today()
+        # 获取台湾时间的今天日期
+        from modules.utils.taiwan_time import get_taiwan_date
+        today = get_taiwan_date()  # 使用台湾时间
         current_app.logger.info(f"今天日期: {today}")
         
         # 解析日期參數（如果有）
@@ -72,9 +74,10 @@ def handle_query_trips_flex(message_text=None):
                     return None, "本周剩餘的星期二、四、六已經沒有班次了。"
                 
             else:
-                # 嘗試解析單個日期
+                # 嘗試解析單個日期，修改這部分
                 try:
                     current_app.logger.info(f"嘗試解析日期: {date_str}")
+                    from modules.utils.taiwan_time import get_taiwan_date
                     query_date = parse_date_input(date_str)
                     query_dates = [query_date]
                     current_app.logger.info(f"解析結果: {query_date}")
@@ -106,6 +109,7 @@ def handle_query_trips_flex(message_text=None):
                 fixed_schedules fs ON t.fixed_trip_id = fs.id
             WHERE 
                 t.date = '{query_date}'
+                AND t.status != '已完成'
             ORDER BY 
                 t.date, t.time
             """
@@ -300,6 +304,7 @@ def handle_query_fixed_trips_flex(message_text=None):
             fixed_schedules fs ON t.fixed_trip_id = fs.id
         WHERE 
             t.date = '{query_date}'
+            AND t.status != '已完成'
         ORDER BY 
             t.time
         """
@@ -400,6 +405,7 @@ def handle_query_trips(message_text=None):
                 fixed_schedules fs ON t.fixed_trip_id = fs.id
             WHERE 
                 t.date = '{query_date}'
+                AND t.status != '已完成'
             ORDER BY 
                 t.date, t.time
             """
