@@ -4,6 +4,7 @@ from flask import current_app
 from sqlalchemy import text as sql_text
 import traceback
 import logging
+import pytz
 
 from modules.models.base import db
 from modules.models.trip import Trip, FixedSchedule
@@ -273,7 +274,21 @@ def handle_change_status(message_text):
         
         # 檢查班次時間是否已過
         current_time = get_taiwan_time()
+        
+        # 確保比較的日期時間對象類型相同（解決offset-naive和offset-aware比較問題）
+        from datetime import datetime
+        
+        # 將班次日期時間轉換為aware datetime（帶時區信息）
         trip_datetime = datetime.combine(trip.date, trip.time)
+        
+        # 如果trip_datetime沒有時區信息，添加台灣時區
+        if trip_datetime.tzinfo is None:
+            taiwan_tz = pytz.timezone('Asia/Taipei')
+            trip_datetime = taiwan_tz.localize(trip_datetime)
+        
+        # 確保current_time也有時區信息
+        if current_time.tzinfo is None:
+            current_time = taiwan_tz.localize(current_time)
         
         # 如果班次時間已過，不允許修改狀態
         if trip_datetime < current_time:

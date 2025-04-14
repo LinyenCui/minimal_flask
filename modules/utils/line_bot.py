@@ -12,7 +12,9 @@ from linebot.v3.messaging import (
     FlexMessage,
     FlexContainer,
     PostbackAction,
-    MessageAction
+    MessageAction,
+    QuickReply,
+    QuickReplyItem
 )
 from linebot.v3.exceptions import InvalidSignatureError
 from flask import current_app
@@ -84,10 +86,68 @@ def reply_message(reply_token, messages):
     
     try:
         messaging_api = get_line_bot_api()
+        
+        # 處理消息列表，將字典轉換為對應的對象
+        processed_messages = []
+        for msg in messages:
+            if isinstance(msg, dict):
+                # 如果是字典格式，根據type轉換為對應的消息對象
+                if msg.get("type") == "text":
+                    processed_messages.append(TextMessage(text=msg.get("text", "")))
+                elif msg.get("type") == "flex":
+                    # 處理Flex Message
+                    flex_container = FlexContainer.from_dict(msg.get("contents", {}))
+                    flex_msg = FlexMessage(
+                        alt_text=msg.get("altText", "Flex Message"),
+                        contents=flex_container
+                    )
+                    
+                    # 如果有QuickReply，以正確方式添加
+                    if "quickReply" in msg and "items" in msg["quickReply"]:
+                        # 創建QuickReply項目
+                        quick_reply_items = []
+                        
+                        logger.info(f"處理QuickReply項目: {msg['quickReply']['items']}")
+                        
+                        for item in msg["quickReply"]["items"]:
+                            if "action" in item and item["action"].get("type") == "message":
+                                action_data = item["action"]
+                                action = MessageAction(
+                                    label=action_data.get("label", ""),
+                                    text=action_data.get("text", "")
+                                )
+                                quick_reply_items.append(
+                                    QuickReplyItem(action=action)
+                                )
+                                logger.info(f"添加QuickReply項目: {action_data.get('label')}, 文本: {action_data.get('text')}")
+                        
+                        # 創建QuickReply並賦值
+                        if quick_reply_items:
+                            # 直接手動構建QuickReply屬性
+                            qr = QuickReply(items=quick_reply_items)
+                            logger.info(f"創建QuickReply對象: {qr}")
+                            # 賦值給flex_msg
+                            flex_msg.quick_reply = qr
+                            logger.info(f"成功設置QuickReply屬性")
+                    
+                    processed_messages.append(flex_msg)
+                    logger.info(f"添加Flex消息到處理列表: {flex_msg}")
+                else:
+                    # 未知類型，跳過
+                    logger.warning(f"未知的消息類型: {msg.get('type')}")
+                    continue
+            else:
+                # 如果已經是消息對象，直接添加
+                processed_messages.append(msg)
+        
+        # 發送處理後的消息
+        logger.info(f"準備發送 {len(processed_messages)} 條處理後的消息")
         messaging_api.reply_message(ReplyMessageRequest(
             reply_token=reply_token,
-            messages=messages
+            messages=processed_messages
         ))
+        logger.info("消息發送成功")
+        
         return True
     except Exception as e:
         import traceback
