@@ -7,7 +7,7 @@ from datetime import datetime
 from flask import current_app
 import traceback
 
-from modules.utils.line_bot import create_text_message, create_flex_message, reply_text, reply_message
+from modules.utils.line_bot import create_text_message, create_flex_message, reply_text, reply_message, reply_flex
 from modules.utils.helpers import booking_states
 from modules.handlers.booking_handler import (
     handle_booking_start, handle_date_input, handle_time_input,
@@ -49,8 +49,28 @@ def handle_postback(event):
         action = params.get('action', '')
         
         if action == 'query_trips':
-            result = handle_query_trips('查詢班次')
-            reply_text(reply_token, result)
+            # 使用Flex版本的查詢班次功能
+            try:
+                logger.info("處理查詢班次postback，使用Flex版本")
+                from modules.services.trip_query_service import handle_query_trips_flex, handle_query_trips
+                
+                # 調用Flex版本的查詢班次
+                flex_content, error_message = handle_query_trips_flex('查詢班次')
+                
+                if flex_content and error_message is None:
+                    # 使用Flex版本回覆
+                    reply_flex(reply_token, "班次查詢結果", flex_content)
+                else:
+                    # 如果出錯，使用文本版本
+                    logger.warning(f"使用Flex版本失敗，回退到文本版本。錯誤: {error_message}")
+                    result = handle_query_trips('查詢班次')
+                    reply_text(reply_token, result)
+            except Exception as e:
+                logger.error(f"處理Flex版本查詢班次時出錯: {e}")
+                traceback.print_exc()
+                # 使用文本版本作為後備
+                result = handle_query_trips('查詢班次')
+                reply_text(reply_token, f"Flex消息處理錯誤，使用文本版本：\n{result}")
             
         elif action == 'generate_report':
             # 處理生成報表請求

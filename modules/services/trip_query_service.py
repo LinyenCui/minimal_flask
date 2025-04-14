@@ -102,7 +102,8 @@ def handle_query_trips_flex(message_text=None):
                 t.end_point, 
                 COALESCE(fs.direction, '來') as direction,
                 t.status,
-                t.driver_id
+                t.driver_id,
+                t.trip_type
             FROM 
                 trips t
             LEFT JOIN
@@ -181,6 +182,7 @@ def handle_query_trips_flex(message_text=None):
             trip_date = trip[1]
             time_val = trip[2].strftime("%H:%M") if trip[2] else "--:--"
             direction = trip[5]  # "來" 或 "回"
+            trip_type = trip[8] if len(trip) > 8 else ""  # 確保獲取trip_type
             
             # 根據方向決定顯示起點還是終點
             if direction == "來":
@@ -224,7 +226,7 @@ def handle_query_trips_flex(message_text=None):
                 "待派": "🟠"
             }.get(status, "⚪")
             
-            # 添加班次信息
+            # 添加班次信息 - 對於臨時預約班次不顯示"來"或"回"
             trip_box = {
                 "type": "box",
                 "layout": "horizontal",
@@ -240,20 +242,6 @@ def handle_query_trips_flex(message_text=None):
                         "text": time_val,
                         "size": "xs",
                         "flex": 2
-                    },
-                    {
-                        "type": "text",
-                        "text": f"{location}{direction}",
-                        "size": "xs",
-                        "flex": 5,
-                        "wrap": True
-                    },
-                    {
-                        "type": "text",
-                        "text": f"🚕{driver_id}",
-                        "size": "xs",
-                        "flex": 2,
-                        "align": "end"
                     }
                 ],
                 "margin": "sm",
@@ -262,6 +250,35 @@ def handle_query_trips_flex(message_text=None):
                     "text": f"班次詳情 {trip_id}"
                 }
             }
+            
+            # 根據班次類型決定是否顯示方向
+            if trip_type == "temp":
+                # 臨時預約班次只顯示地點，不顯示方向
+                trip_box["contents"].append({
+                    "type": "text",
+                    "text": f"{location}",
+                    "size": "xs",
+                    "flex": 5,
+                    "wrap": True
+                })
+            else:
+                # 固定班次顯示地點和方向
+                trip_box["contents"].append({
+                    "type": "text",
+                    "text": f"{location}{direction}",
+                    "size": "xs",
+                    "flex": 5,
+                    "wrap": True
+                })
+            
+            # 添加司機信息
+            trip_box["contents"].append({
+                "type": "text",
+                "text": f"🚕{driver_id}",
+                "size": "xs",
+                "flex": 2,
+                "align": "end"
+            })
             
             bubble["body"]["contents"].append(trip_box)
         
@@ -398,7 +415,8 @@ def handle_query_trips(message_text=None):
                 t.end_point, 
                 COALESCE(fs.direction, '來') as direction,
                 t.status,
-                t.driver_id
+                t.driver_id,
+                t.trip_type
             FROM 
                 trips t
             LEFT JOIN
@@ -439,7 +457,7 @@ def handle_query_trips(message_text=None):
             else:
                 reply_text = f"📅 多日班次總覽：\n\n"
         
-        # 按日期分組顯示
+        # 根據用戶狀態處理輸入
         current_date = None
         
         for trip in all_trips:
@@ -447,6 +465,7 @@ def handle_query_trips(message_text=None):
             trip_date = trip[1]
             time_val = trip[2].strftime("%H:%M") if trip[2] else "--:--"
             direction = trip[5]  # "來" 或 "回"
+            trip_type = trip[8] if len(trip) > 8 else ""  # 確保獲取trip_type
             
             # 根據方向決定顯示起點還是終點
             if direction == "來":
@@ -475,8 +494,13 @@ def handle_query_trips(message_text=None):
                 "待派": "🟠"
             }.get(status, "⚪")
             
-            # 使用黃色小車表情符號代替"司機#"
-            reply_text += f"{status_emoji} #{trip_id} {time_val} {location}{direction} - 🚕{driver_id}\n"
+            # 根據班次類型決定是否顯示方向
+            if trip_type == "temp":
+                # 臨時預約班次只顯示地點，不顯示方向
+                reply_text += f"{status_emoji} #{trip_id} {time_val} {location} - 🚕{driver_id}\n"
+            else:
+                # 固定班次顯示地點和方向
+                reply_text += f"{status_emoji} #{trip_id} {time_val} {location}{direction} - 🚕{driver_id}\n"
         
         reply_text += "\n輸入「班次詳情 [ID]」查看特定班次的詳細信息。"
         

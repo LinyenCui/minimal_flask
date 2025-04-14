@@ -26,10 +26,9 @@ def get_help_flex():
                 {
                     "type": "button",
                     "action": {
-                        "type": "postback",
+                        "type": "message",
                         "label": "🔍 查詢班次",
-                        "data": "action=query_trips",
-                        "displayText": "查詢班次"
+                        "text": "查詢班次"
                     },
                     "style": "primary",
                     "color": "#1E90FF",
@@ -59,6 +58,18 @@ def get_help_flex():
                     },
                     "style": "primary",
                     "color": "#FF8C00",
+                    "margin": "sm",
+                    "height": "sm"
+                },
+                {
+                    "type": "button",
+                    "action": {
+                        "type": "message",
+                        "label": "🚕 臨時預約",
+                        "text": "臨時預約"
+                    },
+                    "style": "primary",
+                    "color": "#FF6B6E",
                     "margin": "sm",
                     "height": "sm"
                 },
