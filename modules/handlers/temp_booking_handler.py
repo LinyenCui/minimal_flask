@@ -413,40 +413,29 @@ def handle_confirm_input(user_id, message_text):
         booking_data = temp_booking_states[user_id]["data"]
         
         try:
-            # 創建新的班次記錄
-            has_end_point = booking_data.get("end_point") and booking_data["end_point"] != "無(略過)"
+            # 修改為使用臨時地點和自定義欄位
+            insert_query = """
+            INSERT INTO trips 
+            (date, time, start_point, end_point, category, status, trip_type, 
+             custom_start_point, custom_end_point) 
+            VALUES 
+            (:date, :time, '臨時地點', '臨時地點', :category, '待派', 'temp',
+             :custom_start_point, :custom_end_point)
+            RETURNING trip_id
+            """
             
-            if has_end_point:
-                insert_query = """
-                INSERT INTO trips 
-                (date, time, start_point, end_point, category, status, trip_type) 
-                VALUES 
-                (:date, :time, :start_point, :end_point, :category, '待派', 'temp')
-                RETURNING trip_id
-                """
-                
-                params = {
-                    "date": booking_data["date"],
-                    "time": booking_data["time"],
-                    "start_point": booking_data["start_point"],
-                    "end_point": booking_data["end_point"],
-                    "category": booking_data["category"]
-                }
-            else:
-                insert_query = """
-                INSERT INTO trips 
-                (date, time, start_point, category, status, trip_type) 
-                VALUES 
-                (:date, :time, :start_point, :category, '待派', 'temp')
-                RETURNING trip_id
-                """
-                
-                params = {
-                    "date": booking_data["date"],
-                    "time": booking_data["time"],
-                    "start_point": booking_data["start_point"],
-                    "category": booking_data["category"]
-                }
+            # 确保 end_point 不为空，如果为空则设置为默认值
+            end_point = booking_data.get("end_point", "")
+            if not end_point or end_point == "無(略過)":
+                end_point = "无指定终点"
+            
+            params = {
+                "date": booking_data["date"],
+                "time": booking_data["time"],
+                "category": booking_data["category"],
+                "custom_start_point": booking_data["start_point"],
+                "custom_end_point": end_point
+            }
             
             result = db.session.execute(sql_text(insert_query), params)
             
@@ -490,7 +479,7 @@ def handle_confirm_input(user_id, message_text):
                 f"起點：{booking_data['start_point']}\n"
             )
             
-            if has_end_point:
+            if booking_data.get("end_point") and booking_data.get("end_point") != "無(略過)":
                 success_message += f"目的地：{booking_data['end_point']}\n"
             
             success_message += (

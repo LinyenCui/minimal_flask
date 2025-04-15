@@ -114,7 +114,7 @@ def get_trip_details_flex(trip_id, trip_data):
                         },
                         {
                             "type": "text",
-                            "text": trip_data.get('start_point') or '未指定',
+                            "text": trip_data.get('display_start_point') or trip_data.get('start_point') or '未指定',
                             "size": "sm",
                             "color": "#111111",
                             "flex": 5
@@ -143,7 +143,7 @@ def get_trip_details_flex(trip_id, trip_data):
     }
     
     # 添加途經點（如果有）
-    if trip_data.get('via_point'):
+    if trip_data.get('display_via_point') or trip_data.get('via_point'):
         flex_message["body"]["contents"].append({
             "type": "box",
             "layout": "horizontal",
@@ -157,7 +157,7 @@ def get_trip_details_flex(trip_id, trip_data):
                 },
                 {
                     "type": "text",
-                    "text": trip_data.get('via_point'),
+                    "text": trip_data.get('display_via_point') or trip_data.get('via_point'),
                     "size": "sm",
                     "color": "#111111",
                     "flex": 5
@@ -180,7 +180,7 @@ def get_trip_details_flex(trip_id, trip_data):
             },
             {
                 "type": "text",
-                "text": trip_data.get('end_point') or '未指定',
+                "text": trip_data.get('display_end_point') or trip_data.get('end_point') or '未指定',
                 "size": "sm",
                 "color": "#111111",
                 "flex": 5

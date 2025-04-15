@@ -73,6 +73,26 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
         status = trip[6] or "未指定"
         driver_id = trip[7] or "未指派"
         
+        # 檢查是否有trip_type字段
+        trip_type = "fixed"  # 默認為固定班次
+        if len(trip) > 8:
+            trip_type = trip[8]
+        
+        # 檢查是否有自定義起點和終點
+        custom_start_point = None
+        custom_end_point = None
+        if len(trip) > 10:
+            custom_start_point = trip[9]
+            custom_end_point = trip[10]
+        
+        # 根據班次類型和方向決定顯示的地點
+        if trip_type == "temp":
+            # 臨時預約優先使用custom_*欄位
+            if direction == "來":
+                location = custom_start_point or location
+            else:
+                location = custom_end_point or location
+        
         # 如果日期變了，添加日期標題
         if current_date != trip_date:
             current_date = trip_date
@@ -106,6 +126,10 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
             "待派": "🟠"
         }.get(status, "⚪")
         
+        # 根據班次類型設定顏色
+        text_color = "#333333" if trip_type == "fixed" else "#0000FF"  # 固定班次為黑色，臨時班次為藍色
+        background_color = None if trip_type == "fixed" else "#E6E6FA"  # 臨時班次有淡紫色背景
+        
         # 添加班次信息
         trip_box = {
             "type": "box",
@@ -115,27 +139,34 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
                     "type": "text",
                     "text": f"{status_emoji} #{trip_id}",
                     "size": "xs",
-                    "flex": 3
+                    "flex": 3,
+                    "color": text_color,
+                    "align": "start"
                 },
                 {
                     "type": "text",
                     "text": time_val,
                     "size": "xs",
-                    "flex": 2
+                    "flex": 2,
+                    "color": text_color,
+                    "align": "start"
                 },
                 {
                     "type": "text",
-                    "text": f"{location}{direction}",
+                    "text": f"{location}" if trip_type == "temp" else f"{location}{direction}",
                     "size": "xs",
                     "flex": 5,
-                    "wrap": True
+                    "wrap": True,
+                    "color": text_color,
+                    "align": "start"
                 },
                 {
                     "type": "text",
                     "text": f"🚕{driver_id}",
                     "size": "xs",
                     "flex": 2,
-                    "align": "end"
+                    "align": "end",
+                    "color": text_color
                 }
             ],
             "margin": "sm",
@@ -144,6 +175,12 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
                 "text": f"班次詳情 {trip_id}"
             }
         }
+        
+        # 如果是臨時班次，添加背景色
+        if background_color:
+            trip_box["backgroundColor"] = background_color
+            trip_box["cornerRadius"] = "sm"
+            trip_box["paddingAll"] = "sm"
         
         bubble["body"]["contents"].append(trip_box)
     

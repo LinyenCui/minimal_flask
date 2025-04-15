@@ -24,6 +24,23 @@ def process_text_message(event):
     
     logger.info(f"處理文本消息: {message_text}")
     
+    # 檢查是否是群組消息，並處理前綴問題
+    is_group = False
+    if hasattr(event.source, 'type') and event.source.type in ['group', 'room']:
+        is_group = True
+        logger.info("偵測到群組消息")
+        
+        # 使用message_handler模块检查是否应该处理该消息
+        from modules.handlers.message_handler import should_process_message
+        should_handle, processed_text = should_process_message(message_text, event.source.type, user_id)
+        
+        if not should_handle:
+            logger.info(f"群組消息不符合處理條件，跳過: {message_text}")
+            return
+            
+        message_text = processed_text
+        logger.info(f"處理後的消息: {message_text}")
+    
     try:
         # 檢查用戶是否在臨時預約流程中
         if user_id in temp_booking_states:
@@ -70,8 +87,8 @@ def process_text_message(event):
             return
         
         # 臨時預約命令
-        elif message_text == "臨時預約":
-            logger.info(f"用戶 {user_id} 請求臨時預約")
+        elif message_text == "臨時預約" or message_text.lower() in ["!臨時預約", "#臨時預約", "/臨時預約"]:
+            logger.info(f"用戶 {user_id} 請求臨時預約，消息: {message_text}")
             response = handle_temp_booking_start(user_id)
             
             if response:
@@ -255,6 +272,32 @@ def process_text_message(event):
                 reply_text(reply_token, f"處理指派司機請求失敗: {str(e)}")
                 return
         
+        # 簡化版指派司機指令 - 支持"指派 2307"格式
+        elif message_text.startswith('指派 ') and len(message_text.split()) == 2:
+            try:
+                trip_id = int(message_text.split()[1])
+                logger.info(f"處理簡化指派司機請求: {trip_id}")
+                
+                # 重用指派司機的邏輯
+                flex_content, error_message = handle_driver_assign_request(trip_id)
+                
+                if flex_content and error_message is None:
+                    # 發送司機選擇界面
+                    reply_flex(reply_token, f"指派司機：班次 #{trip_id}", flex_content)
+                else:
+                    # 發送錯誤消息
+                    reply_text(reply_token, error_message or "無法載入司機列表")
+                
+                return
+            except ValueError:
+                reply_text(reply_token, "班次ID必須是數字。")
+                return
+            except Exception as e:
+                logger.error(f"處理簡化指派司機請求時出錯: {e}")
+                traceback.print_exc()
+                reply_text(reply_token, f"處理指派司機請求失敗: {str(e)}")
+                return
+        
         # 選擇司機
         elif message_text.startswith('指派司機 ') and len(message_text.split()) == 3:
             try:
@@ -384,7 +427,7 @@ def process_text_message(event):
             try:
                 logger.info(f"處理查詢固定班次命令: {message_text}")
                 # 優先使用Flex Message版本
-                from modules.services.fixed_trip_service import handle_query_fixed_trips_flex, handle_query_fixed_trips
+                from modules.services.trip_query_service import handle_query_fixed_trips_flex, handle_query_fixed_trips
                 
                 # 记录调用前的状态
                 logger.info("即將調用handle_query_fixed_trips_flex函數")
@@ -406,7 +449,7 @@ def process_text_message(event):
                 logger.error(f"處理查詢固定班次時出錯: {e}")
                 traceback.print_exc()
                 # 使用文本版本作為後備
-                from modules.services.fixed_trip_service import handle_query_fixed_trips
+                from modules.services.trip_query_service import handle_query_fixed_trips
                 result = handle_query_fixed_trips(message_text)
                 reply_text(reply_token, f"Flex消息處理錯誤，使用文本版本：\n{result}")
                 return
@@ -476,14 +519,15 @@ def process_text_message_with_text(message_text, reply_token, user_id):
 def get_help_text():
     """取得文字版幫助信息"""
     return """可用命令列表：
-1. 查詢班次 [日期] - 查詢指定日期的班次
-2. 班次詳情 [ID] - 查看班次詳細信息
-3. 修改狀態 [ID] [新狀態] - 修改班次狀態
-4. 指派司機 [ID] - 為班次指派司機
-5. 臨時預約 - 開始臨時預約流程
-6. 臨時預約幫助 - 顯示臨時預約相關說明
-7. 幫助 - 顯示此幫助信息
+1. 查詢班次 [日期] - 查詢指定日期的班次（包含固定和臨時）
+2. 查詢固定班次 [日期] - 只查詢固定班次，不包含臨時班次
+3. 班次詳情 [ID] - 查看班次詳細信息
+4. 修改狀態 [ID] [新狀態] - 修改班次狀態
+5. 指派司機 [ID] - 為班次指派司機
+6. 臨時預約 - 開始臨時預約流程
+7. 臨時預約幫助 - 顯示臨時預約相關說明
+8. 幫助 - 顯示此幫助信息
 
-在群組中使用時，需在命令前添加前綴：!、# 或 /
-例如：!查詢班次、#幫助
+在群組中使用時，可以選擇性在命令前添加前綴：!、# 或 /
+例如：!查詢班次、#幫助，也可以直接輸入「查詢班次」「幫助」等
 """
