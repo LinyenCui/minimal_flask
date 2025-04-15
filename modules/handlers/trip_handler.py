@@ -201,24 +201,39 @@ def handle_trip_details(trip_id):
         trip_date = trip.date.strftime("%Y-%m-%d") if trip.date else "未設置"
         trip_time = trip.time.strftime("%H:%M") if trip.time else "未設置"
         
+        # 檢查是否為臨時預約
+        is_temp_booking = trip.trip_type == 'temp'
+        
+        # 根據班次類型選擇顯示的起點
+        if is_temp_booking and trip.custom_start_point:
+            start_display = trip.custom_start_point
+        else:
+            start_display = f"{customer.short_name} ({customer.name})"
+        
         result += (f"📅 日期: {trip_date}\n"
                   f"⏰ 時間: {trip_time}\n"
-                  f"📍 起點: {customer.short_name} ({customer.name})\n")
+                  f"📍 起點: {start_display}\n")
         
         # 如果有經由點
-        if trip.via_point:
-            via_customer = db.session.query(Customer).filter(Customer.short_name == trip.via_point).first()
-            if via_customer:
-                result += f"🚩 經由: {via_customer.short_name} ({via_customer.name})\n"
+        if trip.via_point or (is_temp_booking and trip.custom_via_point):
+            if is_temp_booking and trip.custom_via_point:
+                result += f"🚩 經由: {trip.custom_via_point}\n"
             else:
-                result += f"🚩 經由: {trip.via_point}\n"
+                via_customer = db.session.query(Customer).filter(Customer.short_name == trip.via_point).first()
+                if via_customer:
+                    result += f"🚩 經由: {via_customer.short_name} ({via_customer.name})\n"
+                else:
+                    result += f"🚩 經由: {trip.via_point}\n"
         
         # 終點
-        end_customer = db.session.query(Customer).filter(Customer.short_name == trip.end_point).first()
-        if end_customer:
-            result += f"🏁 終點: {end_customer.short_name} ({end_customer.name})\n"
+        if is_temp_booking and trip.custom_end_point:
+            result += f"🏁 終點: {trip.custom_end_point}\n"
         else:
-            result += f"🏁 終點: {trip.end_point}\n"
+            end_customer = db.session.query(Customer).filter(Customer.short_name == trip.end_point).first()
+            if end_customer:
+                result += f"🏁 終點: {end_customer.short_name} ({end_customer.name})\n"
+            else:
+                result += f"🏁 終點: {trip.end_point}\n"
         
         # 價格信息
         result += (f"💰 表價: {trip.meter_fare or 0}\n"
