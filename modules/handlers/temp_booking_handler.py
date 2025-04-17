@@ -285,7 +285,6 @@ def handle_location_input(user_id, message_text):
         
         # 更新用戶狀態
         temp_booking_states[user_id]["data"]["start_point"] = message_text.strip()
-        # 更新狀態為等待目的地輸入
         temp_booking_states[user_id]["state"] = "waiting_for_destination"
         
         logger.info(f"用戶 {user_id} 輸入了起點位置: {message_text.strip()}, 狀態更新為: {temp_booking_states[user_id]}")

@@ -41,23 +41,12 @@ def should_process_message(message_text, source_type, user_id=None):
         
     # 群組消息，需要前綴
     if source_type in ['group', 'room']:
-        # 檢查是否是用戶提及機器人
-        if message_text.strip() == "機器人":
-            # 返回特殊命令「幫助」，使機器人顯示幫助菜單
-            return True, "幫助"
-        # 檢查是否有人@機器人 (通常會包含像 @機器人 或 @小黃機器人 這樣的文本)
-        if "@" in message_text and any(bot_name in message_text for bot_name in ["機器人", "小黃", "小黄"]):
+        # 1. 檢查提及
+        if message_text.strip() == "機器人" or ("@" in message_text and any(bot_name in message_text for bot_name in ["機器人", "小黃", "小黄"])):
             return True, "幫助"
             
-        # 檢查是否是常見命令格式，這些通常是由按鈕觸發的
-        button_commands = [
-            "查詢班次", "預約", "東洋預約", "查詢固定班次", 
-            "生成週報", "修改狀態", "班次詳情", "幫助", "幫助文字",
-            "臨時預約", "臨時預約幫助", "取消預約",
-            "指派司機", "選擇司機", "確認指派", "取消指派"
-        ]
-        
-        # 檢查是否是臨時預約流程中的常用輸入格式
+        # 2. 檢查是否為臨時預約輸入 (保留之前的 is_booking_input 判斷)
+        # 檢查是否是日期、時間、確認等臨時預約流程中的輸入
         date_pattern = r'^\d{4}-\d{2}-\d{2}$'  # 如 2025-04-16
         time_pattern = r'^([01]?[0-9]|2[0-3]):([0-5][0-9])$'  # 如 09:30
         shorthand_time_pattern = r'^\d{3,4}$'  # 如 930 或 1430
@@ -105,35 +94,32 @@ def should_process_message(message_text, source_type, user_id=None):
         if is_booking_input:
             return True, message_text
         
-        # 檢查前綴
-        has_prefix = False
+        # 3. 檢查前綴
         processed_text = message_text
-        
         for prefix in ["!", "#", "/"]:
             if message_text.startswith(prefix):
                 processed_text = message_text[1:].strip()
-                if processed_text:  # 確保不是空消息
-                    has_prefix = True
-                    break
+                if processed_text: # 確保去除前綴後不是空消息
+                    # 如果有前綴，直接返回 True 和去除前綴的文本
+                    return True, processed_text 
+                else: # 如果只有前綴，不處理
+                    return False, message_text
         
-        # 檢查是否是按鈕命令
-        is_button_command = False
+        # 4. 如果沒有前綴，檢查是否為已知按鈕命令 (兼容按鈕點擊)
+        # (只有在沒有前綴時才執行到這裡)
+        button_commands = [
+            "查詢班次", "預約", "東洋預約", "查詢固定班次", 
+            "生成週報", "修改狀態", "班次詳情", "幫助", "幫助文字",
+            "臨時預約", "臨時預約幫助", "取消預約",
+            "指派司機", "選擇司機", "確認指派", "取消指派"
+        ]
+        # 嚴格匹配或匹配帶空格的命令 (處理像"班次詳情 123"這種按鈕觸發)
         for cmd in button_commands:
-            if processed_text == cmd or processed_text.startswith(f"{cmd} "):
-                is_button_command = True
-                break
-        
-        # 在群組中，必須要么有前綴，要么是常見按鈕命令
-        if has_prefix and is_button_command:
-            return True, processed_text
-        elif has_prefix:
-            # 有前綴但不是按鈕命令，也可以處理
-            return True, processed_text
-        elif is_button_command and not has_prefix:
-            # 是按鈕命令但没有前綴，這裡要判斷是否確實來自按鈕點擊
-            # 簡單的判斷方式：檢查消息是否完全匹配某個按鈕命令
-            # 對於"班次詳情 123"這樣的命令，允許處理
-            return True, processed_text
+            if message_text == cmd or message_text.startswith(f"{cmd} "):
+                 return True, message_text # 返回原始文本
+                 
+        # 5. 其他所有無前綴消息，跳過
+        return False, message_text
                 
-    # 默認不處理
+    # 默認不處理 (理論上不會執行到這裡，因為 user source type 已經覆蓋)
     return False, message_text 

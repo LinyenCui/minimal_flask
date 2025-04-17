@@ -33,20 +33,21 @@ def callback():
                 
             # 處理文本消息
             if event.type == "message" and event.message.type == "text":
-                message_text = event.message.text
+                original_message_text = event.message.text
                 source_type = event.source.type
+                user_id = event.source.user_id # 獲取 user_id
                 
-                # 檢查是否應該處理這條消息（群組需要前綴）
-                should_process, processed_text = should_process_message(message_text, source_type)
+                from modules.handlers.message_handler import should_process_message
+                should_handle, processed_text = should_process_message(original_message_text, source_type, user_id)
                 
-                if not should_process:
-                    continue  # 不處理這條消息
-                
-                # 更新消息文本（去除前綴）
-                event.message.text = processed_text
-                
-                # 處理消息
-                handle_text_message(event)
+                if should_handle:
+                    # --- 恢復直接修改 event 對象 --- 
+                    event.message.text = processed_text 
+                    # --- 調用原始的處理函數 --- 
+                    handle_text_message(event) 
+                else:
+                    logger.info(f"Skipping message from {source_type} due to handler rules: {original_message_text}")
+                    continue 
                 
     except InvalidSignatureError:
         logger.error("無效的簽名")
@@ -58,6 +59,7 @@ def callback():
         
     return 'OK'
 
+# 恢復原始的 handle_text_message 函數 (如果之前被註釋或刪除)
 def handle_text_message(event):
     """處理文本消息"""
     from modules.handlers.text_message_handler import process_text_message
