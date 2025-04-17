@@ -134,6 +134,7 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
         trip_box = {
             "type": "box",
             "layout": "horizontal",
+            "spacing": "sm",
             "contents": [
                 {
                     "type": "text",

@@ -8,13 +8,14 @@ import re
 from modules.models.base import db
 from modules.utils.helpers import parse_date_input
 from modules.flex_designs.trip_query_flex import generate_trips_flex
+from modules.utils.taiwan_time import get_taiwan_date
+from modules.utils.line_bot import QuickReply, QuickReplyItem, MessageAction, TextMessage
 
 def handle_query_trips_flex(message_text=None):
     """返回Flex Message格式的班次查詢結果"""
     try:
         current_app.logger.info(f"handle_query_trips_flex被調用，參數: {message_text}")
         # 获取台湾时间的今天日期
-        from modules.utils.taiwan_time import get_taiwan_date
         today = get_taiwan_date()  # 使用台湾时间
         current_app.logger.info(f"今天日期: {today}")
         
@@ -77,7 +78,6 @@ def handle_query_trips_flex(message_text=None):
                 # 嘗試解析單個日期，修改這部分
                 try:
                     current_app.logger.info(f"嘗試解析日期: {date_str}")
-                    from modules.utils.taiwan_time import get_taiwan_date
                     query_date = parse_date_input(date_str)
                     query_dates = [query_date]
                     current_app.logger.info(f"解析結果: {query_date}")
@@ -480,3 +480,56 @@ def handle_query_fixed_trips(message_text=None):
         
     except Exception as e:
         return f"查詢固定班次錯誤: {str(e)}"
+
+def request_fixed_trip_date_selection():
+    """生成用於查詢固定班次的日期選擇 Quick Reply (本週日到週六)"""
+    try:
+        today = get_taiwan_date()
+        quick_reply_items = []
+        weekday_names = ["日", "一", "二", "三", "四", "五", "六"]
+        
+        days_since_sunday = today.isoweekday() % 7 
+        week_start_sunday = today - timedelta(days=days_since_sunday)
+
+        today_button = None # 用於存放今天的按鈕
+        other_day_buttons = [] # 存放其他天的按鈕
+
+        # 生成本週日到週六的日期和按鈕
+        for i in range(7):
+            current_day = week_start_sunday + timedelta(days=i)
+            date_str_iso = current_day.strftime("%Y-%m-%d")
+            weekday_index = (current_day.weekday() + 1) % 7 
+            weekday = weekday_names[weekday_index]
+            label = f"{current_day.month}/{current_day.day}({weekday})"
+            
+            button_item = QuickReplyItem(
+                action=MessageAction(
+                    label=label, # 先用基本標籤
+                    text=f"查詢固定班次 {date_str_iso}"
+                )
+            )
+
+            if current_day == today:
+                button_item.action.label = f"今天 {label}" # 為今天的按鈕添加前綴
+                today_button = button_item # 保存今天的按鈕
+            else:
+                other_day_buttons.append(button_item) # 保存其他天的按鈕
+                
+        # 將今天的按鈕放在最前面
+        if today_button:
+             quick_reply_items = [today_button] + other_day_buttons
+        else: # 理論上不會發生，除非計算錯誤
+             quick_reply_items = other_day_buttons
+            
+        quick_reply = QuickReply(items=quick_reply_items)
+        
+        reply_msg = TextMessage(
+            text="請選擇要查詢固定班次的日期 (本週日-週六)：", 
+            quick_reply=quick_reply
+        )
+        return reply_msg, None
+
+    except Exception as e:
+        current_app.logger.error(f"生成固定班次日期選擇時出錯: {e}")
+        traceback.print_exc()
+        return None, f"生成日期選擇失敗: {str(e)}"

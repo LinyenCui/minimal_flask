@@ -443,6 +443,11 @@ def update_completed_trips():
     except Exception as e:
         error_msg = f"更新已完成班次任務失敗: {e}"
         try:
+            db.session.rollback()
+            current_app.logger.info("Rolled back session due to outer exception in update_completed_trips")
+        except Exception as rb_ex:
+            current_app.logger.error(f"Rollback failed in outer exception handler: {rb_ex}")
+        try:
             current_app.logger.error(error_msg)
         except RuntimeError:
              print(f"ERROR (outside context): {error_msg}") # fallback

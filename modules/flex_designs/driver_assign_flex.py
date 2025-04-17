@@ -145,16 +145,31 @@ def get_driver_assign_confirm_flex(trip_id, driver_id, driver_info=None, trip_in
     driver_name = driver_info.get("name", "未知") if driver_info else f"ID: {driver_id}"
     driver_plate = driver_info.get("plate_number", "") if driver_info else ""
     
-    # 獲取班次信息
+    # 獲取班次信息 (增加條件判斷)
+    trip_detail = f"班次 #{trip_id}" # 默認值
     if trip_info:
         date_str = trip_info.get("date", "未知")
         time_str = trip_info.get("time", "未知")
-        start_point = trip_info.get("start_point", "未知")
-        end_point = trip_info.get("end_point", "未知")
-        trip_detail = f"{date_str} {time_str}\n{start_point} → {end_point}"
-    else:
-        trip_detail = f"班次 #{trip_id}"
-    
+        
+        # --- 根據 trip_type 選擇顯示地點 --- 
+        trip_type = trip_info.get("trip_type")
+        start_display = "未知起點"
+        end_display = "未知終點"
+        
+        if trip_type == 'temp':
+            # 臨時班次，優先使用 custom points
+            start_display = trip_info.get("custom_start_point") or trip_info.get("start_point", "未知")
+            end_display = trip_info.get("custom_end_point") or trip_info.get("end_point", "未知")
+        elif trip_type == 'fixed':
+             # 固定班次，使用 standard points
+            start_display = trip_info.get("start_point", "未知")
+            end_display = trip_info.get("end_point", "未知")
+        else: # 其他或未知類型
+             start_display = trip_info.get("start_point", "未知")
+             end_display = trip_info.get("end_point", "未知")
+             
+        trip_detail = f"{date_str} {time_str}\n{start_display} → {end_display}"
+
     # 創建 Flex Message 結構
     bubble = {
         "type": "bubble",
