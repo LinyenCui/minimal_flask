@@ -96,6 +96,23 @@ def handle_postback(event):
                 result = handle_query_fixed_trips('查詢固定班次')
                 reply_text(reply_token, f"Flex消息處理錯誤，使用文本版本：\n{result}")
             
+        elif action == 'query_fixed_trips_date_select':
+            try:
+                logger.info("處理查詢固定班次日期選擇請求")
+                from modules.services.trip_query_service import request_fixed_trip_date_selection
+                
+                reply_msg, error_message = request_fixed_trip_date_selection()
+                
+                if reply_msg and error_message is None:
+                    # 發送帶 Quick Reply 的消息
+                    reply_message(reply_token, [reply_msg]) 
+                else:
+                    reply_text(reply_token, error_message or "無法生成日期選擇")
+            except Exception as e:
+                logger.error(f"處理固定班次日期選擇時出錯: {e}")
+                traceback.print_exc()
+                reply_text(reply_token, f"處理請求時出錯: {str(e)}")
+            
         elif action == 'generate_report':
             # 處理生成報表請求
             category = params.get('category')
@@ -147,55 +164,6 @@ def handle_postback(event):
             from modules.handlers.message_handler import get_help_text
             help_text = get_help_text()
             reply_text(reply_token, help_text)
-            
-        elif action == 'update_status':
-            # 檢查是否提供了trip_id和status參數
-            if 'trip_id' in params and 'status' in params:
-                trip_id = params['trip_id']
-                new_status = params['status']
-                
-                # 調用更新狀態的處理程序
-                from modules.handlers.trip_handler import handle_change_status
-                result = handle_change_status(f"修改狀態 {trip_id} {new_status}")
-                reply_text(reply_token, result)
-            
-            # 如果只有trip_id而沒有status，返回狀態選擇
-            elif 'trip_id' in params:
-                trip_id = params['trip_id']
-                # 查詢班次詳情，提供狀態選擇
-                result, _ = handle_trip_details_flex(trip_id)
-                
-                if result and 'flex_message' in result and 'quick_reply' in result:
-                    # 提供狀態選擇
-                    quick_reply_items = []
-                    for item in result['quick_reply']['items']:
-                        action = item['action']
-                        quick_reply_items.append(
-                            QuickReplyItem(
-                                action=PostbackAction(
-                                    label=action['label'],
-                                    data=action['data'],
-                                    display_text=action['displayText']
-                                )
-                            )
-                        )
-                    
-                    # 構建 Quick Reply
-                    quick_reply = QuickReply(items=quick_reply_items)
-                    
-                    # 發送提示消息
-                    from linebot.v3.messaging import TextMessage
-                    text_message = TextMessage(
-                        text=f"請選擇班次 #{trip_id} 的新狀態：",
-                        quick_reply=quick_reply
-                    )
-                    
-                    reply_message(reply_token, [text_message])
-                else:
-                    reply_text(reply_token, "無法提供狀態選擇，請使用文字命令：修改狀態 [班次ID] [新狀態]")
-            else:
-                # 缺少參數
-                reply_text(reply_token, "修改狀態需要班次ID和新狀態，請使用正確格式：修改狀態 [班次ID] [新狀態]")
             
         else:
             reply_text(reply_token, f"收到未知的 postback: {postback_data}")

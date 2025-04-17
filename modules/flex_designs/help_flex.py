@@ -40,24 +40,11 @@ def get_help_flex():
                     "action": {
                         "type": "postback",
                         "label": "📋 查詢固定班次",
-                        "data": "action=query_fixed_trips",
+                        "data": "action=query_fixed_trips_date_select",
                         "displayText": "查詢固定班次"
                     },
                     "style": "primary",
                     "color": "#6A5ACD",
-                    "margin": "sm",
-                    "height": "sm"
-                },
-                {
-                    "type": "button",
-                    "action": {
-                        "type": "postback",
-                        "label": "🔄 修改班次狀態",
-                        "data": "action=update_status",
-                        "displayText": "修改狀態"
-                    },
-                    "style": "primary",
-                    "color": "#FF8C00",
                     "margin": "sm",
                     "height": "sm"
                 },
