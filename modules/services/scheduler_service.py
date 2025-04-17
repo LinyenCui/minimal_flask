@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import text
+from sqlalchemy import text, Row
+from sqlalchemy.engine import ResultProxy
 from flask import current_app
 import traceback
 from modules.utils.taiwan_time import get_taiwan_time, get_taiwan_date
@@ -84,52 +85,45 @@ def update_single_trip(app, trip_id):
             # 獲取當前日期和時間
             now = get_taiwan_time()
             
-            # 查詢班次信息
+            # 查詢班次詳細信息，確保包含 trip_type, custom_start_point, custom_end_point
             query = """
             SELECT 
-                t.trip_id, 
-                t.date, 
-                t.time, 
-                t.start_point, 
-                t.via_point,
-                t.end_point, 
-                t.meter_fare,
-                t.extra_fare,
-                t.category,
-                t.driver_id,
-                t.status,
-                t.unique_code,
-                t.fixed_trip_id
+                t.trip_id, t.date, t.time, 
+                t.start_point, t.via_point, t.end_point, 
+                t.meter_fare, t.extra_fare, t.category, t.driver_id,
+                t.status, t.unique_code, t.fixed_trip_id,
+                t.trip_type, t.custom_start_point, t.custom_end_point
             FROM 
                 trips t
             WHERE 
                 t.trip_id = :trip_id
             """
+            result: ResultProxy = db.session.execute(text(query), {"trip_id": trip_id})
+            trip_info_row: Row = result.fetchone()
+            trip_info = row_to_dict(trip_info_row) # Convert Row to dict
             
-            trip = db.session.execute(text(query), {"trip_id": trip_id}).fetchone()
-            
-            if not trip:
+            if not trip_info or trip_info.get('status') != '準備':
                 current_app.logger.error(f"找不到班次 #{trip_id}")
                 return
             
             # 如果班次狀態不是"準備"，跳過
-            if trip[10] != '準備':
+            if trip_info.get('status') != '準備':
                 current_app.logger.info(f"班次 #{trip_id} 狀態不是「準備」，跳過更新")
                 return
             
-            unique_code = trip[11]
+            unique_code = trip_info.get('unique_code')
             
             # 如果沒有唯一識別碼，生成一個
             if not unique_code:
-                if trip[12]:  # fixed_trip_id
+                if trip_info.get('fixed_trip_id'):  # fixed_trip_id
                     # 計算一年中的第幾天和第幾周
-                    day_of_year = trip[1].timetuple().tm_yday
-                    _, week_number, _ = trip[1].isocalendar()
-                    unique_code = f"{trip[12]}_{day_of_year}_{week_number}"
+                    day_of_year = trip_info.get('date').timetuple().tm_yday
+                    _, week_number, _ = trip_info.get('date').isocalendar()
+                    unique_code = f"{trip_info.get('fixed_trip_id')}_{day_of_year}_{week_number}"
                 else:
                     unique_code = f"T_{trip_id}"
                     # 對於非固定班次，也需要計算週數
-                    _, week_number, _ = trip[1].isocalendar()
+                    _, week_number, _ = trip_info.get('date').isocalendar()
                 
                 # 更新班次的唯一識別碼和週數
                 update_query = """
@@ -162,28 +156,61 @@ def update_single_trip(app, trip_id):
                 current_app.logger.info(f"班次 #{trip_id} 已經在已完成班次表中，跳過更新")
                 return
             
-            # 插入到completed_trips表
+            # --- 修改插入 completed_trips 的邏輯 (與上面 update_completed_trips 相同) --- 
             insert_query = """
             INSERT INTO completed_trips 
-            (date, start_point, via_point, end_point, meter_fare, extra_fare, category, driver_id, unique_code) 
+            (date, start_point, via_point, end_point, 
+             meter_fare, extra_fare, category, driver_id, 
+             unique_code, trip_type, 
+             custom_start_point, custom_end_point)
             VALUES 
-            (:date, :start_point, :via_point, :end_point, :meter_fare, :extra_fare, :category, :driver_id, :unique_code)
+            (:date, :start_point, :via_point, :end_point, 
+             :meter_fare, :extra_fare, :category, :driver_id, 
+             :unique_code, :trip_type, 
+             :custom_start_point, :custom_end_point)
             """
             
-            db.session.execute(
-                text(insert_query), 
-                {
-                    "date": trip[1],
-                    "start_point": trip[3],
-                    "via_point": trip[4],
-                    "end_point": trip[5],
-                    "meter_fare": trip[6],
-                    "extra_fare": trip[7],
-                    "category": trip[8],
-                    "driver_id": trip[9],
-                    "unique_code": unique_code
-                }
-            )
+            params = {
+                "date": trip_info.get('date'),
+                "via_point": trip_info.get('via_point'),
+                "meter_fare": trip_info.get('meter_fare'),
+                "extra_fare": trip_info.get('extra_fare'),
+                "category": trip_info.get('category'),
+                "driver_id": trip_info.get('driver_id'),
+                "unique_code": unique_code,
+                "trip_type": trip_info.get('trip_type')
+            }
+            
+            # 根據 trip_type 設置 standard 和 custom 的地點
+            trip_type = trip_info.get('trip_type')
+            if trip_type == 'fixed': # 如果是固定班次
+                params["start_point"] = trip_info.get('start_point')
+                params["end_point"] = trip_info.get('end_point')
+                params["custom_start_point"] = None # custom 設為 NULL
+                params["custom_end_point"] = None   # custom 設為 NULL
+                current_app.logger.info(f"固定班次 #{trip_id}，將標準地點寫入 completed_trips")
+            elif trip_type == 'temp': # 如果是臨時班次
+                params["start_point"] = None # standard 設為 NULL (避免外鍵)
+                params["end_point"] = None   # standard 設為 NULL (避免外鍵)
+                params["custom_start_point"] = trip_info.get('custom_start_point') # 使用 custom start_point
+                params["custom_end_point"] = trip_info.get('custom_end_point')   # 使用 custom end_point
+                current_app.logger.info(f"臨時班次 #{trip_id}，將自定義地點寫入 completed_trips")
+            else: # 其他未知類型，都設為 NULL 或記錄錯誤
+                params["start_point"] = None
+                params["end_point"] = None
+                params["custom_start_point"] = None
+                params["custom_end_point"] = None
+                current_app.logger.warning(f"班次 #{trip_id} 類型未知 ({trip_type})，地點設置為 NULL")
+            
+            # 添加日誌記錄要插入的參數 (遮蔽敏感信息，如果有的話)
+            current_app.logger.info(f"準備插入 completed_trips (single): {params}")
+            
+            try:
+                db.session.execute(text(insert_query), params)
+                current_app.logger.info(f"已將班次 #{trip_id} 插入到已完成班次表中")
+            except Exception as e:
+                current_app.logger.error(f"將班次 #{trip_id} 插入到已完成班次表中時出錯: {e}")
+                raise
             
             # 更新trips表中的狀態為"已完成"
             update_query = "UPDATE trips SET status = '已完成' WHERE trip_id = :trip_id"
@@ -212,10 +239,8 @@ def update_completed_trips():
         now = get_taiwan_time()
         current_app.logger.info(f"開始執行更新已完成班次任務...")
         
-        # 獲取當前日期和時間
         current_date = get_taiwan_date()
         current_time = now.time()
-        
         current_app.logger.info(f"當前日期: {current_date}, 當前時間: {current_time}")
         
         # 查詢所有狀態為"準備"且時間已過的班次
@@ -252,60 +277,47 @@ def update_completed_trips():
         error_count = 0
         skipped_count = 0
         
-        for trip in completed_trips:
-            trip_id = trip[0]
+        for trip_row in completed_trips: # Rename variable
+            trip_id = trip_row[0]
             current_app.logger.info(f"開始處理班次 #{trip_id}")
             
             try:
-                # 查詢班次信息
-                query = """
+                # 查詢班次詳細信息
+                query = text("""
                 SELECT 
-                    t.trip_id, 
-                    t.date, 
-                    t.time, 
-                    t.start_point, 
-                    t.via_point,
-                    t.end_point, 
-                    t.meter_fare,
-                    t.extra_fare,
-                    t.category,
-                    t.driver_id,
-                    t.status,
-                    t.unique_code,
-                    t.fixed_trip_id
-                FROM 
-                    trips t
-                WHERE 
-                    t.trip_id = :trip_id
-                FOR UPDATE
-                """
-                
-                trip_info = db.session.execute(text(query), {"trip_id": trip_id}).fetchone()
+                    t.trip_id, t.date, t.time, 
+                    t.start_point, t.via_point, t.end_point, 
+                    t.meter_fare, t.extra_fare, t.category, t.driver_id,
+                    t.status, t.unique_code, t.fixed_trip_id,
+                    t.trip_type, t.custom_start_point, t.custom_end_point
+                FROM trips t WHERE t.trip_id = :trip_id FOR UPDATE
+                """)
+                result: ResultProxy = db.session.execute(query, {"trip_id": trip_id})
+                trip_info_row: Row = result.fetchone() 
+                trip_info = row_to_dict(trip_info_row) # Convert Row to dict
                 
                 if not trip_info:
                     current_app.logger.warning(f"找不到班次 #{trip_id}，可能已被刪除")
                     error_count += 1
                     continue
                 
-                # 如果班次狀態不是"準備"，跳過
-                if trip_info[10] != '準備':
-                    current_app.logger.info(f"班次 #{trip_id} 狀態為「{trip_info[10]}」，不是「準備」，跳過更新")
+                if trip_info.get('status') != '準備':
+                    current_app.logger.info(f"班次 #{trip_id} 狀態為「{trip_info.get('status')}」，不是「準備」，跳過更新")
                     skipped_count += 1
                     continue
-                
-                unique_code = trip_info[11]
-                current_app.logger.info(f"班次 #{trip_id} 的唯一識別碼: {unique_code}")
+                    
+                unique_code = trip_info.get('unique_code')
                 
                 if not unique_code:
-                    if trip_info[12]:  # fixed_trip_id
+                    if trip_info.get('fixed_trip_id'):  # fixed_trip_id
                         # 計算一年中的第幾天和第幾周
-                        day_of_year = trip_info[1].timetuple().tm_yday
-                        _, week_number, _ = trip_info[1].isocalendar()
-                        unique_code = f"{trip_info[12]}_{day_of_year}_{week_number}"
+                        day_of_year = trip_info.get('date').timetuple().tm_yday
+                        _, week_number, _ = trip_info.get('date').isocalendar()
+                        unique_code = f"{trip_info.get('fixed_trip_id')}_{day_of_year}_{week_number}"
                     else:
                         unique_code = f"T_{trip_id}"
                         # 對於非固定班次，也需要計算週數
-                        _, week_number, _ = trip_info[1].isocalendar()
+                        _, week_number, _ = trip_info.get('date').isocalendar()
                     
                     # 更新班次的唯一識別碼和週數
                     update_query = """
@@ -348,45 +360,66 @@ def update_completed_trips():
                     skipped_count += 1
                     continue
                 
-                # 插入到completed_trips表
+                # --- 修改插入 completed_trips 的邏輯 (與上面 update_single_trip 相同) --- 
                 insert_query = """
                 INSERT INTO completed_trips 
-                (date, start_point, via_point, end_point, meter_fare, extra_fare, category, driver_id, unique_code) 
+                (date, start_point, via_point, end_point, 
+                 meter_fare, extra_fare, category, driver_id, 
+                 unique_code, trip_type, 
+                 custom_start_point, custom_end_point)
                 VALUES 
-                (:date, :start_point, :via_point, :end_point, :meter_fare, :extra_fare, :category, :driver_id, :unique_code)
+                (:date, :start_point, :via_point, :end_point, 
+                 :meter_fare, :extra_fare, :category, :driver_id, 
+                 :unique_code, :trip_type, 
+                 :custom_start_point, :custom_end_point)
                 """
                 
+                params = {
+                    "date": trip_info.get('date'),
+                    "via_point": trip_info.get('via_point'),
+                    "meter_fare": trip_info.get('meter_fare'),
+                    "extra_fare": trip_info.get('extra_fare'),
+                    "category": trip_info.get('category'),
+                    "driver_id": trip_info.get('driver_id'),
+                    "unique_code": unique_code,
+                    "trip_type": trip_info.get('trip_type')
+                }
+                
+                trip_type = trip_info.get('trip_type')
+                if trip_type == 'fixed':
+                    params["start_point"] = trip_info.get('start_point')
+                    params["end_point"] = trip_info.get('end_point')
+                    params["custom_start_point"] = None
+                    params["custom_end_point"] = None
+                elif trip_type == 'temp':
+                    params["start_point"] = None
+                    params["end_point"] = None
+                    params["custom_start_point"] = trip_info.get('custom_start_point')
+                    params["custom_end_point"] = trip_info.get('custom_end_point') 
+                else:
+                    params["start_point"] = None
+                    params["end_point"] = None
+                    params["custom_start_point"] = None
+                    params["custom_end_point"] = None
+                    current_app.logger.warning(f"班次 #{trip_id} 類型未知 ({trip_type})，地點設置為 NULL")
+                
+                # 添加日誌記錄要插入的參數 (遮蔽敏感信息，如果有的話)
+                current_app.logger.info(f"準備插入 completed_trips: {params}") 
+                
                 try:
-                    db.session.execute(
-                        text(insert_query), 
-                        {
-                            "date": trip_info[1],
-                            "start_point": trip_info[3],
-                            "via_point": trip_info[4],
-                            "end_point": trip_info[5],
-                            "meter_fare": trip_info[6],
-                            "extra_fare": trip_info[7],
-                            "category": trip_info[8],
-                            "driver_id": trip_info[9],
-                            "unique_code": unique_code
-                        }
-                    )
+                    db.session.execute(text(insert_query), params)
                     current_app.logger.info(f"已將班次 #{trip_id} 插入到已完成班次表中")
                 except Exception as e:
                     current_app.logger.error(f"將班次 #{trip_id} 插入到已完成班次表中時出錯: {e}")
                     raise
                 
                 # 更新trips表中的狀態為"已完成"
-                update_query = "UPDATE trips SET status = '已完成' WHERE trip_id = :trip_id"
-                try:
-                    db.session.execute(text(update_query), {"trip_id": trip_id})
-                    current_app.logger.info(f"已將班次 #{trip_id} 的狀態更新為「已完成」")
-                except Exception as e:
-                    current_app.logger.error(f"更新班次 #{trip_id} 的狀態時出錯: {e}")
-                    raise
-                
+                update_trips_query = text("UPDATE trips SET status = '已完成' WHERE trip_id = :trip_id")
+                db.session.execute(update_trips_query, {"trip_id": trip_id})
+                current_app.logger.info(f"已將班次 #{trip_id} 的狀態更新為「已完成」")
+                    
                 updated_count += 1
-                
+                    
             except Exception as e:
                 current_app.logger.error(f"處理班次 #{trip_id} 時出錯: {e}")
                 traceback.print_exc()
@@ -406,10 +439,13 @@ def update_completed_trips():
         result_message = f"更新已完成班次任務結束。成功: {updated_count}, 跳過: {skipped_count}, 錯誤: {error_count}"
         current_app.logger.info(result_message)
         return f"✅ {result_message}"
-        
+            
     except Exception as e:
         error_msg = f"更新已完成班次任務失敗: {e}"
-        current_app.logger.error(error_msg)
+        try:
+            current_app.logger.error(error_msg)
+        except RuntimeError:
+             print(f"ERROR (outside context): {error_msg}") # fallback
         traceback.print_exc()
         return error_msg
 
@@ -434,7 +470,6 @@ def initialize_unique_codes():
         trips = db.session.execute(text(query)).fetchall()
         current_app.logger.info(f"找到 {len(trips)} 個沒有唯一識別碼的班次")
         
-        # 為每個班次生成並更新唯一識別碼
         updated_trips_count = 0
         for trip in trips:
             try:
@@ -491,7 +526,6 @@ def initialize_unique_codes():
         completed_trips = db.session.execute(text(completed_query)).fetchall()
         current_app.logger.info(f"找到 {len(completed_trips)} 個沒有唯一識別碼的已完成班次")
         
-        # 為每個已完成班次生成並更新唯一識別碼
         updated_completed_count = 0
         for trip in completed_trips:
             try:
@@ -525,45 +559,74 @@ def initialize_unique_codes():
         
         current_app.logger.info(f"初始化班次唯一識別碼任務結束。成功更新班次: {updated_trips_count}, 已完成班次: {updated_completed_count}")
         return f"✅ 成功初始化 {updated_trips_count} 筆班次和 {updated_completed_count} 筆已完成班次的唯一識別碼。"
-        
+            
     except Exception as e:
-        # 發生錯誤時回滾事務
         db.session.rollback()
-        current_app.logger.error(f"初始化班次唯一識別碼任務失敗: {e}")
+        error_msg = f"初始化班次唯一識別碼任務失敗: {e}"
+        try:
+            current_app.logger.error(error_msg)
+        except RuntimeError:
+             print(f"ERROR (outside context): {error_msg}") # fallback
         traceback.print_exc()
         return f"初始化唯一識別碼失敗: {str(e)}"
 
 # 創建初始化排程任務的函數
 def init_scheduler(app):
     """初始化排程任務"""
-    # 在每個排程任務定義中添加時區
+
+    # 包裝函數：為 update_completed_trips 提供上下文
+    def update_completed_wrapper():
+        with app.app_context():
+            update_completed_trips()
+
+    # 包裝函數：為 initialize_unique_codes 提供上下文
+    def initialize_codes_wrapper():
+        with app.app_context():
+            initialize_unique_codes()
+
+    # schedule_all_trip_updates 任務定義 (這個函數內部已有上下文處理)
     app.scheduler.add_job(
         id='schedule_daily_updates',
         func=schedule_all_trip_updates,
         args=[app],
         trigger='cron',
-        hour=0,
-        minute=0,
-        timezone='Asia/Taipei',  # 添加時區
+        hour=0, minute=0, timezone='Asia/Taipei',
         replace_existing=True
     )
 
+    # hourly_update_completed 任務定義 (使用包裝函數)
     app.scheduler.add_job(
         id='hourly_update_completed',
-        func=lambda: update_completed_trips(),
+        func=update_completed_wrapper, # <--- 使用包裝函數
         trigger='cron',
-        hour='*',
-        minute=0,
-        timezone='Asia/Taipei',  # 添加時區
+        hour='*', minute=0, timezone='Asia/Taipei',
         replace_existing=True
     )
 
+    # hourly_update_unique_codes 任務定義 (使用包裝函數)
     app.scheduler.add_job(
         id='hourly_update_unique_codes',
-        func=lambda: initialize_unique_codes(),
+        func=initialize_codes_wrapper, # <--- 使用包裝函數
         trigger='cron',
-        hour='*',
-        minute=30,
-        timezone='Asia/Taipei',  # 添加時區
+        hour='*', minute=30, timezone='Asia/Taipei',
         replace_existing=True
-    ) 
+    )
+
+# Helper function to convert Row to dict
+def row_to_dict(row: Row) -> dict:
+    if row is None:
+        return None
+    # Assuming the row object has a ._mapping attribute or similar
+    # SQLAlchemy 1.4+ often uses ._mapping
+    # Older versions or different configs might need adjustments
+    if hasattr(row, '_mapping'):
+        return dict(row._mapping)
+    else:
+        # Fallback or raise error if structure is unexpected
+        # This might need adjustment based on your exact SQLAlchemy setup
+        try: 
+           return dict(row)
+        except TypeError:
+           # Log an error or handle differently
+           app.logger.error(f"Could not convert row to dict: {row}")
+           return None 

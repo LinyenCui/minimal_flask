@@ -18,28 +18,13 @@ logger = logging.getLogger(__name__)
 
 def process_text_message(event):
     """處理文本消息的主函數"""
-    message_text = event.message.text
+    # 傳入的 event.message.text 應該是已經過 webhook.py 處理的文本
+    message_text = event.message.text 
     reply_token = event.reply_token
     user_id = event.source.user_id
     
-    logger.info(f"處理文本消息: {message_text}")
-    
-    # 檢查是否是群組消息，並處理前綴問題
-    is_group = False
-    if hasattr(event.source, 'type') and event.source.type in ['group', 'room']:
-        is_group = True
-        logger.info("偵測到群組消息")
-        
-        # 使用message_handler模块检查是否应该处理该消息
-        from modules.handlers.message_handler import should_process_message
-        should_handle, processed_text = should_process_message(message_text, event.source.type, user_id)
-        
-        if not should_handle:
-            logger.info(f"群組消息不符合處理條件，跳過: {message_text}")
-            return
-            
-        message_text = processed_text
-        logger.info(f"處理後的消息: {message_text}")
+    # 記錄將要處理的文本
+    logger.info(f"Processing text message handed over: {message_text}") 
     
     try:
         # 檢查用戶是否在臨時預約流程中
