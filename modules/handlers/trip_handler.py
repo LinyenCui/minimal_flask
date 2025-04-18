@@ -319,3 +319,115 @@ def handle_change_status(message_text):
         current_app.logger.error(f"處理修改狀態命令時出錯: {e}")
         traceback.print_exc()
         return f"修改狀態失敗: {str(e)}"
+
+def handle_record_fare(message_text):
+    """處理記錄已完成班次車資的命令 (加成可選，默認為0)"""
+    try:
+        parts = message_text.split()
+        if len(parts) < 3 or len(parts) > 4:
+            return "命令格式不正確。正確格式：記錄車資 [ID] [錶價] [加成(可選)]"
+            
+        completed_trip_id = None
+        meter_fare = None
+        extra_fare = 0
+        
+        # 解析參數並進行類型檢查
+        try:
+            completed_trip_id = int(parts[1])
+        except ValueError:
+            return "錯誤：班次 ID 必須是數字。"
+            
+        try:
+            meter_fare = int(parts[2])
+        except ValueError:
+             return "錯誤：錶價必須是數字。"
+             
+        if len(parts) == 4:
+            try:
+                extra_fare = int(parts[3]) # 允許負數
+            except ValueError:
+                 return "錯誤：加成必須是數字。"
+
+        # 查找 completed_trips 記錄
+        # 注意：這裡不能使用 FOR UPDATE，因為 completed_trips 是歷史記錄
+        query = sql_text("SELECT id FROM completed_trips WHERE id = :id")
+        trip = db.session.execute(query, {"id": completed_trip_id}).fetchone()
+        
+        if not trip:
+            return f"錯誤：找不到已完成班次記錄 ID: {completed_trip_id}"
+            
+        # 更新車資
+        update_query = sql_text("""
+        UPDATE completed_trips 
+        SET meter_fare = :meter_fare, extra_fare = :extra_fare
+        WHERE id = :id
+        """)
+        
+        db.session.execute(update_query, {
+            "meter_fare": meter_fare,
+            "extra_fare": extra_fare,
+            "id": completed_trip_id
+        })
+        
+        db.session.commit()
+        logger.info(f"成功記錄車資 - ID: {completed_trip_id}, 錶價: {meter_fare}, 加成: {extra_fare}")
+        return f"✅ 成功記錄班次 {completed_trip_id} 車資：錶價={meter_fare}, 加成={extra_fare}"
+
+    except Exception as e:
+        db.session.rollback() # 確保回滾
+        logger.error(f"記錄車資時出錯: {e}")
+        traceback.print_exc()
+        return f"記錄車資失敗: {str(e)}"
+
+def handle_modify_category(message_text):
+    """處理修改已完成班次類別的命令"""
+    try:
+        parts = message_text.split()
+        if len(parts) != 3:
+            return "命令格式不正確。正確格式：修改類別 [ID] [新類別]"
+            
+        completed_trip_id = None
+        new_category = None
+        valid_categories = ["診所", "東洋", "臨時"] # 根據您的實際情況調整
+        
+        try:
+            completed_trip_id = int(parts[1])
+        except ValueError:
+            return "錯誤：班次 ID 必須是數字。"
+            
+        new_category = parts[2]
+        if new_category not in valid_categories:
+            return f"錯誤：無效的類別 '{new_category}'。請選擇：{', '.join(valid_categories)}"
+
+        # 查找 completed_trips 記錄
+        query = sql_text("SELECT id, category FROM completed_trips WHERE id = :id")
+        trip = db.session.execute(query, {"id": completed_trip_id}).fetchone()
+        
+        if not trip:
+            return f"錯誤：找不到已完成班次記錄 ID: {completed_trip_id}"
+            
+        old_category = trip[1]
+        if old_category == new_category:
+             return f"班次 {completed_trip_id} 的類別已經是 '{new_category}'，無需修改。"
+            
+        # 更新類別
+        update_query = sql_text("""
+        UPDATE completed_trips 
+        SET category = :category
+        WHERE id = :id
+        """)
+        
+        db.session.execute(update_query, {
+            "category": new_category,
+            "id": completed_trip_id
+        })
+        
+        db.session.commit()
+        logger.info(f"成功修改類別 - ID: {completed_trip_id}, 從 {old_category} 改為 {new_category}")
+        return f"✅ 成功將班次 {completed_trip_id} 的類別從 '{old_category}' 修改為 '{new_category}'。"
+
+    except Exception as e:
+        db.session.rollback() # 確保回滾
+        logger.error(f"修改類別時出錯: {e}")
+        traceback.print_exc()
+        return f"修改類別失敗: {str(e)}"

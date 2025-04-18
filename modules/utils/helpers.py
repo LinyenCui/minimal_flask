@@ -4,6 +4,10 @@
 import re
 from modules.config import COMMAND_PREFIXES
 from datetime import datetime, timedelta, date, timezone
+from sqlalchemy import Row
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 台灣時區功能
 def get_taiwan_time():
@@ -236,3 +240,19 @@ def parse_date_input(date_input):
     # 無法識別的格式
     else:
         raise ValueError("無法識別的日期格式") 
+
+# Helper function to convert Row to dict
+def row_to_dict(row: Row) -> dict | None:
+    """將 SQLAlchemy Row 對象轉換為字典，處理可能的 None。"""
+    if row is None:
+        return None
+    # SQLAlchemy 1.4+ 使用 ._mapping
+    if hasattr(row, '_mapping'):
+        return dict(row._mapping)
+    else:
+        # 嘗試直接轉換，適用於某些情況
+        try: 
+           return dict(row)
+        except TypeError:
+           logger.error(f"Could not convert row to dict: {row}")
+           return None 

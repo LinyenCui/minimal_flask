@@ -4,6 +4,7 @@ from sqlalchemy.engine import ResultProxy
 from flask import current_app
 import traceback
 from modules.utils.taiwan_time import get_taiwan_time, get_taiwan_date
+from modules.utils.helpers import row_to_dict
 
 from modules.models.base import db
 
@@ -100,7 +101,12 @@ def update_single_trip(app, trip_id):
             """
             result: ResultProxy = db.session.execute(text(query), {"trip_id": trip_id})
             trip_info_row: Row = result.fetchone()
-            trip_info = row_to_dict(trip_info_row) # Convert Row to dict
+            
+            if not trip_info_row:
+                current_app.logger.error(f"找不到班次 #{trip_id}")
+                return
+            
+            trip_info = dict(trip_info_row._mapping) # Convert Row to dict
             
             if not trip_info or trip_info.get('status') != '準備':
                 current_app.logger.error(f"找不到班次 #{trip_id}")
@@ -294,7 +300,7 @@ def update_completed_trips():
                 """)
                 result: ResultProxy = db.session.execute(query, {"trip_id": trip_id})
                 trip_info_row: Row = result.fetchone() 
-                trip_info = row_to_dict(trip_info_row) # Convert Row to dict
+                trip_info = dict(trip_info_row._mapping) # Convert Row to dict
                 
                 if not trip_info:
                     current_app.logger.warning(f"找不到班次 #{trip_id}，可能已被刪除")
@@ -615,23 +621,4 @@ def init_scheduler(app):
         trigger='cron',
         hour='*', minute=30, timezone='Asia/Taipei',
         replace_existing=True
-    )
-
-# Helper function to convert Row to dict
-def row_to_dict(row: Row) -> dict:
-    if row is None:
-        return None
-    # Assuming the row object has a ._mapping attribute or similar
-    # SQLAlchemy 1.4+ often uses ._mapping
-    # Older versions or different configs might need adjustments
-    if hasattr(row, '_mapping'):
-        return dict(row._mapping)
-    else:
-        # Fallback or raise error if structure is unexpected
-        # This might need adjustment based on your exact SQLAlchemy setup
-        try: 
-           return dict(row)
-        except TypeError:
-           # Log an error or handle differently
-           app.logger.error(f"Could not convert row to dict: {row}")
-           return None 
+    ) 

@@ -26,6 +26,7 @@ from modules.services.report_service import handle_generate_weekly_report
 from linebot.v3.messaging import QuickReply, QuickReplyItem, PostbackAction
 # 導入時區相關函數
 from modules.utils.taiwan_time import get_taiwan_time, get_taiwan_date
+from modules.handlers.text_message_handler import get_help_text
 
 # 建立日誌記錄器
 logger = logging.getLogger(__name__)
@@ -161,12 +162,54 @@ def handle_postback(event):
             reply_text(reply_token, result)
             
         elif action == 'help':
-            from modules.handlers.message_handler import get_help_text
+            from modules.handlers.text_message_handler import get_help_text
             help_text = get_help_text()
             reply_text(reply_token, help_text)
             
+        elif action == 'update_status' and 'trip_id' in params:
+            trip_id = params['trip_id']
+            
+            if 'status' in params:
+                # 情況 1: 帶 status 參數 (來自 Quick Reply)，執行更新
+                new_status = params['status']
+                from modules.handlers.trip_handler import handle_change_status
+                result = handle_change_status(f"修改狀態 {trip_id} {new_status}")
+                reply_text(reply_token, result)
+            else:
+                # 情況 2: 不帶 status 參數 (來自 Flex 主按鈕)，重新顯示詳情+QuickReply
+                logger.info(f"收到修改狀態請求 (無 status)，重新顯示詳情: trip_id={trip_id}")
+                try:
+                    # 需要重新查詢詳情並獲取 Flex 和 QuickReply
+                    from modules.services.trip_detail_service import handle_trip_details_flex
+                    from linebot.v3.messaging import FlexMessage, FlexContainer, QuickReply as LineQuickReply # 避免命名衝突
+                    
+                    result_data, error_message = handle_trip_details_flex(trip_id)
+                    
+                    if result_data and 'flex_message' in result_data and 'quick_reply' in result_data:
+                        flex_content = result_data['flex_message']
+                        quick_reply_dict = result_data['quick_reply']
+                        
+                        # 重新構造 Flex Message 對象
+                        flex_msg_obj = FlexMessage(
+                            alt_text=f"班次 #{trip_id} 詳細信息",
+                            contents=FlexContainer.from_dict(flex_content),
+                            quick_reply=LineQuickReply.from_dict(quick_reply_dict) # 從字典創建 QuickReply
+                        )
+                        reply_message(reply_token, [flex_msg_obj])
+                    elif error_message:
+                         reply_text(reply_token, f"無法獲取班次詳情: {error_message}")
+                    else:
+                         reply_text(reply_token, "無法獲取班次詳情以提供狀態修改選項。")
+                         
+                except Exception as e:
+                    logger.error(f"重新顯示班次詳情時出錯: {e}")
+                    traceback.print_exc()
+                    reply_text(reply_token, "處理修改狀態請求時出錯。")
+            
         else:
-            reply_text(reply_token, f"收到未知的 postback: {postback_data}")
+            # 對於其他未知 postback 或缺少參數的 update_status，給出提示
+            logger.warning(f"收到未知的 postback 或缺少參數: {postback_data}")
+            reply_text(reply_token, f"收到未知的操作請求: {postback_data}")
             
     except Exception as e:
         current_app.logger.error(f"處理 postback 時出錯: {e}")

@@ -2,13 +2,15 @@
 import traceback
 import logging
 from flask import current_app
+from modules.utils.taiwan_time import get_taiwan_date
+from modules.utils.helpers import parse_date_input
 
 from modules.utils.line_bot import (
     reply_text, reply_message, reply_flex,
     create_postback_action, create_message_action,
     create_flex_message
 )
-from modules.handlers.trip_handler import handle_query_trips, handle_trip_details, handle_change_status
+from modules.handlers.trip_handler import handle_query_trips, handle_trip_details, handle_change_status, handle_record_fare, handle_modify_category
 from modules.flex_designs.help_flex import get_help_flex
 from modules.handlers.temp_booking_handler import handle_temp_booking_start, handle_temp_booking_message, temp_booking_states, handle_temp_booking_help
 from modules.services.driver_service import handle_driver_assign_request, handle_driver_assign_select, handle_driver_assign_confirm, handle_driver_assign_cancel
@@ -449,6 +451,47 @@ def process_text_message(event):
             reply_text(reply_token, result_text)
             return
             
+        # --- 修改：查詢已完成班次 --- 
+        elif message_text.startswith("查已完成"):
+             try:
+                 parts = message_text.split()
+                 date_str = None
+                 category_filter = None
+                 query_date = get_taiwan_date() # 默認日期為今天
+
+                 # 解析參數
+                 if len(parts) > 1:
+                     # 嘗試解析第一個參數為日期
+                     try:
+                         query_date = parse_date_input(parts[1])
+                         date_str = parts[1] # 記錄用戶輸入的日期字符串
+                         if len(parts) > 2:
+                             category_filter = parts[2]
+                     except ValueError:
+                         # 如果第一個參數不是日期，則假定它是類別
+                         category_filter = parts[1]
+                         date_str = query_date.strftime("%Y-%m-%d") # 使用默認日期
+                         
+                 if category_filter:
+                     # 如果提供了類別，直接查詢
+                     from modules.services.trip_query_service import handle_query_completed_trips
+                     result_text = handle_query_completed_trips(message_text) # 傳遞原始命令文本
+                     reply_text(reply_token, result_text)
+                 else:
+                     # 如果沒有提供類別，顯示類別選擇 Quick Reply
+                     from modules.services.trip_query_service import request_completed_trip_category_selection
+                     reply_msg, error_message = request_completed_trip_category_selection(query_date)
+                     if reply_msg and error_message is None:
+                         reply_message(reply_token, [reply_msg])
+                     else:
+                         reply_text(reply_token, error_message or "無法生成類別選擇")
+             except Exception as e:
+                 logger.error(f"處理查已完成命令時出錯: {e}")
+                 traceback.print_exc()
+                 reply_text(reply_token, f"查詢已完成班次失敗: {str(e)}")
+             return
+        # --- 結束修改 ---
+            
         # 生成周報表
         elif message_text.startswith("生成周報表") or message_text.startswith("生成週報表") or message_text.startswith("生成周報") or message_text.startswith("生成週報"):
             try:
@@ -475,6 +518,20 @@ def process_text_message(event):
                 # 遞迴調用自己，但使用完整命令
                 process_text_message_with_text(f"班次詳情 {trip_id}", reply_token, user_id)
                 return
+            
+        # --- 新增：修改類別 --- 
+        elif message_text.startswith("修改類別"):
+             result = handle_modify_category(message_text)
+             reply_text(reply_token, result)
+             return
+        # --- 結束新增 ---
+            
+        # --- 新增：記錄車資 --- 
+        elif message_text.startswith("記錄車資"):
+             result = handle_record_fare(message_text)
+             reply_text(reply_token, result)
+             return
+        # --- 結束新增 ---
             
         # 未識別的命令
         else:
@@ -507,14 +564,16 @@ def process_text_message_with_text(message_text, reply_token, user_id):
 def get_help_text():
     """取得文字版幫助信息"""
     return """可用命令列表：
-1. 查詢班次 [日期] - 查詢指定日期的班次（包含固定和臨時）
-2. 查詢固定班次 [日期] - 只查詢固定班次，不包含臨時班次
-3. 班次詳情 [ID] - 查看班次詳細信息 (可從此處修改狀態)
-4. 指派司機 [ID] - 為班次指派司機
-5. 臨時預約 - 開始臨時預約流程
-6. 臨時預約幫助 - 顯示臨時預約相關說明
-7. 幫助 - 顯示此幫助信息
+1. 查詢班次 [日期] - 查詢未完成班次
+2. 查詢固定班次 - 查詢固定班次(通過日期按鈕選擇)
+3. 查已完成 [日期] [類別] - 查已完成班次(日期默認今天, 類別可選)
+4. 班次詳情 [ID] - 查看班次詳細信息 (可修改狀態)
+5. 指派司機 [ID] - 為班次指派司機 (通過按鈕選擇)
+6. 記錄車資 [ID] [錶價] [加成] - 記錄費用 (加成可選/可為負, 默認0)
+7. 修改類別 [ID] [新類別] - 修改已完成班次的類別 (診所/東洋/臨時)
+8. 臨時預約 - 開始臨時預約流程 (默認類別為東洋)
+9. 臨時預約幫助 - 顯示臨時預約相關說明
+10. 幫助 - 顯示此幫助信息
 
-在群組中使用時，可以選擇性在命令前添加前綴：!、# 或 /
-例如：!查詢班次、#幫助，也可以直接輸入「查詢班次」「幫助」等
+在群組中使用時，可選擇性在命令前添加前綴...
 """

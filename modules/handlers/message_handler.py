@@ -4,6 +4,9 @@ prefixes = ["!", "#", "/"]
 
 from modules.config import COMMAND_PREFIXES
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 def is_from_button(message_text):
     """
@@ -17,61 +20,80 @@ def is_from_button(message_text):
     return False
 
 def should_process_message(message_text, source_type, user_id=None):
-    """
-    檢查是否應該處理這條消息
+    logger.info(f"[should_process] Checking: '{message_text}' from {source_type}")
     
-    params:
-        message_text: 消息文本
-        source_type: 消息來源類型 ('user', 'group', 'room')
-        user_id: 用戶ID，用於檢查是否在臨時預約流程中
-    
-    returns:
-        (should_process, processed_text): 是否處理, 處理後的文本
-    """
-    # 如果有提供用戶ID，檢查是否在臨時預約流程中
+    # 0. Check if user is in booking state
     if user_id is not None:
         from modules.handlers.temp_booking_handler import temp_booking_states
         if user_id in temp_booking_states:
-            # 用戶在臨時預約流程中，直接處理
+            logger.info("[should_process] User in booking state, returning True")
             return True, message_text
-    
-    # 私聊消息，總是處理
+             
+    # 1. Handle User messages directly
     if source_type == 'user':
+        logger.info("[should_process] User source, returning True")
         return True, message_text
         
-    # 群組消息，需要前綴
+    # 2. Handle Group/Room messages
     if source_type in ['group', 'room']:
-        # 1. 檢查提及
+        logger.info("[should_process] Group/Room source")
+        
+        # 2a. Check mentions first
         if message_text.strip() == "機器人" or ("@" in message_text and any(bot_name in message_text for bot_name in ["機器人", "小黃", "小黄"])):
+            logger.info("[should_process] Mention detected, returning True (Help)")
             return True, "幫助"
-            
-        # 2. 檢查是否為臨時預約輸入 (保留之前的 is_booking_input 判斷)
-        # 檢查是否是日期、時間、確認等臨時預約流程中的輸入
-        date_pattern = r'^\d{4}-\d{2}-\d{2}$'  # 如 2025-04-16
-        time_pattern = r'^([01]?[0-9]|2[0-3]):([0-5][0-9])$'  # 如 09:30
-        shorthand_time_pattern = r'^\d{3,4}$'  # 如 930 或 1430
+        
+        # 2b. Check for prefix
+        processed_text = message_text
+        for prefix in ["!", "#", "/"]:
+            if message_text.startswith(prefix):
+                processed_text = message_text[1:].strip()
+                if processed_text: 
+                    logger.info(f"[should_process] Prefix '{prefix}' detected, returning True with '{processed_text}'")
+                    return True, processed_text 
+                else:
+                    logger.info(f"[should_process] Only prefix '{prefix}' found, returning False")
+                    return False, message_text
+        
+        # 2c. If NO prefix, check known button/text commands
+        logger.info("[should_process] No prefix found, checking known commands...")
+        button_commands = [
+            "查詢班次", "查詢固定班次", "查已完成", # Add 查已完成 here
+            "預約", "東洋預約", 
+            "生成週報", "修改狀態", "班次詳情", "幫助", "幫助文字",
+            "臨時預約", "臨時預約幫助", "取消預約",
+            "指派司機", "選擇司機", "確認指派", "取消指派",
+            "記錄車資", "修改類別" # Add new commands
+        ]
+        for cmd in button_commands:
+            match = False
+            if message_text == cmd:
+                match = True
+                logger.info(f"[should_process] Exact match for command: '{cmd}'")
+            elif message_text.startswith(f"{cmd} "):
+                 match = True
+                 logger.info(f"[should_process] Starts with command: '{cmd} '")
+                 
+            if match:
+                 # For commands, return the original text, let handler parse args
+                 logger.info(f"[should_process] Command match, returning True with original text '{message_text}'")
+                 return True, message_text
+                 
+        # 2d. If NO prefix and NOT a known command, THEN check for booking input patterns
+        logger.info("[should_process] Not a known command, checking booking patterns...")
+        # ... (Define date_pattern, time_pattern, location_keywords etc. as before) ...
+        date_pattern = r'^\d{4}-\d{2}-\d{2}$' 
+        time_pattern = r'^([01]?[0-9]|2[0-3]):([0-5][0-9])$'
+        shorthand_time_pattern = r'^\d{3,4}$' 
         special_date_inputs = ["今天", "明天", "後天"]
         confirm_inputs = ["確認", "confirm", "yes", "是", "確定", "ok"]
         cancel_inputs = ["取消", "取消預約", "cancel", "退出", "exit"]
-        
-        # 檢查司機指派相關輸入格式
-        driver_assign_pattern = r'^指派司機\s+\d+$'  # 如 "指派司機 2307"
-        driver_select_pattern = r'^指派司機\s+\d+\s+\d+$'  # 如 "指派司機 2307 123"
-        driver_confirm_pattern = r'^確認指派\s+\d+\s+\d+$'  # 如 "確認指派 2307 123"
-        driver_cancel_pattern = r'^取消指派\s+\d+$'  # 如 "取消指派 2307"
-        
-        # 簡化的班次指派指令
-        simplified_assign_pattern = r'^指派\s+\d+$'  # 如 "指派 2307" 或 "指派司機"
-        
-        # 添加位置相關文本識別（這是一個啟發式方法）
-        # 這些是可能的位置關鍵詞，任何包含這些關鍵詞的文本都可能是位置輸入
-        location_keywords = [
-            "路", "街", "巷", "弄", "號", "樓", "台", "臺", "区", "區", "鎮", "鄉", "村", 
-            "大樓", "大廈", "社區", "小區", "廣場", "公園", "站", "市場", "中心", "學校", 
-            "醫院", "飯店", "酒店", "賓館", "捷運", "公司", "車站", "南", "北", "東", "西"
-        ]
-        
-        # 檢查是否是日期、時間、確認等臨時預約流程中的輸入
+        location_keywords = ["路", "街", "巷", "弄", "號", "樓", "台", "臺", "区", "區", "鎮", "鄉", "村", "大樓", "大廈", "社區", "小區", "廣場", "公園", "站", "市場", "中心", "學校", "醫院", "飯店", "酒店", "賓館", "捷運", "公司", "車站", "南", "北", "東", "西"]
+        driver_assign_pattern = r'^指派司機\s+\d+$'
+        driver_select_pattern = r'^指派司機\s+\d+\s+\d+$'
+        driver_confirm_pattern = r'^確認指派\s+\d+\s+\d+$'
+        driver_cancel_pattern = r'^取消指派\s+\d+$'
+        simplified_assign_pattern = r'^指派\s+\d+$'
         is_booking_input = (
             re.match(date_pattern, message_text) or 
             re.match(time_pattern, message_text) or
@@ -80,46 +102,20 @@ def should_process_message(message_text, source_type, user_id=None):
             message_text in confirm_inputs or
             message_text in cancel_inputs or
             message_text == "無(略過)" or
-            # 檢查是否包含位置關鍵詞
             any(keyword in message_text for keyword in location_keywords) or
-            # 檢查司機指派相關命令
-            re.match(driver_assign_pattern, message_text) or
+            re.match(driver_assign_pattern, message_text) or # Keep driver assign checks here or move to known commands?
             re.match(driver_select_pattern, message_text) or
             re.match(driver_confirm_pattern, message_text) or
             re.match(driver_cancel_pattern, message_text) or
             re.match(simplified_assign_pattern, message_text)
         )
-        
-        # 如果是臨時預約相關輸入，直接處理
         if is_booking_input:
-            return True, message_text
-        
-        # 3. 檢查前綴
-        processed_text = message_text
-        for prefix in ["!", "#", "/"]:
-            if message_text.startswith(prefix):
-                processed_text = message_text[1:].strip()
-                if processed_text: # 確保去除前綴後不是空消息
-                    # 如果有前綴，直接返回 True 和去除前綴的文本
-                    return True, processed_text 
-                else: # 如果只有前綴，不處理
-                    return False, message_text
-        
-        # 4. 如果沒有前綴，檢查是否為已知按鈕命令 (兼容按鈕點擊)
-        # (只有在沒有前綴時才執行到這裡)
-        button_commands = [
-            "查詢班次", "預約", "東洋預約", "查詢固定班次", 
-            "生成週報", "修改狀態", "班次詳情", "幫助", "幫助文字",
-            "臨時預約", "臨時預約幫助", "取消預約",
-            "指派司機", "選擇司機", "確認指派", "取消指派"
-        ]
-        # 嚴格匹配或匹配帶空格的命令 (處理像"班次詳情 123"這種按鈕觸發)
-        for cmd in button_commands:
-            if message_text == cmd or message_text.startswith(f"{cmd} "):
-                 return True, message_text # 返回原始文本
-                 
-        # 5. 其他所有無前綴消息，跳過
+             logger.info("[should_process] Booking input pattern detected, returning True")
+             return True, message_text # Return original text for booking handler
+             
+        # 5. If none of the above, skip
+        logger.info("[should_process] No match found, returning False")
         return False, message_text
                 
-    # 默認不處理 (理論上不會執行到這裡，因為 user source type 已經覆蓋)
+    logger.info("[should_process] Default return False (source type unknown?)")
     return False, message_text 

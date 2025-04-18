@@ -25,7 +25,7 @@ temp_booking_states = {}
 # 設置日誌
 logger = logging.getLogger(__name__)
 
-def handle_temp_booking_start(user_id, category="臨時"):
+def handle_temp_booking_start(user_id, category="東洋"):
     """初始化臨時預約流程"""
     try:
         logger.info(f"初始化臨時預約流程，用戶ID: {user_id}, 類別: {category}")
@@ -431,7 +431,7 @@ def handle_confirm_input(user_id, message_text):
             params = {
                 "date": booking_data["date"],
                 "time": booking_data["time"],
-                "category": booking_data["category"],
+                "category": booking_data.get("category", "東洋"),
                 "custom_start_point": booking_data["start_point"],
                 "custom_end_point": end_point
             }
