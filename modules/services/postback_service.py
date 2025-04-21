@@ -74,43 +74,34 @@ def handle_postback(event):
                 reply_text(reply_token, f"Flex消息處理錯誤，使用文本版本：\n{result}")
             
         elif action == 'query_fixed_trips':
-            # 使用Flex版本的查詢固定班次功能
             try:
-                logger.info("處理查詢固定班次postback，使用Flex版本")
+                logger.info("處理查詢固定班次 postback (應通過日期選擇觸發Message) - 目標改為診所")
                 from modules.services.trip_query_service import handle_query_fixed_trips_flex, handle_query_fixed_trips
-                
-                # 調用Flex版本的查詢固定班次
-                flex_content, error_message = handle_query_fixed_trips_flex('查詢固定班次')
-                
+                flex_content, error_message = handle_query_fixed_trips_flex('診所班次') 
                 if flex_content and error_message is None:
-                    # 使用Flex版本回覆
-                    reply_flex(reply_token, "固定班次查詢結果", flex_content)
+                     reply_flex(reply_token, "診所班次查詢結果", flex_content)
                 else:
-                    # 如果出錯，使用文本版本
-                    logger.warning(f"使用Flex版本失敗，回退到文本版本。錯誤: {error_message}")
-                    result = handle_query_fixed_trips('查詢固定班次')
-                    reply_text(reply_token, result)
+                     logger.warning(f"固定班次 postback Flex 失敗，回退文本: {error_message}")
+                     result = handle_query_fixed_trips('診所班次')
+                     reply_text(reply_token, result)
             except Exception as e:
-                logger.error(f"處理Flex版本查詢固定班次時出錯: {e}")
+                logger.error(f"處理固定班次 postback 時出錯: {e}")
                 traceback.print_exc()
-                # 使用文本版本作為後備
-                result = handle_query_fixed_trips('查詢固定班次')
+                result = handle_query_fixed_trips('診所班次')
                 reply_text(reply_token, f"Flex消息處理錯誤，使用文本版本：\n{result}")
             
-        elif action == 'query_fixed_trips_date_select':
+        elif action == 'query_clinic_trips_date_select':
             try:
-                logger.info("處理查詢固定班次日期選擇請求")
-                from modules.services.trip_query_service import request_fixed_trip_date_selection
-                
-                reply_msg, error_message = request_fixed_trip_date_selection()
+                logger.info("處理診所班次日期選擇請求")
+                from modules.services.trip_query_service import request_clinic_trip_date_selection
+                reply_msg, error_message = request_clinic_trip_date_selection()
                 
                 if reply_msg and error_message is None:
-                    # 發送帶 Quick Reply 的消息
                     reply_message(reply_token, [reply_msg]) 
                 else:
                     reply_text(reply_token, error_message or "無法生成日期選擇")
             except Exception as e:
-                logger.error(f"處理固定班次日期選擇時出錯: {e}")
+                logger.error(f"處理診所班次日期選擇時出錯: {e}")
                 traceback.print_exc()
                 reply_text(reply_token, f"處理請求時出錯: {str(e)}")
             

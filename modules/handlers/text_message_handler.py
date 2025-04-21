@@ -122,29 +122,33 @@ def process_text_message(event):
             reply_text(reply_token, response.get("text", "臨時預約使用說明..."))
             return
         
-        # 查詢班次
+        # 查詢班次 (東洋/臨時)
         elif message_text.startswith("查詢班次"):
             try:
-                logger.info(f"處理查詢班次命令: {message_text}")
-                # 優先使用Flex Message版本
-                from modules.services.trip_query_service import handle_query_trips_flex, handle_query_trips
-                
-                # 记录调用前的状态
-                logger.info("即將調用handle_query_trips_flex函數")
-                flex_content, error_message = handle_query_trips_flex(message_text)
-                logger.info(f"handle_query_trips_flex返回結果: flex_content類型={type(flex_content)}, error_message={error_message}")
-                
-                if flex_content and error_message is None:
-                    # 如果有Flex內容，使用Flex Message回覆
-                    logger.info("使用Flex回覆查詢結果")
-                    reply_flex(reply_token, "班次查詢結果", flex_content)
-                    return
+                parts = message_text.split()
+                # --- 修改：如果帶有日期參數，則執行查詢；否則觸發日期選擇 --- 
+                if len(parts) > 1:
+                    # 執行實際查詢 (東洋/臨時)
+                    logger.info(f"處理查詢班次命令 (帶日期): {message_text}")
+                    from modules.services.trip_query_service import handle_query_trips_flex
+                    flex_content, result_message = handle_query_trips_flex(message_text)
+                    logger.info(f"handle_query_trips_flex返回: flex={bool(flex_content)}, msg='{result_message}'")
+                    if flex_content:
+                        reply_flex(reply_token, "班次查詢結果", flex_content)
+                    elif result_message:
+                        reply_text(reply_token, result_message)
+                    else:
+                        reply_text(reply_token, "查詢完成，但沒有找到任何信息。")
                 else:
-                    # 如果出錯或沒有結果，顯示錯誤消息或使用文本版本
-                    logger.info(f"無Flex內容或有錯誤，使用文本版本。錯誤: {error_message}")
-                    result = handle_query_trips(message_text)
-                    reply_text(reply_token, result)
-                    return
+                    # 觸發日期選擇
+                    logger.info(f"處理查詢班次命令 (觸發日期選擇): {message_text}")
+                    from modules.services.trip_query_service import request_toyo_temp_trip_date_selection
+                    reply_msg, error_message = request_toyo_temp_trip_date_selection()
+                    if reply_msg and error_message is None:
+                        reply_message(reply_token, [reply_msg])
+                    else:
+                        reply_text(reply_token, error_message or "無法生成日期選擇")
+                return 
             except Exception as e:
                 logger.error(f"處理查詢班次時出錯: {e}")
                 traceback.print_exc()
@@ -409,41 +413,36 @@ def process_text_message(event):
             reply_text(reply_token, result_text)
             return
             
-        # 查詢固定班次
-        elif message_text.startswith("查詢固定班次"):
-            # --- 恢復條件判斷邏輯 --- 
+        # 查詢固定班次 (現在是 診所班次)
+        elif message_text.startswith("診所班次"):
             try:
                 parts = message_text.split()
                 if len(parts) > 1:
-                    # 如果命令包含日期或其他參數，執行實際查詢
-                    logger.info(f"處理查詢固定班次命令 (帶日期): {message_text}")
-                    # 優先使用Flex Message版本
-                    from modules.services.trip_query_service import handle_query_fixed_trips_flex, handle_query_fixed_trips
-                    flex_content, error_message = handle_query_fixed_trips_flex(message_text)
+                    # 如果命令包含日期，執行實際查詢 (診所)
+                    logger.info(f"處理診所班次命令 (帶日期): {message_text}")
+                    from modules.services.trip_query_service import handle_query_clinic_trips_flex, handle_query_clinic_trips
+                    flex_content, error_message = handle_query_clinic_trips_flex(message_text)
                     if flex_content and error_message is None:
-                        reply_flex(reply_token, "固定班次查詢結果", flex_content)
+                        reply_flex(reply_token, "診所班次查詢結果", flex_content)
                     else:
-                        logger.info(f"固定班次查詢 Flex 失敗或無結果，回退文本: {error_message}")
-                        result = handle_query_fixed_trips(message_text)
+                        logger.info(f"診所班次查詢 Flex 失敗或無結果，回退文本: {error_message}")
+                        result = handle_query_clinic_trips(message_text)
                         reply_text(reply_token, result)
                 else:
-                    # 如果命令只有"查詢固定班次"，觸發日期選擇
-                    logger.info(f"處理查詢固定班次命令 (觸發日期選擇): {message_text}")
-                    from modules.services.trip_query_service import request_fixed_trip_date_selection
-                    reply_msg, error_message = request_fixed_trip_date_selection()
+                    # 如果命令只有"診所班次"，觸發日期選擇
+                    logger.info(f"處理診所班次命令 (觸發日期選擇): {message_text}")
+                    from modules.services.trip_query_service import request_clinic_trip_date_selection
+                    reply_msg, error_message = request_clinic_trip_date_selection()
                     if reply_msg and error_message is None:
                         reply_message(reply_token, [reply_msg]) 
                     else:
                         reply_text(reply_token, error_message or "無法生成日期選擇")
-                return # 處理完畢
-
+                return 
             except Exception as e:
-                logger.error(f"處理查詢固定班次時出錯: {e}")
-                traceback.print_exc()
+                logger.error(f"處理診所班次命令時出錯: {e}", exc_info=True)
                 reply_text(reply_token, f"處理請求時出錯: {str(e)}")
                 return
-            # --- 結束恢復 ---
-            
+        
         # 更新已完成班次
         elif message_text == "更新已完成班次":
             from modules.services.scheduler_service import update_completed_trips
@@ -564,8 +563,8 @@ def process_text_message_with_text(message_text, reply_token, user_id):
 def get_help_text():
     """取得文字版幫助信息"""
     return """可用命令列表：
-1. 查詢班次 [日期] - 查詢未完成班次
-2. 查詢固定班次 - 查詢固定班次(通過日期按鈕選擇)
+1. 查詢班次 - 查詢東洋/臨時未完成班次(通過日期按鈕選擇)
+2. 診所班次 - 查詢診所班次(通過日期按鈕選擇)
 3. 查已完成 [日期] [類別] - 查已完成班次(日期默認今天, 類別可選)
 4. 班次詳情 [ID] - 查看班次詳細信息 (可修改狀態)
 5. 指派司機 [ID] - 為班次指派司機 (通過按鈕選擇)

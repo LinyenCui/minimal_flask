@@ -58,12 +58,13 @@ def should_process_message(message_text, source_type, user_id=None):
         # 2c. If NO prefix, check known button/text commands
         logger.info("[should_process] No prefix found, checking known commands...")
         button_commands = [
-            "查詢班次", "查詢固定班次", "查已完成", # Add 查已完成 here
+            "查詢班次", "診所班次", "查已完成",
             "預約", "東洋預約", 
-            "生成週報", "修改狀態", "班次詳情", "幫助", "幫助文字",
+            "生成週報",
+            "班次詳情", "幫助", "幫助文字",
             "臨時預約", "臨時預約幫助", "取消預約",
             "指派司機", "選擇司機", "確認指派", "取消指派",
-            "記錄車資", "修改類別" # Add new commands
+            "記錄車資", "修改類別"
         ]
         for cmd in button_commands:
             match = False

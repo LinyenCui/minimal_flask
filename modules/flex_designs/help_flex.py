@@ -39,9 +39,9 @@ def get_help_flex():
                     "type": "button",
                     "action": {
                         "type": "postback",
-                        "label": "📋 查詢固定班次",
-                        "data": "action=query_fixed_trips_date_select",
-                        "displayText": "查詢固定班次"
+                        "label": "🏥 診所班次",
+                        "data": "action=query_clinic_trips_date_select",
+                        "displayText": "診所班次"
                     },
                     "style": "primary",
                     "color": "#6A5ACD",

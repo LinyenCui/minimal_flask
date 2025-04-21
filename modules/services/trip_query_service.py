@@ -4,12 +4,15 @@ from sqlalchemy import text as sql_text, Row
 from flask import current_app
 import traceback
 import re
+import logging
 
 from modules.models.base import db
 from modules.utils.helpers import parse_date_input, row_to_dict
 from modules.flex_designs.trip_query_flex import generate_trips_flex
 from modules.utils.taiwan_time import get_taiwan_date
 from modules.utils.line_bot import QuickReply, QuickReplyItem, MessageAction, TextMessage
+
+logger = logging.getLogger(__name__)
 
 def handle_query_trips_flex(message_text=None):
     """返回Flex Message格式的班次查詢結果"""
@@ -95,17 +98,11 @@ def handle_query_trips_flex(message_text=None):
         for query_date in query_dates:
             query = f"""
             SELECT 
-                t.trip_id, 
-                t.date,
-                t.time, 
-                t.start_point, 
-                t.end_point, 
+                t.trip_id, t.date, t.time, 
+                t.start_point, t.end_point, 
                 COALESCE(fs.direction, '來') as direction,
-                t.status,
-                t.driver_id,
-                t.trip_type,
-                t.custom_start_point,
-                t.custom_end_point
+                t.status, t.driver_id, t.trip_type,
+                t.custom_start_point, t.custom_end_point, t.category
             FROM 
                 trips t
             LEFT JOIN
@@ -113,6 +110,7 @@ def handle_query_trips_flex(message_text=None):
             WHERE 
                 t.date = '{query_date}'
                 AND t.status != '已完成'
+                AND t.category IN ('東洋', '臨時')
             ORDER BY 
                 t.date, t.time
             """
@@ -267,17 +265,11 @@ def handle_query_trips(message_text=None):
         for query_date in query_dates:
             query = f"""
             SELECT 
-                t.trip_id, 
-                t.date,
-                t.time, 
-                t.start_point, 
-                t.end_point, 
+                t.trip_id, t.date, t.time, 
+                t.start_point, t.end_point, 
                 COALESCE(fs.direction, '來') as direction,
-                t.status,
-                t.driver_id,
-                t.trip_type,
-                t.custom_start_point,
-                t.custom_end_point
+                t.status, t.driver_id, t.trip_type,
+                t.custom_start_point, t.custom_end_point, t.category
             FROM 
                 trips t
             LEFT JOIN
@@ -285,6 +277,7 @@ def handle_query_trips(message_text=None):
             WHERE 
                 t.date = '{query_date}'
                 AND t.status != '已完成'
+                AND t.category IN ('東洋', '臨時')
             ORDER BY 
                 t.date, t.time
             """
@@ -656,3 +649,264 @@ def request_completed_trip_category_selection(query_date):
         current_app.logger.error(f"生成已完成班次類別選擇時出錯: {e}")
         traceback.print_exc()
         return None, f"生成類別選擇失敗: {str(e)}"
+
+# --- 新增：診所班次日期選擇 --- 
+def request_clinic_trip_date_selection():
+    """生成用於查詢診所班次的日期選擇 Quick Reply (今天第一, 週日最後)"""
+    try:
+        today = get_taiwan_date()
+        quick_reply_items = []
+        weekday_names = ["日", "一", "二", "三", "四", "五", "六"]
+        days_since_sunday = today.isoweekday() % 7 
+        week_start_sunday = today - timedelta(days=days_since_sunday)
+        
+        today_button = None
+        sunday_button = None
+        other_day_buttons = []
+
+        for i in range(7):
+            current_day = week_start_sunday + timedelta(days=i)
+            date_str_iso = current_day.strftime("%Y-%m-%d")
+            weekday_index = (current_day.weekday() + 1) % 7 
+            weekday = weekday_names[weekday_index]
+            label = f"{current_day.month}/{current_day.day}({weekday})"
+            
+            button_item = QuickReplyItem(
+                action=MessageAction(
+                    label=label,
+                    text=f"診所班次 {date_str_iso}" 
+                )
+            )
+            
+            if current_day == today:
+                button_item.action.label = f"今天 {label}"
+                today_button = button_item
+            elif weekday_index == 0: # 如果是星期日
+                sunday_button = button_item
+            else:
+                other_day_buttons.append(button_item)
+                
+        # --- 組合按鈕順序 --- 
+        final_items = []
+        if today_button:
+            final_items.append(today_button)
+        final_items.extend(other_day_buttons) # 添加中間的按鈕
+        if sunday_button:
+            final_items.append(sunday_button) # 添加星期日按鈕
+            
+        quick_reply = QuickReply(items=final_items)
+        
+        reply_msg = TextMessage(
+            text="請選擇要查詢診所班次的日期 (本週)：", # 稍微修改提示
+            quick_reply=quick_reply
+        )
+        return reply_msg, None
+    except Exception as e:
+        # ... (錯誤處理)
+        # <<< 這裡的代碼需要正確縮進 >>>
+        logger.error(f"生成東洋/臨時班次日期選擇時出錯: {e}", exc_info=True)
+        return None, f"生成日期選擇失敗: {str(e)}"
+
+# --- 重命名並修改：查詢診所班次 (Flex) ---
+def handle_query_clinic_trips_flex(message_text=None):
+    """以Flex Message格式返回診所班次查詢結果"""
+    try:
+        today = get_taiwan_date() # <--- 獲取今天日期
+        query_dates = [] # <--- 初始化日期列表
+        date_str = None # <--- 初始化日期字符串
+        
+        # --- 修改：重新加入對 一三五/二四六 的處理 --- 
+        if message_text and len(message_text.split()) > 1:
+            date_str = message_text.split()[1]
+            if date_str == "今天":
+                query_dates = [today]
+            elif date_str == "明天":
+                query_dates = [today + timedelta(days=1)]
+            elif date_str == "後天":
+                query_dates = [today + timedelta(days=2)]
+            elif date_str == "一三五":
+                weekday_map = {0: "一", 2: "三", 4: "五"}
+                days_since_sunday = today.weekday() + 1 if today.weekday() < 6 else 0
+                week_start = today - timedelta(days=days_since_sunday)
+                for days_offset, _ in weekday_map.items():
+                    weekday_date = week_start + timedelta(days=days_offset + 1)
+                    if weekday_date >= today:
+                        query_dates.append(weekday_date)
+                if not query_dates:
+                    return None, "本周剩餘的星期一、三、五已經沒有診所班次了。"
+            elif date_str == "二四六":
+                weekday_map = {1: "二", 3: "四", 5: "六"}
+                days_since_sunday = today.weekday() + 1 if today.weekday() < 6 else 0
+                week_start = today - timedelta(days=days_since_sunday)
+                for days_offset, _ in weekday_map.items():
+                    weekday_date = week_start + timedelta(days=days_offset + 1)
+                    if weekday_date >= today:
+                        query_dates.append(weekday_date)
+                if not query_dates:
+                    return None, "本周剩餘的星期二、四、六已經沒有診所班次了。"
+            else:
+                try:
+                    query_date = parse_date_input(date_str)
+                    query_dates = [query_date]
+                except ValueError as e:
+                    return None, f"日期格式不正確: {str(e)} ..."
+        else:
+            # 如果命令只有 "診所班次"，理論上應該由 text_handler 觸發 Quick Reply
+            # 但作為保險，這裡可以查今天
+            query_dates = [today]
+            
+        # --- 使用 query_dates 列表進行查詢 --- 
+        all_clinic_trips = []
+        for query_date in query_dates:
+            query = sql_text(f"""
+            SELECT 
+                t.trip_id, t.date, t.time, 
+                t.start_point, t.end_point, 
+                fs.direction, 
+                t.status, t.driver_id, t.trip_type,
+                t.custom_start_point, t.custom_end_point, t.category
+            FROM trips t
+            LEFT JOIN fixed_schedules fs ON t.fixed_trip_id = fs.id 
+            WHERE 
+                t.date = :query_date
+                AND t.status != '已完成'
+                AND t.category = '診所' 
+            ORDER BY t.time
+            """)
+            trips = db.session.execute(query, {"query_date": query_date}).fetchall()
+            all_clinic_trips.extend(trips)
+            
+        current_app.logger.info(f"查詢到 {len(all_clinic_trips)} 條診所班次記錄")
+        if not all_clinic_trips:
+            # --- 恢復/確保處理空結果的代碼塊 --- 
+            weekday_names = ["一", "二", "三", "四", "五", "六", "日"]
+            # 使用循環中最後處理的日期，或提供默認值
+            last_query_date = query_date if 'query_date' in locals() else get_taiwan_date()
+            weekday = weekday_names[last_query_date.weekday()]
+            formatted_date = f"{last_query_date.month}/{last_query_date.day} (星期{weekday})"
+            logger.info(f"查詢診所班次結果為空，日期: {last_query_date}")
+            return None, f"{formatted_date} 沒有診所班次。"
+            # --- 結束恢復 ---
+        
+        # 如果有結果，則生成 Flex (這部分應在 if 塊之外)
+        flex_content = generate_trips_flex(all_clinic_trips, is_fixed_trips=True) 
+        return flex_content, None
+    except Exception as e:
+        # ... (錯誤處理) ...
+        current_app.logger.error(f"查詢診所班次時發生錯誤: {str(e)}")
+        return None, "查詢診所班次時發生錯誤，請稍後再試。"
+
+# --- 重命名並修改：查詢診所班次 (Text) ---
+def handle_query_clinic_trips(message_text=None):
+    """返回文本格式的診所班次查詢結果"""
+    try:
+        # 第一層縮進
+        today = get_taiwan_date()
+        query_dates = []
+        # ...
+        if message_text and len(message_text.split()) > 1:
+            # 第二層縮進
+            date_str = message_text.split()[1]
+            if date_str == "今天":
+                # 第三層縮進
+                query_dates = [today]
+            elif date_str == "一三五":
+                # 第三層縮進
+                # 計算一三五的日期
+                query_dates = []
+                for i in range(7):  # 查詢未來一週
+                    check_date = today + timedelta(days=i)
+                    # 星期一(0)、三(2)、五(4)
+                    if check_date.weekday() in [0, 2, 4]:
+                        query_dates.append(check_date)
+            elif date_str == "二四六":
+                # ... (計算 二四六 日期)
+                if not query_dates: return "本周剩餘的星期二、四、六已經沒有診所班次了。"
+            else: # <<< 與 elif 對齊
+                # <<< 以下需要縮進 >>>
+                try: 
+                    query_dates = [parse_date_input(date_str)]
+                except ValueError as e: 
+                    return f"日期格式不正確: {str(e)} ..."
+        else:
+            query_dates = [today]
+
+        # 第一層縮進
+        all_clinic_trips = []
+        for query_date in query_dates:
+            # 第二層縮進
+            query = sql_text(f""" SELECT ... WHERE t.date = :query_date AND ... AND t.category = '診所' ... """) # <-- 保持查詢不變
+            # --- 添加賦值 --- 
+            trips = db.session.execute(query, {"query_date": query_date}).fetchall()
+            all_clinic_trips.extend(trips)
+
+        # 第一層縮進
+        if not all_clinic_trips:
+            # 第二層縮進
+            # ...
+            return "..." # 無班次消息
+
+        # 第一層縮進
+        reply_text = "..."
+        for trip_row in all_clinic_trips:
+            # 第二層縮進
+            # ... (格式化) ...
+            pass # 確保循環體不為空
+        # --- 將 return 取消縮進，與 for 對齊 ---
+        return reply_text
+
+    except Exception as e:
+        # 第一層縮進
+        logger.error(...)
+        return "..." # 錯誤消息
+
+# --- 新增：東洋/臨時 班次日期選擇 --- 
+def request_toyo_temp_trip_date_selection():
+    """生成用於查詢東洋/臨時班次的日期選擇 Quick Reply (今天第一, 週日最後)"""
+    try:
+        today = get_taiwan_date()
+        quick_reply_items = []
+        weekday_names = ["日", "一", "二", "三", "四", "五", "六"]
+        days_since_sunday = today.isoweekday() % 7 
+        week_start_sunday = today - timedelta(days=days_since_sunday)
+        today_button = None
+        sunday_button = None
+        other_day_buttons = []
+        for i in range(7):
+            current_day = week_start_sunday + timedelta(days=i)
+            date_str_iso = current_day.strftime("%Y-%m-%d")
+            weekday_index = (current_day.weekday() + 1) % 7 
+            weekday = weekday_names[weekday_index]
+            label = f"{current_day.month}/{current_day.day}({weekday})"
+            button_item = QuickReplyItem(
+                action=MessageAction(
+                    label=label,
+                    text=f"查詢班次 {date_str_iso}" # <-- 注意命令文本不同
+                )
+            )
+            if current_day == today:
+                button_item.action.label = f"今天 {label}"
+                today_button = button_item
+            elif weekday_index == 0: # 星期日
+                sunday_button = button_item
+            else:
+                other_day_buttons.append(button_item)
+        
+        # 組合按鈕順序
+        final_items = []
+        if today_button:
+            final_items.append(today_button)
+        final_items.extend(other_day_buttons)
+        if sunday_button:
+            final_items.append(sunday_button)
+            
+        quick_reply = QuickReply(items=final_items)
+        reply_msg = TextMessage(
+            text="請選擇要查詢東洋/臨時班次的日期 (本週)：", 
+            quick_reply=quick_reply
+        )
+        return reply_msg, None
+    except Exception as e:
+        # <<< 確保以下兩行有縮進 >>>
+        logger.error(f"生成東洋/臨時班次日期選擇時出錯: {e}", exc_info=True)
+        return None, f"生成日期選擇失敗: {str(e)}"
