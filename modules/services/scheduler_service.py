@@ -162,23 +162,22 @@ def update_single_trip(app, trip_id):
                 current_app.logger.info(f"班次 #{trip_id} 已經在已完成班次表中，跳過更新")
                 return
             
-            # --- 修改插入 completed_trips 的邏輯 (與上面 update_completed_trips 相同) --- 
+            # --- 修改插入 completed_trips 的邏輯 ---
+            # 移除 custom_start_point, custom_end_point 列
             insert_query = """
-            INSERT INTO completed_trips 
-            (date, start_point, via_point, end_point, 
-             meter_fare, extra_fare, category, driver_id, 
-             unique_code, trip_type, 
-             custom_start_point, custom_end_point)
-            VALUES 
-            (:date, :start_point, :via_point, :end_point, 
-             :meter_fare, :extra_fare, :category, :driver_id, 
-             :unique_code, :trip_type, 
-             :custom_start_point, :custom_end_point)
+            INSERT INTO completed_trips
+            (date, start_point, via_point, end_point,
+             meter_fare, extra_fare, category, driver_id,
+             unique_code, trip_type)
+            VALUES
+            (:date, :start_point, :via_point, :end_point,
+             :meter_fare, :extra_fare, :category, :driver_id,
+             :unique_code, :trip_type)
             """
-            
+
             params = {
                 "date": trip_info.get('date'),
-                "via_point": trip_info.get('via_point'),
+                # "via_point": trip_info.get('via_point'), # via_point needs conditional logic too
                 "meter_fare": trip_info.get('meter_fare'),
                 "extra_fare": trip_info.get('extra_fare'),
                 "category": trip_info.get('category'),
@@ -186,31 +185,29 @@ def update_single_trip(app, trip_id):
                 "unique_code": unique_code,
                 "trip_type": trip_info.get('trip_type')
             }
-            
-            # 根據 trip_type 設置 standard 和 custom 的地點
+
+            # 根據 trip_type 設置地點
             trip_type = trip_info.get('trip_type')
             if trip_type == 'fixed': # 如果是固定班次
-                params["start_point"] = trip_info.get('start_point')
-                params["end_point"] = trip_info.get('end_point')
-                params["custom_start_point"] = None # custom 設為 NULL
-                params["custom_end_point"] = None   # custom 設為 NULL
-                current_app.logger.info(f"固定班次 #{trip_id}，將標準地點寫入 completed_trips")
+                params["start_point"] = trip_info.get('start_point') # Assume this is the text representation needed
+                params["end_point"] = trip_info.get('end_point')     # Assume this is the text representation needed
+                params["via_point"] = trip_info.get('via_point')     # Assume this is the text representation needed
+                current_app.logger.info(f"固定班次 #{trip_id}，將標準地點寫入 completed_trips 的標準欄位")
             elif trip_type == 'temp': # 如果是臨時班次
-                params["start_point"] = None # standard 設為 NULL (避免外鍵)
-                params["end_point"] = None   # standard 設為 NULL (避免外鍵)
-                params["custom_start_point"] = trip_info.get('custom_start_point') # 使用 custom start_point
-                params["custom_end_point"] = trip_info.get('custom_end_point')   # 使用 custom end_point
-                current_app.logger.info(f"臨時班次 #{trip_id}，將自定義地點寫入 completed_trips")
-            else: # 其他未知類型，都設為 NULL 或記錄錯誤
+                params["start_point"] = trip_info.get('custom_start_point') # Use custom start_point from trips
+                params["end_point"] = trip_info.get('custom_end_point')   # Use custom end_point from trips
+                # Assuming trips table has custom_via_point. If not, this will be None.
+                params["via_point"] = trip_info.get('custom_via_point') # Use custom via_point from trips
+                current_app.logger.info(f"臨時班次 #{trip_id}，將自定義地點寫入 completed_trips 的標準欄位")
+            else: # 其他未知類型，都設為 NULL
                 params["start_point"] = None
                 params["end_point"] = None
-                params["custom_start_point"] = None
-                params["custom_end_point"] = None
+                params["via_point"] = None
                 current_app.logger.warning(f"班次 #{trip_id} 類型未知 ({trip_type})，地點設置為 NULL")
-            
+
             # 添加日誌記錄要插入的參數 (遮蔽敏感信息，如果有的話)
             current_app.logger.info(f"準備插入 completed_trips (single): {params}")
-            
+
             try:
                 db.session.execute(text(insert_query), params)
                 current_app.logger.info(f"已將班次 #{trip_id} 插入到已完成班次表中")
@@ -366,23 +363,22 @@ def update_completed_trips():
                     skipped_count += 1
                     continue
                 
-                # --- 修改插入 completed_trips 的邏輯 (與上面 update_single_trip 相同) --- 
+                # --- 修改插入 completed_trips 的邏輯 ---
+                # 移除 custom_start_point, custom_end_point 列
                 insert_query = """
-                INSERT INTO completed_trips 
-                (date, start_point, via_point, end_point, 
-                 meter_fare, extra_fare, category, driver_id, 
-                 unique_code, trip_type, 
-                 custom_start_point, custom_end_point)
-                VALUES 
-                (:date, :start_point, :via_point, :end_point, 
-                 :meter_fare, :extra_fare, :category, :driver_id, 
-                 :unique_code, :trip_type, 
-                 :custom_start_point, :custom_end_point)
+                INSERT INTO completed_trips
+                (date, start_point, via_point, end_point,
+                 meter_fare, extra_fare, category, driver_id,
+                 unique_code, trip_type)
+                VALUES
+                (:date, :start_point, :via_point, :end_point,
+                 :meter_fare, :extra_fare, :category, :driver_id,
+                 :unique_code, :trip_type)
                 """
-                
+
                 params = {
                     "date": trip_info.get('date'),
-                    "via_point": trip_info.get('via_point'),
+                    # "via_point": trip_info.get('via_point'), # via_point needs conditional logic too
                     "meter_fare": trip_info.get('meter_fare'),
                     "extra_fare": trip_info.get('extra_fare'),
                     "category": trip_info.get('category'),
@@ -390,28 +386,29 @@ def update_completed_trips():
                     "unique_code": unique_code,
                     "trip_type": trip_info.get('trip_type')
                 }
-                
+
+                # 根據 trip_type 設置地點
                 trip_type = trip_info.get('trip_type')
-                if trip_type == 'fixed':
-                    params["start_point"] = trip_info.get('start_point')
-                    params["end_point"] = trip_info.get('end_point')
-                    params["custom_start_point"] = None
-                    params["custom_end_point"] = None
-                elif trip_type == 'temp':
+                if trip_type == 'fixed': # 如果是固定班次
+                    params["start_point"] = trip_info.get('start_point') # Assume this is the text representation needed
+                    params["end_point"] = trip_info.get('end_point')     # Assume this is the text representation needed
+                    params["via_point"] = trip_info.get('via_point')     # Assume this is the text representation needed
+                    current_app.logger.info(f"固定班次 #{trip_id}，將標準地點寫入 completed_trips 的標準欄位")
+                elif trip_type == 'temp': # 如果是臨時班次
+                    params["start_point"] = trip_info.get('custom_start_point') # Use custom start_point from trips
+                    params["end_point"] = trip_info.get('custom_end_point')   # Use custom end_point from trips
+                    # Assuming trips table has custom_via_point. If not, this will be None.
+                    params["via_point"] = trip_info.get('custom_via_point') # Use custom via_point from trips
+                    current_app.logger.info(f"臨時班次 #{trip_id}，將自定義地點寫入 completed_trips 的標準欄位")
+                else: # 其他未知類型，都設為 NULL
                     params["start_point"] = None
                     params["end_point"] = None
-                    params["custom_start_point"] = trip_info.get('custom_start_point')
-                    params["custom_end_point"] = trip_info.get('custom_end_point') 
-                else:
-                    params["start_point"] = None
-                    params["end_point"] = None
-                    params["custom_start_point"] = None
-                    params["custom_end_point"] = None
+                    params["via_point"] = None
                     current_app.logger.warning(f"班次 #{trip_id} 類型未知 ({trip_type})，地點設置為 NULL")
-                
+
                 # 添加日誌記錄要插入的參數 (遮蔽敏感信息，如果有的話)
-                current_app.logger.info(f"準備插入 completed_trips: {params}") 
-                
+                current_app.logger.info(f"準備插入 completed_trips: {params}")
+
                 try:
                     db.session.execute(text(insert_query), params)
                     current_app.logger.info(f"已將班次 #{trip_id} 插入到已完成班次表中")

@@ -553,12 +553,11 @@ def handle_query_completed_trips(message_text=None):
         # 構建查詢語句
         query_base = """
         SELECT 
-            id, date, 
-            start_point, end_point, 
-            custom_start_point, custom_end_point, 
+            id, date,
+            start_point, end_point,
             meter_fare, extra_fare, driver_id, trip_type, category
-        FROM completed_trips 
-        WHERE date = :query_date 
+        FROM completed_trips
+        WHERE date = :query_date
         """
         query_params = {"query_date": query_date}
         
@@ -585,7 +584,7 @@ def handle_query_completed_trips(message_text=None):
         reply_text = f"📅 {formatted_date} 已完成班次{category_title}：\n---\n"
         
         for trip in completed_trips:
-            trip_dict = row_to_dict(trip) 
+            trip_dict = row_to_dict(trip)
             if not trip_dict: continue
             
             trip_id = trip_dict.get('id')
@@ -595,17 +594,13 @@ def handle_query_completed_trips(message_text=None):
             extra_fare = trip_dict.get('extra_fare')
             meter_fare_str = str(meter_fare) if meter_fare is not None else "未記錄"
             extra_fare_str = str(extra_fare) if extra_fare is not None else "未記錄"
-            trip_type = trip_dict.get('trip_type')
-            
-            # 根據類型選擇地點
-            if trip_type == 'temp':
-                start = trip_dict.get('custom_start_point') or "?"
-                end = trip_dict.get('custom_end_point') or "?"
-            else:
-                start = trip_dict.get('start_point') or "?"
-                end = trip_dict.get('end_point') or "?"
-                
-            # 添加 category 到輸出 
+            # trip_type = trip_dict.get('trip_type') # 不再需要根據 trip_type 判斷
+
+            # 直接使用 start_point 和 end_point
+            start = trip_dict.get('start_point') or "?"
+            end = trip_dict.get('end_point') or "?"
+
+            # 添加 category 到輸出
             category = trip_dict.get('category') or "?"
             reply_text += f"ID: {trip_id} ({category})\n" # 在 ID 後面加上類別
             reply_text += f"  路線: {start} → {end}\n"
