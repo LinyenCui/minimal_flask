@@ -135,10 +135,14 @@ def process_text_message(event):
                     logger.info(f"handle_query_trips_flex返回: flex={bool(flex_content)}, msg='{result_message}'")
                     if flex_content:
                         reply_flex(reply_token, "班次查詢結果", flex_content)
+                    # --- FIX: If flex failed but gave a message, send that message directly --- 
                     elif result_message:
-                        reply_text(reply_token, result_message)
+                        logger.info(f"查詢班次 Flex 無結果或錯誤，回覆訊息: {result_message}")
+                        reply_text(reply_token, result_message) # Reply directly with the message
+                    # --- END FIX --- 
                     else:
-                        reply_text(reply_token, "查詢完成，但沒有找到任何信息。")
+                         logger.warning("handle_query_trips_flex returned None for both content and message.")
+                         reply_text(reply_token, "抱歉，查詢時發生未知錯誤。") # Fallback
                 else:
                     # 觸發日期選擇
                     logger.info(f"處理查詢班次命令 (觸發日期選擇): {message_text}")
@@ -420,16 +424,20 @@ def process_text_message(event):
                 if len(parts) > 1:
                     # 如果命令包含日期，執行實際查詢 (診所)
                     logger.info(f"處理診所班次命令 (帶日期): {message_text}")
-                    from modules.services.trip_query_service import handle_query_clinic_trips_flex, handle_query_clinic_trips
+                    from modules.services.trip_query_service import handle_query_clinic_trips_flex # , handle_query_clinic_trips # No need for text version initially
                     flex_content, error_message = handle_query_clinic_trips_flex(message_text)
-                    if flex_content and error_message is None:
+                    if flex_content and error_message is None: # Check error_message is None for success case
                         reply_flex(reply_token, "診所班次查詢結果", flex_content)
+                    # --- FIX: If flex failed but gave a message, send that message directly --- 
+                    elif error_message:
+                        logger.info(f"診所班次查詢 Flex 無結果或錯誤，回覆訊息: {error_message}")
+                        reply_text(reply_token, error_message) # Reply directly with the message
+                    # --- END FIX --- 
                     else:
-                        logger.info(f"診所班次查詢 Flex 失敗或無結果，回退文本: {error_message}")
-                        result = handle_query_clinic_trips(message_text)
-                        reply_text(reply_token, result)
+                         logger.warning("handle_query_clinic_trips_flex returned None for both content and message.")
+                         reply_text(reply_token, "抱歉，查詢時發生未知錯誤。") # Fallback
                 else:
-                    # 如果命令只有"診所班次"，觸發日期選擇
+                    # 觸發日期選擇
                     logger.info(f"處理診所班次命令 (觸發日期選擇): {message_text}")
                     from modules.services.trip_query_service import request_clinic_trip_date_selection
                     reply_msg, error_message = request_clinic_trip_date_selection()
@@ -530,6 +538,16 @@ def process_text_message(event):
              result = handle_record_fare(message_text)
              reply_text(reply_token, result)
              return
+        # --- 結束新增 ---
+            
+        # --- 新增：處理通用的取消命令 --- 
+        elif message_text == '取消':
+            # 在這裡可以加入清除特定狀態的邏輯 (如果有的話)
+            # 例如，如果是在選擇司機的流程中，可以清除相關狀態
+            # 目前僅簡單回覆
+            logger.info("處理通用取消命令")
+            reply_text(reply_token, "操作已取消。")
+            return
         # --- 結束新增 ---
             
         # 未識別的命令
