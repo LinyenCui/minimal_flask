@@ -99,12 +99,36 @@ def parse_date(date_str):
     except ValueError:
         return None
 
-def parse_time(time_str):
-    """解析時間字符串（HH:MM）"""
-    try:
-        return datetime.strptime(time_str, "%H:%M").time()
-    except ValueError:
-        return None
+def parse_time_input(time_str):
+    """解析各種格式的時間輸入 (HH:MM, HHMM) 並返回 time 對象"""
+    time_str = time_str.strip()
+    
+    # 嘗試 HH:MM 格式
+    if re.match(r"^([01]?[0-9]|2[0-3]):([0-5][0-9])$", time_str):
+        try:
+            return datetime.strptime(time_str, "%H:%M").time()
+        except ValueError:
+            pass # 繼續嘗試其他格式
+            
+    # 嘗試 HHMM 格式
+    elif re.match(r'^\d{3,4}$', time_str):
+        if len(time_str) == 3: # 補零，例如 930 -> 09:30
+             formatted_time = f"0{time_str[0]}:{time_str[1:3]}"
+        else: # 1405 -> 14:05
+             formatted_time = f"{time_str[0:2]}:{time_str[2:4]}"
+        try:
+            return datetime.strptime(formatted_time, "%H:%M").time()
+        except ValueError:
+            pass # 繼續嘗試其他格式
+
+    # (可選) 處理 早上/下午 等模糊時間？ 暫不處理
+    # elif time_str == "早上":
+    #     return datetime.strptime("09:00", "%H:%M").time() # Example
+    # elif time_str == "下午":
+    #     return datetime.strptime("14:00", "%H:%M").time() # Example
+            
+    # 無法識別的格式
+    raise ValueError(f"無法識別的時間格式: {time_str}")
 
 def generate_unique_code(trip_id, date_obj, fixed_trip_id=None):
     """生成班次的唯一識別碼，使用一年中的第幾天和第幾周"""
