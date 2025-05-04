@@ -374,7 +374,7 @@ def get_temp_booking_destination_flex():
     
     return bubble, quick_reply
 
-def get_temp_booking_confirm_flex(date_str, time_str, start_point, end_point=None, category="臨時"):
+def get_temp_booking_confirm_flex(date_str, time_str, start_point, end_point=None, category="臨時", via_point=None):
     """生成臨時預約確認頁面，使用Flex Message + Quick Reply組合"""
     bubble = {
         "type": "bubble",
@@ -504,22 +504,25 @@ def get_temp_booking_confirm_flex(date_str, time_str, start_point, end_point=Non
         }
     }
     
-    # 如果有目的地，添加到內容中
-    if end_point and end_point != "無(略過)":
-        bubble["body"]["contents"][2]["contents"].append({
+    # Get the contents box to append items dynamically
+    contents_box = bubble["body"]["contents"][2]["contents"]
+
+    # --- ADDED: Logic to display via_point --- 
+    if via_point:
+        contents_box.append({
             "type": "box",
             "layout": "horizontal",
             "contents": [
                 {
                     "type": "text",
-                    "text": "目的地",
+                    "text": "途經",
                     "size": "sm",
                     "color": "#555555",
                     "flex": 2
                 },
                 {
                     "type": "text",
-                    "text": end_point,
+                    "text": via_point,
                     "size": "sm",
                     "color": "#111111",
                     "flex": 4,
@@ -528,26 +531,27 @@ def get_temp_booking_confirm_flex(date_str, time_str, start_point, end_point=Non
             ],
             "margin": "md"
         })
+    # --- END ADDED --- 
+
+    # Display end_point if it exists
+    if end_point and end_point != "無(略過)":
+        contents_box.append({
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+                 { "type": "text", "text": "目的地", "size": "sm", "color": "#555555", "flex": 2 },
+                 { "type": "text", "text": end_point, "size": "sm", "color": "#111111", "flex": 4, "wrap": True }
+            ],
+            "margin": "md"
+        })
     
-    # 添加類別
-    bubble["body"]["contents"][2]["contents"].append({
+    # Display category
+    contents_box.append({
         "type": "box",
         "layout": "horizontal",
         "contents": [
-            {
-                "type": "text",
-                "text": "類別",
-                "size": "sm",
-                "color": "#555555",
-                "flex": 2
-            },
-            {
-                "type": "text",
-                "text": category,
-                "size": "sm",
-                "color": "#111111",
-                "flex": 4
-            }
+            { "type": "text", "text": "類別", "size": "sm", "color": "#555555", "flex": 2 },
+            { "type": "text", "text": category, "size": "sm", "color": "#111111", "flex": 4 }
         ],
         "margin": "md"
     })

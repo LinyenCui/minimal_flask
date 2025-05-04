@@ -8,6 +8,45 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Known commands (exact match, case-insensitive)
+KNOWN_COMMANDS = {
+    "幫助", 
+    "幫助文字", 
+    # "臨時預約", # Removed
+    # "臨時預約幫助", # Removed
+    "AI叫車",     # Added
+    # "Bot叫車",    # We'll use the step-by-step fallback from AI for now
+    # "AI叫車幫助", 
+    # "Bot叫車幫助",
+    "查詢班次",     
+    "診所班次",     
+    "查已完成",     
+    "指派司機",     
+    "完成班次",
+    "回報問題",
+    "取消預約",     
+    "取消指派",     
+    "更新已完成班次"
+}
+
+# Commands that *can* take arguments
+COMMANDS_WITH_ARGS = {
+    "查詢班次",
+    "診所班次",
+    "查已完成",
+    "班次詳情",
+    "指派司機", 
+    "指派",     
+    "記錄車資",
+    "修改類別",
+    "生成周報表", 
+    "生成週報表", 
+    "生成周報",   
+    "生成週報",
+    "確認指派", 
+    "取消指派"  
+}
+
 def is_from_button(message_text):
     """
     檢查消息是否來自按鈕點擊
@@ -62,7 +101,7 @@ def should_process_message(message_text, source_type, user_id=None):
             "預約", "東洋預約", 
             "生成周報表",
             "班次詳情", "幫助", "幫助文字",
-            "臨時預約", "臨時預約幫助", "取消預約",
+            "取消預約",
             "指派司機", "選擇司機", "確認指派", "取消指派",
             "記錄車資", "修改類別"
         ]

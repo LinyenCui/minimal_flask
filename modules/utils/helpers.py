@@ -100,7 +100,7 @@ def parse_date(date_str):
         return None
 
 def parse_time_input(time_str):
-    """解析各種格式的時間輸入 (HH:MM, HHMM) 並返回 time 對象"""
+    """解析各種格式的時間輸入 (HH:MM, HHMM, 中文描述) 並返回 time 對象"""
     time_str = time_str.strip()
     
     # 嘗試 HH:MM 格式
@@ -108,26 +108,80 @@ def parse_time_input(time_str):
         try:
             return datetime.strptime(time_str, "%H:%M").time()
         except ValueError:
-            pass # 繼續嘗試其他格式
+            pass 
             
     # 嘗試 HHMM 格式
     elif re.match(r'^\d{3,4}$', time_str):
-        if len(time_str) == 3: # 補零，例如 930 -> 09:30
+        if len(time_str) == 3: 
              formatted_time = f"0{time_str[0]}:{time_str[1:3]}"
-        else: # 1405 -> 14:05
+        else: 
              formatted_time = f"{time_str[0:2]}:{time_str[2:4]}"
         try:
             return datetime.strptime(formatted_time, "%H:%M").time()
         except ValueError:
-            pass # 繼續嘗試其他格式
+            pass
 
-    # (可選) 處理 早上/下午 等模糊時間？ 暫不處理
-    # elif time_str == "早上":
-    #     return datetime.strptime("09:00", "%H:%M").time() # Example
-    # elif time_str == "下午":
-    #     return datetime.strptime("14:00", "%H:%M").time() # Example
+    # --- ADDED: Handle Chinese time descriptions --- 
+    else:
+        # Define mappings for Chinese numbers and periods
+        num_map = {'一': 1, '二': 2, '兩': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
+        period_map = {'凌晨': 0, '早上': 0, '上午': 0, '中午': 12, '下午': 12, '傍晚': 18, '晚上': 18} 
+        
+        hour, minute = None, 0 
+        hour_offset = 0
+
+        # Check for period 
+        for period, offset in period_map.items():
+            if period in time_str:
+                hour_offset = offset
+                time_str = time_str.replace(period, '') 
+                break 
+
+        # Parse hour 
+        hour_match = re.search(r'([一二三四五六七八九十兩]+)點', time_str) # Added 兩
+        if hour_match:
+            hour_str = hour_match.group(1)
+            if hour_str == '十': hour = 10
+            elif hour_str == '兩': hour = 2 # Handle 兩點
+            elif hour_str.startswith('十'): hour = 10 + num_map.get(hour_str[1:], 0)
+            elif len(hour_str) == 1: hour = num_map.get(hour_str, None)
             
-    # 無法識別的格式
+            if hour is not None:
+                 if hour_offset == 12 and hour < 12: hour += 12
+                 elif hour_offset == 18 and hour < 12: hour += 12 
+                 elif hour_offset == 0 and hour == 12: hour = 0 
+                 hour = hour % 24 
+
+        # Parse minute 
+        minute_match = re.search(r'([一二三四五]?十?[一二三四五六七八九]?)分', time_str)
+        half_match = re.search(r'半', time_str)
+        quarter_match = re.search(r'(一刻|三刻)', time_str)
+
+        if minute_match:
+            minute_str = minute_match.group(1)
+            if not minute_str: minute = 0 
+            elif minute_str == '十': minute = 10
+            elif minute_str.startswith('十'): minute = 10 + num_map.get(minute_str[1:], 0)
+            elif minute_str.startswith('二十'): minute = 20 + num_map.get(minute_str[2:], 0)
+            elif minute_str.startswith('三十'): minute = 30 + num_map.get(minute_str[2:], 0)
+            elif minute_str.startswith('四十'): minute = 40 + num_map.get(minute_str[2:], 0)
+            elif minute_str.startswith('五十'): minute = 50 + num_map.get(minute_str[2:], 0)
+            elif len(minute_str) == 1 : minute = num_map.get(minute_str, 0)
+        elif half_match: 
+            minute = 30
+        elif quarter_match:
+            minute = 15 if quarter_match.group(1) == '一刻' else 45
+        else: 
+             pass 
+
+        if hour is not None:
+             try:
+                 minute = max(0, min(minute, 59))
+                 return datetime.strptime(f"{hour:02d}:{minute:02d}", "%H:%M").time()
+             except ValueError:
+                 pass 
+    # --- END ADDED --- 
+            
     raise ValueError(f"無法識別的時間格式: {time_str}")
 
 def generate_unique_code(trip_id, date_obj, fixed_trip_id=None):

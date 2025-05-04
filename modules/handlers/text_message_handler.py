@@ -26,7 +26,8 @@ def process_text_message(event):
     user_id = event.source.user_id
     
     # 記錄將要處理的文本
-    logger.info(f"Processing text message handed over: {message_text}") 
+    command_text_lower = message_text.strip().lower()
+    logger.info(f"Processing text message handed over: '{message_text}' (Normalized: '{command_text_lower}')") 
     
     try:
         # 檢查用戶是否在臨時預約流程中
@@ -74,8 +75,8 @@ def process_text_message(event):
             return
         
         # 臨時預約命令
-        elif message_text == "臨時預約" or message_text.lower() in ["!臨時預約", "#臨時預約", "/臨時預約"]:
-            logger.info(f"用戶 {user_id} 請求臨時預約，消息: {message_text}")
+        if command_text_lower == "ai叫車":
+            logger.info(f"用戶 {user_id} 請求 AI 叫車")
             response = handle_temp_booking_start(user_id)
             
             if response:
@@ -115,13 +116,6 @@ def process_text_message(event):
                     reply_text(reply_token, response.get("text", "開始臨時預約流程..."))
             return
             
-        # 臨時預約幫助
-        elif message_text == "臨時預約幫助":
-            logger.info(f"用戶 {user_id} 請求臨時預約幫助")
-            response = handle_temp_booking_help()
-            reply_text(reply_token, response.get("text", "臨時預約使用說明..."))
-            return
-        
         # 查詢班次 (東洋/臨時)
         elif message_text.startswith("查詢班次"):
             try:

@@ -21,34 +21,331 @@ from modules.flex_designs.temp_booking_flex import (
 from modules.services.ai_service import extract_booking_info_with_gemini
 from linebot.v3.messaging import TextMessage, QuickReply, QuickReplyItem, MessageAction
 
-# 用於存儲臨時預約過程中的用戶狀態
-temp_booking_states = {}
+# State definitions for clarity
+STATE_WAITING_AI_INPUT = "waiting_for_ai_input"
+STATE_WAITING_AI_FOLLOWUP = "waiting_for_ai_followup"
+STATE_WAITING_CONFIRM = "waiting_for_confirm"
+# Old step-by-step states (keep for potential future use or fallback)
+STATE_WAITING_DATE = "waiting_for_date" 
+STATE_WAITING_TIME = "waiting_for_time"
+STATE_WAITING_LOCATION = "waiting_for_location"
+STATE_WAITING_DESTINATION = "waiting_for_destination"
 
-# 設置日誌
+temp_booking_states = {}
 logger = logging.getLogger(__name__)
 
 def handle_temp_booking_start(user_id, category="東洋"):
-    """初始化臨時預約流程，優先嘗試自然語言解析"""
+    """初始化 AI 叫車流程"""
     try:
-        logger.info(f"初始化臨時預約流程 (AI優先)，用戶ID: {user_id}, 類別: {category}")
-        
-        # 初始化預約狀態
+        logger.info(f"初始化 AI 叫車流程，用戶ID: {user_id}, 類別: {category}")
         temp_booking_states[user_id] = {
-            "state": "waiting_for_natural_language",
+            "state": STATE_WAITING_AI_INPUT,
             "data": {
-                "category": category
+                "category": category,
+                "date": None, "time": None, "start_point": None,
+                "end_point": None, "via_point": None 
             }
         }
-        
-        logger.info(f"已設置用戶 {user_id} 的臨時預約狀態: {temp_booking_states[user_id]}")
-        
-        # 返回自然語言提示
-        prompt_text = "請用一句話描述您的預約需求，例如：『明天下午三點半從火車站送到成大醫院』，或點擊下方按鈕逐步輸入。"
-        
+        logger.info(f"已設置用戶 {user_id} 的 AI 叫車狀態: {temp_booking_states[user_id]}")
+        prompt_text = "請儘可能以簡短易懂的文字提供日期、時間、出發地，也能提供目的地是最好(非必需)，更詳細的經過地或哪裡的班次亦可(預設東洋)。"
         quick_reply = QuickReply(items=[
-            QuickReplyItem(
-                action=MessageAction(label="🗓️ 逐步輸入", text="開始逐步輸入")
+             QuickReplyItem(action=MessageAction(label="取消", text="取消"))
+        ])
+        return {"type": "text", "text": prompt_text, "quick_reply": quick_reply.to_dict()}
+    except Exception as e:
+        if user_id in temp_booking_states: del temp_booking_states[user_id]
+        logger.error(f"初始化 AI 叫車流程時出錯: {e}", exc_info=True)
+        return {"type": "text", "text": "AI 叫車系統暫時無法使用，請稍後重試"}
+
+
+def handle_temp_booking_message(user_id, message_text):
+    """處理 AI 叫車流程中的消息"""
+    if user_id not in temp_booking_states: 
+        logger.info(f"用戶 {user_id} 不在叫車流程中，忽略消息。")
+        return None 
+        
+    # --- Always handle cancel first --- 
+    if message_text.lower() in ["取消", "取消預約", "cancel", "退出", "exit"]:
+        logger.info(f"用戶 {user_id} 取消預約流程。")
+        del temp_booking_states[user_id]
+        return {"type": "text", "text": "已取消預約流程"}
+
+    current_state = temp_booking_states[user_id]["state"]
+    booking_data = temp_booking_states[user_id]["data"].copy() 
+    logger.info(f"處理 AI 叫車消息: User={user_id}, State={current_state}, Msg='{message_text}'")
+
+    try:
+        # --- State: Waiting for initial AI input --- 
+        if current_state == STATE_WAITING_AI_INPUT:
+            extracted_info = extract_booking_info_with_gemini(message_text)
+            if not extracted_info: 
+                logger.warning("AI 未能提取任何有效信息 (initial)。")
+                return {"type": "text", "text": "抱歉，無法理解您的預約需求，請嘗試換句話說或更詳細地描述。"}
+                
+            logger.info(f"AI 初始解析結果: {extracted_info}")
+            booking_data = _update_booking_data(booking_data, extracted_info) # Update using helper
+            missing_fields = _check_missing_fields(booking_data)
+            
+            temp_booking_states[user_id]["data"] = booking_data # Save updated data
+
+            if not missing_fields:
+                 logger.info("AI 初始提取信息完整，進入確認步驟")
+                 temp_booking_states[user_id]["state"] = STATE_WAITING_CONFIRM
+                 return _generate_confirm_response(booking_data)
+            else:
+                 logger.info(f"AI 初始提取信息不完整，缺少: {missing_fields}")
+                 temp_booking_states[user_id]["state"] = STATE_WAITING_AI_FOLLOWUP
+                 return _generate_followup_prompt(booking_data, missing_fields)
+
+        # --- State: Waiting for AI followup --- 
+        elif current_state == STATE_WAITING_AI_FOLLOWUP:
+            extracted_info_followup = extract_booking_info_with_gemini(message_text)
+            if not extracted_info_followup:
+                 logger.warning("AI 未能提取任何有效信息 (followup)。")
+                 missing_fields = _check_missing_fields(booking_data) # Check based on existing data
+                 feedback_text = f"抱歉，還是不太明白。還需要請您提供：{'、'.join(missing_fields)}。" if missing_fields else "抱歉，還是不太明白，請嘗試重新說明。"
+                 return {"type": "text", "text": feedback_text}
+                 
+            logger.info(f"AI 追問解析結果: {extracted_info_followup}")
+            booking_data = _update_booking_data(booking_data, extracted_info_followup, merge=True) # Merge results
+            missing_fields = _check_missing_fields(booking_data)
+            
+            temp_booking_states[user_id]["data"] = booking_data # Save updated data
+
+            if not missing_fields:
+                 logger.info("AI 追問後信息齊全，進入確認步驟")
+                 temp_booking_states[user_id]["state"] = STATE_WAITING_CONFIRM
+                 return _generate_confirm_response(booking_data)
+            else:
+                 logger.info(f"AI 追問後仍缺少: {missing_fields}")
+                 # Stay in followup state
+                 return _generate_followup_prompt(booking_data, missing_fields)
+                 
+        # --- State: Waiting for confirmation --- 
+        elif current_state == STATE_WAITING_CONFIRM:
+            # Reuse the existing confirm handler, assuming it's correct
+            return handle_confirm_input(user_id, message_text)
+            
+        # --- Handle unexpected old states --- 
+        elif current_state in [STATE_WAITING_DATE, STATE_WAITING_TIME, STATE_WAITING_LOCATION, STATE_WAITING_DESTINATION]:
+             logger.warning(f"Reached unexpected state '{current_state}' during AI flow. Resetting.")
+             if user_id in temp_booking_states: del temp_booking_states[user_id]
+             return {"type": "text", "text": "預約流程狀態錯誤，請重新使用「AI叫車」開始。"}
+            
+        else:
+            logger.warning(f"未知的用戶狀態: {current_state}")
+            if user_id in temp_booking_states: del temp_booking_states[user_id]
+            return {"type": "text", "text": "對不起，預約流程出現錯誤。請重新開始。"}
+
+    except Exception as e:
+        logger.error(f"處理 AI 叫車消息時頂層出錯: {e}", exc_info=True)
+        if user_id in temp_booking_states: del temp_booking_states[user_id]
+        return {"type": "text", "text": "預約處理過程中出現錯誤，請重新開始。"}
+
+# --- Helper function to update booking data --- 
+def _update_booking_data(current_data, extracted_info, merge=False):
+    """Updates booking data with extracted info. If merge=True, only fills missing fields."""
+    logger.debug(f"Updating booking data. Merge={merge}. Current={current_data}, Extracted={extracted_info}")
+    updated_data = current_data.copy()
+    
+    # Date
+    if (not merge or not updated_data.get("date")) and extracted_info.get("date"):
+        try: 
+            parsed_date = parse_date_input(extracted_info["date"])
+            if parsed_date >= get_taiwan_date(): updated_data["date"] = parsed_date
+        except ValueError: pass
+        
+    # Time (Requires valid date)
+    if updated_data.get("date") and (not merge or not updated_data.get("time")) and extracted_info.get("time"):
+        try: 
+            parsed_time = parse_time_input(extracted_info["time"])
+            now = get_taiwan_time()
+            if not (updated_data["date"] == now.date() and parsed_time < now.time()): 
+                updated_data["time"] = parsed_time
+        except ValueError: pass
+        
+    # Start Point
+    if (not merge or not updated_data.get("start_point")) and extracted_info.get("start_point"):
+        updated_data["start_point"] = extracted_info["start_point"]
+        
+    # Optional Fields (Merge or Overwrite based on `merge` flag)
+    if (not merge or not updated_data.get("end_point")) and extracted_info.get("end_point"):
+        updated_data["end_point"] = extracted_info["end_point"]
+    if (not merge or not updated_data.get("via_point")) and extracted_info.get("via_point"):
+        updated_data["via_point"] = extracted_info["via_point"]
+    # Category: Always overwrite if provided by AI?
+    if extracted_info.get("category"): 
+        updated_data["category"] = extracted_info["category"]
+        
+    logger.debug(f"Updated booking data: {updated_data}")
+    return updated_data
+
+# --- Helper function to check missing fields --- 
+def _check_missing_fields(booking_data):
+    """Checks for required fields and returns a list of missing ones."""
+    missing = []
+    if not booking_data.get("date"): missing.append("日期")
+    if not booking_data.get("time"): missing.append("時間")
+    if not booking_data.get("start_point"): missing.append("起點")
+    return missing
+
+# --- Helper function to generate confirmation response --- 
+def _generate_confirm_response(booking_data):
+    """Generates the Flex Message dictionary for confirmation."""
+    try:
+        formatted_date = booking_data["date"].strftime("%Y-%m-%d")
+        formatted_time = booking_data["time"].strftime("%H:%M")
+        flex_content, quick_reply = get_temp_booking_confirm_flex(
+            formatted_date, formatted_time,
+            booking_data["start_point"],
+            booking_data.get("end_point"), 
+            booking_data.get("category", "東洋"), 
+            booking_data.get("via_point") 
+        )
+        return {"type": "flex", "alt_text": "請確認預約信息", "contents": flex_content, "quick_reply": quick_reply}
+    except Exception as e:
+        logger.error(f"生成確認 Flex 時出錯: {e}", exc_info=True)
+        # Fallback to simple text confirmation request
+        confirm_text = (
+             "我們已處理您的請求，但生成確認界面出錯。\n"
+             "請確認以下信息是否正確：\n"
+             f"日期: {booking_data.get('date')}, 時間: {booking_data.get('time')}, "
+             f"起點: {booking_data.get('start_point')}"
+             # Add optional fields if they exist
+             f"{', 目的地: ' + booking_data['end_point'] if booking_data.get('end_point') else ''}"
+             f"{', 途經: ' + booking_data['via_point'] if booking_data.get('via_point') else ''}"
+             f"{', 類別: ' + booking_data['category'] if booking_data.get('category') else ''}\n\n"
+             "回覆「確認」或「取消」。"
+        )
+        return {"type": "text", "text": confirm_text}
+
+# --- Helper function to generate followup prompt --- 
+def _generate_followup_prompt(booking_data, missing_fields):
+    """Generates the text message prompt for missing information."""
+    feedback_parts = []
+    if booking_data.get("date"): feedback_parts.append(f"日期:{booking_data['date'].strftime('%m/%d')}")
+    if booking_data.get("time"): feedback_parts.append(f"時間:{booking_data['time'].strftime('%H:%M')}")
+    if booking_data.get("start_point"): feedback_parts.append(f"起點:'{booking_data['start_point']}'")
+    if booking_data.get("end_point"): feedback_parts.append(f"目的地:'{booking_data['end_point']}'")
+    if booking_data.get("via_point"): feedback_parts.append(f"途經:'{booking_data['via_point']}'")
+    initial_category = "東洋" 
+    if booking_data.get("category") and booking_data.get("category") != initial_category: 
+        feedback_parts.append(f"類別:'{booking_data['category']}'")
+    
+    feedback_prefix = "好的，我了解到：" + "、".join(feedback_parts) + "。\n" if feedback_parts else "好的，\n"
+    feedback_suffix = f"還需要請您提供：{'、'.join(missing_fields)}。"
+    feedback_text = feedback_prefix + feedback_suffix
+    return {"type": "text", "text": feedback_text}
+
+
+# --- Keep handle_confirm_input as it is likely shared/correct --- 
+def handle_confirm_input(user_id, message_text):
+    # ... (Existing confirmation logic - SAVE TO DB) ...
+    # Ensure this function uses the latest booking_data including via_point
+    # The logic to include via_point in the DB insert and success message
+    # should already be here from previous edits.
+    try:
+        if message_text.lower() not in ["確認", "confirm", "yes", "是", "確定", "ok"]:
+            if user_id in temp_booking_states: del temp_booking_states[user_id]
+            return {"type": "text", "text": "您已取消臨時預約。"}
+        
+        booking_data = temp_booking_states[user_id]["data"]
+        logger.info(f"用戶 {user_id} 確認預約，數據: {booking_data}")
+        
+        try:
+            insert_query = """
+            INSERT INTO trips (date, time, start_point, end_point, category, status, trip_type, custom_start_point, custom_end_point, custom_via_point)
+            VALUES (:date, :time, '臨時地點', '臨時地點', :category, '待派', 'temp', :custom_start_point, :custom_end_point, :custom_via_point)
+            RETURNING trip_id
+            """
+            end_point_db = booking_data.get("end_point")
+            if not end_point_db or end_point_db == "無(略過)": end_point_db = "无指定终点"
+            via_point_db = booking_data.get("via_point")
+            
+            params = {
+                "date": booking_data["date"],
+                "time": booking_data["time"],
+                "category": booking_data.get("category", "東洋"),
+                "custom_start_point": booking_data["start_point"],
+                "custom_end_point": end_point_db,
+                "custom_via_point": via_point_db
+            }
+            result = db.session.execute(sql_text(insert_query), params)
+            new_trip_id = result.fetchone()[0]
+            
+            # Update unique code and week number
+            unique_code = f"T_{new_trip_id}"
+            _, week_number, _ = booking_data["date"].isocalendar()
+            update_query = "UPDATE trips SET unique_code = :unique_code, week_number = :week_number WHERE trip_id = :trip_id"
+            db.session.execute(sql_text(update_query), {"unique_code": unique_code, "week_number": week_number, "trip_id": new_trip_id})
+            
+            db.session.commit()
+            logger.info(f"成功創建臨時班次: ID={new_trip_id}, Data={booking_data}")
+            del temp_booking_states[user_id]
+            
+            # Build success message
+            success_message = (
+                 "✅ 臨時預約成功！\n\n"
+                 f"班次ID: {new_trip_id}\n"
+                 f"日期：{booking_data['date'].strftime('%Y-%m-%d')}\n"
+                 f"時間：{booking_data['time'].strftime('%H:%M')}\n"
+                 f"起點：{booking_data['start_point']}\n"
             )
+            if via_point_db: success_message += f"途經：{via_point_db}\n"
+            if booking_data.get("end_point") and booking_data.get("end_point") != "無(略過)": success_message += f"目的地：{booking_data['end_point']}\n"
+            success_message += (
+                 f"類別：{booking_data['category']}\n"
+                 f"狀態：待派\n\n"
+                 "我們會盡快為您指派司機。"
+            )
+            return {"type": "text", "text": success_message}
+        
+        except Exception as db_error:
+             logger.error(f"保存臨時預約到數據庫時出錯: {db_error}", exc_info=True)
+             db.session.rollback()
+             # Don't clear state on DB error, allow retry?
+             # if user_id in temp_booking_states: del temp_booking_states[user_id]
+             return {"type": "text", "text": f"保存預約時出錯，請稍後重試或聯繫管理員。"}
+    
+    except Exception as e:
+         logger.error(f"處理確認輸入時出錯: {e}", exc_info=True)
+         if user_id in temp_booking_states: del temp_booking_states[user_id]
+         return {"type": "text", "text": "處理預約確認時出錯。請重新開始預約流程。"}
+
+# --- Remove or comment out old step-by-step handlers --- 
+# def handle_date_input(...)
+# def handle_time_input(...)
+# ...
+
+def handle_temp_booking_help():
+    # ... (Existing help logic can remain for now) ...
+    pass
+
+def handle_temp_booking_start(user_id, category="東洋"):
+    """初始化 AI 叫車流程"""
+    try:
+        logger.info(f"初始化 AI 叫車流程，用戶ID: {user_id}, 類別: {category}")
+        temp_booking_states[user_id] = {
+            "state": "waiting_for_ai_input", # Start with waiting for NL input
+            "data": {
+                "category": category,
+                # Initialize other fields to None or leave empty initially
+                "date": None,
+                "time": None,
+                "start_point": None,
+                "end_point": None,
+                "via_point": None 
+            }
+        }
+        logger.info(f"已設置用戶 {user_id} 的 AI 叫車狀態: {temp_booking_states[user_id]}")
+        
+        # Use the prompt from the logs
+        prompt_text = "請儘可能以簡短易懂的文字提供日期、時間、出發地，也能提供目的地是最好(非必需)，更詳細的經過地或哪裡的班次亦可(預設東洋)。"
+        
+        # Add a cancel button for easier exit
+        quick_reply = QuickReply(items=[
+             QuickReplyItem(action=MessageAction(label="取消", text="取消"))
+             # Optionally add a button to force step-by-step later if needed
         ])
         
         return {
@@ -61,617 +358,216 @@ def handle_temp_booking_start(user_id, category="東洋"):
         if user_id in temp_booking_states:
             del temp_booking_states[user_id]
             logger.info(f"已清除用戶 {user_id} 的預約狀態")
-        logger.error(f"初始化臨時預約流程時出錯: {e}")
+        logger.error(f"初始化 AI 叫車流程時出錯: {e}")
         traceback.print_exc()
         return {
             "type": "text",
-            "text": "臨時預約系統暫時無法使用，請稍後重試"
+            "text": "AI 叫車系統暫時無法使用，請稍後重試"
         }
 
 def handle_temp_booking_message(user_id, message_text):
-    """處理臨時預約流程中的消息"""
+    """處理 AI 叫車流程中的消息"""
     try:
-        logger.info(f"處理臨時預約消息: 用戶ID={user_id}, 消息='{message_text}'")
+        logger.info(f"處理 AI 叫車消息: 用戶ID={user_id}, 消息='{message_text}'")
         
-        # 檢查取消命令 - 優先處理取消命令，無論用戶是否在預約流程中
-        if message_text.lower() in ["取消", "取消預約", "cancel", "退出", "exit", "!取消", "!取消預約", "!cancel", "!退出", "!exit"]:
-            logger.info(f"收到取消預約命令: {message_text}")
-            # 清除預約狀態
-            if user_id in temp_booking_states:
-                logger.info(f"清除用戶 {user_id} 的預約狀態")
-                del temp_booking_states[user_id]
-            
-            return {
-                "type": "text",
-                "text": "已取消臨時預約流程"
-            }
-        
-        # 檢查用戶是否在預約流程中
-        if user_id not in temp_booking_states:
-            logger.info(f"用戶 {user_id} 不在臨時預約流程中")
-            # 如果用戶不在預約流程中，直接返回
-            return None
-        
-        # 獲取用戶當前狀態
+        if message_text.lower() in ["取消", "取消預約", "cancel", "退出", "exit"]:
+            if user_id in temp_booking_states: del temp_booking_states[user_id]
+            return {"type": "text", "text": "已取消預約流程"}
+
+        if user_id not in temp_booking_states: return None 
+
         current_state = temp_booking_states[user_id]["state"]
         logger.info(f"用戶 {user_id} 當前狀態: {current_state}")
-        
-        # 處理"開始逐步輸入"命令
-        if message_text == "開始逐步輸入":
-            logger.info(f"用戶 {user_id} 選擇逐步輸入")
-            # Set state and trigger date selection immediately
-            temp_booking_states[user_id]["state"] = "waiting_for_date"
-            logger.info(f"用戶 {user_id} 狀態更新為: {temp_booking_states[user_id]}")
-            # Return the response from handle_date_input (which should be the date picker)
-            # Pass a special value or None to indicate initial prompt is needed
-            try:
-                current_date = get_taiwan_date()
-                flex_content, quick_reply = get_temp_booking_start_flex(current_date)
-                return {"type": "flex", "alt_text": "請選擇預約日期", "contents": flex_content, "quick_reply": quick_reply}
-            except Exception as date_flex_e:
-                logger.error(f"創建日期選擇界面 (逐步輸入) 時出錯: {date_flex_e}")
-                return {"type": "text", "text": "請輸入預約日期 (YYYY-MM-DD 或 今天/明天/後天)："}
-        
-        # 根據用戶狀態處理輸入
-        if current_state == "waiting_for_date":
-            return handle_date_input(user_id, message_text)
-        
-        elif current_state == "waiting_for_time":
-            return handle_time_input(user_id, message_text)
-        
-        elif current_state == "waiting_for_location":
-            return handle_location_input(user_id, message_text)
-            
-        elif current_state == "waiting_for_destination":
-            return handle_destination_input(user_id, message_text)
-        
-        elif current_state == "waiting_for_confirm":
-            return handle_confirm_input(user_id, message_text)
-        
-        elif current_state == "waiting_for_natural_language":
-            logger.info(f"嘗試使用 AI 解析用戶輸入: {message_text}")
+        booking_data = temp_booking_states[user_id]["data"].copy() 
+
+        if current_state == "waiting_for_ai_input":
+            logger.info(f"嘗試使用 AI 解析初始輸入: {message_text}")
             extracted_info = extract_booking_info_with_gemini(message_text)
 
             if extracted_info:
                 logger.info(f"AI 解析結果: {extracted_info}")
-                booking_data = temp_booking_states[user_id]["data"]
-                all_required_present = True
-                parsed_date = None
-                parsed_time = None
                 missing_fields = []
-
-                # 處理日期
+                # --- Process and validate extracted info --- 
+                # Date
                 extracted_date_str = extracted_info.get("date")
                 if extracted_date_str:
                     try:
-                        # 嘗試解析相對日期 ("今天", "明天") 或 YYYY-MM-DD
                         parsed_date = parse_date_input(extracted_date_str)
-                        today = get_taiwan_date()
-                        if parsed_date < today:
-                             logger.warning(f"AI提取的日期無效（過去日期）: {parsed_date}")
-                             parsed_date = None # 視為未提取到有效日期
-                             all_required_present = False
-                             missing_fields.append("日期")
-                        else:
-                            booking_data["date"] = parsed_date
-                            logger.info(f"AI提取並驗證日期: {parsed_date}")
-                    except ValueError:
-                        logger.warning(f"AI提取的日期格式無法解析: {extracted_date_str}")
-                        all_required_present = False
-                        missing_fields.append("日期")
-                else:
-                    all_required_present = False
-                    missing_fields.append("日期")
-
-                # 處理時間 (需要有日期才能處理時間)
-                extracted_time_str = extracted_info.get("time")
-                if parsed_date and extracted_time_str: # 確保有日期再來處理時間
-                     try:
-                          # 假設 parse_time_input 能處理 "HH:MM", "HHMM", "早上", "下午" 等
-                          parsed_time = parse_time_input(extracted_time_str)
-                          now = get_taiwan_time()
-                          # 檢查時間是否在過去 (如果日期是今天)
-                          if parsed_date == now.date() and parsed_time < now.time():
-                              logger.warning(f"AI提取的時間無效（過去時間）: {parsed_time}")
-                              parsed_time = None
-                              all_required_present = False
-                              if "時間" not in missing_fields: missing_fields.append("時間")
-                          else:
-                              booking_data["time"] = parsed_time
-                              logger.info(f"AI提取並驗證時間: {parsed_time}")
-                     except ValueError:
-                          logger.warning(f"AI提取的時間格式無法解析: {extracted_time_str}")
-                          all_required_present = False
-                          if "時間" not in missing_fields: missing_fields.append("時間")
-                elif not extracted_time_str: # 如果 AI 沒有提取時間
-                     all_required_present = False
-                     if "時間" not in missing_fields: missing_fields.append("時間")
-                # 如果沒有日期，也無法處理時間，算缺少時間
-                elif not parsed_date and "時間" not in missing_fields:
-                     all_required_present = False
-                     missing_fields.append("時間")
-
-                # 處理起點
-                start_point = extracted_info.get("start_point")
-                if start_point:
-                    booking_data["start_point"] = start_point
-                    logger.info(f"AI提取起點: {start_point}")
-                else:
-                    all_required_present = False
-                    missing_fields.append("起點")
-
-                # 處理終點 (可選)
-                end_point = extracted_info.get("end_point")
-                if end_point:
-                    booking_data["end_point"] = end_point
-                    logger.info(f"AI提取終點: {end_point}")
-                else:
-                     booking_data["end_point"] = None # 確保 end_point 存在
-
-                # 處理類別 (可選)
-                category = extracted_info.get("category")
-                if category:
-                    booking_data["category"] = category # 覆蓋初始值
-                    logger.info(f"AI提取類別: {category}")
+                        if parsed_date >= get_taiwan_date(): booking_data["date"] = parsed_date
+                    except ValueError: pass # Ignore invalid date format from AI
+                if not booking_data.get("date"): missing_fields.append("日期")
                 
-                # 更新狀態記錄 (即使不完整也要更新，以便後續步驟使用已提取信息)
-                temp_booking_states[user_id]["data"] = booking_data
-                logger.info(f"AI處理後，用戶 {user_id} 數據更新為: {booking_data}")
-
-                # 檢查是否所有必要信息都已提取並有效
-                if all_required_present:
-                     logger.info("AI提取了所有必要信息，進入確認步驟")
-                     temp_booking_states[user_id]["state"] = "waiting_for_confirm"
-                     logger.info(f"用戶 {user_id} 狀態更新為: {temp_booking_states[user_id]}")
-                     # 調用生成確認界面的邏輯
-                     try:
+                # Time (only process if date is valid)
+                extracted_time_str = extracted_info.get("time")
+                if booking_data.get("date") and extracted_time_str:
+                    try:
+                        parsed_time = parse_time_input(extracted_time_str)
+                        now = get_taiwan_time()
+                        if not (booking_data["date"] == now.date() and parsed_time < now.time()): booking_data["time"] = parsed_time
+                    except ValueError: pass # Ignore invalid time format
+                if not booking_data.get("time"): missing_fields.append("時間")
+                
+                # Start Point
+                if extracted_info.get("start_point"): booking_data["start_point"] = extracted_info.get("start_point")
+                if not booking_data.get("start_point"): missing_fields.append("起點")
+                
+                # Optional Fields
+                if extracted_info.get("end_point"): booking_data["end_point"] = extracted_info.get("end_point")
+                if extracted_info.get("via_point"): booking_data["via_point"] = extracted_info.get("via_point")
+                if extracted_info.get("category"): booking_data["category"] = extracted_info.get("category")
+                
+                temp_booking_states[user_id]["data"] = booking_data 
+                logger.info(f"AI初步處理後數據: {booking_data}")
+                
+                # --- Decide next step --- 
+                if not missing_fields:
+                    logger.info("AI 提取信息完整，進入確認步驟")
+                    temp_booking_states[user_id]["state"] = "waiting_for_confirm"
+                    # Generate confirm flex...
+                    try:
                          formatted_date = booking_data["date"].strftime("%Y-%m-%d")
                          formatted_time = booking_data["time"].strftime("%H:%M")
                          flex_content, quick_reply = get_temp_booking_confirm_flex(
-                             formatted_date,
-                             formatted_time,
-                             booking_data["start_point"],
-                             booking_data.get("end_point"), # 可能為 None
-                             booking_data["category"]
+                              formatted_date, formatted_time,
+                              booking_data["start_point"],
+                              booking_data.get("end_point"), 
+                              booking_data.get("category", "東洋"), # Use default if missing in data
+                              booking_data.get("via_point") 
                          )
-                         return {"type": "flex", "alt_text": "請確認臨時預約信息", "contents": flex_content, "quick_reply": quick_reply}
-                     except Exception as confirm_e:
-                         logger.error(f"AI流程中創建確認界面時出錯: {confirm_e}")
-                         return {"type": "text", "text": "我們已處理您的請求，請輸入「確認」或「取消」。"}
+                         return {"type": "flex", "alt_text": "請確認預約信息", "contents": flex_content, "quick_reply": quick_reply}
+                    except Exception as confirm_e: 
+                        logger.error(f"AI流程中創建確認界面時出錯: {confirm_e}")
+                        return {"type": "text", "text": "信息已處理，但生成確認界面出錯。請輸入「確認」或「取消」。"}
                 else:
-                     # 缺少信息，提示用戶補充第一個缺少的欄位
-                     logger.info(f"AI提取信息不完整，缺少: {missing_fields}")
-                     first_missing = missing_fields[0]
-                     if first_missing == "日期":
-                         temp_booking_states[user_id]["state"] = "waiting_for_date"
-                         logger.info(f"用戶 {user_id} 狀態更新為 waiting_for_date")
-                         try:
-                             current_date = get_taiwan_date()
-                             flex_content, quick_reply = get_temp_booking_start_flex(current_date)
-                             return {"type": "flex", "alt_text": "請選擇預約日期", "contents": flex_content, "quick_reply": quick_reply}
-                         except: return {"type": "text", "text": "抱歉，未能識別日期，請輸入預約日期："}
-
-                     elif first_missing == "時間":
-                         temp_booking_states[user_id]["state"] = "waiting_for_time"
-                         logger.info(f"用戶 {user_id} 狀態更新為 waiting_for_time")
-                         try:
-                             flex_content, quick_reply = get_temp_booking_time_flex(booking_data["date"])
-                             return {"type": "flex", "alt_text": "請選擇預約時間", "contents": flex_content, "quick_reply": quick_reply}
-                         except: return {"type": "text", "text": "請輸入預約時間："}
-
-                     elif first_missing == "起點":
-                         temp_booking_states[user_id]["state"] = "waiting_for_location"
-                         logger.info(f"用戶 {user_id} 狀態更新為 waiting_for_location")
-                         try:
-                              flex_content, quick_reply = get_temp_booking_location_flex()
-                              return {"type": "flex", "alt_text": "請選擇起點位置", "contents": flex_content, "quick_reply": quick_reply}
-                         except: return {"type": "text", "text": "請輸入起點："}
-                     else: # 其他不太可能缺少的情況
-                          temp_booking_states[user_id]["state"] = "waiting_for_natural_language" # 回到原點
-                          logger.info(f"用戶 {user_id} 狀態重置為 waiting_for_natural_language")
-                          return {"type": "text", "text": f"處理時遇到問題，缺少 {first_missing}。請嘗試重新描述或逐步輸入。"}
-
+                    logger.info(f"AI 提取信息不完整，缺少: {missing_fields}")
+                    temp_booking_states[user_id]["state"] = "waiting_for_ai_followup"
+                    # --- Rebuild feedback text logic carefully --- 
+                    feedback_parts = []
+                    if booking_data.get("date"): feedback_parts.append(f"日期:{booking_data['date'].strftime('%m/%d')}")
+                    if booking_data.get("time"): feedback_parts.append(f"時間:{booking_data['time'].strftime('%H:%M')}")
+                    if booking_data.get("start_point"): feedback_parts.append(f"起點:'{booking_data['start_point']}'")
+                    if booking_data.get("end_point"): feedback_parts.append(f"目的地:'{booking_data['end_point']}'")
+                    if booking_data.get("via_point"): feedback_parts.append(f"途經:'{booking_data['via_point']}'")
+                    initial_category = "東洋" 
+                    if booking_data.get("category") and booking_data.get("category") != initial_category: 
+                        feedback_parts.append(f"類別:'{booking_data['category']}'")
+                    
+                    feedback_prefix = "好的，我了解到：" + "、".join(feedback_parts) + "。\n" if feedback_parts else "好的，\n"
+                    feedback_suffix = f"還需要請您提供：{'、'.join(missing_fields)}。"
+                    feedback_text = feedback_prefix + feedback_suffix
+                    # --- End feedback text logic --- 
+                    return {"type": "text", "text": feedback_text}
             else:
-                # AI 解析失敗
-                logger.warning("AI未能提取任何有效信息。")
-                quick_reply = QuickReply(items=[QuickReplyItem(action=MessageAction(label="🗓️ 逐步輸入", text="開始逐步輸入"))])
-                # Keep state as waiting_for_natural_language
-                return {
-                    "type": "text",
-                    "text": "抱歉，我暫時無法完全理解您的預約需求。請嘗試換句話說，或點擊下方按鈕逐步輸入。",
-                    "quick_reply": quick_reply.to_dict()
-                 }
+                 logger.warning("AI 未能提取任何有效信息。")
+                 return {"type": "text", "text": "抱歉，無法理解您的預約需求，請嘗試換句話說或更詳細地描述。"}
+        
+        elif current_state == "waiting_for_ai_followup":
+             logger.info(f"處理 AI 追問狀態，用戶補充輸入: {message_text}")
+             extracted_info_followup = extract_booking_info_with_gemini(message_text)
+             
+             if extracted_info_followup:
+                  logger.info(f"AI 追問解析結果: {extracted_info_followup}")
+                  # --- Merge followup info (only fill if None/missing in existing booking_data) ---
+                  if not booking_data.get("date") and extracted_info_followup.get("date"):
+                      try: 
+                           parsed_date = parse_date_input(extracted_info_followup["date"])
+                           if parsed_date >= get_taiwan_date(): booking_data["date"] = parsed_date
+                      except ValueError: pass
+                  if not booking_data.get("time") and booking_data.get("date") and extracted_info_followup.get("time"):
+                       try: 
+                           parsed_time = parse_time_input(extracted_info_followup["time"])
+                           now = get_taiwan_time()
+                           if not (booking_data["date"] == now.date() and parsed_time < now.time()): 
+                               booking_data["time"] = parsed_time
+                       except ValueError: pass
+                  if not booking_data.get("start_point") and extracted_info_followup.get("start_point"):
+                       booking_data["start_point"] = extracted_info_followup["start_point"]
+                  # Merge optional fields 
+                  if not booking_data.get("end_point") and extracted_info_followup.get("end_point"): 
+                       booking_data["end_point"] = extracted_info_followup["end_point"]
+                  if not booking_data.get("via_point") and extracted_info_followup.get("via_point"): 
+                       booking_data["via_point"] = extracted_info_followup["via_point"]
+                  if booking_data.get("category") == "東洋" and extracted_info_followup.get("category"): 
+                       booking_data["category"] = extracted_info_followup["category"]
+                  
+                  temp_booking_states[user_id]["data"] = booking_data
+                  logger.info(f"合併追問信息後數據: {booking_data}")
+                  
+                  # --- Check completion again --- 
+                  missing_fields = []
+                  if not booking_data.get("date"): missing_fields.append("日期")
+                  if not booking_data.get("time"): missing_fields.append("時間")
+                  if not booking_data.get("start_point"): missing_fields.append("起點")
+
+                  if not missing_fields:
+                       logger.info("AI 追問後信息齊全，進入確認步驟")
+                       temp_booking_states[user_id]["state"] = "waiting_for_confirm"
+                       try:
+                           formatted_date = booking_data["date"].strftime("%Y-%m-%d")
+                           formatted_time = booking_data["time"].strftime("%H:%M")
+                           flex_content, quick_reply = get_temp_booking_confirm_flex(
+                                formatted_date, formatted_time,
+                                booking_data["start_point"],
+                                booking_data.get("end_point"), 
+                                booking_data.get("category", "東洋"),
+                                booking_data.get("via_point") 
+                           )
+                           return {"type": "flex", "alt_text": "請確認預約信息", "contents": flex_content, "quick_reply": quick_reply}
+                       except Exception as confirm_e: 
+                            logger.error(f"AI追問流程中創建確認界面時出錯: {confirm_e}")
+                            return {"type": "text", "text": "信息已處理，但生成確認界面出錯。請輸入「確認」或「取消」。"}
+                  else:
+                       logger.info(f"AI 追問後仍缺少: {missing_fields}")
+                       # --- Rebuild feedback text logic carefully --- 
+                       feedback_parts = []
+                       if booking_data.get("date"): feedback_parts.append(f"日期:{booking_data['date'].strftime('%m/%d')}")
+                       if booking_data.get("time"): feedback_parts.append(f"時間:{booking_data['time'].strftime('%H:%M')}")
+                       if booking_data.get("start_point"): feedback_parts.append(f"起點:'{booking_data['start_point']}'")
+                       if booking_data.get("end_point"): feedback_parts.append(f"目的地:'{booking_data['end_point']}'")
+                       if booking_data.get("via_point"): feedback_parts.append(f"途經:'{booking_data['via_point']}'")
+                       initial_category = "東洋" 
+                       if booking_data.get("category") and booking_data.get("category") != initial_category: 
+                            feedback_parts.append(f"類別:'{booking_data['category']}'")
+                       
+                       feedback_prefix = "好的，我了解到：" + "、".join(feedback_parts) + "。\n" if feedback_parts else "好的，\n"
+                       feedback_suffix = f"還需要請您提供：{'、'.join(missing_fields)}。"
+                       feedback_text = feedback_prefix + feedback_suffix
+                       # --- End feedback text logic --- 
+                       return {"type": "text", "text": feedback_text} 
+             else:
+                  logger.warning("AI 未能解析補充信息。")
+                  # Re-prompt based on currently known missing fields
+                  missing_fields = []
+                  if not booking_data.get("date"): missing_fields.append("日期")
+                  if not booking_data.get("time"): missing_fields.append("時間")
+                  if not booking_data.get("start_point"): missing_fields.append("起點")
+                  if missing_fields: # Only prompt if something is actually missing
+                       feedback_text = f"抱歉，還是不太明白。還需要請您提供：{'、'.join(missing_fields)}。"
+                  else: # Should not happen if state is followup, but as a fallback
+                       feedback_text = "抱歉，無法處理您的輸入，請嘗試重新說明。"
+                       temp_booking_states[user_id]["state"] = "waiting_for_ai_input" # Reset state?
+                  return {"type": "text", "text": feedback_text}
+                  
+        elif current_state == "waiting_for_confirm":
+            return handle_confirm_input(user_id, message_text)
+            
+        # --- Fallback for Old Step-by-Step States (Log warning) ---
+        elif current_state in ["waiting_for_date", "waiting_for_time", "waiting_for_location", "waiting_for_destination"]:
+             logger.warning(f"Reached unexpected state '{current_state}' during AI flow. Resetting.")
+             if user_id in temp_booking_states: del temp_booking_states[user_id]
+             return {"type": "text", "text": "預約流程狀態錯誤，請重新使用「AI叫車」開始。"}
+            
         else:
+            # ... (handle unknown state) ...
             logger.warning(f"未知的用戶狀態: {current_state}")
-            # 狀態無效，清除並重新開始
             if user_id in temp_booking_states: del temp_booking_states[user_id]
-            return {
-                "type": "text",
-                "text": "對不起，臨時預約流程出現錯誤。請重新開始預約。"
-            }
+            return {"type": "text", "text": "對不起，預約流程出現錯誤。請重新開始。"}
 
     except Exception as e:
-        logger.error(f"處理臨時預約消息時出錯: {e}")
+        logger.error(f"處理 AI 叫車消息時出錯: {e}")
         traceback.print_exc()
         if user_id in temp_booking_states: del temp_booking_states[user_id]
-        return {
-            "type": "text",
-            "text": "臨時預約處理過程中出現錯誤，請重新開始預約。"
-        }
-
-def handle_date_input(user_id, message_text):
-    """處理用戶輸入的日期"""
-    try:
-        # 解析日期輸入
-        selected_date = None
-        today = get_taiwan_date()
-        
-        # 處理特殊日期輸入
-        if message_text == "今天":
-            selected_date = today
-        elif message_text == "明天":
-            selected_date = today + timedelta(days=1)
-        elif message_text == "後天":
-            selected_date = today + timedelta(days=2)
-        else:
-            # 嘗試解析標準日期格式
-            try:
-                selected_date = parse_date_input(message_text)
-            except ValueError:
-                return {
-                    "type": "text",
-                    "text": "日期格式無效。請使用YYYY-MM-DD格式（如2025-03-20），或輸入「今天」、「明天」、「後天」。"
-                }
-        
-        # 檢查日期是否有效（不能是過去的日期）
-        if selected_date < today:
-            return {
-                "type": "text",
-                "text": "無法預約過去的日期。請選擇今天或未來的日期。"
-            }
-        
-        # 更新用戶狀態
-        temp_booking_states[user_id]["data"]["date"] = selected_date
-        temp_booking_states[user_id]["state"] = "waiting_for_time"
-        
-        logger.info(f"用戶 {user_id} 選擇了日期: {selected_date}, 狀態更新為: {temp_booking_states[user_id]}")
-        
-        # 返回時間選擇界面
-        try:
-            flex_content, quick_reply = get_temp_booking_time_flex(selected_date)
-            
-            # 創建包含Flex內容和Quick Reply的回覆
-            return {
-                "type": "flex",
-                "alt_text": "請選擇預約時間",
-                "contents": flex_content,
-                "quick_reply": quick_reply  # 添加QuickReply
-            }
-        except Exception as e:
-            logger.error(f"創建時間選擇界面時出錯: {e}")
-            # 使用簡單的文本消息作為備用方案
-            return {
-                "type": "text",
-                "text": "請輸入預約時間 (HH:MM 格式)，例如 09:17、14:30 等。"
-            }
-    
-    except Exception as e:
-        logger.error(f"處理日期輸入時出錯: {e}")
-        # 重置狀態
-        temp_booking_states[user_id]["state"] = "waiting_for_date"
-        return {
-            "type": "text",
-            "text": "處理日期時出錯。請重新輸入預約日期。"
-        }
-
-def handle_time_input(user_id, message_text):
-    """處理用戶輸入的時間"""
-    try:
-        # 檢查時間格式是否有效 (HH:MM)
-        time_pattern = r"^([01]?[0-9]|2[0-3]):([0-5][0-9])$"
-        if not re.match(time_pattern, message_text):
-            # 嘗試轉換其他格式（如HHMM）
-            if re.match(r'^\d{3,4}$', message_text):
-                if len(message_text) == 3:
-                    message_text = message_text[0] + ":" + message_text[1:3]
-                else:
-                    message_text = message_text[0:2] + ":" + message_text[2:4]
-            else:
-                return {
-                    "type": "text",
-                    "text": "時間格式無效。請使用HH:MM格式（如09:17或14:30）或HHMM格式（如0917）。"
-                }
-        
-        # 解析時間
-        try:
-            time_obj = datetime.strptime(message_text, "%H:%M").time()
-        except ValueError:
-            return {
-                "type": "text",
-                "text": "無法解析時間。請使用HH:MM格式（如09:17或14:30）。"
-            }
-        
-        # 檢查時間是否是過去的時間
-        selected_date = temp_booking_states[user_id]["data"]["date"]
-        now = get_taiwan_time()
-        
-        if selected_date == now.date() and time_obj < now.time():
-            return {
-                "type": "text",
-                "text": "無法預約過去的時間。請選擇未來的時間。"
-            }
-        
-        # 更新用戶狀態
-        temp_booking_states[user_id]["data"]["time"] = time_obj
-        temp_booking_states[user_id]["state"] = "waiting_for_location"
-        
-        logger.info(f"用戶 {user_id} 選擇了時間: {time_obj}, 狀態更新為: {temp_booking_states[user_id]}")
-        
-        # 返回地點選擇界面
-        try:
-            flex_content, quick_reply = get_temp_booking_location_flex()
-            
-            # 創建包含Flex內容和Quick Reply的回覆
-            return {
-                "type": "flex",
-                "alt_text": "請選擇起點位置",
-                "contents": flex_content,
-                "quick_reply": quick_reply
-            }
-        except Exception as e:
-            logger.error(f"創建地點選擇界面時出錯: {e}")
-            # 使用簡單的文本消息作為備用方案
-            return {
-                "type": "text",
-                "text": "請輸入起點位置（完整地址或地標名稱）："
-            }
-    
-    except Exception as e:
-        logger.error(f"處理時間輸入時出錯: {e}")
-        # 重置狀態
-        temp_booking_states[user_id]["state"] = "waiting_for_time"
-        return {
-            "type": "text",
-            "text": "處理時間時出錯。請重新輸入預約時間。"
-        }
-
-def handle_location_input(user_id, message_text):
-    """處理用戶輸入的起點位置"""
-    try:
-        # 檢查位置是否有效
-        if not message_text.strip():
-            return {
-                "type": "text",
-                "text": "位置不能為空，請輸入起點位置："
-            }
-        
-        # 更新用戶狀態
-        temp_booking_states[user_id]["data"]["start_point"] = message_text.strip()
-        temp_booking_states[user_id]["state"] = "waiting_for_destination"
-        
-        logger.info(f"用戶 {user_id} 輸入了起點位置: {message_text.strip()}, 狀態更新為: {temp_booking_states[user_id]}")
-        
-        # 返回目的地選擇界面
-        try:
-            flex_content, quick_reply = get_temp_booking_destination_flex()
-            
-            # 創建包含Flex內容和Quick Reply的回覆
-            return {
-                "type": "flex",
-                "alt_text": "請選擇目的地位置",
-                "contents": flex_content,
-                "quick_reply": quick_reply
-            }
-        except Exception as e:
-            logger.error(f"創建目的地選擇界面時出錯: {e}")
-            # 使用簡單的文本消息作為備用方案
-            return {
-                "type": "text",
-                "text": "請輸入目的地位置（完整地址或地標名稱），或輸入「無(略過)」跳過："
-            }
-    
-    except Exception as e:
-        logger.error(f"處理起點位置輸入時出錯: {e}")
-        # 重置狀態
-        temp_booking_states[user_id]["state"] = "waiting_for_location"
-        return {
-            "type": "text",
-            "text": "處理起點位置時出錯。請重新輸入起點位置。"
-        }
-
-def handle_destination_input(user_id, message_text):
-    """處理用戶輸入的目的地位置"""
-    try:
-        # 檢查位置是否有效，但允許"無(略過)"
-        if not message_text.strip():
-            return {
-                "type": "text",
-                "text": "位置不能為空，請輸入目的地位置或輸入「無(略過)」跳過："
-            }
-        
-        # 更新用戶狀態
-        temp_booking_states[user_id]["data"]["end_point"] = message_text.strip()
-        # 更新狀態為等待確認
-        temp_booking_states[user_id]["state"] = "waiting_for_confirm"
-        
-        logger.info(f"用戶 {user_id} 輸入了目的地位置: {message_text.strip()}, 狀態更新為: {temp_booking_states[user_id]}")
-        
-        # 生成確認信息
-        booking_data = temp_booking_states[user_id]["data"]
-        selected_date = booking_data["date"]
-        time_obj = booking_data["time"]
-        
-        # 格式化日期和時間
-        formatted_date = selected_date.strftime("%Y-%m-%d")
-        formatted_time = time_obj.strftime("%H:%M")
-        
-        # 創建預約確認界面
-        try:
-            # 根據用戶是否提供了目的地決定參數
-            end_point = booking_data.get("end_point", None)
-            
-            flex_content, quick_reply = get_temp_booking_confirm_flex(
-                formatted_date,
-                formatted_time,
-                booking_data["start_point"],
-                end_point,
-                booking_data["category"]
-            )
-            
-            # 創建包含Flex內容和Quick Reply的回覆
-            return {
-                "type": "flex",
-                "alt_text": "請確認臨時預約信息",
-                "contents": flex_content,
-                "quick_reply": quick_reply
-            }
-        except Exception as e:
-            logger.error(f"創建確認界面時出錯: {e}")
-            # 使用簡單的文本消息作為備用方案
-            confirm_text = (
-                "請確認臨時預約信息：\n\n"
-                f"日期：{formatted_date}\n"
-                f"時間：{formatted_time}\n"
-                f"起點：{booking_data['start_point']}\n"
-            )
-            
-            # 如果有提供目的地且不是"無(略過)"，則顯示
-            if booking_data.get("end_point") and booking_data.get("end_point") != "無(略過)":
-                confirm_text += f"目的地：{booking_data['end_point']}\n"
-                
-            confirm_text += (
-                f"類別：{booking_data['category']}\n\n"
-                "確認預約請回覆「確認」，取消請回覆「取消」："
-            )
-            
-            return {
-                "type": "text",
-                "text": confirm_text
-            }
-    
-    except Exception as e:
-        logger.error(f"處理目的地位置輸入時出錯: {e}")
-        # 重置狀態
-        temp_booking_states[user_id]["state"] = "waiting_for_destination"
-        return {
-            "type": "text",
-            "text": "處理目的地位置時出錯。請重新輸入目的地位置。"
-        }
-
-def handle_confirm_input(user_id, message_text):
-    """處理用戶確認臨時預約"""
-    try:
-        # 檢查是否確認預約
-        if message_text.lower() not in ["確認", "confirm", "yes", "是", "確定", "ok"]:
-            # 用戶沒有確認，取消預約
-            del temp_booking_states[user_id]
-            return {
-                "type": "text",
-                "text": "您已取消臨時預約。"
-            }
-        
-        # 用戶確認，保存預約到數據庫
-        booking_data = temp_booking_states[user_id]["data"]
-        
-        try:
-            # 修改為使用臨時地點和自定義欄位
-            insert_query = """
-            INSERT INTO trips 
-            (date, time, start_point, end_point, category, status, trip_type, 
-             custom_start_point, custom_end_point) 
-            VALUES 
-            (:date, :time, '臨時地點', '臨時地點', :category, '待派', 'temp',
-             :custom_start_point, :custom_end_point)
-            RETURNING trip_id
-            """
-            
-            # 确保 end_point 不为空，如果为空则设置为默认值
-            end_point = booking_data.get("end_point", "")
-            if not end_point or end_point == "無(略過)":
-                end_point = "无指定终点"
-            
-            params = {
-                "date": booking_data["date"],
-                "time": booking_data["time"],
-                "category": booking_data.get("category", "東洋"),
-                "custom_start_point": booking_data["start_point"],
-                "custom_end_point": end_point
-            }
-            
-            result = db.session.execute(sql_text(insert_query), params)
-            
-            new_trip_id = result.fetchone()[0]
-            
-            # 生成唯一識別碼
-            unique_code = f"T_{new_trip_id}"
-            
-            # 計算一年中的第幾周
-            _, week_number, _ = booking_data["date"].isocalendar()
-            
-            # 更新班次的唯一識別碼和週數
-            update_query = """
-            UPDATE trips 
-            SET unique_code = :unique_code, week_number = :week_number
-            WHERE trip_id = :trip_id
-            """
-            
-            db.session.execute(
-                sql_text(update_query), 
-                {
-                    "unique_code": unique_code,
-                    "week_number": week_number,
-                    "trip_id": new_trip_id
-                }
-            )
-            
-            db.session.commit()
-            
-            logger.info(f"成功創建臨時班次: ID={new_trip_id}, 日期={booking_data['date']}, 時間={booking_data['time']}")
-            
-            # 清除用戶狀態
-            del temp_booking_states[user_id]
-            
-            # 生成成功消息
-            success_message = (
-                "✅ 臨時預約成功！\n\n"
-                f"班次ID: {new_trip_id}\n"
-                f"日期：{booking_data['date'].strftime('%Y-%m-%d')}\n"
-                f"時間：{booking_data['time'].strftime('%H:%M')}\n"
-                f"起點：{booking_data['start_point']}\n"
-            )
-            
-            if booking_data.get("end_point") and booking_data.get("end_point") != "無(略過)":
-                success_message += f"目的地：{booking_data['end_point']}\n"
-            
-            success_message += (
-                f"類別：{booking_data['category']}\n"
-                f"狀態：待派\n\n"
-                "我們會盡快為您指派司機。"
-            )
-            
-            return {
-                "type": "text",
-                "text": success_message
-            }
-        
-        except Exception as db_error:
-            logger.error(f"保存臨時預約到數據庫時出錯: {db_error}")
-            # 回滾事務
-            db.session.rollback()
-            return {
-                "type": "text",
-                "text": f"保存臨時預約時出錯: {str(db_error)}\n請稍後重試。"
-            }
-    
-    except Exception as e:
-        logger.error(f"處理確認輸入時出錯: {e}")
-        # 清除用戶狀態
-        if user_id in temp_booking_states:
-            del temp_booking_states[user_id]
-        return {
-            "type": "text",
-            "text": "處理臨時預約確認時出錯。請重新開始預約流程。"
-        }
+        return {"type": "text", "text": "預約處理過程中出現錯誤，請重新開始。"}
 
 def handle_temp_booking_help():
     """提供臨時預約幫助信息"""
