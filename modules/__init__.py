@@ -6,6 +6,9 @@ from modules.config import LINE_CHANNEL_TOKEN, LINE_CHANNEL_SECRET, DATABASE_URL
 from modules.models.base import init_db_app
 import os
 
+# Import the init function
+from modules.services.ai_service import init_vertexai
+
 def create_app():
     app = Flask(__name__)
     
@@ -18,6 +21,12 @@ def create_app():
     
     # 初始化數據庫
     init_db_app(app)
+    
+    # Initialize Vertex AI
+    try:
+        init_vertexai()
+    except Exception as ai_init_e:
+        app.logger.error(f"Vertex AI initialization failed during app startup: {ai_init_e}", exc_info=True)
     
     # 導入並註冊藍圖
     from modules.routes.webhook import webhook_bp

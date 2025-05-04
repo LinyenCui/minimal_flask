@@ -8,6 +8,45 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Known commands (exact match, case-insensitive)
+KNOWN_COMMANDS = {
+    "幫助", 
+    "幫助文字", 
+    # "臨時預約", # Removed
+    # "臨時預約幫助", # Removed
+    "AI叫車",     # Added
+    # "Bot叫車",    # We'll use the step-by-step fallback from AI for now
+    # "AI叫車幫助", 
+    # "Bot叫車幫助",
+    "查詢班次",     
+    "診所班次",     
+    "查已完成",     
+    "指派司機",     
+    "完成班次",
+    "回報問題",
+    "取消預約",     
+    "取消指派",     
+    "更新已完成班次"
+}
+
+# Commands that *can* take arguments
+COMMANDS_WITH_ARGS = {
+    "查詢班次",
+    "診所班次",
+    "查已完成",
+    "班次詳情",
+    "指派司機", 
+    "指派",     
+    "記錄車資",
+    "修改類別",
+    "生成周報表", 
+    "生成週報表", 
+    "生成周報",   
+    "生成週報",
+    "確認指派", 
+    "取消指派"  
+}
+
 def is_from_button(message_text):
     """
     檢查消息是否來自按鈕點擊
@@ -27,7 +66,6 @@ def should_process_message(message_text, source_type, user_id=None):
         from modules.handlers.temp_booking_handler import temp_booking_states
         if user_id in temp_booking_states:
             logger.info("[should_process] User in booking state, returning True")
-            # For booking state, we need the original message text
             return True, message_text
              
     # 1. Handle User messages directly
@@ -39,67 +77,85 @@ def should_process_message(message_text, source_type, user_id=None):
     if source_type in ['group', 'room']:
         logger.info("[should_process] Group/Room source")
         
-        # 2a. Check mentions first (Optional: keep or remove based on preference)
-        # Example: Check if mentioning the bot should trigger 'help'
-        # if message_text.strip() == "機器人" or ("@" in message_text and any(bot_name in message_text for bot_name in ["機器人", "小黃", "小黄"])):
-        #     logger.info("[should_process] Mention detected, returning True (Help)")
-        #     return True, "幫助" # Trigger help on mention
+        # 2a. Check mentions first
+        if message_text.strip() == "機器人" or ("@" in message_text and any(bot_name in message_text for bot_name in ["機器人", "小黃", "小黄"])):
+            logger.info("[should_process] Mention detected, returning True (Help)")
+            return True, "幫助"
         
         # 2b. Check for prefix
         processed_text = message_text
         for prefix in ["!", "#", "/"]:
             if message_text.startswith(prefix):
-                processed_text = message_text[len(prefix):].strip() # Use len(prefix) for multi-char prefixes
-                if processed_text:
+                processed_text = message_text[1:].strip()
+                if processed_text: 
                     logger.info(f"[should_process] Prefix '{prefix}' detected, returning True with '{processed_text}'")
-                    return True, processed_text
+                    return True, processed_text 
                 else:
-                    # Handle case where only prefix is sent (e.g., "!")
                     logger.info(f"[should_process] Only prefix '{prefix}' found, returning False")
-                    return False, message_text # Ignore message with only prefix
+                    return False, message_text
         
-        # 2c. If NO prefix, check known commands (likely from Quick Replies)
+        # 2c. If NO prefix, check known button/text commands
         logger.info("[should_process] No prefix found, checking known commands...")
-        # List of commands often triggered by buttons/quick replies that should work without prefix
-        known_commands = [
+        button_commands = [
             "查詢班次", "診所班次", "查已完成",
-            # "預約", "東洋預約", # Might be too general? Consider triggering these with prefix?
-            # "生成周報表", # Usually requires prefix
+            "預約", "東洋預約", 
+            "生成周報表",
             "班次詳情", "幫助", "幫助文字",
-            "臨時預約", "臨時預約幫助", # "取消預約" might be too general
-            "取消", # Allow generic cancel from Quick Reply
-            # "指派司機", "選擇司機", "確認指派", "取消指派", # Usually require arguments or prefix
+            "取消預約",
+            "指派司機", "選擇司機", "確認指派", "取消指派",
             "記錄車資", "修改類別"
         ]
-        # Add commands that START with known patterns, e.g., "班次詳情 123"
-        known_command_patterns = [
-             "班次詳情 ", # Note the space
-             "查詢班次 ", # Note the space
-             "診所班次 ", # Note the space
-             "查已完成 ", # Note the space
-             "修改狀態 ", # Note the space
-             "記錄車資 ", # Note the space
-             "確認取消 ", # Note the space
-             "確認請假 ", # Note the space
-             "確認衝突 ", # Note the space
-             "修改類別 ", # Note the space
-             # Driver related commands usually triggered by postback or have prefix,
-             # but check if needed based on your Quick Reply design
-             # "指派司機 ", "選擇司機 ", "確認指派 ", "取消指派 "
-        ]
-
-        exact_match = message_text in known_commands
-        starts_with_match = any(message_text.startswith(pattern) for pattern in known_command_patterns)
-
-        if exact_match or starts_with_match:
-             logger.info(f"[should_process] Known command without prefix detected ('{message_text}'), returning True")
-             # For these commands, the handler expects the full original text
-             return True, message_text
-
-        # 2d. If NO prefix and NOT a known command, DO NOT process
-        logger.info("[should_process] No prefix and not a known command in Group/Room, returning False")
-        return False, message_text # Ignore other non-prefixed messages
-        
-    # Default: should not happen, but return False just in case
-    logger.warning(f"[should_process] Unknown source type or condition: {source_type}")
+        for cmd in button_commands:
+            match = False
+            if message_text == cmd:
+                match = True
+                logger.info(f"[should_process] Exact match for command: '{cmd}'")
+            elif message_text.startswith(f"{cmd} "):
+                 match = True
+                 logger.info(f"[should_process] Starts with command: '{cmd} '")
+                 
+            if match:
+                 # For commands, return the original text, let handler parse args
+                 logger.info(f"[should_process] Command match, returning True with original text '{message_text}'")
+                 return True, message_text
+                 
+        # 2d. If NO prefix and NOT a known command, THEN check for booking input patterns
+        logger.info("[should_process] Not a known command, checking booking patterns...")
+        # ... (Define date_pattern, time_pattern, location_keywords etc. as before) ...
+        date_pattern = r'^\d{4}-\d{2}-\d{2}$' 
+        time_pattern = r'^([01]?[0-9]|2[0-3]):([0-5][0-9])$'
+        shorthand_time_pattern = r'^\d{3,4}$' 
+        special_date_inputs = ["今天", "明天", "後天"]
+        confirm_inputs = ["確認", "confirm", "yes", "是", "確定", "ok"]
+        cancel_inputs = ["取消", "取消預約", "cancel", "退出", "exit"]
+        location_keywords = ["路", "街", "巷", "弄", "號", "樓", "台", "臺", "区", "區", "鎮", "鄉", "村", "大樓", "大廈", "社區", "小區", "廣場", "公園", "站", "市場", "中心", "學校", "醫院", "飯店", "酒店", "賓館", "捷運", "公司", "車站", "南", "北", "東", "西"]
+        driver_assign_pattern = r'^指派司機\s+\d+$'
+        driver_select_pattern = r'^指派司機\s+\d+\s+\d+$'
+        driver_confirm_pattern = r'^確認指派\s+\d+\s+\d+$'
+        driver_cancel_pattern = r'^取消指派\s+\d+$'
+        simplified_assign_pattern = r'^指派\s+\d+$'
+        is_booking_input = (
+            re.match(date_pattern, message_text) or 
+            re.match(time_pattern, message_text) or
+            re.match(shorthand_time_pattern, message_text) or
+            message_text in special_date_inputs or
+            message_text in confirm_inputs or
+            message_text in cancel_inputs or
+            message_text == "無(略過)" or
+            any(keyword in message_text for keyword in location_keywords) or
+            re.match(driver_assign_pattern, message_text) or # Keep driver assign checks here or move to known commands?
+            re.match(driver_select_pattern, message_text) or
+            re.match(driver_confirm_pattern, message_text) or
+            re.match(driver_cancel_pattern, message_text) or
+            re.match(simplified_assign_pattern, message_text)
+        )
+        if is_booking_input:
+             logger.info("[should_process] Booking input pattern detected, returning True")
+             return True, message_text # Return original text for booking handler
+             
+        # 5. If none of the above, skip
+        logger.info("[should_process] No match found, returning False")
+        return False, message_text
+                
+    logger.info("[should_process] Default return False (source type unknown?)")
     return False, message_text 
