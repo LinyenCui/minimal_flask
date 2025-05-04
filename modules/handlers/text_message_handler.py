@@ -413,30 +413,33 @@ def process_text_message(event):
             reply_text(reply_token, result_text)
             return
             
-        # 查詢固定班次 (現在是 診所班次)
-        elif message_text.startswith("診所班次"):
+        # 診所班次 (Handles "診所班次" and "診所班次 [date]")
+        elif message_text.startswith("診所班次"): 
             try:
                 parts = message_text.split()
                 if len(parts) > 1:
-                    # 如果命令包含日期，執行實際查詢 (診所)
                     logger.info(f"處理診所班次命令 (帶日期): {message_text}")
-                    from modules.services.trip_query_service import handle_query_clinic_trips_flex, handle_query_clinic_trips
-                    flex_content, error_message = handle_query_clinic_trips_flex(message_text)
-                    if flex_content and error_message is None:
-                        reply_flex(reply_token, "診所班次查詢結果", flex_content)
-                    else:
-                        logger.info(f"診所班次查詢 Flex 失敗或無結果，回退文本: {error_message}")
-                        result = handle_query_clinic_trips(message_text)
-                        reply_text(reply_token, result)
-                else:
-                    # 如果命令只有"診所班次"，觸發日期選擇
+                    from modules.services.trip_query_service import handle_query_clinic_trips_flex
+                    
+                    flex_content, message = handle_query_clinic_trips_flex(message_text) 
+
+                    if flex_content: # Trips found, send Flex
+                         logger.info(f"找到診所班次，發送 Flex Message")
+                         reply_flex(reply_token, "診所班次查詢結果", flex_content)
+                    else: # No trips found OR error occurred
+                         # --- FIX: Directly use the message returned by the service --- 
+                         logger.info(f"診所班次查詢無結果或發生錯誤，發送消息: {message}")
+                         reply_text(reply_token, message or "查詢診所班次時發生未知錯誤。") # Send the message directly
+                         # --- END FIX --- 
+
+                else: # "診所班次" without date
                     logger.info(f"處理診所班次命令 (觸發日期選擇): {message_text}")
                     from modules.services.trip_query_service import request_clinic_trip_date_selection
                     reply_msg, error_message = request_clinic_trip_date_selection()
                     if reply_msg and error_message is None:
                         reply_message(reply_token, [reply_msg]) 
                     else:
-                        reply_text(reply_token, error_message or "無法生成日期選擇")
+                         reply_text(reply_token, error_message or "無法生成日期選擇")
                 return 
             except Exception as e:
                 logger.error(f"處理診所班次命令時出錯: {e}", exc_info=True)
