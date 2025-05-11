@@ -7,17 +7,9 @@ def get_help_flex():
             "type": "box",
             "layout": "vertical",
             "contents": [
-                {
-                    "type": "text",
-                    "text": "可用命令列表",
-                    "weight": "bold",
-                    "size": "md",
-                    "color": "#ffffff"
-                }
+                {"type": "text", "text": "常用功能", "weight": "bold", "size": "md", "color": "#ffffff"}
             ],
-            "backgroundColor": "#4682B4",
-            "paddingTop": "8px",
-            "paddingBottom": "8px"
+            "backgroundColor": "#4682B4", "paddingTop": "8px", "paddingBottom": "8px"
         },
         "body": {
             "type": "box",
@@ -25,52 +17,23 @@ def get_help_flex():
             "contents": [
                 {
                     "type": "button",
-                    "action": {
-                        "type": "message",
-                        "label": "🔍 查詢班次",
-                        "text": "查詢班次"
-                    },
-                    "style": "primary",
-                    "color": "#1E90FF",
-                    "margin": "sm",
-                    "height": "sm"
+                    "action": {"type": "message", "label": "🔍 查詢班次", "text": "查詢班次"},
+                    "style": "primary", "color": "#1E90FF", "margin": "sm", "height": "sm"
                 },
                 {
                     "type": "button",
-                    "action": {
-                        "type": "postback",
-                        "label": "🏥 診所班次",
-                        "data": "action=query_clinic_trips_date_select",
-                        "displayText": "診所班次"
-                    },
-                    "style": "primary",
-                    "color": "#6A5ACD",
-                    "margin": "sm",
-                    "height": "sm"
+                    "action": {"type": "postback", "label": "🏥 診所班次", "data": "action=query_clinic_trips_date_select", "displayText": "診所班次"},
+                    "style": "primary", "color": "#6A5ACD", "margin": "sm", "height": "sm"
                 },
                 {
                     "type": "button",
-                    "action": {
-                        "type": "message",
-                        "label": "🚕 臨時預約",
-                        "text": "臨時預約"
-                    },
-                    "style": "primary",
-                    "color": "#FF6B6E",
-                    "margin": "sm",
-                    "height": "sm"
+                    "action": {"type": "message", "label": "📝 預約叫車 (AI推薦)", "text": "預約叫車"},
+                    "style": "primary", "color": "#FF6B6E", "margin": "sm", "height": "sm"
                 },
                 {
                     "type": "button",
-                    "action": {
-                        "type": "postback",
-                        "label": "📄 顯示文字版幫助",
-                        "data": "action=help",
-                        "displayText": "幫助文字"
-                    },
-                    "style": "secondary",
-                    "margin": "sm",
-                    "height": "sm"
+                    "action": {"type": "postback", "label": "📄 顯示完整指令", "data": "action=help_text", "displayText": "幫助文字"},
+                    "style": "secondary", "margin": "sm", "height": "sm"
                 }
             ]
         },
@@ -78,15 +41,8 @@ def get_help_flex():
             "type": "box",
             "layout": "vertical",
             "contents": [
-                {
-                    "type": "text",
-                    "text": "按鈕操作在群組中無需使用前綴",
-                    "size": "xs",
-                    "color": "#888888",
-                    "align": "center"
-                }
+                {"type": "text", "text": "輸入「預約叫車幫助」或「幫助文字」查看指令", "size": "xs", "color": "#888888", "align": "center"}
             ]
         }
     }
-    
     return help_bubble

@@ -784,7 +784,7 @@ def handle_query_clinic_trips_flex(message_text=None):
             # --- 結束恢復 ---
         
         # 如果有結果，則生成 Flex (這部分應在 if 塊之外)
-        flex_content = generate_trips_flex(all_clinic_trips, is_fixed_trips=True) 
+        flex_content = generate_trips_flex(all_clinic_trips, is_fixed_trips=False) 
         return flex_content, None
     except Exception as e:
         # ... (錯誤處理) ...
