@@ -6,7 +6,7 @@ import logging
 
 from modules.utils.line_bot import get_parser, reply_text
 from modules.services.postback_service import handle_postback
-from modules.handlers.message_handler import should_process_message
+from modules.handlers.message_handler import should_process
 
 # 創建藍圖
 webhook_bp = Blueprint('webhook', __name__)
@@ -37,12 +37,12 @@ def callback():
                 source_type = event.source.type
                 user_id = event.source.user_id # 獲取 user_id
                 
-                from modules.handlers.message_handler import should_process_message
-                should_handle, processed_text = should_process_message(original_message_text, source_type, user_id)
+                should_handle, processed_text = should_process(original_message_text, source_type, user_id)
                 
                 if should_handle:
                     # --- 恢復直接修改 event 對象 --- 
                     event.message.text = processed_text 
+                    logger.info(f"Passing processed text '{processed_text}' to handler.")
                     # --- 調用原始的處理函數 --- 
                     handle_text_message(event) 
                 else:
@@ -53,8 +53,7 @@ def callback():
         logger.error("無效的簽名")
         abort(400)
     except Exception as e:
-        logger.error(f"處理webhook時出錯: {e}")
-        traceback.print_exc()
+        logger.error(f"處理webhook時出錯: {e}", exc_info=True)
         abort(500)
         
     return 'OK'

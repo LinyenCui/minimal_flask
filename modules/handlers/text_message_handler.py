@@ -12,7 +12,12 @@ from modules.utils.line_bot import (
 )
 from modules.handlers.trip_handler import handle_query_trips, handle_trip_details, handle_change_status, handle_record_fare, handle_modify_category
 from modules.flex_designs.help_flex import get_help_flex
-from modules.handlers.temp_booking_handler import handle_temp_booking_start, handle_temp_booking_message, temp_booking_states, handle_temp_booking_help
+from modules.handlers.temp_booking_handler import (
+    handle_temp_booking_start,
+    handle_temp_booking_message,
+    temp_booking_states,
+    handle_temp_booking_help
+)
 from modules.services.driver_service import handle_driver_assign_request, handle_driver_assign_select, handle_driver_assign_confirm, handle_driver_assign_cancel
 
 # 設定日誌
@@ -75,8 +80,8 @@ def process_text_message(event):
             return
         
         # 臨時預約命令
-        if command_text_lower == "ai叫車":
-            logger.info(f"用戶 {user_id} 請求 AI 叫車")
+        if command_text_lower == "預約叫車":
+            logger.info(f"用戶 {user_id} 請求 預約叫車 (AI流程)")
             response = handle_temp_booking_start(user_id)
             
             if response:
@@ -567,9 +572,9 @@ def get_help_text():
 5. 指派司機 [ID] - 為班次指派司機 (通過按鈕選擇)
 6. 記錄車資 [ID] [錶價] [加成] - 記錄費用 (加成可選/可為負, 默認0)
 7. 修改類別 [ID] [新類別] - 修改已完成班次的類別 (診所/東洋/臨時)
-8. 臨時預約 - 開始臨時預約流程 (默認類別為東洋)
-9. 臨時預約幫助 - 顯示臨時預約相關說明
+8. 預約叫車 - 通過自然語言描述開始預約 (推薦)
+9. 預約叫車幫助 - 顯示「預約叫車」的說明
 10. 幫助 - 顯示此幫助信息
 
-在群組中使用時，可選擇性在命令前添加前綴...
+在群組中使用時，可選擇性在命令前添加前綴... (例如 !, #, /)
 """
