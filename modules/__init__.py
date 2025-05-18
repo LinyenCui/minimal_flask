@@ -18,6 +18,10 @@ def create_app():
     app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/dispatch_db')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['DEBUG'] = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_pre_ping': True,
+        'pool_recycle': 1800
+    }
     
     # 初始化數據庫
     init_db_app(app)

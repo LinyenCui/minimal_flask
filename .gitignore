@@ -50,3 +50,4 @@ __pycache__/
 !.env.example
 venv/
 new_venv/
+*.xlsx
