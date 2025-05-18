@@ -1,6 +1,6 @@
 # modules/flex_designs/trip_query_flex.py
-# import logging # Logger can be removed if not used elsewhere in this file after cleanup
-# logger = logging.getLogger(__name__) # Can be removed
+import logging # Logger can be removed if not used elsewhere in this file after cleanup
+logger = logging.getLogger(__name__) # Can be removed
 
 def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
     """
@@ -92,33 +92,33 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
                 # --- END MODIFICATION ---
             
             else: # Fixed trips or other types
-                # logger.info(f"[generate_trips_flex] Trip ID {trip_id}: Entered 'else' (non-temp) type logic.") # Removed
+                # logger.info(f"[generate_trips_flex] Trip ID {trip_id}: Entered \'else\' (non-temp) type logic.") # Removed
                 if direction == "來":
                     location_display_text = (start_point_db or "未指定") + " (來)"
                 elif direction == "回":
                     end_point_db = trip[4] # Ensure end_point_db is defined here
                     location_display_text = (end_point_db or "未指定") + " (回)"
-                else: 
+                else:
                     s = start_point_db or "?"
                     e = trip[4] or "?" # Ensure end_point_db is defined here
                     location_display_text = f"{s} → {e}"
             
-            # logger.info(f"[generate_trips_flex] Trip ID {trip_id}: Final location_display_text='{location_display_text}'") # Removed
-
+            # logger.info(f"[generate_trips_flex] Trip ID {trip_id}: Final location_display_text=\'{location_display_text}\'\") # Removed
+        
             # 如果日期變了，添加日期標題
             if current_date != trip_date:
                 current_date = trip_date
                 weekday_names = ["一", "二", "三", "四", "五", "六", "日"]
                 weekday = weekday_names[current_date.weekday()]
                 date_title = f"{current_date.month}/{current_date.day} (星期{weekday})"
-                
+            
                 # 添加日期分隔線 (如果不是第一個日期)
                 if bubble["body"]["contents"]:
                     bubble["body"]["contents"].append({
                         "type": "separator",
                         "margin": "md"
                     })
-                
+            
                 # 添加日期標題
                 bubble["body"]["contents"].append({
                     "type": "text",
@@ -127,7 +127,7 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
                     "size": "md",
                     "margin": "md"
                 })
-            
+        
             # 根據狀態添加不同的表情符號
             status_emoji = {
                 "準備": "🟢",
@@ -137,11 +137,11 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
                 "請假": "🔵",
                 "待派": "🟠"
             }.get(status, "⚪")
-            
+        
             # 根據班次類型設定顏色
             text_color = "#333333" if trip_type == "fixed" else "#0000FF"  # 固定班次為黑色，臨時班次為藍色
             background_color = None if trip_type == "fixed" else "#E6E6FA"  # 臨時班次有淡紫色背景
-            
+        
             # 添加班次信息
             trip_box = {
                 "type": "box",
@@ -188,13 +188,13 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
                     "text": f"班次詳情 {trip_id}"
                 }
             }
-            
+        
             # 如果是臨時班次，添加背景色
             if background_color:
                 trip_box["backgroundColor"] = background_color
                 trip_box["cornerRadius"] = "sm"
                 trip_box["paddingAll"] = "sm"
-            
+        
             bubble["body"]["contents"].append(trip_box)
         except Exception as e:
             # Keep this error logging for individual trip processing errors

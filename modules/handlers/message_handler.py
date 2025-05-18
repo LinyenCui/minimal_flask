@@ -38,18 +38,17 @@ def is_from_button(message_text):
 
 def should_process(message_text, source_type, user_id):
     logger.info(f"[should_process] Checking: '{message_text}' from {source_type}")
-
+    
     if message_text == "@CANCEL_DRIVER_ASSIGN@":
         logger.info("[should_process] Internal cancel command detected, returning True")
         return True, message_text
 
-    from modules.handlers.temp_booking_handler import temp_booking_states
     cancel_commands = ["取消", "取消預約", "cancel", "退出", "exit"]
     if user_id in temp_booking_states and not any(cmd in message_text.lower() for cmd in cancel_commands):
         if not any(message_text.startswith(f"{p}{cmd}") for p in ["!", "#", "/"] for cmd in cancel_commands):
-             logger.info("[should_process] User in booking state, returning True")
-             return True, message_text 
-
+            logger.info("[should_process] User in booking state, returning True")
+            return True, message_text
+             
     prefix = None
     command_body = message_text 
     for p in ["!", "#", "/"]:
@@ -81,7 +80,7 @@ def should_process(message_text, source_type, user_id):
         if command_body.strip() in bot_names or ("@" in command_body and any(f"@{name}" in command_body for name in bot_names)):
             logger.info("[should_process] Mention detected, treating as '幫助'")
             return True, "幫助"
-            
+        
         logger.info("[should_process] Group: Checking for commands with args pattern...")
         for cmd_arg_original_case in COMMANDS_WITH_ARGS:
              if command_body.startswith(f"{cmd_arg_original_case} "):
@@ -94,6 +93,6 @@ def should_process(message_text, source_type, user_id):
     if source_type == "user":
         logger.info("[should_process] Private chat and not a KNOWN command. Processing.")
         return True, command_body 
-
+                
     logger.info("[should_process] Default: No processing rule matched, ignore.")
     return False, command_body 

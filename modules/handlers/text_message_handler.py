@@ -43,40 +43,40 @@ def process_text_message(event):
             
             if response:
                 # 根據回傳的消息類型發送回覆
-                if response.get("type") == "flex":
-                    try:
-                        # 如果有Quick Reply，使用它
-                        if "quick_reply" in response:
-                            from linebot.v3.messaging import FlexMessage, FlexContainer
-                            
-                            # 添加日志记录
-                            logger.info(f"臨時預約中帶有QuickReply: {response.get('quick_reply')}")
-                            
-                            # 更簡單地創建FlexMessage
-                            flex_message = {
-                                "type": "flex",
-                                "altText": response.get("alt_text", "預約流程"),
-                                "contents": response.get("contents"),
-                                "quickReply": response.get("quick_reply")
-                            }
-                            
-                            # 發送帶有Quick Reply的Flex消息
-                            logger.info("嘗試發送帶有QuickReply的臨時預約Flex消息")
-                            reply_message(reply_token, [flex_message])
-                            logger.info("臨時預約Flex消息發送成功")
-                        else:
-                            # 沒有Quick Reply，使用普通的reply_flex
-                            reply_flex(reply_token, response.get("alt_text", "預約流程"), response.get("contents"))
-                    except Exception as e:
-                        logger.error(f"發送Flex消息時出錯: {e}")
-                        traceback.print_exc()
-                        # 使用文本版本作為後備
-                        if "text" in response:
-                            reply_text(reply_token, response.get("text"))
-                        else:
-                            reply_text(reply_token, "處理中...")
-                else:
-                    reply_text(reply_token, response.get("text", "處理中..."))
+                    if response.get("type") == "flex":
+                        try:
+                            # 如果有Quick Reply，使用它
+                            if "quick_reply" in response:
+                                from linebot.v3.messaging import FlexMessage, FlexContainer
+                                
+                                # 添加日志记录
+                                logger.info(f"臨時預約中帶有QuickReply: {response.get('quick_reply')}")
+                                
+                                # 更簡單地創建FlexMessage
+                                flex_message = {
+                                    "type": "flex",
+                                    "altText": response.get("alt_text", "預約流程"),
+                                    "contents": response.get("contents"),
+                                    "quickReply": response.get("quick_reply")
+                                }
+                                
+                                # 發送帶有Quick Reply的Flex消息
+                                logger.info("嘗試發送帶有QuickReply的臨時預約Flex消息")
+                                reply_message(reply_token, [flex_message])
+                                logger.info("臨時預約Flex消息發送成功")
+                            else:
+                                # 沒有Quick Reply，使用普通的reply_flex
+                                reply_flex(reply_token, response.get("alt_text", "預約流程"), response.get("contents"))
+                        except Exception as e:
+                            logger.error(f"發送Flex消息時出錯: {e}")
+                            traceback.print_exc()
+                            # 使用文本版本作為後備
+                            if "text" in response:
+                                reply_text(reply_token, response.get("text"))
+                            else:
+                                reply_text(reply_token, "處理中...")
+                    else:
+                        reply_text(reply_token, response.get("text", "處理中..."))
             return
         
         # 臨時預約命令
@@ -120,7 +120,7 @@ def process_text_message(event):
                 else:
                     reply_text(reply_token, response.get("text", "開始臨時預約流程..."))
             return
-            
+        
         # 查詢班次 (東洋/臨時)
         elif message_text.startswith("查詢班次"):
             try:
@@ -413,7 +413,7 @@ def process_text_message(event):
             return
             
         # 診所班次 (Handles "診所班次" and "診所班次 [date]")
-        elif message_text.startswith("診所班次"): 
+        elif message_text.startswith("診所班次"):
             try:
                 parts = message_text.split()
                 if len(parts) > 1:
@@ -423,8 +423,8 @@ def process_text_message(event):
                     flex_content, message = handle_query_clinic_trips_flex(message_text) 
 
                     if flex_content: # Trips found, send Flex
-                         logger.info(f"找到診所班次，發送 Flex Message")
-                         reply_flex(reply_token, "診所班次查詢結果", flex_content)
+                        logger.info(f"找到診所班次，發送 Flex Message")
+                        reply_flex(reply_token, "診所班次查詢結果", flex_content)
                     else: # No trips found OR error occurred
                          # --- FIX: Directly use the message returned by the service --- 
                          logger.info(f"診所班次查詢無結果或發生錯誤，發送消息: {message}")
@@ -438,7 +438,7 @@ def process_text_message(event):
                     if reply_msg and error_message is None:
                         reply_message(reply_token, [reply_msg]) 
                     else:
-                         reply_text(reply_token, error_message or "無法生成日期選擇")
+                        reply_text(reply_token, error_message or "無法生成日期選擇")
                 return 
             except Exception as e:
                 logger.error(f"處理診所班次命令時出錯: {e}", exc_info=True)
