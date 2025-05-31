@@ -386,12 +386,13 @@ def get_temp_booking_confirm_flex(date_str, time_str, start_point, end_point=Non
                     "type": "text",
                     "text": "預約確認",
                     "weight": "bold",
-                    "size": "xl",
-                    "color": "#ffffff"
+                    "size": "lg",
+                    "color": "#FFFFFF",
+                    "align": "center"
                 }
             ],
-            "backgroundColor": "#FF6B6E",
-            "paddingAll": "12px"
+            "backgroundColor": "#6BBD6B",
+            "paddingAll": "md"
         },
         "body": {
             "type": "box",
@@ -399,10 +400,12 @@ def get_temp_booking_confirm_flex(date_str, time_str, start_point, end_point=Non
             "contents": [
                 {
                     "type": "text",
-                    "text": "請確認您的臨時預約信息",
+                    "text": "請確認您的預約信息",
                     "weight": "bold",
                     "size": "md",
-                    "align": "center"
+                    "align": "center",
+                    "wrap": True,
+                    "margin": "md"
                 },
                 {
                     "type": "separator",
@@ -478,62 +481,30 @@ def get_temp_booking_confirm_flex(date_str, time_str, start_point, end_point=Non
                         }
                     ],
                     "paddingAll": "10px",
-                    "backgroundColor": "#F5F5F5",
-                    "cornerRadius": "5px",
+                    "backgroundColor": "#F8F9F9",
+                    "cornerRadius": "md",
                     "margin": "md"
                 }
             ],
             "spacing": "md",
             "paddingBottom": "10px"
-        },
-        "footer": {
-            "type": "box",
-            "layout": "vertical",
-            "contents": [
-                {
-                    "type": "button",
-                    "action": {
-                        "type": "message",
-                        "label": "取消預約",
-                        "text": "取消預約"
-                    },
-                    "style": "secondary",
-                    "color": "#999999"
-                }
-            ]
         }
     }
     
     # Get the contents box to append items dynamically
     contents_box = bubble["body"]["contents"][2]["contents"]
 
-    # --- ADDED: Logic to display via_point --- 
     if via_point:
         contents_box.append({
             "type": "box",
             "layout": "horizontal",
             "contents": [
-                {
-                    "type": "text",
-                    "text": "途經",
-                    "size": "sm",
-                    "color": "#555555",
-                    "flex": 2
-                },
-                {
-                    "type": "text",
-                    "text": via_point,
-                    "size": "sm",
-                    "color": "#111111",
-                    "flex": 4,
-                    "wrap": True
-                }
+                { "type": "text", "text": "途經", "size": "sm", "color": "#555555", "flex": 2 },
+                { "type": "text", "text": via_point, "size": "sm", "color": "#111111", "flex": 4, "wrap": True }
             ],
             "margin": "md"
         })
-    # --- END ADDED --- 
 
-    # Display end_point if it exists
     if end_point and end_point != "無(略過)":
         contents_box.append({
             "type": "box",
@@ -545,7 +516,6 @@ def get_temp_booking_confirm_flex(date_str, time_str, start_point, end_point=Non
             "margin": "md"
         })
     
-    # Display category
     contents_box.append({
         "type": "box",
         "layout": "horizontal",
@@ -556,14 +526,22 @@ def get_temp_booking_confirm_flex(date_str, time_str, start_point, end_point=Non
         "margin": "md"
     })
     
-    # 創建確認的Quick Reply選項
+    # Enhanced Quick Reply options
     quick_reply_items = [
         {
             "type": "action",
             "action": {
                 "type": "message",
-                "label": "確認預約",
+                "label": "✅ 確認預約",
                 "text": "確認"
+            }
+        },
+        {
+            "type": "action",
+            "action": {
+                "type": "message",
+                "label": "❌ 取消流程",
+                "text": "取消預約"
             }
         }
     ]

@@ -86,7 +86,8 @@ def handle_query_trips(message_text=None):
                 t.end_point, 
                 COALESCE(fs.direction, '來') as direction,
                 t.status,
-                t.driver_id
+                t.driver_id,
+                t.trip_type
             FROM 
                 trips t
             LEFT JOIN
@@ -144,6 +145,7 @@ def handle_query_trips(message_text=None):
             
             status = trip[6] or "未指定"
             driver_id = trip[7] or "未指派"
+            trip_type_val = trip[8]
             
             # 如果日期變了，添加日期標題
             if current_date != trip_date:
@@ -164,7 +166,7 @@ def handle_query_trips(message_text=None):
             }.get(status, "⚪")
             
             # 使用黃色小車表情符號代替"司機#"
-            reply_text += f"{status_emoji} #{trip_id} {time_val} {location}{direction} - 🚕{driver_id}\n"
+            reply_text += f"{status_emoji} #{trip[0]} {time_val} {location}{direction} - 🚕{driver_id}\n"
         
         reply_text += "\n輸入「班次詳情 [ID]」查看特定班次的詳細信息。"
         
@@ -178,88 +180,91 @@ def handle_query_trips(message_text=None):
 # 處理班次詳情命令
 def handle_trip_details(trip_id):
     try:
-        # 查詢班次
-        trip = db.session.query(
-            Trip, Customer, Driver
-        ).join(
-            Customer, Trip.start_point == Customer.short_name
-        ).outerjoin(
-            Driver, Trip.driver_id == Driver.id
-        ).filter(
-            Trip.trip_id == trip_id
-        ).first()
+        logger.info(f"處理班次詳情查詢 (文本版): trip_id={trip_id}") # 更新日誌
         
-        if not trip:
-            return f"找不到ID為 {trip_id} 的班次"
+        # 查詢班次詳情 - 確保包含 trip_type
+        query = """
+        SELECT 
+            t.trip_id, 
+            t.date,
+            t.time,
+            t.start_point, -- 使用原始 short_name
+            t.via_point,   -- 使用原始 short_name
+            t.end_point,   -- 使用原始 short_name
+            t.status,
+            t.custom_start_point, # 新增
+            t.custom_via_point,   # 新增
+            t.custom_end_point,   # 新增
+            t.trip_type,          # <--- 確保選取 trip_type
+            t.category,
+            t.meter_fare,
+            t.extra_fare,
+            t.actual_fare,
+            t.driver_id,          -- 直接獲取 driver_id
+            d.name as driver_name, -- 獲取司機名字
+            d.plate_number,       -- 獲取車牌
+            t.fixed_trip_id,
+            t.unique_code
+        FROM 
+            trips t
+        LEFT JOIN 
+            drivers d ON t.driver_id = d.id
+        WHERE 
+            t.trip_id = :trip_id
+        """
         
-        trip, customer, driver = trip
+        # 使用 fetchone() 因為我們期望只有一條記錄
+        trip_row = db.session.execute(sql_text(query), {"trip_id": trip_id}).fetchone()
         
-        # 格式化結果
-        result = f"📋 班次 #{trip_id} 詳細信息：\n\n"
+        if not trip_row:
+            return f"找不到班次 #{trip_id}"
         
-        # 格式化日期和時間
-        trip_date = trip.date.strftime("%Y-%m-%d") if trip.date else "未設置"
-        trip_time = trip.time.strftime("%H:%M") if trip.time else "未設置"
+        # 將 RowProxy 轉換為字典以便於訪問
+        trip = dict(trip_row._mapping if hasattr(trip_row, '_mapping') else trip_row) 
+
+        result_text = f"📋 班次 #{trip.get('trip_id')} 詳細信息：\n\n"
+        trip_date_obj = trip.get('date')
+        formatted_date = trip_date_obj.strftime("%Y-%m-%d") if trip_date_obj else "未設置"
+        weekday_names = ["一", "二", "三", "四", "五", "六", "日"]
+        weekday = weekday_names[trip_date_obj.weekday()] if trip_date_obj else ""
+        result_text += f"📅 日期: {formatted_date} (星期{weekday})\n"
         
-        # 檢查是否為臨時預約
-        is_temp_booking = trip.trip_type == 'temp'
+        trip_time_obj = trip.get('time')
+        formatted_time = trip_time_obj.strftime("%H:%M") if trip_time_obj else "未設置"
+        result_text += f"⏰ 時間: {formatted_time}\n"
+
+        is_temp_booking = trip.get('trip_type') == 'temp'
+        start_display = trip.get('custom_start_point') if is_temp_booking and trip.get('custom_start_point') else trip.get('start_point')
+        via_display = trip.get('custom_via_point') if is_temp_booking and trip.get('custom_via_point') else trip.get('via_point')
+        end_display = trip.get('custom_end_point') if is_temp_booking and trip.get('custom_end_point') else trip.get('end_point')
+
+        result_text += f"📍 起點: {start_display or '未指定'}\n"
+        if via_display:
+            result_text += f"🚩 經由: {via_display}\n"
+        result_text += f"🏁 終點: {end_display or '未指定'}\n"
         
-        # 根據班次類型選擇顯示的起點
-        if is_temp_booking and trip.custom_start_point:
-            start_display = trip.custom_start_point
-        else:
-            start_display = f"{customer.short_name} ({customer.name})"
+        result_text += f"🚦 狀態: {trip.get('status') or '未指定'}\n"
+        result_text += f"🚕 司機: {trip.get('driver_name') or '未指派'}\n"
+        if trip.get('plate_number'):
+            result_text += f"牌照: {trip.get('plate_number')}\n"
+        result_text += f"📊 類別: {trip.get('category') or '未分類'}\n"
+        if trip.get('meter_fare') is not None:
+            result_text += f"💰 表價: {trip.get('meter_fare')} 元\n"
+        if trip.get('extra_fare') is not None:
+            result_text += f"💸 加成: {trip.get('extra_fare')} 元\n"
+        if trip.get('actual_fare') is not None:
+            result_text += f"💲 實收: {trip.get('actual_fare')} 元\n"
+        else: # 如果 actual_fare 為空，嘗試計算
+            meter = trip.get('meter_fare', 0) or 0
+            extra = trip.get('extra_fare', 0) or 0
+            result_text += f"💲 實收: {meter + extra} 元\n"
+
+        if trip.get('fixed_trip_id'):
+            result_text += f"🔄 固定班次ID: {trip.get('fixed_trip_id')}\n"
+        if trip.get('unique_code'):
+            result_text += f"🔑 唯一碼: {trip.get('unique_code')}\n"
         
-        result += (f"📅 日期: {trip_date}\n"
-                  f"⏰ 時間: {trip_time}\n"
-                  f"📍 起點: {start_display}\n")
-        
-        # 如果有經由點
-        if trip.via_point or (is_temp_booking and trip.custom_via_point):
-            if is_temp_booking and trip.custom_via_point:
-                result += f"🚩 經由: {trip.custom_via_point}\n"
-            else:
-                via_customer = db.session.query(Customer).filter(Customer.short_name == trip.via_point).first()
-                if via_customer:
-                    result += f"🚩 經由: {via_customer.short_name} ({via_customer.name})\n"
-                else:
-                    result += f"🚩 經由: {trip.via_point}\n"
-        
-        # 終點
-        if is_temp_booking and trip.custom_end_point:
-            result += f"🏁 終點: {trip.custom_end_point}\n"
-        else:
-            end_customer = db.session.query(Customer).filter(Customer.short_name == trip.end_point).first()
-            if end_customer:
-                result += f"🏁 終點: {end_customer.short_name} ({end_customer.name})\n"
-            else:
-                result += f"🏁 終點: {trip.end_point}\n"
-        
-        # 價格信息
-        result += (f"💰 表價: {trip.meter_fare or 0}\n"
-                  f"💸 加成: {trip.extra_fare or 0}\n"
-                  f"💲 實收: {trip.actual_fare or (trip.meter_fare or 0) + (trip.extra_fare or 0)}\n")
-        
-        # 類別與狀態
-        result += (f"📊 類別: {trip.category}\n"
-                  f"🚦 狀態: {trip.status}\n")
-        
-        # 司機信息
-        if driver:
-            result += (f"👨‍✈️ 司機: {driver.name}\n"
-                      f"🚕 車號: {driver.plate_number}\n")
-        else:
-            result += "🚫 未指派司機\n"
-        
-        # 如果是固定班次，顯示固定班次ID
-        if trip.fixed_trip_id:
-            result += f"🔄 固定班次ID: {trip.fixed_trip_id}\n"
-        
-        # 顯示唯一碼
-        if trip.unique_code:
-            result += f"🔑 唯一碼: {trip.unique_code}\n"
-        
-        return result
+        return result_text
     except Exception as e:
         current_app.logger.error(f"處理班次詳情命令時出錯: {e}")
         traceback.print_exc()

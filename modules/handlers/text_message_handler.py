@@ -175,41 +175,40 @@ def process_text_message(event):
                         current_app.logger.info("获取到Flex内容，准备发送")
                         
                         try:
-                            # 尝试使用Flex版本回复
                             from linebot.v3.messaging import FlexMessage, FlexContainer, QuickReply, QuickReplyItem, PostbackAction
                             
-                            # 添加Quick Reply
-                            if 'quick_reply' in result:
+                            flex_message_content = result['flex_message']
+                            quick_reply_data = result.get('quick_reply') # 使用 .get() 以安全處理 None
+
+                            quick_reply_obj = None
+                            if quick_reply_data and isinstance(quick_reply_data, dict) and 'items' in quick_reply_data and isinstance(quick_reply_data['items'], list):
                                 quick_reply_items = []
-                                for item in result['quick_reply']['items']:
-                                    action = item['action']
-                                    quick_reply_items.append(
-                                        QuickReplyItem(
-                                            action=PostbackAction(
-                                                label=action['label'],
-                                                data=action['data'],
-                                                display_text=action['displayText']
+                                for item_data in quick_reply_data['items']:
+                                    action_data = item_data.get('action')
+                                    if action_data and isinstance(action_data, dict):
+                                        quick_reply_items.append(
+                                            QuickReplyItem(
+                                                action=PostbackAction(
+                                                    label=action_data.get('label'),
+                                                    data=action_data.get('data'),
+                                                    display_text=action_data.get('displayText')
+                                                )
                                             )
                                         )
-                                    )
-                                
-                                quick_reply = QuickReply(items=quick_reply_items)
-                                flex_message = FlexMessage(
-                                    alt_text=f"班次 #{trip_id} 詳細信息",
-                                    contents=FlexContainer.from_dict(result['flex_message']),
-                                    quick_reply=quick_reply
-                                )
-                                
-                                # 发送带Quick Reply的Flex Message
-                                reply_message(reply_token, [flex_message])
-                            else:
-                                # 发送普通Flex Message
-                                reply_flex(reply_token, f"班次 #{trip_id} 詳細信息", result['flex_message'])
+                                if quick_reply_items: # 只有當 items 列表不為空時才創建 QuickReply 物件
+                                    quick_reply_obj = QuickReply(items=quick_reply_items)
                             
-                            current_app.logger.info("成功发送Flex Message")
+                            flex_message = FlexMessage(
+                                alt_text=f"班次 #{trip_id} 詳細信息",
+                                contents=FlexContainer.from_dict(flex_message_content),
+                                quick_reply=quick_reply_obj # quick_reply_obj 可能為 None
+                            )
+                            
+                            reply_message(reply_token, [flex_message])
+                            current_app.logger.info("成功发送Flex Message (班次詳情)") # 更新日誌
                             return
                         except Exception as flex_error:
-                            current_app.logger.error(f"发送Flex Message时出错: {flex_error}")
+                            current_app.logger.error(f"发送Flex Message時出錯: {flex_error}")
                             traceback.print_exc()
                             # 如果发送Flex失败，使用文本版本
                         

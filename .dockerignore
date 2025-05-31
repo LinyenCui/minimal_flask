@@ -1,0 +1,75 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Python virtual environment
+.venv
+venv
+ENV
+env
+new_venv 
+fresh_venv
+
+# Python bytecode and cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.~
+*pip-log.txt*
+*pip-delete-this-directory.txt*
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE / Editor specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Secrets - meskipun GOOGLE_APPLICATION_CREDENTIALS ada di env var, 
+# file kredensial lokal (jika ada) sebaiknya tidak masuk ke image.
+# credentials.json # Sesuaikan jika nama file kredensial Anda berbeda
+# *.json # Hati-hati jika ada file json lain yang diperlukan aplikasi
+
+# Logs
+*.log
+logs/
+
+# Local Instance/Testing
+instance/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+*.spec
+
+# Excel files (kita sudah sepakat untuk tidak memasukkan ini)
+*.xlsx
+*.xls
+
+# Backup files
+*.bak
+*.old
+
+# Environment files (ini akan di-mount atau diset di runtime)
+.env
+.env.*
+!env.example # Jika Anda punya file contoh env
+
+# Mac specific
+.AppleDouble 

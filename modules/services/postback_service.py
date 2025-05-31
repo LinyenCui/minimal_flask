@@ -8,17 +8,8 @@ from flask import current_app
 import traceback
 
 from modules.utils.line_bot import create_text_message, create_flex_message, reply_text, reply_message, reply_flex
-from modules.utils.helpers import booking_states
-from modules.handlers.booking_handler import (
-    handle_booking_start, handle_date_input, handle_time_input,
-    handle_location_input
-)
 from modules.handlers.trip_query_handler import (
     handle_query_fixed_trips, handle_query_today_trips
-)
-from modules.flex_designs.booking_flex import (
-    get_booking_start_flex, get_booking_time_flex,
-    get_booking_location_flex, get_booking_confirm_flex
 )
 from modules.handlers.trip_handler import handle_query_trips, handle_trip_details, handle_change_status
 from modules.services.trip_detail_service import handle_trip_details_flex
@@ -163,6 +154,24 @@ def handle_postback(event):
             if 'status' in params:
                 # 情況 1: 帶 status 參數 (來自 Quick Reply)，執行更新
                 new_status = params['status']
+                
+                # 🚨 新增：檢查基於執行時間的30分鐘限制
+                try:
+                    from modules.models.trip import Trip
+                    from modules.models.base import db
+                    
+                    trip = db.session.query(Trip).filter_by(trip_id=trip_id).first()
+                    
+                    if trip and not trip.can_modify_status():
+                        # 在限制期間，不允許修改狀態
+                        restriction_message = trip.get_restriction_message()
+                        reply_text(reply_token, restriction_message or f"⚠️ 班次 {trip_id} 目前無法修改狀態")
+                        return
+                    
+                except Exception as check_error:
+                    logger.error(f"檢查修改權限時出錯: {check_error}")
+                    # 如果檢查失敗，允許繼續（向下兼容）
+                
                 from modules.handlers.trip_handler import handle_change_status
                 result = handle_change_status(f"修改狀態 {trip_id} {new_status}")
                 reply_text(reply_token, result)
@@ -238,11 +247,6 @@ def create_help_message():
         "例如：!預約、#幫助"
     )
     return create_text_message(help_text)
-
-def handle_confirm_input(user_id, message_text, states):
-    """處理用戶確認預約（從 booking_handler 移植）"""
-    from modules.handlers.booking_handler import handle_confirm_input
-    return handle_confirm_input(user_id, message_text, states)
 
 def handle_help_section(section):
     """處理幫助命令的不同部分"""

@@ -25,11 +25,11 @@ from linebot.v3.messaging import TextMessage, QuickReply, QuickReplyItem, Messag
 STATE_WAITING_AI_INPUT = "waiting_for_ai_input"
 STATE_WAITING_AI_FOLLOWUP = "waiting_for_ai_followup"
 STATE_WAITING_CONFIRM = "waiting_for_confirm"
-# Old step-by-step states (keep for potential future use or fallback)
-STATE_WAITING_DATE = "waiting_for_date" 
-STATE_WAITING_TIME = "waiting_for_time"
-STATE_WAITING_LOCATION = "waiting_for_location"
-STATE_WAITING_DESTINATION = "waiting_for_destination"
+# Old step-by-step states (REMOVED)
+# STATE_WAITING_DATE = "waiting_for_date" 
+# STATE_WAITING_TIME = "waiting_for_time"
+# STATE_WAITING_LOCATION = "waiting_for_location"
+# STATE_WAITING_DESTINATION = "waiting_for_destination"
 
 temp_booking_states = {}
 logger = logging.getLogger(__name__)
@@ -83,9 +83,10 @@ def handle_temp_booking_message(user_id, message_text):
         elif current_state == STATE_WAITING_CONFIRM: 
              response = handle_confirm_input(user_id, message_text)
         else:
-            logger.warning(f"未知的預約狀態 (預約叫車流程): {current_state}, Resetting.")
+            # This case should ideally not be reached if all AI states are handled above.
+            logger.warning(f"未知的預約狀態 (AI 流程): {current_state}, Resetting.")
             if user_id in temp_booking_states: del temp_booking_states[user_id]
-            response = {"type": "text", "text": "預約流程出錯，請重新開始「預約叫車」。"}
+            response = {"type": "text", "text": "預約流程出現未預期錯誤，請重新開始「預約叫車」。"}
 
     except Exception as e:
         logger.error(f"處理 AI 叫車消息時頂層出錯: {e}", exc_info=True)
@@ -287,9 +288,7 @@ def handle_confirm_input(user_id, message_text):
          return {"type": "text", "text": "處理預約確認時出錯。請重新開始預約流程。"}
 
 # --- Remove or comment out old step-by-step handlers --- 
-# def handle_date_input(...)
-# def handle_time_input(...)
-# ...
+# (All old step-by-step handler definitions and their comments should be removed if they exist below this line)
 
 def handle_temp_booking_help():
     """提供預約叫車幫助信息"""

@@ -4,7 +4,6 @@
 import logging
 from modules.utils.line_bot import create_text_message, create_flex_message
 from modules.utils.helpers import extract_command_args
-from modules.handlers.booking_handler import handle_booking_start, handle_booking_message
 from modules.handlers.trip_status_handler import (
     handle_update_trip_status, handle_confirm_cancel_trip,
     handle_confirm_leave_trip, handle_confirm_conflict_trip
@@ -30,20 +29,11 @@ def handle_message(message_text, user_id, in_group=False):
         if not message_text:
             return create_text_message("收到空消息，請輸入有效的命令。")
         
-        # 預約流程處理 - 對於正在預約流程中的用戶
-        booking_response = handle_booking_message(user_id, message_text)
-        if booking_response:
-            return booking_response
-        
         # 提取命令
         command, args = extract_command_args(message_text)
         
-        # 檢查是否是預設命令
-        if command == "預約":
-            return handle_booking_start(user_id)
-        
         # 修改班次狀態命令
-        elif command in ["修改狀態", "更改狀態"]:
+        if command in ["修改狀態", "更改狀態"]:
             return create_text_message(handle_update_trip_status(message_text))
         
         # 確認取消班次命令

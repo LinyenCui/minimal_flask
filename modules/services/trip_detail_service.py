@@ -1,110 +1,81 @@
 from flask import current_app
 from sqlalchemy import text
 import traceback
+import inspect
+import logging
+import json
+# import sys # No longer needed for sys.modules manipulation
+
+logger = logging.getLogger(__name__)
 
 from modules.models.base import db
-from modules.flex_designs.trip_detail_flex import get_trip_details_flex
+from modules.flex_designs.trip_details_flex import get_trip_details_flex # Standard import
+from linebot.v3.messaging import FlexMessage, FlexContainer, QuickReply as LineQuickReply
 
 def handle_trip_details_flex(trip_id):
     """以Flex Message格式返回班次詳情"""
     try:
-        # 查詢特定班次的詳細信息
-        query = """
+        func_file_path = inspect.getfile(get_trip_details_flex)
+        logger.info(f"<<<<< get_trip_details_flex is imported from: {func_file_path} >>>>>")
+    except Exception as e_inspect:
+        logger.error(f"<<<<< Error inspecting get_trip_details_flex: {e_inspect} >>>>>")
+
+    try:
+        # Removed forced sys.modules deletion and re-import from here
+        
+        # ... (查詢和 trip_data 準備邏輯保持不變) ...
+        query = """ 
         SELECT 
-            t.trip_id, 
-            t.date, 
-            t.time, 
-            t.start_point, 
-            t.via_point,
-            t.end_point, 
-            t.status,
-            d.id as driver_id,
-            d.plate_number,
-            t.category,
-            t.fixed_trip_id,
-            t.meter_fare as base_fare,
-            t.trip_type,
-            t.custom_start_point,
-            t.custom_via_point,
+            t.trip_id, t.date, t.time, t.start_point, t.via_point,
+            t.end_point, t.status, d.id as driver_id, d.plate_number,
+            t.category, t.fixed_trip_id, t.meter_fare as base_fare,
+            t.trip_type, t.custom_start_point, t.custom_via_point,
             t.custom_end_point
-        FROM 
-            trips t
-        LEFT JOIN 
-            drivers d ON t.driver_id = d.id
-        WHERE 
-            t.trip_id = :trip_id
+        FROM trips t
+        LEFT JOIN drivers d ON t.driver_id = d.id
+        WHERE t.trip_id = :trip_id
         """
-        
         trip = db.session.execute(text(query), {"trip_id": trip_id}).fetchone()
-        
         if not trip:
             return None, f"找不到ID為 {trip_id} 的班次。"
         
-        # 準備數據字典 - 使用索引或命名元組訪問
         try:
-            # 嘗試使用字典方式訪問
-            trip_data = {
-                'date': trip['date'],
-                'time': trip['time'],
-                'start_point': trip['start_point'],
-                'via_point': trip['via_point'],
-                'end_point': trip['end_point'],
-                'status': trip['status'],
-                'driver_id': trip['driver_id'],
-                'plate_number': trip['plate_number'],
-                'category': trip['category'],
-                'base_fare': trip['base_fare'],
-                'trip_type': trip['trip_type'],
-                'custom_start_point': trip['custom_start_point'],
-                'custom_via_point': trip['custom_via_point'],
-                'custom_end_point': trip['custom_end_point']
-            }
-        except (TypeError, KeyError):
-            # 如果失敗，嘗試使用索引訪問
-            trip_data = {
-                'date': trip[1],
-                'time': trip[2],
-                'start_point': trip[3],
-                'via_point': trip[4],
-                'end_point': trip[5],
-                'status': trip[6],
-                'driver_id': trip[7],
-                'plate_number': trip[8],
-                'category': trip[9],
-                'base_fare': trip[11],
-                'trip_type': trip[12] if len(trip) > 12 else None,
-                'custom_start_point': trip[13] if len(trip) > 13 else None,
-                'custom_via_point': trip[14] if len(trip) > 14 else None,
-                'custom_end_point': trip[15] if len(trip) > 15 else None
-            }
+            trip_data = dict(trip._mapping) 
+        except AttributeError: 
+            trip_data = dict(zip(trip.keys(), trip))
         
-        # 如果是臨時班次，優先使用自定義地點欄位
+        # Populate display_ fields for consistency
         if trip_data.get('trip_type') == 'temp':
-            if trip_data.get('custom_start_point'):
-                trip_data['display_start_point'] = trip_data['custom_start_point']
-            else:
-                trip_data['display_start_point'] = trip_data['start_point']
-                
-            if trip_data.get('custom_via_point'):
-                trip_data['display_via_point'] = trip_data['custom_via_point']
-            else:
-                trip_data['display_via_point'] = trip_data['via_point']
-                
-            if trip_data.get('custom_end_point'):
-                trip_data['display_end_point'] = trip_data['custom_end_point']
-            else:
-                trip_data['display_end_point'] = trip_data['end_point']
+            trip_data['display_start_point'] = trip_data.get('custom_start_point') or trip_data.get('start_point')
+            trip_data['display_via_point'] = trip_data.get('custom_via_point') or trip_data.get('via_point')
+            trip_data['display_end_point'] = trip_data.get('custom_end_point') or trip_data.get('end_point')
         else:
-            # 固定班次使用標準欄位
-            trip_data['display_start_point'] = trip_data['start_point']
-            trip_data['display_via_point'] = trip_data['via_point']
-            trip_data['display_end_point'] = trip_data['end_point']
+            trip_data['display_start_point'] = trip_data.get('start_point')
+            trip_data['display_via_point'] = trip_data.get('via_point')
+            trip_data['display_end_point'] = trip_data.get('end_point')
+                
+        result_dict = get_trip_details_flex(trip_id, trip_data)
         
-        # 使用Flex設計函數生成Flex Message
-        result = get_trip_details_flex(trip_id, trip_data)
-        
-        return result, None
-        
+        if result_dict and "flex_message" in result_dict and isinstance(result_dict["flex_message"], dict):
+            flex_message_payload = result_dict["flex_message"]
+            quick_reply_payload = result_dict.get("quick_reply")
+
+            logger.info(f"+++++ PREPARING TO SEND FLEX MESSAGE FOR TRIP {trip_id} (Final Check) +++++")
+            try:
+                logger.info("Raw flex_message_payload from get_trip_details_flex (Final Check):")
+                logger.info(json.dumps(flex_message_payload, indent=2, ensure_ascii=False))
+                if quick_reply_payload:
+                    logger.info("Raw quick_reply_payload from get_trip_details_flex (Final Check):")
+                    logger.info(json.dumps(quick_reply_payload, indent=2, ensure_ascii=False))
+            except Exception as e_json_dump:
+                logger.error(f"Error during JSON dump for logging: {e_json_dump}")
+            logger.info(f"++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+            
+            return result_dict, None 
+        else:
+            logger.error(f"get_trip_details_flex (from import) did not return expected dict structure for trip {trip_id}. Received: {result_dict}")
+            return None, f"無法生成班次 {trip_id} 的詳細資訊 (Final Check)。"
+            
     except Exception as e:
         current_app.logger.error(f"處理班次詳情Flex Message時出錯: {e}")
         traceback.print_exc()

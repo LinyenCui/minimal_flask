@@ -22,9 +22,6 @@ def get_taiwan_date():
 # 用戶狀態字典，用於跟踪對話狀態
 user_states = {}
 
-# 預約狀態字典
-booking_states = {}
-
 def remove_prefix(text):
     """移除消息前綴"""
     for prefix in COMMAND_PREFIXES:
