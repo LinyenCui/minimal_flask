@@ -325,16 +325,17 @@ def handle_change_status(message_text):
         traceback.print_exc()
         return f"修改狀態失敗: {str(e)}"
 
-def handle_record_fare(message_text):
-    """處理記錄已完成班次車資的命令 (加成可選，默認為0)"""
+def handle_record_fare(message_text, user_id=None):
+    """處理記錄已完成班次車資的命令 - 增強版：支持修改原因追蹤"""
     try:
         parts = message_text.split()
-        if len(parts) < 3 or len(parts) > 4:
-            return "命令格式不正確。正確格式：記錄車資 [ID] [錶價] [加成(可選)]"
+        if len(parts) < 3:
+            return "命令格式不正確。正確格式：記錄車資 [ID] [錶價] [加成] [修改原因]"
             
         completed_trip_id = None
         meter_fare = None
         extra_fare = 0
+        reason = None
         
         # 解析參數並進行類型檢查
         try:
@@ -347,36 +348,94 @@ def handle_record_fare(message_text):
         except ValueError:
              return "錯誤：錶價必須是數字。"
              
-        if len(parts) == 4:
+        if len(parts) >= 4:
             try:
                 extra_fare = int(parts[3]) # 允許負數
             except ValueError:
-                 return "錯誤：加成必須是數字。"
-
-        # 查找 completed_trips 記錄
-        # 注意：這裡不能使用 FOR UPDATE，因為 completed_trips 是歷史記錄
-        query = sql_text("SELECT id FROM completed_trips WHERE id = :id")
-        trip = db.session.execute(query, {"id": completed_trip_id}).fetchone()
+                # 如果第3個參數不是數字，可能是原因
+                extra_fare = 0
+                reason = ' '.join(parts[3:])
         
-        if not trip:
+        if len(parts) >= 5:
+            # 如果有5個或更多參數，第4個開始是原因
+            reason = ' '.join(parts[4:])
+
+        # 查找現有記錄並獲取當前值
+        query = sql_text("SELECT id, meter_fare, extra_fare FROM completed_trips WHERE id = :id")
+        current_trip = db.session.execute(query, {"id": completed_trip_id}).fetchone()
+        
+        if not current_trip:
             return f"錯誤：找不到已完成班次記錄 ID: {completed_trip_id}"
+        
+        current_meter = current_trip[1] or 0
+        current_extra = current_trip[2] or 0
+        
+        # 檢查是否有實際變更
+        meter_changed = current_meter != meter_fare
+        extra_changed = current_extra != extra_fare
+        has_changes = meter_changed or extra_changed
+        
+        if not has_changes:
+            return f"✅ 班次 {completed_trip_id} 的車資已經是錶價={meter_fare}, 加成={extra_fare}，無需修改。"
+        
+        # 如果有變更但沒有提供原因，要求說明
+        if has_changes and not reason:
+            change_summary = []
+            if meter_changed:
+                change_summary.append(f"錶價: {current_meter} → {meter_fare} ({meter_fare - current_meter:+d})")
+            if extra_changed:
+                change_summary.append(f"加成: {current_extra} → {extra_fare} ({extra_fare - current_extra:+d})")
             
-        # 更新車資
+            return f"""⚠️ 檢測到車資變更，需要說明原因：
+
+📊 當前記錄：
+• {chr(10).join(change_summary)}
+
+💡 請使用完整格式：
+記錄車資 {completed_trip_id} {meter_fare} {extra_fare} [修改原因]
+
+範例：記錄車資 {completed_trip_id} {meter_fare} {extra_fare} 客戶要求調整價格"""
+
+        # 更新車資並記錄修改信息
+        from modules.utils.taiwan_time import get_taiwan_time
+        
         update_query = sql_text("""
         UPDATE completed_trips 
-        SET meter_fare = :meter_fare, extra_fare = :extra_fare
+        SET meter_fare = :meter_fare, 
+            extra_fare = :extra_fare,
+            modified_by = :modified_by,
+            modification_reason = :modification_reason,
+            modification_time = :modification_time
         WHERE id = :id
         """)
         
         db.session.execute(update_query, {
             "meter_fare": meter_fare,
             "extra_fare": extra_fare,
+            "modified_by": user_id,
+            "modification_reason": reason or '車資調整',
+            "modification_time": get_taiwan_time(),
             "id": completed_trip_id
         })
         
         db.session.commit()
-        logger.info(f"成功記錄車資 - ID: {completed_trip_id}, 錶價: {meter_fare}, 加成: {extra_fare}")
-        return f"✅ 成功記錄班次 {completed_trip_id} 車資：錶價={meter_fare}, 加成={extra_fare}"
+        
+        # 格式化變更信息
+        change_info = []
+        if meter_changed:
+            change_info.append(f"錶價: {current_meter} → {meter_fare}")
+        if extra_changed:
+            change_info.append(f"加成: {current_extra} → {extra_fare}")
+        
+        logger.info(f"成功記錄車資 - ID: {completed_trip_id}, 錶價: {meter_fare}, 加成: {extra_fare}, 修改者: {user_id}")
+        
+        result = f"✅ 成功記錄班次 {completed_trip_id} 車資：錶價={meter_fare}, 加成={extra_fare}"
+        if change_info:
+            result += f"\n📝 變更記錄：\n• {chr(10).join(change_info)}"
+        if reason:
+            result += f"\n• 原因: {reason}"
+        
+        return result
 
     except Exception as e:
         db.session.rollback() # 確保回滾
@@ -432,7 +491,114 @@ def handle_modify_category(message_text):
         return f"✅ 成功將班次 {completed_trip_id} 的類別從 '{old_category}' 修改為 '{new_category}'。"
 
     except Exception as e:
-        db.session.rollback() # 確保回滾
-        logger.error(f"修改類別時出錯: {e}")
+        logger.error(f"修改類別錯誤: {str(e)}")
         traceback.print_exc()
-        return f"修改類別失敗: {str(e)}"
+        return f"修改類別錯誤: {str(e)}"
+
+# 處理查看已完成班次命令
+def handle_completed_trip_details(completed_trip_id):
+    """查看已完成班次詳細信息"""
+    logger.info(f"處理查看已完成班次查詢: completed_trip_id={completed_trip_id}")
+    
+    # 查詢已完成班次詳情
+    try:
+        query = """
+        SELECT 
+            ct.id,
+            ct.date,
+            ct.start_point,
+            ct.via_point,
+            ct.end_point,
+            ct.category,
+            ct.meter_fare,
+            ct.extra_fare,
+            ct.driver_id,
+            ct.remarks,
+            ct.created_at,
+            ct.unique_code,
+            d.name as driver_name,
+            d.plate_number
+        FROM 
+            completed_trips ct
+        LEFT JOIN 
+            drivers d ON ct.driver_id = d.id
+        WHERE 
+            ct.id = :completed_trip_id
+        """
+        
+        trip_row = db.session.execute(sql_text(query), {"completed_trip_id": completed_trip_id}).fetchone()
+        
+        if not trip_row:
+            return f"找不到已完成班次 #{completed_trip_id}"
+        
+        # 轉換為字典
+        trip = dict(trip_row._mapping if hasattr(trip_row, '_mapping') else trip_row)
+        
+        # 格式化結果 - 簡潔版UI
+        result_text = f"✅ 已完成班次 #{trip.get('id')}\n\n"
+        
+        # 基本信息
+        trip_date_obj = trip.get('date')
+        if trip_date_obj:
+            weekday_names = ["一", "二", "三", "四", "五", "六", "日"]
+            weekday = weekday_names[trip_date_obj.weekday()]
+            formatted_date = f"{trip_date_obj.month}/{trip_date_obj.day} (星期{weekday})"
+            result_text += f"📅 {formatted_date}\n"
+        
+        # 路線信息
+        start = trip.get('start_point') or "未指定"
+        end = trip.get('end_point') or "未指定"
+        via = trip.get('via_point')
+        
+        if via:
+            result_text += f"🚩 {start} → {via} → {end}\n"
+        else:
+            result_text += f"🚩 {start} → {end}\n"
+        
+        # 類別和司機
+        category = trip.get('category') or "未分類"
+        driver_name = trip.get('driver_name')
+        driver_id = trip.get('driver_id')
+        
+        result_text += f"📊 {category} | "
+        if driver_name:
+            result_text += f"🚕{driver_name}({driver_id})\n"
+        elif driver_id:
+            result_text += f"🚕司機#{driver_id}\n"
+        else:
+            result_text += "🚕未指派\n"
+        
+        # 車資信息
+        meter_fare = trip.get('meter_fare')
+        extra_fare = trip.get('extra_fare')
+        
+        if meter_fare is not None or extra_fare is not None:
+            meter = meter_fare or 0
+            extra = extra_fare or 0
+            total = meter + extra
+            
+            if extra >= 0:
+                fare_display = f"{meter}+{extra}"
+            else:
+                fare_display = f"{meter}{extra}"
+            
+            result_text += f"💰 {fare_display} = {total}元\n"
+        else:
+            result_text += f"💰 未記錄車資\n"
+        
+        # 備註
+        remarks = trip.get('remarks')
+        if remarks:
+            result_text += f"📝 {remarks}\n"
+        
+        # 記錄時間
+        created_at = trip.get('created_at')
+        if created_at:
+            result_text += f"\n⏰ 記錄於: {created_at.strftime('%m/%d %H:%M')}"
+        
+        return result_text
+        
+    except Exception as e:
+        logger.error(f"查看已完成班次錯誤: {str(e)}")
+        traceback.print_exc()
+        return f"查看已完成班次錯誤: {str(e)}"

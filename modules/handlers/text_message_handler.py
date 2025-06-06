@@ -10,7 +10,7 @@ from modules.utils.line_bot import (
     create_postback_action, create_message_action,
     create_flex_message
 )
-from modules.handlers.trip_handler import handle_query_trips, handle_trip_details, handle_change_status, handle_record_fare, handle_modify_category
+from modules.handlers.trip_handler import handle_query_trips, handle_trip_details, handle_change_status, handle_record_fare, handle_modify_category, handle_completed_trip_details
 from modules.flex_designs.help_flex import get_help_flex
 from modules.handlers.temp_booking_handler import (
     handle_temp_booking_start,
@@ -19,6 +19,9 @@ from modules.handlers.temp_booking_handler import (
     handle_temp_booking_help
 )
 from modules.services.driver_service import handle_driver_assign_request, handle_driver_assign_select, handle_driver_assign_confirm, handle_driver_assign_cancel
+
+# AI功能導入
+from modules.services.ai_fare_service import should_use_ai_query
 
 # 設定日誌
 logger = logging.getLogger(__name__)
@@ -528,14 +531,81 @@ def process_text_message(event):
             
         # --- 新增：記錄車資 --- 
         elif message_text.startswith("記錄車資"):
-             result = handle_record_fare(message_text)
+             result = handle_record_fare(message_text, user_id)
              reply_text(reply_token, result)
              return
         # --- 結束新增 ---
             
+        # --- 🔥 修改：AI智能車資查詢檢測 ---
+        elif should_use_ai_query(message_text):
+            try:
+                logger.info(f"檢測到AI智能車資查詢: {message_text}")
+                from modules.services.ai_fare_service import handle_smart_fare_query
+                
+                # 使用完整的智能車資查詢服務
+                result = handle_smart_fare_query(message_text, user_id)
+                reply_text(reply_token, result)
+                return
+            except Exception as e:
+                logger.error(f"AI智能車資查詢出錯: {e}")
+                traceback.print_exc()
+                reply_text(reply_token, f"❌ AI處理出錯: {str(e)}")
+                return
+        # --- 結束修改 ---
+            
+        # --- 新增：查看已完成班次 ---
+        elif message_text.startswith("查看"):
+            parts = message_text.split()
+            if len(parts) >= 2:
+                try:
+                    completed_trip_id = int(parts[1])
+                    logger.info(f"處理查看已完成班次: {completed_trip_id}")
+                    
+                    result = handle_completed_trip_details(completed_trip_id)
+                    reply_text(reply_token, result)
+                except ValueError:
+                    reply_text(reply_token, "班次ID必須是數字。")
+                except Exception as e:
+                    logger.error(f"處理查看命令時出錯: {e}")
+                    traceback.print_exc()
+                    reply_text(reply_token, f"查詢失敗: {str(e)}")
+            else:
+                reply_text(reply_token, "請提供班次ID，例如：查看 123")
+            return
+        # --- 結束新增 ---
+            
         # 未識別的命令
         else:
-            reply_text(reply_token, "未識別的命令。請使用「幫助」查看可用命令。")
+            # 🔥 新增：检查是否有AI上下文需要处理（例如pending_modification）
+            from modules.utils.conversation_context import conversation_manager
+            pending_modification = conversation_manager.get_pending_modification(user_id)
+            
+            if pending_modification:
+                # 用户可能在回复AI的追问，交给AI处理
+                try:
+                    logger.info(f"檢測到待執行修改，將消息交給AI處理: {message_text}")
+                    from modules.services.ai_fare_service import handle_smart_fare_query
+                    
+                    result = handle_smart_fare_query(message_text, user_id)
+                    reply_text(reply_token, result)
+                    return
+                except Exception as e:
+                    logger.error(f"AI上下文處理出錯: {e}")
+                    traceback.print_exc()
+                    # 如果AI处理失败，继续原有逻辑
+            
+            # 檢查是否可能是AI查詢但檢測失敗
+            if any(keyword in message_text.lower() for keyword in ['車資', '費用', '查詢', '查', '找']):
+                # 提供AI查詢建議
+                suggestions = "💡 可能您想要使用AI車資查詢功能？\n\n範例:\n"
+                suggestions += "• 查詢今天台中車資\n"
+                suggestions += "• 查詢明天彰化車資\n" 
+                suggestions += "• 查詢6/1診所車資\n"
+                suggestions += "• 修改班次123車資500\n\n"
+                suggestions += "或使用「幫助」查看所有可用命令。"
+                reply_text(reply_token, suggestions)
+            else:
+                reply_text(reply_token, "未識別的命令。請使用「幫助」查看可用命令。")
             
     except Exception as e:
         logger.error(f"處理消息時出錯: {e}")
@@ -568,12 +638,13 @@ def get_help_text():
 2. 診所班次 - 查詢診所班次(通過日期按鈕選擇)
 3. 查已完成 [日期] [類別] - 查已完成班次(日期默認今天, 類別可選)
 4. 班次詳情 [ID] - 查看班次詳細信息 (可修改狀態)
-5. 指派司機 [ID] - 為班次指派司機 (通過按鈕選擇)
-6. 記錄車資 [ID] [錶價] [加成] - 記錄費用 (加成可選/可為負, 默認0)
-7. 修改類別 [ID] [新類別] - 修改已完成班次的類別 (診所/東洋/臨時)
-8. 預約叫車 - 通過自然語言描述開始預約 (推薦)
-9. 預約叫車幫助 - 顯示「預約叫車」的說明
-10. 幫助 - 顯示此幫助信息
+5. 查看 [ID] - 查看已完成班次詳細信息
+6. 指派司機 [ID] - 為班次指派司機 (通過按鈕選擇)
+7. 記錄車資 [ID] [錶價] [加成] - 記錄費用 (加成可選/可為負, 默認0)
+8. 修改類別 [ID] [新類別] - 修改已完成班次的類別 (診所/東洋/臨時)
+9. 預約叫車 - 通過自然語言描述開始預約 (推薦)
+10. 預約叫車幫助 - 顯示「預約叫車」的說明
+11. 幫助 - 顯示此幫助信息
 
 在群組中使用時，可選擇性在命令前添加前綴... (例如 !, #, /)
 """
