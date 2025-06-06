@@ -24,7 +24,7 @@ _KEY_FILE_PATH = os.path.join(_ROOT_DIR, SERVICE_ACCOUNT_KEY_FILE)
 
 # --- ADDED: Define prompt file path --- 
 _PROMPT_DIR = os.path.join(_SERVICE_DIR, '..', 'prompts')
-_PROMPT_FILE_PATH = os.path.join(_PROMPT_DIR, 'booking_extraction_prompt.txt')
+_PROMPT_FILE_PATH = os.path.join(_PROMPT_DIR, 'booking_extraction_prompt_enhanced.txt')
 # --- END ADDED ---
 
 # Correctly read project ID and location from environment or use defaults

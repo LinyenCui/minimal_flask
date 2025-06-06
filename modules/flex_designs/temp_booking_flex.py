@@ -374,7 +374,7 @@ def get_temp_booking_destination_flex():
     
     return bubble, quick_reply
 
-def get_temp_booking_confirm_flex(date_str, time_str, start_point, end_point=None, category="臨時", via_point=None):
+def get_temp_booking_confirm_flex(date_str, time_str, start_point, end_point=None, category="臨時", via_point=None, meter_fare=None, passenger_name=None):
     """生成臨時預約確認頁面，使用Flex Message + Quick Reply組合"""
     bubble = {
         "type": "bubble",
@@ -525,6 +525,30 @@ def get_temp_booking_confirm_flex(date_str, time_str, start_point, end_point=Non
         ],
         "margin": "md"
     })
+    
+    # 🔥 新增：顯示錶價信息
+    if meter_fare:
+        contents_box.append({
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+                { "type": "text", "text": "錶價", "size": "sm", "color": "#555555", "flex": 2 },
+                { "type": "text", "text": f"{meter_fare}元", "size": "sm", "color": "#111111", "flex": 4, "weight": "bold" }
+            ],
+            "margin": "md"
+        })
+
+    # 🔥 新增：顯示乘客姓名
+    if passenger_name:
+        contents_box.append({
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+                { "type": "text", "text": "乘客", "size": "sm", "color": "#555555", "flex": 2 },
+                { "type": "text", "text": passenger_name, "size": "sm", "color": "#111111", "flex": 4, "weight": "bold" }
+            ],
+            "margin": "md"
+        })
     
     # Enhanced Quick Reply options
     quick_reply_items = [

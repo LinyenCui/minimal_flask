@@ -41,7 +41,7 @@ def handle_temp_booking_start(user_id, category="東洋"):
         "state": STATE_WAITING_AI_INPUT,  # Use the consistent state name
         "data": { 
             "category": category, "date": None, "time": None, "start_point": None,
-            "end_point": None, "via_point": None 
+            "end_point": None, "via_point": None, "meter_fare": None, "passenger_name": None
         }
     }
     logger.info(f"[AI Flow Start] State for User ID {user_id} set to: {temp_booking_states[user_id]}")
@@ -158,6 +158,15 @@ def _update_booking_data(current_data, extracted_info, merge=False):
     if (not merge or not updated_data.get("via_point")) and extracted_info.get("via_point"):
         updated_data["via_point"] = extracted_info["via_point"]
     if extracted_info.get("category"): updated_data["category"] = extracted_info["category"]
+    # 🔥 新增：處理錶價
+    if (not merge or not updated_data.get("meter_fare")) and extracted_info.get("meter_fare"):
+        try:
+            meter_fare = int(extracted_info["meter_fare"])
+            if meter_fare > 0: updated_data["meter_fare"] = meter_fare
+        except (ValueError, TypeError): pass
+    # 🔥 新增：處理乘客姓名
+    if (not merge or not updated_data.get("passenger_name")) and extracted_info.get("passenger_name"):
+        updated_data["passenger_name"] = extracted_info["passenger_name"]
     logger.debug(f"Updated booking data: {updated_data}")
     return updated_data
 
@@ -180,11 +189,14 @@ def _generate_confirm_response(booking_data):
             booking_data["start_point"],
             booking_data.get("end_point"), 
             booking_data.get("category", "東洋"), 
-            booking_data.get("via_point") 
+            booking_data.get("via_point"),
+            booking_data.get("meter_fare"),      # 🔥 新增：錶價
+            booking_data.get("passenger_name")   # 🔥 新增：乘客姓名
         )
         return {"type": "flex", "alt_text": "請確認預約信息", "contents": flex_content, "quick_reply": quick_reply}
     except Exception as e:
         logger.error(f"生成確認 Flex 時出錯: {e}", exc_info=True)
+        # 🔥 增強文本確認界面，包含新欄位
         confirm_text = (
              "我們已處理您的請求，但生成確認界面出錯。\n"
              "請確認以下信息是否正確：\n"
@@ -192,7 +204,9 @@ def _generate_confirm_response(booking_data):
              f"起點: {booking_data.get('start_point')}"
              f"{', 目的地: ' + booking_data['end_point'] if booking_data.get('end_point') else ''}"
              f"{', 途經: ' + booking_data['via_point'] if booking_data.get('via_point') else ''}"
-             f"{', 類別: ' + booking_data['category'] if booking_data.get('category') else ''}\n\n"
+             f"{', 類別: ' + booking_data['category'] if booking_data.get('category') else ''}"
+             f"{', 錶價: ' + str(booking_data['meter_fare']) + '元' if booking_data.get('meter_fare') else ''}"
+             f"{', 乘客: ' + booking_data['passenger_name'] if booking_data.get('passenger_name') else ''}\n\n"
              "回覆「確認」或「取消」。"
         )
         return {"type": "text", "text": confirm_text}
@@ -227,10 +241,43 @@ def handle_confirm_input(user_id, message_text):
         booking_data = temp_booking_states[user_id]["data"]
         logger.info(f"用戶 {user_id} 確認預約，數據: {booking_data}")
         
+        # 🔥 新增：自動處理乘客資料
+        if booking_data.get("passenger_name"):
+            try:
+                passenger_name = booking_data["passenger_name"]
+                category = booking_data.get("category", "東洋")
+                
+                # 檢查乘客是否已存在
+                check_query = "SELECT id FROM customers WHERE name = :name OR short_name = :name"
+                existing_passenger = db.session.execute(sql_text(check_query), {"name": passenger_name}).fetchone()
+                
+                if existing_passenger:
+                    logger.info(f"乘客已存在: {passenger_name} (ID: {existing_passenger[0]})")
+                else:
+                    # 乘客不存在，自動新增（提供預設地址）
+                    insert_passenger_query = """
+                    INSERT INTO customers (name, short_name, category, address) 
+                    VALUES (:name, :short_name, :category, :address)
+                    """
+                    db.session.execute(sql_text(insert_passenger_query), {
+                        "name": passenger_name,
+                        "short_name": passenger_name,
+                        "category": category,
+                        "address": "預約時未提供地址"  # 提供預設地址值
+                    })
+                    logger.info(f"自動新增乘客: {passenger_name}, 類別: {category}")
+                    
+            except Exception as passenger_error:
+                logger.error(f"處理乘客資料時出錯: {passenger_error}")
+                db.session.rollback()  # 回滾事務以清除錯誤狀態
+                # 不中斷預約流程，繼續執行
+        
         try:
             insert_query = """
-            INSERT INTO trips (date, time, start_point, end_point, category, status, trip_type, custom_start_point, custom_end_point, custom_via_point)
-            VALUES (:date, :time, '臨時地點', '臨時地點', :category, '待派', 'temp', :custom_start_point, :custom_end_point, :custom_via_point)
+            INSERT INTO trips (date, time, start_point, end_point, category, status, trip_type, 
+                              custom_start_point, custom_end_point, custom_via_point, meter_fare, passenger_name)
+            VALUES (:date, :time, '臨時地點', '臨時地點', :category, '待派', 'temp', 
+                    :custom_start_point, :custom_end_point, :custom_via_point, :meter_fare, :passenger_name)
             RETURNING trip_id
             """
             end_point_db = booking_data.get("end_point")
@@ -243,7 +290,9 @@ def handle_confirm_input(user_id, message_text):
                 "category": booking_data.get("category", "東洋"),
                 "custom_start_point": booking_data["start_point"],
                 "custom_end_point": end_point_db,
-                "custom_via_point": via_point_db
+                "custom_via_point": via_point_db,
+                "meter_fare": booking_data.get("meter_fare"),        # 錶價
+                "passenger_name": booking_data.get("passenger_name") # 乘客姓名
             }
             result = db.session.execute(sql_text(insert_query), params)
             new_trip_id = result.fetchone()[0]
@@ -267,7 +316,14 @@ def handle_confirm_input(user_id, message_text):
                  f"起點：{booking_data['start_point']}\n"
             )
             if via_point_db: success_message += f"途經：{via_point_db}\n"
-            if booking_data.get("end_point") and booking_data.get("end_point") != "無(略過)": success_message += f"目的地：{booking_data['end_point']}\n"
+            if booking_data.get("end_point") and booking_data.get("end_point") != "無(略過)": 
+                success_message += f"目的地：{booking_data['end_point']}\n"
+            # 顯示錶價信息
+            if booking_data.get("meter_fare"):
+                success_message += f"錶價：{booking_data['meter_fare']}元\n"
+            # 顯示乘客信息
+            if booking_data.get("passenger_name"):
+                success_message += f"乘客：{booking_data['passenger_name']}\n"
             success_message += (
                  f"類別：{booking_data['category']}\n"
                  f"狀態：待派\n\n"

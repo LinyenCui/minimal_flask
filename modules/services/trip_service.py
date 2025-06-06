@@ -71,7 +71,8 @@ def get_trip_details(trip_id):
         t.fixed_trip_id,
         t.meter_fare,
         t.extra_fare,
-        t.actual_fare
+        t.actual_fare,
+        t.passenger_name
     FROM 
         trips t
     LEFT JOIN 
@@ -168,7 +169,8 @@ def update_completed_trips():
                         t.driver_id,
                         t.status,
                         t.unique_code,
-                        t.fixed_trip_id
+                        t.fixed_trip_id,
+                        t.passenger_name
                     FROM 
                         trips t
                     WHERE 
@@ -269,9 +271,9 @@ def update_completed_trips():
                     try:
                         insert_query = """
                         INSERT INTO completed_trips 
-                        (date, start_point, via_point, end_point, meter_fare, extra_fare, category, driver_id, unique_code) 
+                        (date, start_point, via_point, end_point, meter_fare, extra_fare, category, driver_id, unique_code, passenger_name) 
                         VALUES 
-                        (:date, :start_point, :via_point, :end_point, :meter_fare, :extra_fare, :category, :driver_id, :unique_code)
+                        (:date, :start_point, :via_point, :end_point, :meter_fare, :extra_fare, :category, :driver_id, :unique_code, :passenger_name)
                         """
                         
                         conn.execute(
@@ -285,7 +287,8 @@ def update_completed_trips():
                                 "extra_fare": trip_info[7],
                                 "category": trip_info[8],
                                 "driver_id": trip_info[9],
-                                "unique_code": unique_code
+                                "unique_code": unique_code,
+                                "passenger_name": trip_info[13]
                             }
                         )
                         print(f"[{now}] 成功將班次 #{trip_id} 插入到已完成班次表中")
