@@ -627,39 +627,94 @@ def handle_smart_fare_query(message_text: str, user_id: str) -> str:
         # 🔥 检查是否是对之前追问的回复（用户提供原因）
         pending_modification = conversation_manager.get_pending_modification(user_id)
         if pending_modification:
-            # 用户在回复原因
+            # 🔥 修復：檢查用戶是否想要開始新的查詢而不是回覆原因
+            # 如果輸入包含新的車資查詢關鍵詞，清除舊的pending並重新處理
+            new_query_indicators = [
+                '查詢', '查', '找', '搜尋', '顯示', '看',  # 查詢動詞
+                '修改班次#', '班次#', '#',  # 新的班次ID
+                '今天', '明天', '昨天', '月', '日',  # 時間詞
+                '台中', '彰化', '診所', '醫院'  # 地點詞
+            ]
+            
+            is_new_query = any(indicator in message_text for indicator in new_query_indicators)
+            
+            # 🔥 新增：檢查是否包含新的修改意圖（不同的班次或費用）
+            current_modification = parse_fare_modification_intent(message_text)
+            is_new_modification = False
+            
+            if current_modification:
+                # 如果有新的費用意圖，檢查是否與待執行的不同
+                pending_trip_id = pending_modification.get('trip_id')
+                new_meter = current_modification.get('meter_fare')
+                new_extra = current_modification.get('extra_fare')
+                
+                # 檢查班次ID或費用是否不同
+                trip_id_in_text = re.search(r'班次#?(\d+)|#(\d+)', message_text)
+                if trip_id_in_text:
+                    mentioned_trip_id = int(trip_id_in_text.group(1) or trip_id_in_text.group(2))
+                    if mentioned_trip_id != pending_trip_id:
+                        is_new_modification = True
+                
+                # 檢查費用是否不同
+                if new_meter and new_meter != pending_modification.get('meter_fare'):
+                    is_new_modification = True
+                if new_extra and new_extra != pending_modification.get('extra_fare'):
+                    is_new_modification = True
+            
+            if is_new_query or is_new_modification:
+                # 用戶想要開始新的查詢或修改，清除舊的pending
+                logger.info(f"用戶開始新查詢，清除待執行修改: {message_text}")
+                conversation_manager.clear_pending_modification(user_id)
+                # 重新處理這個消息（遞歸調用）
+                return handle_smart_fare_query(message_text, user_id)
+            
+            # 確實是在回覆原因
             reason = message_text.strip()
             
-            # 验证原因是否合理（不是空白或无意义）
-            if len(reason) > 2 and not reason.isdigit():
-                # 执行之前暂停的修改
-                trip = pending_modification['trip']
-                modification_intent = {
-                    'meter_fare': pending_modification['meter_fare'],
-                    'extra_fare': pending_modification['extra_fare'],
-                    'reason': reason
-                }
+            # 🔥 增強原因驗證：更寬鬆的判斷邏輯
+            if len(reason) > 1 and not reason.isdigit():
+                # 🔥 過濾明顯不是原因的回覆
+                not_reason_patterns = [
+                    r'^錶價\d+',         # 錶價數字
+                    r'^加成[+-]?\d+',    # 加成數字
+                    r'^\d+$',            # 純數字
+                    r'^[+-]?\d+$',       # 帶符號的純數字
+                ]
                 
-                # 清除待执行修改
-                conversation_manager.clear_pending_modification(user_id)
+                is_not_reason = any(re.match(pattern, reason) for pattern in not_reason_patterns)
                 
-                result = execute_fare_modification(trip, modification_intent, user_id)
-                return f"""✅ 修改原因已记录
+                if not is_not_reason:
+                    # 执行之前暂停的修改
+                    trip = pending_modification['trip']
+                    modification_intent = {
+                        'meter_fare': pending_modification['meter_fare'],
+                        'extra_fare': pending_modification['extra_fare'],
+                        'reason': reason
+                    }
+                    
+                    # 清除待执行修改
+                    conversation_manager.clear_pending_modification(user_id)
+                    
+                    result = execute_fare_modification(trip, modification_intent, user_id)
+                    return f"""✅ 修改原因已记录
 
 📝 修改原因：{reason}
 
 {result}"""
-            else:
-                return f"""❓ 请提供更具体的修改原因：
+            
+            # 原因無效，繼續要求
+            return f"""❓ 请提供更具体的修改原因：
 
 当前输入：「{reason}」
-❌ 原因过于简短或无效
+❌ 原因过于简短或可能不是原因描述
 
 💡 请说明为什么要修改费用，例如：
 • 客戶要求調整價格
 • 等候時間過長  
 • 夜班服務費
-• 路線變更"""
+• 路線變更
+
+💭 如果要查詢其他班次，請直接說「查詢...」開始新查詢。"""
         
         # 🔥 如果上下文無法解析，繼續原有的智能解析流程
         modification_intent = parse_fare_modification_intent(message_text)

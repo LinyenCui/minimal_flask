@@ -247,25 +247,34 @@ def handle_confirm_input(user_id, message_text):
                 passenger_name = booking_data["passenger_name"]
                 category = booking_data.get("category", "東洋")
                 
-                # 檢查乘客是否已存在
-                check_query = "SELECT id FROM customers WHERE name = :name OR short_name = :name"
-                existing_passenger = db.session.execute(sql_text(check_query), {"name": passenger_name}).fetchone()
+                # 🔥 修復：使用short_name進行檢查（因為有UNIQUE約束）
+                check_query = "SELECT id FROM customers WHERE name = :name OR short_name = :short_name"
+                existing_passenger = db.session.execute(sql_text(check_query), {
+                    "name": passenger_name, 
+                    "short_name": passenger_name
+                }).fetchone()
                 
                 if existing_passenger:
                     logger.info(f"乘客已存在: {passenger_name} (ID: {existing_passenger[0]})")
                 else:
-                    # 乘客不存在，自動新增（提供預設地址）
-                    insert_passenger_query = """
-                    INSERT INTO customers (name, short_name, category, address) 
-                    VALUES (:name, :short_name, :category, :address)
-                    """
-                    db.session.execute(sql_text(insert_passenger_query), {
-                        "name": passenger_name,
-                        "short_name": passenger_name,
-                        "category": category,
-                        "address": "預約時未提供地址"  # 提供預設地址值
-                    })
-                    logger.info(f"自動新增乘客: {passenger_name}, 類別: {category}")
+                    # 🔥 修復：使用short_name的UNIQUE約束來避免重複插入
+                    try:
+                        insert_passenger_query = """
+                        INSERT INTO customers (name, short_name, category, address) 
+                        VALUES (:name, :short_name, :category, :address)
+                        ON CONFLICT (short_name) DO NOTHING
+                        """
+                        db.session.execute(sql_text(insert_passenger_query), {
+                            "name": passenger_name,
+                            "short_name": passenger_name,
+                            "category": category,
+                            "address": "預約時未提供地址"  # 提供預設地址值
+                        })
+                        logger.info(f"嘗試新增乘客: {passenger_name}, 類別: {category} (使用UNIQUE約束避免重複)")
+                    except Exception as insert_error:
+                        # 如果還是出錯，記錄錯誤但繼續流程
+                        logger.warning(f"乘客插入出錯，但繼續預約流程: {insert_error}")
+                        pass
                     
             except Exception as passenger_error:
                 logger.error(f"處理乘客資料時出錯: {passenger_error}")
