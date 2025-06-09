@@ -102,7 +102,8 @@ def handle_query_trips_flex(message_text=None):
                 t.start_point, t.end_point, 
                 COALESCE(fs.direction, '來') as direction,
                 t.status, t.driver_id, t.trip_type,
-                t.custom_start_point, t.custom_end_point, t.category
+                t.custom_start_point, t.custom_end_point, t.category,
+                t.passenger_leave_reason, t.modification_reason
             FROM 
                 trips t
             LEFT JOIN
@@ -269,7 +270,8 @@ def handle_query_trips(message_text=None):
                 t.start_point, t.end_point, 
                 COALESCE(fs.direction, '來') as direction,
                 t.status, t.driver_id, t.trip_type,
-                t.custom_start_point, t.custom_end_point, t.category
+                t.custom_start_point, t.custom_end_point, t.category,
+                t.passenger_leave_reason, t.modification_reason
             FROM 
                 trips t
             LEFT JOIN
@@ -326,6 +328,9 @@ def handle_query_trips(message_text=None):
             trip_type = trip[8] if len(trip) > 8 else ""  # 確保獲取trip_type
             custom_start_point = trip[9] if len(trip) > 9 else None
             custom_end_point = trip[10] if len(trip) > 10 else None
+            category = trip[11] if len(trip) > 11 else None
+            passenger_leave_reason = trip[12] if len(trip) > 12 else None
+            modification_reason = trip[13] if len(trip) > 13 else None
             
             # 根據班次類型和方向決定顯示的地點
             if trip_type == "temp":
@@ -349,6 +354,16 @@ def handle_query_trips(message_text=None):
                 date_str = f"{current_date.month}/{current_date.day} (星期{weekday})"
                 reply_text += f"\n【{date_str}】\n"
             
+            # 🚨 新增：檢查是否為乘客請假狀態
+            display_status = status
+            
+            # 優先檢查新的passenger_leave_reason欄位
+            if passenger_leave_reason:
+                display_status = "請假"
+            # 回退檢查舊的modification_reason欄位
+            elif modification_reason and ("乘客請假" in modification_reason or "請假" in modification_reason):
+                display_status = "請假"
+            
             # 根據狀態添加不同的表情符號
             status_emoji = {
                 "準備": "🟢",
@@ -357,7 +372,7 @@ def handle_query_trips(message_text=None):
                 "衝突": "⚠️",
                 "請假": "🔵",
                 "待派": "🟠"
-            }.get(status, "⚪")
+            }.get(display_status, "⚪")
             
             # 根據班次類型決定是否顯示方向
             if trip_type == "temp":
@@ -411,7 +426,9 @@ def handle_query_fixed_trips(message_text=None):
             fs.direction,
             t.status,
             t.driver_id,
-            t.trip_type
+            t.trip_type,
+            t.passenger_leave_reason,
+            t.modification_reason
         FROM 
             trips t
         JOIN
@@ -447,12 +464,24 @@ def handle_query_fixed_trips(message_text=None):
             direction = trip[5]  # "來" 或 "回"
             status = trip[6] or "未指定"
             driver_id = trip[7] or "未指派"
+            passenger_leave_reason = trip[9] if len(trip) > 9 else None
+            modification_reason = trip[10] if len(trip) > 10 else None
             
             # 根據方向決定顯示的地點
             if direction == "來":
                 location = start_point
             else:
                 location = end_point
+            
+            # 🚨 新增：檢查是否為乘客請假狀態
+            display_status = status
+            
+            # 優先檢查新的passenger_leave_reason欄位
+            if passenger_leave_reason:
+                display_status = "請假"
+            # 回退檢查舊的modification_reason欄位
+            elif modification_reason and ("乘客請假" in modification_reason or "請假" in modification_reason):
+                display_status = "請假"
             
             # 根據狀態添加不同的表情符號
             status_emoji = {
@@ -462,7 +491,7 @@ def handle_query_fixed_trips(message_text=None):
                 "衝突": "⚠️",
                 "請假": "🔵",
                 "待派": "🟠"
-            }.get(status, "⚪")
+            }.get(display_status, "⚪")
             
             # 固定班次顯示地點和方向
             reply_text += f"{status_emoji} #{trip_id} {time_val} {location}{direction} - 🚕{driver_id}\n"
@@ -759,7 +788,8 @@ def handle_query_clinic_trips_flex(message_text=None):
                 t.start_point, t.end_point, 
                 fs.direction, 
                 t.status, t.driver_id, t.trip_type,
-                t.custom_start_point, t.custom_end_point, t.category
+                t.custom_start_point, t.custom_end_point, t.category,
+                t.passenger_leave_reason, t.modification_reason
             FROM trips t
             LEFT JOIN fixed_schedules fs ON t.fixed_trip_id = fs.id 
             WHERE 
@@ -830,7 +860,22 @@ def handle_query_clinic_trips(message_text=None):
         all_clinic_trips = []
         for query_date in query_dates:
             # 第二層縮進
-            query = sql_text(f""" SELECT ... WHERE t.date = :query_date AND ... AND t.category = '診所' ... """) # <-- 保持查詢不變
+            query = sql_text(f"""
+            SELECT 
+                t.trip_id, t.date, t.time, 
+                t.start_point, t.end_point, 
+                fs.direction, 
+                t.status, t.driver_id, t.trip_type,
+                t.custom_start_point, t.custom_end_point, t.category,
+                t.passenger_leave_reason, t.modification_reason
+            FROM trips t
+            LEFT JOIN fixed_schedules fs ON t.fixed_trip_id = fs.id 
+            WHERE 
+                t.date = :query_date
+                AND t.status != '已完成'
+                AND t.category = '診所' 
+            ORDER BY t.time
+            """)
             # --- 添加賦值 --- 
             trips = db.session.execute(query, {"query_date": query_date}).fetchall()
             all_clinic_trips.extend(trips)

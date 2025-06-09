@@ -172,6 +172,13 @@ def process_text_message(event):
                     # 记录日志便于调试
                     current_app.logger.info(f"处理班次详情: {trip_id}")
                     
+                    # 🚨 新增：記錄班次ID到上下文（用於簡單請假格式）
+                    try:
+                        from modules.utils.conversation_context import conversation_manager
+                        conversation_manager.set_recent_trip_id(user_id, trip_id)
+                    except Exception as context_error:
+                        logger.error(f"記錄班次ID到上下文時出錯: {context_error}")
+                    
                     result, error_message = handle_trip_details_flex(trip_id)
                     
                     if result and 'flex_message' in result:
@@ -542,8 +549,10 @@ def process_text_message(event):
                 logger.info(f"檢測到AI智能車資查詢: {message_text}")
                 from modules.services.ai_fare_service import handle_smart_fare_query
                 
-                # 使用完整的智能車資查詢服務
-                result = handle_smart_fare_query(message_text, user_id)
+                # 使用完整的智能車資查詢服務（暫時關閉Flex Message）
+                result = handle_smart_fare_query(message_text, user_id, use_flex=False)
+                
+                # 暫時只使用文字格式，確保功能正常
                 reply_text(reply_token, result)
                 return
             except Exception as e:
@@ -576,6 +585,38 @@ def process_text_message(event):
             
         # 未識別的命令
         else:
+            # 🚨 新增：檢測簡單請假格式（負數開頭加原因）
+            import re
+            simple_leave_pattern = r'^(-?\d+)\s+(.+)$'
+            simple_leave_match = re.match(simple_leave_pattern, message_text.strip())
+            
+            if simple_leave_match:
+                amount = simple_leave_match.group(1)
+                reason = simple_leave_match.group(2)
+                
+                # 嘗試從對話上下文獲取最近的班次ID
+                from modules.utils.conversation_context import conversation_manager
+                recent_trip_id = conversation_manager.get_recent_trip_id(user_id)
+                
+                if recent_trip_id:
+                    logger.info(f"檢測到簡單請假格式，班次ID: {recent_trip_id}, 加成: {amount}, 原因: {reason}")
+                    
+                    # 構造完整的乘客請假命令
+                    full_command = f"乘客請假 {recent_trip_id} {amount} {reason}"
+                    
+                    try:
+                        from modules.handlers.passenger_leave_handler import handle_passenger_leave_command
+                        result = handle_passenger_leave_command(full_command, user_id)
+                        reply_text(reply_token, result)
+                        return
+                    except Exception as e:
+                        logger.error(f"處理簡單請假格式時出錯: {e}")
+                        # 如果出錯，繼續往下執行其他邏輯
+                else:
+                    # 如果找不到最近的班次ID，提示用戶
+                    reply_text(reply_token, f"檢測到請假資料（{amount} {reason}），但找不到對應的班次。\n\n請使用完整格式：\n乘客請假 [班次ID] {amount} {reason}")
+                    return
+            
             # 🔥 新增：检查是否有AI上下文需要处理（例如pending_modification）
             from modules.utils.conversation_context import conversation_manager
             pending_modification = conversation_manager.get_pending_modification(user_id)
@@ -586,7 +627,7 @@ def process_text_message(event):
                     logger.info(f"檢測到待執行修改，將消息交給AI處理: {message_text}")
                     from modules.services.ai_fare_service import handle_smart_fare_query
                     
-                    result = handle_smart_fare_query(message_text, user_id)
+                    result = handle_smart_fare_query(message_text, user_id, use_flex=False)
                     reply_text(reply_token, result)
                     return
                 except Exception as e:

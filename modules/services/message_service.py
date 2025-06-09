@@ -8,6 +8,7 @@ from modules.handlers.trip_status_handler import (
     handle_update_trip_status, handle_confirm_cancel_trip,
     handle_confirm_leave_trip, handle_confirm_conflict_trip
 )
+from modules.handlers.passenger_leave_handler import handle_passenger_leave_command
 from modules.handlers.trip_query_handler import (
     handle_query_fixed_trips, handle_trip_details, create_query_fixed_trips_quick_reply,
     handle_query_today_trips
@@ -47,6 +48,10 @@ def handle_message(message_text, user_id, in_group=False):
         # 確認衝突班次命令
         elif command == "確認衝突":
             return create_text_message(handle_confirm_conflict_trip(message_text))
+        
+        # 乘客請假命令
+        elif command == "乘客請假":
+            return create_text_message(handle_passenger_leave_command(message_text, user_id))
         
         # 查詢固定班次命令
         elif command == "查詢固定班次":
@@ -134,6 +139,7 @@ def create_help_message():
         "• 修改狀態 [班次ID] [新狀態] - 更改班次狀態\n"
         "• 確認取消 [班次ID] - 確認取消班次\n"
         "• 確認請假 [班次ID] - 確認請假班次\n"
+        "• 乘客請假 [班次ID] [加成] [原因] - 處理乘客請假並調整加成\n"
         "• 確認衝突 [班次ID] - 確認衝突班次\n"
         "• 生成周報表 [類別] - 生成上週班次報表\n"
         "• 幫助 - 顯示此幫助訊息\n\n"

@@ -71,7 +71,7 @@ def handle_update_trip_status(message_text):
             return f"您確定要將班次 #{trip_id} 設為「衝突」嗎？\n(司機無法執行，請客戶另行安排)\n請回覆「確認衝突 {trip_id}」進行確認。"
 
         if new_status == "請假":
-            return f"您確定要為班次 #{trip_id} 設定「請假」嗎？\n(如果是固定班次，這可能影響後續排程)\n請回覆「確認請假 {trip_id}」進行確認。"
+            return f"班次 #{trip_id} 乘客請假\n\n請輸入：[加成] [原因]\n\n例如：\n-30 新建路乘客臨時有事\n-50 中華南路乘客身體不適\n\n💡 提示：直接輸入加成金額和原因即可"
 
         logger.error(f"Reached unexpected end of handle_update_trip_status logic for trip {trip_id} to {new_status}.")
         return f"試圖將班次 #{trip_id} 狀態改為 '{new_status}'，但此操作未被明確處理。"

@@ -241,7 +241,7 @@ def handle_confirm_input(user_id, message_text):
         booking_data = temp_booking_states[user_id]["data"]
         logger.info(f"用戶 {user_id} 確認預約，數據: {booking_data}")
         
-        # 🔥 新增：自動處理乘客資料
+        # 🔥 新增：自動處理乘客資料（使用獨立事務）
         if booking_data.get("passenger_name"):
             try:
                 passenger_name = booking_data["passenger_name"]
@@ -257,8 +257,12 @@ def handle_confirm_input(user_id, message_text):
                 if existing_passenger:
                     logger.info(f"乘客已存在: {passenger_name} (ID: {existing_passenger[0]})")
                 else:
-                    # 🔥 修復：使用short_name的UNIQUE約束來避免重複插入
+                    # 🔥 修復：使用獨立事務處理乘客插入，避免影響主要預約流程
                     try:
+                        # 先提交當前事務以清除任何錯誤狀態
+                        db.session.commit()
+                        
+                        # 使用新的事務處理乘客插入
                         insert_passenger_query = """
                         INSERT INTO customers (name, short_name, category, address) 
                         VALUES (:name, :short_name, :category, :address)
@@ -268,18 +272,22 @@ def handle_confirm_input(user_id, message_text):
                             "name": passenger_name,
                             "short_name": passenger_name,
                             "category": category,
-                            "address": "預約時未提供地址"  # 提供預設地址值
+                            "address": "預約時未提供地址"
                         })
-                        logger.info(f"嘗試新增乘客: {passenger_name}, 類別: {category} (使用UNIQUE約束避免重複)")
+                        db.session.commit()
+                        logger.info(f"成功新增乘客: {passenger_name}, 類別: {category}")
                     except Exception as insert_error:
-                        # 如果還是出錯，記錄錯誤但繼續流程
+                        # 回滾乘客插入事務，但不影響主要預約流程
                         logger.warning(f"乘客插入出錯，但繼續預約流程: {insert_error}")
-                        pass
+                        db.session.rollback()
+                        # 重新開始新的事務為預約做準備
+                        db.session.begin()
                     
             except Exception as passenger_error:
                 logger.error(f"處理乘客資料時出錯: {passenger_error}")
-                db.session.rollback()  # 回滾事務以清除錯誤狀態
-                # 不中斷預約流程，繼續執行
+                db.session.rollback()
+                # 重新開始新的事務
+                db.session.begin()
         
         try:
             insert_query = """

@@ -360,6 +360,8 @@ def handle_record_fare(message_text, user_id=None):
             # 如果有5個或更多參數，第4個開始是原因
             reason = ' '.join(parts[4:])
 
+
+
         # 查找現有記錄並獲取當前值
         query = sql_text("SELECT id, meter_fare, extra_fare FROM completed_trips WHERE id = :id")
         current_trip = db.session.execute(query, {"id": completed_trip_id}).fetchone()
@@ -370,13 +372,10 @@ def handle_record_fare(message_text, user_id=None):
         current_meter = current_trip[1] or 0
         current_extra = current_trip[2] or 0
         
-        # 檢查是否有實際變更
+        # 🔥 簡化邏輯：按照用戶初衷，只在車資變更時要求原因
         meter_changed = current_meter != meter_fare
         extra_changed = current_extra != extra_fare
         has_changes = meter_changed or extra_changed
-        
-        if not has_changes:
-            return f"✅ 班次 {completed_trip_id} 的車資已經是錶價={meter_fare}, 加成={extra_fare}，無需修改。"
         
         # 如果有變更但沒有提供原因，要求說明
         if has_changes and not reason:
@@ -517,7 +516,9 @@ def handle_completed_trip_details(completed_trip_id):
             ct.created_at,
             ct.unique_code,
             d.name as driver_name,
-            d.plate_number
+            d.plate_number,
+            ct.passenger_leave_reason,
+            ct.modification_reason
         FROM 
             completed_trips ct
         LEFT JOIN 
@@ -590,6 +591,16 @@ def handle_completed_trip_details(completed_trip_id):
         remarks = trip.get('remarks')
         if remarks:
             result_text += f"📝 {remarks}\n"
+        
+        # 🔥 新增：顯示請假原因（如果有）
+        passenger_leave_reason = trip.get('passenger_leave_reason')
+        if passenger_leave_reason:
+            result_text += f"🔵 請假原因: {passenger_leave_reason}\n"
+        
+        # 🔥 新增：顯示修改原因（如果有且不是請假相關）
+        modification_reason = trip.get('modification_reason')
+        if modification_reason and not passenger_leave_reason:  # 避免重複顯示請假原因
+            result_text += f"🟠 修改原因: {modification_reason}\n"
         
         # 記錄時間
         created_at = trip.get('created_at')

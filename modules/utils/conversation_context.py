@@ -278,6 +278,20 @@ class ConversationContextManager:
         context = self.get_context(user_id)
         context.pending_modification = None
     
+    def set_recent_trip_id(self, user_id: str, trip_id: int):
+        """記錄用戶最近查看的班次ID"""
+        context = self.get_context(user_id)
+        context.active_trip_id = trip_id
+        context.context_expires_at = datetime.now() + timedelta(minutes=30)
+        
+        self._add_to_history(context, 'view_trip', {'trip_id': trip_id})
+        logger.info(f"記錄用戶 {user_id} 最近查看班次: {trip_id}")
+    
+    def get_recent_trip_id(self, user_id: str) -> Optional[int]:
+        """獲取用戶最近查看的班次ID"""
+        context = self.get_context(user_id)
+        return context.active_trip_id
+    
     def _add_to_history(self, context: ConversationContext, action_type: str, data: Dict):
         """添加操作到對話歷史"""
         history_item = {

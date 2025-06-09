@@ -110,21 +110,54 @@ def get_trip_details_flex(trip_id, trip_data):
     
     body_contents.append({ "type": "box", "layout": "horizontal", "margin": "md", "contents": [ { "type": "text", "text": "終點", "size": "sm", "color": "#555555", "flex": 2 },{ "type": "text", "text": trip_data.get('display_end_point', trip_data.get('end_point')) or '未指定', "size": "sm", "color": "#111111", "flex": 5, "wrap": True }]})
     
+    # 🔥 新增：檢查是否為乘客請假狀態
+    from modules.handlers.passenger_leave_handler import get_display_status
+    
+    # 創建一個臨時對象來傳遞給 get_display_status
+    class TempTrip:
+        def __init__(self, trip_data):
+            self.status = trip_data.get('status')
+            self.modification_reason = trip_data.get('modification_reason')
+            self.passenger_leave_reason = trip_data.get('passenger_leave_reason')
+            self.passenger_leave_reason = trip_data.get('passenger_leave_reason')
+            self.passenger_leave_reason = trip_data.get('passenger_leave_reason')
+    
+    temp_trip = TempTrip(trip_data)
+    display_status = get_display_status(temp_trip)
+    
     status_color_map = { "待派": "#FF6B6E", "準備": "#6CD8A0", "取消": "#888888", "衝突": "#FF9153", "請假": "#A0A0FF", "完成": "#1DB446" }
-    current_status = trip_data.get('status') or '未指定'
-    body_contents.append({ "type": "box", "layout": "horizontal", "margin": "md", "contents": [ { "type": "text", "text": "狀態", "size": "sm", "color": "#555555", "flex": 2 },{ "type": "text", "text": current_status, "size": "sm", "color": status_color_map.get(current_status, "#111111"), "weight": "bold", "flex": 5 }]})
+    # 提取顯示狀態的主要部分來選擇顏色
+    main_status = display_status.split()[0] if display_status else '未指定'
+    status_color = status_color_map.get(main_status, "#111111")
+    
+    body_contents.append({ "type": "box", "layout": "horizontal", "margin": "md", "contents": [ { "type": "text", "text": "狀態", "size": "sm", "color": "#555555", "flex": 2 },{ "type": "text", "text": display_status, "size": "sm", "color": status_color, "weight": "bold", "flex": 5, "wrap": True }]})
     
     if trip_data.get('driver_id'):
         body_contents.append({ "type": "box", "layout": "horizontal", "margin": "md", "contents": [ { "type": "text", "text": "司機", "size": "sm", "color": "#555555", "flex": 2 },{ "type": "text", "text": f"🚕{trip_data.get('driver_id')}", "size": "sm", "color": "#111111", "flex": 5 }]})
-        if trip_data.get('plate_number'):
-            body_contents.append({ "type": "box", "layout": "horizontal", "margin": "md", "contents": [ { "type": "text", "text": "車牌", "size": "sm", "color": "#555555", "flex": 2 },{ "type": "text", "text": trip_data.get('plate_number'), "size": "sm", "color": "#111111", "flex": 5 }]})
+        # 🔥 移除車牌顯示（按用戶要求）
     else:
         body_contents.append({ "type": "box", "layout": "horizontal", "margin": "md", "contents": [ { "type": "text", "text": "司機", "size": "sm", "color": "#555555", "flex": 2 },{ "type": "text", "text": "未指派", "size": "sm", "color": "#111111", "flex": 5 }]})
+    
+    # 🔥 新增：顯示加成
+    extra_fare = trip_data.get('extra_fare')
+    if extra_fare is not None:
+        extra_fare_text = f"+{extra_fare}" if extra_fare >= 0 else str(extra_fare)
+        body_contents.append({ "type": "box", "layout": "horizontal", "margin": "md", "contents": [ { "type": "text", "text": "加成", "size": "sm", "color": "#555555", "flex": 2 },{ "type": "text", "text": f"{extra_fare_text} 元", "size": "sm", "color": "#111111", "flex": 5 }]})
 
     body_contents.append({ "type": "box", "layout": "horizontal", "margin":"md", "contents": [ { "type": "text", "text": "類別", "size": "sm", "color": "#555555", "flex": 2 },{ "type": "text", "text": trip_data.get('category') or '未分類', "size": "sm", "color": "#111111", "flex": 5 }]})
 
     if trip_data.get('base_fare') is not None:
         body_contents.append({ "type": "box", "layout": "horizontal", "margin": "md", "contents": [ { "type": "text", "text": "基本車資", "size": "sm", "color": "#555555", "flex": 2 },{ "type": "text", "text": f"{trip_data.get('base_fare')} 元", "size": "sm", "color": "#111111", "flex": 5 }]})
+    
+    # 🔥 新增：顯示請假原因（如果有）
+    passenger_leave_reason = trip_data.get('passenger_leave_reason')
+    if passenger_leave_reason:
+        body_contents.append({ "type": "box", "layout": "horizontal", "margin": "md", "contents": [ { "type": "text", "text": "請假原因", "size": "sm", "color": "#555555", "flex": 2 },{ "type": "text", "text": passenger_leave_reason, "size": "sm", "color": "#A0A0FF", "flex": 5, "wrap": True }]})
+    
+    # 🔥 新增：顯示修改原因（如果有且不是請假相關）
+    modification_reason = trip_data.get('modification_reason')
+    if modification_reason and not passenger_leave_reason:  # 避免重複顯示請假原因
+        body_contents.append({ "type": "box", "layout": "horizontal", "margin": "md", "contents": [ { "type": "text", "text": "修改原因", "size": "sm", "color": "#555555", "flex": 2 },{ "type": "text", "text": modification_reason, "size": "sm", "color": "#FF9153", "flex": 5, "wrap": True }]})
     
     # 🚨 新增：如果有時間限制，顯示提示信息
     if not can_modify_status and restriction_message:

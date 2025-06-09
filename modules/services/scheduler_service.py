@@ -168,11 +168,13 @@ def update_single_trip(app, trip_id):
             INSERT INTO completed_trips
             (date, start_point, via_point, end_point,
              meter_fare, extra_fare, category, driver_id,
-             unique_code, trip_type, passenger_name)
+             unique_code, trip_type, passenger_name,
+             passenger_leave_reason, modification_reason)
             VALUES
             (:date, :start_point, :via_point, :end_point,
              :meter_fare, :extra_fare, :category, :driver_id,
-             :unique_code, :trip_type, :passenger_name)
+             :unique_code, :trip_type, :passenger_name,
+             :passenger_leave_reason, :modification_reason)
             """
 
             params = {
@@ -184,7 +186,9 @@ def update_single_trip(app, trip_id):
                 "driver_id": trip_info.get('driver_id'),
                 "unique_code": unique_code,
                 "trip_type": trip_info.get('trip_type'),
-                "passenger_name": trip_info.get('passenger_name')
+                "passenger_name": trip_info.get('passenger_name'),
+                "passenger_leave_reason": trip_info.get('passenger_leave_reason'),
+                "modification_reason": trip_info.get('modification_reason')
             }
 
             # 根據 trip_type 設置地點
@@ -293,7 +297,8 @@ def update_completed_trips():
                     t.start_point, t.via_point, t.end_point, 
                     t.meter_fare, t.extra_fare, t.category, t.driver_id,
                     t.status, t.unique_code, t.fixed_trip_id,
-                    t.trip_type, t.custom_start_point, t.custom_end_point, t.passenger_name
+                    t.trip_type, t.custom_start_point, t.custom_end_point, t.passenger_name,
+                    t.passenger_leave_reason, t.modification_reason
                 FROM trips t WHERE t.trip_id = :trip_id FOR UPDATE
                 """)
                 result: ResultProxy = db.session.execute(query, {"trip_id": trip_id})
@@ -370,11 +375,13 @@ def update_completed_trips():
                 INSERT INTO completed_trips
                 (date, start_point, via_point, end_point,
                  meter_fare, extra_fare, category, driver_id,
-                 unique_code, trip_type, passenger_name)
+                 unique_code, trip_type, passenger_name,
+                 passenger_leave_reason, modification_reason)
                 VALUES
                 (:date, :start_point, :via_point, :end_point,
                  :meter_fare, :extra_fare, :category, :driver_id,
-                 :unique_code, :trip_type, :passenger_name)
+                 :unique_code, :trip_type, :passenger_name,
+                 :passenger_leave_reason, :modification_reason)
                 """
 
                 params = {
@@ -386,7 +393,9 @@ def update_completed_trips():
                     "driver_id": trip_info.get('driver_id'),
                     "unique_code": unique_code,
                     "trip_type": trip_info.get('trip_type'),
-                    "passenger_name": trip_info.get('passenger_name')
+                    "passenger_name": trip_info.get('passenger_name'),
+                    "passenger_leave_reason": trip_info.get('passenger_leave_reason'),
+                    "modification_reason": trip_info.get('modification_reason')
                 }
 
                 # 根據 trip_type 設置地點

@@ -77,6 +77,9 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
             trip_type = trip[8] if len(trip) > 8 else "fixed" 
             custom_start_point = trip[9] if len(trip) > 9 else None
             custom_end_point = trip[10] if len(trip) > 10 else None
+            category = trip[11] if len(trip) > 11 else None
+            passenger_leave_reason = trip[12] if len(trip) > 12 else None
+            modification_reason = trip[13] if len(trip) > 13 else None
             
             # --- REMOVED: Logging for determined trip_type and direction --- 
             # logger.info(f"[generate_trips_flex] Trip ID {trip_id}: Determined trip_type='{trip_type}', direction='{direction}'")
@@ -128,6 +131,16 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
                     "margin": "md"
                 })
         
+            # 🚨 新增：檢查是否為乘客請假狀態
+            display_status = status
+            
+            # 優先檢查新的passenger_leave_reason欄位
+            if passenger_leave_reason:
+                display_status = "請假"
+            # 回退檢查舊的modification_reason欄位
+            elif modification_reason and ("乘客請假" in modification_reason or "請假" in modification_reason):
+                display_status = "請假"
+            
             # 根據狀態添加不同的表情符號
             status_emoji = {
                 "準備": "🟢",
@@ -136,7 +149,7 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
                 "衝突": "⚠️",
                 "請假": "🔵",
                 "待派": "🟠"
-            }.get(status, "⚪")
+            }.get(display_status, "⚪")
         
             # 根據班次類型設定顏色
             text_color = "#333333" if trip_type == "fixed" else "#0000FF"  # 固定班次為黑色，臨時班次為藍色

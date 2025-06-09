@@ -528,7 +528,7 @@ class CompletedTripMatcher:
         
         return filtered_trips
 
-def handle_smart_fare_query(message_text: str, user_id: str) -> str:
+def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True):
     """處理智能車資查詢/修改請求 - 🔥 增強版：支持對話上下文"""
     try:
         logger.info(f"處理智能車資查詢: {message_text}")
@@ -580,8 +580,8 @@ def handle_smart_fare_query(message_text: str, user_id: str) -> str:
                         result = execute_fare_modification(trip, modification_intent, user_id)
                         return f"""🎯 智能上下文解析
 
-📝 您的輸入：「{message_text}」
-🧠 理解：{context_info}
+💬「{message_text}」
+🧠 {context_info}
 
 {result}"""
                 else:
@@ -594,15 +594,14 @@ def handle_smart_fare_query(message_text: str, user_id: str) -> str:
                     else:
                         fare_display = f"錶價 {meter_fare}, 加成 {extra_fare}"
                     
-                    return f"""🎯 智能上下文解析
+                    return f"""🎯 智能解析結果
 
-📝 您的輸入：「{message_text}」
-🧠 理解：{context_info}
+💬「{message_text}」
+🧠 {context_info}
 
 📋 班次 #{trip['id']} ({trip['category']})
-📍 路線：{trip['start_point']} → {trip['end_point']}
-🚕 {trip['driver_id']}
-💰 當前費用：{fare_display}
+📍 {trip['start_point']} → {trip['end_point']}
+🚕 {trip['driver_id']} | 💰 {fare_display}
 
 請告訴我要如何調整費用？
 例如：「改成錶價400加成80，客戶要求調整」"""
@@ -613,16 +612,21 @@ def handle_smart_fare_query(message_text: str, user_id: str) -> str:
                 available_trips = context_resolution['available_trips']
                 trips_summary = format_multiple_trips_summary(available_trips)
                 
-                return f"""🤔 需要您澄清
+                if use_flex:
+                    from modules.flex_designs.ai_fare_query_flex import create_ai_clarification_flex
+                    search_info = {'query': message_text}
+                    return create_ai_clarification_flex(search_info, message, available_trips)
+                else:
+                    return f"""🤔 需要您澄清
 
-📝 您的輸入：「{message_text}」
+💬「{message_text}」
 ⚠️ {message}
 
 {trips_summary}
 
-請更具體地指定，例如：
-「修改第1個的費用為400加成80」
-「修改班次#{available_trips[0]['id']}」"""
+💡 操作提示：
+• 修改第1個費用為400加成80
+• 修改班次#{available_trips[0]['id']}"""
         
         # 🔥 检查是否是对之前追问的回复（用户提供原因）
         pending_modification = conversation_manager.get_pending_modification(user_id)
@@ -733,31 +737,37 @@ def handle_smart_fare_query(message_text: str, user_id: str) -> str:
         
         # 如果信心度很低，詢問用戶澄清
         if confidence == 'very_low':
-            return f"""🤔 抱歉，我無法理解您的查詢條件
+            if use_flex:
+                from modules.flex_designs.ai_fare_query_flex import create_ai_very_low_confidence_flex
+                search_info = {'query': message_text}
+                return create_ai_very_low_confidence_flex(search_info)
+            else:
+                return f"""🤔 抱歉，我無法理解您的查詢條件
 
-📝 您的輸入：「{message_text}」
+💬 {message_text}
 
-💡 請嘗試更明確的描述，例如：
-• 日期：「5/30」、「今天」、「昨天」
-• 司機：「司機123」、「123號司機」  
-• 類別：「診所」、「東洋」、「臨時」
-• 班次ID：「班次#322」、「修改班次#322」
-• 組合：「5/30司機123的班次」
+💡 請嘗試更明確的描述：
+  日期：「5/30」、「今天」、「昨天」
+  司機：「司機123」、「123號司機」  
+  類別：「診所」、「東洋」、「臨時」
+  班次ID：「班次#322」、「修改班次#322」
 
 或使用「查已完成」查看完整列表後再選擇修改。"""
 
         # 如果信心度低，顯示理解並詢問確認
         if confidence == 'low':
-            return f"""⚠️ 請確認我的理解是否正確
+            if use_flex:
+                from modules.flex_designs.ai_fare_query_flex import create_ai_low_confidence_flex
+                search_info = {'query': message_text}
+                return create_ai_low_confidence_flex(search_info, understood_criteria)
+            else:
+                return f"""⚠️ 請確認我的理解是否正確
 
-📝 您的輸入：「{message_text}」
+💬 {message_text}
 
-🧠 我的理解：
 {understood_criteria}
 
-如果正確請說「確認」，如果不對請重新描述您的需求。
-
-💡 建議使用更具體的描述，例如：「5/30司機123的班次要調整」"""
+如果正確請說「確認」，如果不對請重新描述您的需求。"""
 
         # 搜索匹配的班次
         matching_trips = matcher.search_completed_trips(criteria)
@@ -774,14 +784,21 @@ def handle_smart_fare_query(message_text: str, user_id: str) -> str:
         # 🔥 新增：總是顯示搜索條件，提高透明度
         search_header = f"""🔍 AI智能搜索
 
-📝 您的輸入：「{message_text}」
-🧠 解析條件：
+💬 {message_text}
 {understood_criteria}
 
 """
         
         if not matching_trips:
-            return f"""{search_header}❌ 找不到符合條件的班次記錄
+            if use_flex:
+                from modules.flex_designs.ai_fare_query_flex import create_ai_search_result_flex
+                search_info = {
+                    'query': message_text,
+                    'criteria_text': understood_criteria.replace('\n', ', ').replace('  ', '')
+                }
+                return create_ai_search_result_flex(search_info, [], confidence)
+            else:
+                return f"""{search_header}❌ 找不到符合條件的班次記錄
 
 💡 建議：
 • 嘗試更寬泛的條件（如「今天的診所班次」）
@@ -828,14 +845,22 @@ def handle_smart_fare_query(message_text: str, user_id: str) -> str:
 📊 總計變化：{(meter_change + extra_change) - (meter_fare + extra_fare):+d} 元
 
 ❓ 請說明修改原因：
-（例如：客戶要求調整、等候時間過長、夜班費用等）"""
+  例如：客戶要求調整、等候時間過長、夜班費用等"""
                 else:
                     # 有明确原因，直接执行修改
                     result = execute_fare_modification(trip, modification_intent, user_id)
                     return f"{search_header}✅ 找到唯一匹配班次並執行修改：\n\n{result}"
             
             # 只是查詢，詢問如何修改
-            return f"""{search_header}🎯 找到唯一匹配的班次：
+            if use_flex:
+                from modules.flex_designs.ai_fare_query_flex import create_ai_search_result_flex
+                search_info = {
+                    'query': message_text,
+                    'criteria_text': understood_criteria.replace('\n', ', ').replace('  ', '')
+                }
+                return create_ai_search_result_flex(search_info, [trip], confidence)
+            else:
+                return f"""{search_header}🎯 找到唯一匹配的班次：
 
 📋 班次 #{trip['id']} ({trip['category']})
 📍 路線：{trip['start_point']} → {trip['end_point']}
@@ -851,15 +876,23 @@ def handle_smart_fare_query(message_text: str, user_id: str) -> str:
         
         else:
             # 多個匹配的情況 - 🔥 修復：直接顯示所有結果，不使用分頁
-            trips_summary = format_multiple_trips_summary(matching_trips)
-            
-            if modification_intent:
-                return f"""{search_header}⚠️ 找到 {len(matching_trips)} 個匹配班次，請選擇：
+            if use_flex:
+                from modules.flex_designs.ai_fare_query_flex import create_ai_search_result_flex
+                search_info = {
+                    'query': message_text,
+                    'criteria_text': understood_criteria.replace('\n', ', ').replace('  ', '')
+                }
+                return create_ai_search_result_flex(search_info, matching_trips, confidence)
+            else:
+                trips_summary = format_multiple_trips_summary(matching_trips)
+                
+                if modification_intent:
+                    return f"""{search_header}⚠️ 找到 {len(matching_trips)} 個匹配班次，請選擇：
 
 {trips_summary}"""
-            
-            # 只是查詢多個結果
-            return f"""{search_header}{trips_summary}"""
+                
+                # 只是查詢多個結果
+                return f"""{search_header}{trips_summary}"""
             
     except Exception as e:
         logger.error(f"處理智能車資查詢時出錯: {e}")
@@ -960,9 +993,9 @@ def format_multiple_trips_summary(trips: List[Dict]) -> str:
     
     # 简化操作提示
     result += "💡 操作提示:\n"
-    result += "• 「修改班次#[ID]車資[錶價]加成[加成]」\n"
-    result += "• 選擇第N個: 「修改第[N]個的費用為...」\n"
-    result += "• 查看: 「查看 [ID]」"
+    result += "  修改#[ID] [錶價] [加成]\n"
+    result += "  修改第[N]個 [錶價] [加成]\n"
+    result += "  查看[ID]"
     
     return result
 
@@ -972,33 +1005,33 @@ def format_understood_criteria(criteria: Dict) -> str:
     
     # 🔥 新增：班次ID條件顯示
     if criteria.get('trip_id'):
-        conditions.append(f"📋 班次ID: #{criteria['trip_id']}")
+        conditions.append(f"📋 #{criteria['trip_id']}")
     
     if criteria.get('date'):
-        date_str = criteria['date'].strftime('%Y-%m-%d (%m/%d)')
-        conditions.append(f"📅 日期: {date_str}")
+        date_str = criteria['date'].strftime('%m/%d')
+        conditions.append(f"📅 {date_str}")
     
     if criteria.get('driver_id'):
-        conditions.append(f"🚕 {criteria['driver_id']}")  # 🔥 修復：簡化顯示
+        conditions.append(f"🚕 {criteria['driver_id']}")  
     
     if criteria.get('category'):
-        conditions.append(f"🏷️ 類別: {criteria['category']}")
+        conditions.append(f"🏷️ {criteria['category']}")
     
     if criteria.get('locations'):
-        conditions.append(f"📍 地點: {', '.join(criteria['locations'])}")
+        conditions.append(f"📍 {', '.join(criteria['locations'])}")
     
     if criteria.get('sequence'):
         if criteria['sequence'] > 0:
-            conditions.append(f"🔢 順序: 第{criteria['sequence']}個")
+            conditions.append(f"🔢 第{criteria['sequence']}個")
         else:
-            conditions.append(f"🔢 順序: 倒數第{abs(criteria['sequence'])}個")
+            conditions.append(f"🔢 倒數第{abs(criteria['sequence'])}個")
     
     if criteria.get('time_range'):
         start, end = criteria['time_range']
-        conditions.append(f"⏰ 時間: {start}:00-{end}:00")
+        conditions.append(f"⏰ {start}:00-{end}:00")
     
     if not conditions:
-        conditions.append("❓ 未識別到明確條件")
+        conditions.append("❓ 未識別到條件")
     
     # 添加信心度指示
     confidence = criteria.get('confidence', 'high')
@@ -1008,56 +1041,70 @@ def format_understood_criteria(criteria: Dict) -> str:
         'very_low': '🔴'
     }
     
-    conditions.append(f"{confidence_emoji.get(confidence, '⚪')} 解析信心度: {confidence}")
+    conditions.append(f"{confidence_emoji.get(confidence, '⚪')} {confidence}")
     
-    return '\n'.join(f"  {condition}" for condition in conditions)
+    return '🧠 ' + ' | '.join(conditions)
 
 def parse_fare_modification_intent(message_text: str) -> Optional[Dict]:
     """解析車資修改意圖（增強版）"""
     try:
         result = {}
         
-        # 提取錶價 - 增強版本
-        meter_patterns = [
-            r'錶價\s*(\d+)',
-            r'改成\s*錶價?\s*(\d+)',
-            r'錶價?\s*改成?\s*(?:為|到|成)?\s*(\d+)',
-            r'錶價?\s*調整?\s*(?:為|到|成)?\s*(\d+)',
-            r'車資\s*(\d+)',
-            r'費用\s*(\d+)',
-            r'\$\s*(\d+)',         # $符號
-            r'(\d+)\s*元',         # 數字+元
-            r'改成\s*(\d+)\s*元',
-            r'調整為\s*(\d+)',
-            r'變成\s*(\d+)'
-        ]
+        # 🔥 新增：檢測簡單數字格式 (班次ID 錶價 加成 原因)
+        # 例如：修改班次1505 270 -40 怡平路沒搭車
+        simple_format_match = re.search(r'修改班次#?(\d+)\s+(\d+)\s+([+-]?\d+)', message_text)
+        if simple_format_match:
+            result['meter_fare'] = int(simple_format_match.group(2))
+            result['extra_fare'] = int(simple_format_match.group(3))
+            # 檢查是否有原因在數字後面
+            after_numbers = message_text[simple_format_match.end():].strip()
+            if after_numbers:
+                result['reason'] = after_numbers
+            logger.info(f"簡單格式解析成功: 錶價{result['meter_fare']}, 加成{result['extra_fare']}, 原因'{result.get('reason', '無')}'")
         
-        for pattern in meter_patterns:
-            match = re.search(pattern, message_text)
-            if match:
-                result['meter_fare'] = int(match.group(1))
-                break
+        # 提取錶價 - 增強版本
+        if 'meter_fare' not in result:  # 如果簡單格式沒有解析到，才使用複雜模式
+            meter_patterns = [
+                r'錶價\s*(\d+)',
+                r'改成\s*錶價?\s*(\d+)',
+                r'錶價?\s*改成?\s*(?:為|到|成)?\s*(\d+)',
+                r'錶價?\s*調整?\s*(?:為|到|成)?\s*(\d+)',
+                r'車資\s*(\d+)',
+                r'費用\s*(\d+)',
+                r'\$\s*(\d+)',         # $符號
+                r'(\d+)\s*元',         # 數字+元
+                r'改成\s*(\d+)\s*元',
+                r'調整為\s*(\d+)',
+                r'變成\s*(\d+)'
+            ]
+            
+            for pattern in meter_patterns:
+                match = re.search(pattern, message_text)
+                if match:
+                    result['meter_fare'] = int(match.group(1))
+                    break
         
         # 提取加成 - 增強版本
-        extra_patterns = [
-            r'加成\s*([+-]?\d+)',  # 🔥 修复：支持负数加成
-            r'加收\s*([+-]?\d+)',
-            r'額外\s*([+-]?\d+)',
-            r'夜班費?\s*([+-]?\d+)',
-            r'加費\s*([+-]?\d+)',
-            r'補貼\s*([+-]?\d+)', 
-            r'折扣\s*([+-]?\d+)',
-            r'優惠\s*([+-]?\d+)',
-            r'調整\s*([+-]?\d+)',
-            r'\+\s*([+-]?\d+)',     # +符號
-            r'另加\s*([+-]?\d+)'
-        ]
-        
-        for pattern in extra_patterns:
-            match = re.search(pattern, message_text)
-            if match:
-                result['extra_fare'] = int(match.group(1))
-                break
+        if 'extra_fare' not in result:  # 如果簡單格式沒有解析到，才使用複雜模式
+            extra_patterns = [
+                r'加成\s*([+-]?\d+)',  # 🔥 修复：支持负数加成
+                r'加收\s*([+-]?\d+)',
+                r'額外\s*([+-]?\d+)',
+                r'夜班費?\s*([+-]?\d+)',
+                r'加費\s*([+-]?\d+)',
+                r'補貼\s*([+-]?\d+)', 
+                r'折扣\s*([+-]?\d+)',
+                r'優惠\s*([+-]?\d+)',
+                r'調整\s*([+-]?\d+)',
+                r'\+\s*([+-]?\d+)',     # +符號
+                r'另加\s*([+-]?\d+)'
+            ]
+            
+            for pattern in extra_patterns:
+                match = re.search(pattern, message_text)
+                if match:
+                    result['extra_fare'] = int(match.group(1))
+                    break
         
         # 如果只有一個數字，根據上下文判斷
         if not result:
@@ -1069,51 +1116,55 @@ def parse_fare_modification_intent(message_text: str) -> Optional[Dict]:
                 else:  # 小於200的數字通常是加成
                     result['extra_fare'] = number
         
-        # 🔥 增强原因提取：支持更多格式
-        reason_patterns = [
-            r'，\s*([^0-9]+.+?)(?:\s*$|[。，])',      # 🔥 修复：逗号后非数字开头的内容
-            r'因為\s*(.+?)(?:\s*$|[。，])',      # "因為..."
-            r'原因[是:：]\s*(.+?)(?:\s*$|[。，])',  # "原因是..."、"原因："
-            r'客戶\s*(.+?)(?:\s*$|[。，])',      # "客戶..."
-            r'[\s，](.+要求.+?)(?:\s*$|[。，])', # 包含"要求"的內容
-            r'等候\s*(.+?)(?:\s*$|[。，])',      # 🔥 新增："等候..."
-            r'等待\s*(.+?)(?:\s*$|[。，])',      # 🔥 新增："等待..."
-            r'夜班\s*(.+?)(?:\s*$|[。，])',      # 🔥 新增："夜班..."
-            r'加班\s*(.+?)(?:\s*$|[。，])',      # 🔥 新增："加班..."
-            r'[\s，](.+小時.+?)(?:\s*$|[。，])', # 🔥 新增：包含"小時"的内容
-            r'[\s，](.+調整.+?)(?:\s*$|[。，])', # 🔥 新增：包含"調整"的内容
-        ]
-        
-        reason = None
-        for i, pattern in enumerate(reason_patterns):
-            match = re.search(pattern, message_text)
-            if match:
-                potential_reason = match.group(1).strip()
-                # 过滤掉纯数字和太短的内容
-                if len(potential_reason) > 1 and not potential_reason.isdigit():
-                    # 🔥 进一步清理原因文本
-                    # 移除可能的车资相关数字
-                    cleaned_reason = re.sub(r'^\d+\s*', '', potential_reason)  # 移除开头的数字
-                    cleaned_reason = re.sub(r'\s*\d+\s*$', '', cleaned_reason)  # 移除结尾的数字
-                    
-                    # 🔥 新增：过滤掉明显是费用描述的内容
-                    fee_patterns = [
-                        r'^錶價\d+',           # 錶價260
-                        r'^加成\d+',           # 加成100  
-                        r'^錶價\d+加成\d*$',   # 錶價260加成, 錶價260加成100
-                        r'^\d+加成\d*$',       # 260加成, 260加成100
-                        r'^\d+錶價\d*$',       # 260錶價
-                    ]
-                    
-                    is_fee_description = any(re.match(pattern, cleaned_reason) for pattern in fee_patterns)
-                    
-                    if not is_fee_description and len(cleaned_reason.strip()) > 2:
-                        reason = cleaned_reason.strip()
-                        logger.info(f"原因提取成功 (模式{i+1}): '{reason}' 来自输入: '{message_text}'")
-                        break
+        # 🔥 增强原因提取：支持更多格式（但避免重複提取）
+        if 'reason' not in result:  # 如果簡單格式沒有提取到原因，才使用複雜模式
+            reason_patterns = [
+                r'，\s*([^0-9]+.+?)(?:\s*$|[。，])',      # 🔥 修复：逗号后非数字开头的内容
+                r'因為\s*(.+?)(?:\s*$|[。，])',      # "因為..."
+                r'原因[是:：]\s*(.+?)(?:\s*$|[。，])',  # "原因是..."、"原因："
+                r'客戶\s*(.+?)(?:\s*$|[。，])',      # "客戶..."
+                r'[\s，](.+要求.+?)(?:\s*$|[。，])', # 包含"要求"的內容
+                r'等候\s*(.+?)(?:\s*$|[。，])',      # 🔥 新增："等候..."
+                r'等待\s*(.+?)(?:\s*$|[。，])',      # 🔥 新增："等待..."
+                r'夜班\s*(.+?)(?:\s*$|[。，])',      # 🔥 新增："夜班..."
+                r'加班\s*(.+?)(?:\s*$|[。，])',      # 🔥 新增："加班..."
+                r'[\s，](.+小時.+?)(?:\s*$|[。，])', # 🔥 新增：包含"小時"的内容
+                r'[\s，](.+調整.+?)(?:\s*$|[。，])', # 🔥 新增：包含"調整"的内容
+            ]
+            
+            reason = None
+            for i, pattern in enumerate(reason_patterns):
+                match = re.search(pattern, message_text)
+                if match:
+                    potential_reason = match.group(1).strip()
+                    # 过滤掉纯数字和太短的内容
+                    if len(potential_reason) > 1 and not potential_reason.isdigit():
+                        # 🔥 进一步清理原因文本
+                        # 移除可能的车资相关数字
+                        cleaned_reason = re.sub(r'^\d+\s*', '', potential_reason)  # 移除开头的数字
+                        cleaned_reason = re.sub(r'\s*\d+\s*$', '', cleaned_reason)  # 移除结尾的数字
+                        
+                        # 🔥 新增：过滤掉明显是费用描述的内容
+                        fee_patterns = [
+                            r'^錶價\d+',           # 錶價260
+                            r'^加成\d+',           # 加成100  
+                            r'^錶價\d+加成\d*$',   # 錶價260加成, 錶價260加成100
+                            r'^\d+加成\d*$',       # 260加成, 260加成100
+                            r'^\d+錶價\d*$',       # 260錶價
+                        ]
+                        
+                        is_fee_description = any(re.match(pattern, cleaned_reason) for pattern in fee_patterns)
+                        
+                        if not is_fee_description and len(cleaned_reason.strip()) > 2:
+                            reason = cleaned_reason.strip()
+                            logger.info(f"原因提取成功 (模式{i+1}): '{reason}' 来自输入: '{message_text}'")
+                            break
+            
+            if reason:
+                result['reason'] = reason
         
         # 🔥 如果常规模式没有提取到原因，尝试更宽松的提取
-        if not reason and result:
+        if 'reason' not in result and result:  # 只有當result有內容但沒有原因時才執行
             # 查找逗号或空格后的非数字内容，且不是费用描述
             loose_patterns = [
                 r'[，,]\s*([^0-9錶價加成]+.+?)(?:\s*$|[。，])',    # 逗号后的非费用内容
@@ -1128,27 +1179,24 @@ def parse_fare_modification_intent(message_text: str) -> Optional[Dict]:
                     exclude_words = ['加成', '錶價', '修改', '班次', '車資', '費用']
                     if (len(potential_reason) > 2 and 
                         not any(word in potential_reason for word in exclude_words)):
-                        reason = potential_reason
-                        logger.info(f"宽松原因提取成功: '{reason}' 来自输入: '{message_text}'")
+                        result['reason'] = potential_reason
+                        logger.info(f"宽松原因提取成功: '{result['reason']}' 来自输入: '{message_text}'")
                         break
         
         # 如果沒有明確原因但有修改意圖，生成通用原因
-        if not reason and result:
+        if 'reason' not in result and result:
             if '夜班' in message_text or '晚上' in message_text:
-                reason = "夜班服務費"
+                result['reason'] = "夜班服務費"
             elif '等候' in message_text or '等待' in message_text:
-                reason = "等候時間調整"
+                result['reason'] = "等候時間調整"
             elif '加班' in message_text:
-                reason = "加班費調整"
+                result['reason'] = "加班費調整"
             elif '客戶' in message_text:
-                reason = "客戶要求調整"
+                result['reason'] = "客戶要求調整"
             elif '要求' in message_text or '需要' in message_text:
-                reason = "費用調整要求"
+                result['reason'] = "費用調整要求"
             else:
-                reason = "透過AI智能修改"
-        
-        if reason:
-            result['reason'] = reason
+                result['reason'] = "透過AI智能修改"
             
         # 🔥 添加调试日志
         logger.info(f"AI修改意图解析结果: {result} (输入: '{message_text}')")

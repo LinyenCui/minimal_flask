@@ -26,6 +26,7 @@ def handle_postback(event):
     """處理 Postback 事件"""
     postback_data = event.postback.data
     reply_token = event.reply_token
+    user_id = event.source.user_id if hasattr(event, 'source') else None
     
     try:
         # 解析 postback 數據
@@ -172,8 +173,9 @@ def handle_postback(event):
                     logger.error(f"檢查修改權限時出錯: {check_error}")
                     # 如果檢查失敗，允許繼續（向下兼容）
                 
-                from modules.handlers.trip_handler import handle_change_status
-                result = handle_change_status(f"修改狀態 {trip_id} {new_status}")
+                # 🚨 新增：所有狀態修改都使用新的處理邏輯
+                from modules.handlers.trip_status_handler import handle_update_trip_status
+                result = handle_update_trip_status(f"修改狀態 {trip_id} {new_status}")
                 reply_text(reply_token, result)
             else:
                 # 情況 2: 不帶 status 參數 (來自 Flex 主按鈕)，重新顯示詳情+QuickReply
