@@ -538,14 +538,17 @@ def get_temp_booking_confirm_flex(date_str, time_str, start_point, end_point=Non
             "margin": "md"
         })
 
-    # 🔥 新增：顯示乘客姓名
+    # 🔥 新增：顯示乘客姓名（支援複合姓名）
     if passenger_name:
+        from modules.utils.passenger_name_handler import get_passengers_display_text
+        display_text = get_passengers_display_text(passenger_name)
+        
         contents_box.append({
             "type": "box",
             "layout": "horizontal",
             "contents": [
                 { "type": "text", "text": "乘客", "size": "sm", "color": "#555555", "flex": 2 },
-                { "type": "text", "text": passenger_name, "size": "sm", "color": "#111111", "flex": 4, "weight": "bold" }
+                { "type": "text", "text": display_text, "size": "sm", "color": "#111111", "flex": 4, "weight": "bold", "wrap": True }
             ],
             "margin": "md"
         })

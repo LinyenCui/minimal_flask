@@ -241,47 +241,21 @@ def handle_confirm_input(user_id, message_text):
         booking_data = temp_booking_states[user_id]["data"]
         logger.info(f"用戶 {user_id} 確認預約，數據: {booking_data}")
         
-        # 🔥 新增：自動處理乘客資料（使用獨立事務）
+        # 🔥 新增：自動處理複合乘客資料
         if booking_data.get("passenger_name"):
             try:
+                from modules.utils.passenger_name_handler import process_multiple_passengers
+                
                 passenger_name = booking_data["passenger_name"]
                 category = booking_data.get("category", "東洋")
                 
-                # 🔥 修復：使用short_name進行檢查（因為有UNIQUE約束）
-                check_query = "SELECT id FROM customers WHERE name = :name OR short_name = :short_name"
-                existing_passenger = db.session.execute(sql_text(check_query), {
-                    "name": passenger_name, 
-                    "short_name": passenger_name
-                }).fetchone()
+                # 使用新的複合姓名處理功能
+                result = process_multiple_passengers(passenger_name, category)
                 
-                if existing_passenger:
-                    logger.info(f"乘客已存在: {passenger_name} (ID: {existing_passenger[0]})")
+                if result["success"]:
+                    logger.info(f"乘客處理完成: {result['summary_message']}")
                 else:
-                    # 🔥 修復：使用獨立事務處理乘客插入，避免影響主要預約流程
-                    try:
-                        # 先提交當前事務以清除任何錯誤狀態
-                        db.session.commit()
-                        
-                        # 使用新的事務處理乘客插入
-                        insert_passenger_query = """
-                        INSERT INTO customers (name, short_name, category, address) 
-                        VALUES (:name, :short_name, :category, :address)
-                        ON CONFLICT (short_name) DO NOTHING
-                        """
-                        db.session.execute(sql_text(insert_passenger_query), {
-                            "name": passenger_name,
-                            "short_name": passenger_name,
-                            "category": category,
-                            "address": "預約時未提供地址"
-                        })
-                        db.session.commit()
-                        logger.info(f"成功新增乘客: {passenger_name}, 類別: {category}")
-                    except Exception as insert_error:
-                        # 回滾乘客插入事務，但不影響主要預約流程
-                        logger.warning(f"乘客插入出錯，但繼續預約流程: {insert_error}")
-                        db.session.rollback()
-                        # 重新開始新的事務為預約做準備
-                        db.session.begin()
+                    logger.warning(f"部分乘客處理失敗: {result['summary_message']}")
                     
             except Exception as passenger_error:
                 logger.error(f"處理乘客資料時出錯: {passenger_error}")
@@ -338,13 +312,17 @@ def handle_confirm_input(user_id, message_text):
             # 顯示錶價信息
             if booking_data.get("meter_fare"):
                 success_message += f"錶價：{booking_data['meter_fare']}元\n"
+            
             # 顯示乘客信息
             if booking_data.get("passenger_name"):
-                success_message += f"乘客：{booking_data['passenger_name']}\n"
+                from modules.utils.passenger_name_handler import get_passengers_display_text
+                display_passenger = get_passengers_display_text(booking_data['passenger_name'])
+                success_message += f"乘客：{display_passenger}\n"
+            
             success_message += (
-                 f"類別：{booking_data['category']}\n"
-                 f"狀態：待派\n\n"
-                 "我們會盡快為您指派司機。"
+                f"類別：{booking_data['category']}\n"
+                f"狀態：待派\n\n"
+                "我們會盡快為您指派司機。"
             )
             return {"type": "text", "text": success_message}
         
