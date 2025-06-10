@@ -585,14 +585,14 @@ def process_text_message(event):
             
         # 未識別的命令
         else:
-            # 🚨 新增：檢測簡單請假格式（負數開頭加原因）
+            # 🚨 新增：檢測簡單請假格式（原因結尾加數字）
             import re
-            simple_leave_pattern = r'^(-?\d+)\s+(.+)$'
+            simple_leave_pattern = r'^(.+)\s+(-?\d+)$'
             simple_leave_match = re.match(simple_leave_pattern, message_text.strip())
             
             if simple_leave_match:
-                amount = simple_leave_match.group(1)
-                reason = simple_leave_match.group(2)
+                reason = simple_leave_match.group(1)
+                amount = simple_leave_match.group(2)
                 
                 # 嘗試從對話上下文獲取最近的班次ID
                 from modules.utils.conversation_context import conversation_manager
@@ -614,7 +614,7 @@ def process_text_message(event):
                         # 如果出錯，繼續往下執行其他邏輯
                 else:
                     # 如果找不到最近的班次ID，提示用戶
-                    reply_text(reply_token, f"檢測到請假資料（{amount} {reason}），但找不到對應的班次。\n\n請使用完整格式：\n乘客請假 [班次ID] {amount} {reason}")
+                    reply_text(reply_token, f"檢測到請假資料（{reason} {amount}），但找不到對應的班次。\n\n請使用完整格式：\n乘客請假 [班次ID] {amount} {reason}")
                     return
             
             # 🔥 新增：检查是否有AI上下文需要处理（例如pending_modification）

@@ -65,13 +65,27 @@ def handle_update_trip_status(message_text):
                 return f"更新班次 #{trip_id} 狀態為「準備」時出錯。"
 
         if new_status == "取消":
-            return f"您確定要取消班次 #{trip_id} 嗎？\n請回覆「確認取消 {trip_id}」進行確認。"
+            # 直接執行取消操作
+            update_query = "UPDATE trips SET status = :new_status WHERE trip_id = :trip_id RETURNING trip_id"
+            result = db.session.execute(text(update_query), {"trip_id": trip_id, "new_status": new_status})
+            db.session.commit()
+            if result.fetchone():
+                return f"✅ 已成功將班次 #{trip_id} 的狀態從「{current_status}」更改為「取消」。"
+            else:
+                return f"取消班次 #{trip_id} 時出錯。"
 
         if new_status == "衝突":
-            return f"您確定要將班次 #{trip_id} 設為「衝突」嗎？\n(司機無法執行，請客戶另行安排)\n請回覆「確認衝突 {trip_id}」進行確認。"
+            # 直接執行衝突操作
+            update_query = "UPDATE trips SET status = :new_status WHERE trip_id = :trip_id RETURNING trip_id"
+            result = db.session.execute(text(update_query), {"trip_id": trip_id, "new_status": new_status})
+            db.session.commit()
+            if result.fetchone():
+                return f"⚠️ 已成功將班次 #{trip_id} 的狀態從「{current_status}」更改為「衝突」。\n(司機無法執行，請客戶另行安排)"
+            else:
+                return f"將班次 #{trip_id} 設為衝突狀態時出錯。"
 
         if new_status == "請假":
-            return f"班次 #{trip_id} 乘客請假\n\n請輸入：[加成] [原因]\n\n例如：\n-30 新建路乘客臨時有事\n-50 中華南路乘客身體不適\n\n💡 提示：直接輸入加成金額和原因即可"
+            return f"班次 #{trip_id} 乘客請假\n\n請輸入：[原因] [加成]\n\n例如：\n新建路乘客臨時有事 -30\n中華南路乘客身體不適 -50\n\n💡 提示：先寫原因，最後寫加成金額"
 
         logger.error(f"Reached unexpected end of handle_update_trip_status logic for trip {trip_id} to {new_status}.")
         return f"試圖將班次 #{trip_id} 狀態改為 '{new_status}'，但此操作未被明確處理。"
