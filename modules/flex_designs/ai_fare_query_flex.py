@@ -201,14 +201,12 @@ def create_ai_search_result_flex(search_info, trips, confidence):
             ]
             quick_reply = QuickReply(items=quick_reply_items)
         
-        # 創建 FlexMessage
-        flex_message = FlexMessage(
-            alt_text=f"AI搜索結果: {query}",
-            contents=FlexContainer.from_dict(flex_content),
-            quick_reply=quick_reply
-        )
-        
-        return flex_message
+        # 🔥 修復：返回字典格式，和司機指派確認一致
+        return {
+            "flex_message": flex_content,  # 直接返回字典
+            "quick_reply": quick_reply,    # Quick Reply 對象
+            "alt_text": f"AI搜索結果: {query}"
+        }
         
     except Exception as e:
         logger.error(f"創建AI搜索結果Flex Message時出錯: {e}")
@@ -268,10 +266,12 @@ def create_ai_very_low_confidence_flex(search_info):
         }
     }
     
-    return FlexMessage(
-        alt_text="AI查詢需要澄清",
-        contents=FlexContainer.from_dict(flex_content)
-    )
+    # 🔥 修復：返回字典格式
+    return {
+        "flex_message": flex_content,
+        "quick_reply": None,
+        "alt_text": "AI查詢需要澄清"
+    }
 
 def create_ai_low_confidence_flex(search_info, understood_criteria):
     """創建信心度低時的確認Flex Message"""
@@ -335,11 +335,12 @@ def create_ai_low_confidence_flex(search_info, understood_criteria):
         )
     ])
     
-    return FlexMessage(
-        alt_text="AI查詢確認",
-        contents=FlexContainer.from_dict(flex_content),
-        quick_reply=quick_reply
-    )
+    # 🔥 修復：返回字典格式
+    return {
+        "flex_message": flex_content,
+        "quick_reply": quick_reply,
+        "alt_text": "AI查詢確認"
+    }
 
 def create_ai_clarification_flex(search_info, message, available_trips):
     """創建需要澄清的Flex Message"""
@@ -409,10 +410,12 @@ def create_ai_clarification_flex(search_info, message, available_trips):
         }
     }
     
-    return FlexMessage(
-        alt_text="AI查詢澄清",
-        contents=FlexContainer.from_dict(flex_content)
-    )
+    # 🔥 修復：返回字典格式
+    return {
+        "flex_message": flex_content,
+        "quick_reply": None,
+        "alt_text": "AI查詢澄清"
+    }
 
 def create_ai_modification_result_flex(modification_info):
     """
