@@ -562,6 +562,59 @@ def process_text_message(event):
              reply_text(reply_token, result)
              return
         # --- 結束新增 ---
+        
+        # --- 新增：AI修改確認處理 ---
+        elif message_text.startswith("確認AI修改"):
+            try:
+                parts = message_text.split()
+                if len(parts) >= 4:
+                    trip_id = int(parts[1])
+                    new_meter = int(parts[2])
+                    new_extra = int(parts[3])
+                    reason = " ".join(parts[4:]) if len(parts) > 4 else "AI智能修改"
+                    
+                    logger.info(f"處理AI修改確認: 班次={trip_id}, 費用={new_meter}+{new_extra}, 原因={reason}")
+                    
+                    from modules.services.ai_fare_service import execute_confirmed_ai_modification
+                    result = execute_confirmed_ai_modification(trip_id, new_meter, new_extra, reason, user_id)
+                    
+                    # 處理返回結果
+                    if isinstance(result, str):
+                        reply_text(reply_token, result)
+                    elif isinstance(result, dict) and 'flex_message' in result and 'quick_reply' in result:
+                        try:
+                            from linebot.v3.messaging import FlexMessage, FlexContainer
+                            
+                            flex_message = FlexMessage(
+                                alt_text=result.get("alt_text", "AI修改完成"),
+                                contents=FlexContainer.from_dict(result['flex_message']),
+                                quick_reply=result['quick_reply']
+                            )
+                            
+                            reply_message(reply_token, [flex_message])
+                            logger.info("成功發送AI修改完成的 Flex Message 與 Quick Reply")
+                        except Exception as flex_error:
+                            logger.error(f"發送AI修改完成 Flex Message失敗: {flex_error}")
+                            reply_text(reply_token, f"修改完成，但顯示出錯: {str(result)}")
+                    else:
+                        reply_text(reply_token, "❌ AI修改返回了未知格式")
+                else:
+                    reply_text(reply_token, "確認AI修改命令格式不正確。")
+                return
+            except ValueError:
+                reply_text(reply_token, "確認AI修改參數必須是數字。")
+                return
+            except Exception as e:
+                logger.error(f"處理AI修改確認時出錯: {e}")
+                traceback.print_exc()
+                reply_text(reply_token, f"處理AI修改確認失敗: {str(e)}")
+                return
+        
+        # 取消AI修改
+        elif message_text == "取消AI修改":
+            reply_text(reply_token, "❌ AI修改已取消\n\n💡 您可以重新發起修改命令或使用其他功能。")
+            return
+        # --- 結束新增 ---
             
         # --- 🔥 修改：AI智能車資查詢檢測 ---
         elif should_use_ai_query(message_text):

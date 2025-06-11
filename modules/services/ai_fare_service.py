@@ -967,7 +967,7 @@ def execute_fare_modification(trip: Dict, modification_intent: Dict, user_id: st
 
 或提供更明确的原因描述。"""
         
-        # 🔥 修復：返回字典格式，和司機指派確認一致
+        # 🔥 修復：返回確認界面，參考預約叫車模式
         modification_info = {
             'trip_id': trip_id,
             'category': trip.get('category', '未分類'),
@@ -981,32 +981,110 @@ def execute_fare_modification(trip: Dict, modification_intent: Dict, user_id: st
             'total_change': (new_meter + new_extra) - (current_meter + current_extra)
         }
         
-        from modules.flex_designs.ai_fare_query_flex import create_ai_modification_result_flex
-        flex_result = create_ai_modification_result_flex(modification_info)
+        from modules.flex_designs.ai_fare_query_flex import create_ai_modification_confirm_flex
+        flex_result = create_ai_modification_confirm_flex(modification_info)
         
         if flex_result and isinstance(flex_result, dict):
-            # 🔥 直接返回字典格式（create_ai_modification_result_flex 已經返回正確格式）
+            # 🔥 返回確認界面（讓用戶確認或取消）
             return flex_result
         else:
             # 如果Flex Message創建失敗，使用文本備用
-            enhanced_result = f"""🤖 AI智能修改完成
-
-{result}
+            confirmation_text = f"""🤖 AI智能修改確認
 
 📊 修改詳情：
 • 班次：#{trip_id} ({trip['category']})
 • 路線：{trip['start_point']} → {trip['end_point']}
 • 費用變更：{current_meter}+{current_extra} → {new_meter}+{new_extra}
 • 總計變化：{(new_meter + new_extra) - (current_meter + current_extra):+d} 元
-• 修改原因：{reason}"""
+• 修改原因：{reason}
+
+⚠️ 請確認是否執行此修改？
+回覆「確認AI修改 {trip_id} {new_meter} {new_extra} {reason}」執行修改
+回覆「取消AI修改」取消修改"""
             
-            return enhanced_result
+            return confirmation_text
         
     except Exception as e:
         logger.error(f"執行車資修改時出錯: {e}")
         import traceback
         traceback.print_exc()
         return f"❌ 修改失敗: {str(e)}"
+
+def execute_confirmed_ai_modification(trip_id: int, new_meter: int, new_extra: int, reason: str, user_id: str) -> str:
+    """執行已確認的AI車資修改"""
+    try:
+        from modules.handlers.trip_handler import handle_record_fare
+        
+        # 🔥 确保原因不为空
+        if not reason or reason.strip() == '':
+            reason = '透過AI智能修改'
+        
+        # 構建修改命令
+        modify_command = f"記錄車資 {trip_id} {new_meter} {new_extra} {reason.strip()}"
+        logger.info(f"執行確認的AI修改命令: '{modify_command}'")
+        
+        # 調用原有的修改功能
+        result = handle_record_fare(modify_command, user_id=user_id)
+        
+        # 🔥 检查是否还在要求原因（表示修改失败）
+        if "需要說明原因" in result or "修改原因" in result or "請使用完整格式" in result:
+            logger.warning(f"確認的AI修改被拒绝，handle_record_fare返回: {result}")
+            return f"""❌ AI修改確認失败
+
+📝 修改確認被系統拒絕。
+
+🔧 调试信息：
+• 班次ID: {trip_id}
+• 费用: {new_meter}+{new_extra}
+• 原因: '{reason}'
+• 命令: '{modify_command}'
+
+💡 請嘗試使用传统格式：
+記錄車資 {trip_id} {new_meter} {new_extra} [您的原因]"""
+        
+        # 查詢班次信息用於顯示
+        from modules.services.ai_fare_service import CompletedTripMatcher
+        matcher = CompletedTripMatcher()
+        criteria = {'trip_id': trip_id}
+        matching_trips = matcher.search_completed_trips(criteria)
+        
+        if matching_trips:
+            trip = matching_trips[0]
+            
+            # 構建修改完成信息
+            modification_info = {
+                'trip_id': trip_id,
+                'category': trip.get('category', '未分類'),
+                'route': f"{trip.get('start_point', '?')} → {trip.get('end_point', '?')}",
+                'driver_id': trip.get('driver_id', 'N/A'),
+                'old_meter': trip.get('meter_fare', 0) - (new_meter - trip.get('meter_fare', 0)),  # 計算舊值
+                'old_extra': trip.get('extra_fare', 0) - (new_extra - trip.get('extra_fare', 0)),  # 計算舊值
+                'new_meter': new_meter,
+                'new_extra': new_extra,
+                'reason': reason,
+                'total_change': 0  # 已經修改完成，變化為0
+            }
+            
+            from modules.flex_designs.ai_fare_query_flex import create_ai_modification_result_flex
+            flex_result = create_ai_modification_result_flex(modification_info)
+            
+            if flex_result and isinstance(flex_result, dict):
+                return flex_result
+        
+        # 文本備用版本
+        return f"""✅ AI修改執行成功
+
+📋 班次：#{trip_id}
+💰 新費用：{new_meter}+{new_extra} = {new_meter + new_extra}元
+📝 原因：{reason}
+
+{result}"""
+        
+    except Exception as e:
+        logger.error(f"執行確認AI修改時出錯: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"❌ 執行修改失敗: {str(e)}"
 
 def format_multiple_trips_summary(trips: List[Dict]) -> str:
     """格式化多個班次的摘要 - 简洁版"""

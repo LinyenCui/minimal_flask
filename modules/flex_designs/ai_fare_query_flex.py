@@ -417,6 +417,168 @@ def create_ai_clarification_flex(search_info, message, available_trips):
         "alt_text": "AI查詢澄清"
     }
 
+def create_ai_modification_confirm_flex(modification_info):
+    """
+    創建AI修改確認界面的Flex Message（參考預約叫車模式）
+    
+    Args:
+        modification_info: 修改信息字典，包含:
+            - trip_id: 班次ID
+            - category: 班次類別
+            - route: 路線（start_point → end_point）
+            - driver_id: 司機ID
+            - old_meter: 舊錶價
+            - old_extra: 舊加成
+            - new_meter: 新錶價
+            - new_extra: 新加成
+            - reason: 修改原因
+            - total_change: 總變化金額
+    """
+    try:
+        trip_id = modification_info.get('trip_id')
+        category = modification_info.get('category', '未分類')
+        route = modification_info.get('route', '? → ?')
+        driver_id = modification_info.get('driver_id', 'N/A')
+        old_meter = modification_info.get('old_meter', 0)
+        old_extra = modification_info.get('old_extra', 0)
+        new_meter = modification_info.get('new_meter', 0)
+        new_extra = modification_info.get('new_extra', 0)
+        reason = modification_info.get('reason', '透過AI智能修改')
+        total_change = modification_info.get('total_change', 0)
+        
+        # 構建變更詳情
+        fare_change_text = f"💰 費用變更：{old_meter}+{old_extra} → {new_meter}+{new_extra}"
+        total_change_text = f"📊 總計變化：{total_change:+d} 元"
+        
+        body_contents = [
+            {
+                "type": "text",
+                "text": "🤖 AI智能修改確認",
+                "size": "md",
+                "weight": "bold",
+                "color": "#FF9800"
+            },
+            {
+                "type": "separator",
+                "margin": "md"
+            },
+            {
+                "type": "text",
+                "text": f"📋 班次：#{trip_id} ({category})",
+                "size": "sm",
+                "weight": "bold",
+                "margin": "md"
+            },
+            {
+                "type": "text",
+                "text": f"📍 路線：{route}",
+                "size": "sm",
+                "margin": "xs"
+            },
+            {
+                "type": "text",
+                "text": f"🚕 司機：{driver_id}",
+                "size": "sm",
+                "margin": "xs"
+            },
+            {
+                "type": "separator",
+                "margin": "md"
+            },
+            {
+                "type": "text",
+                "text": fare_change_text,
+                "size": "sm",
+                "margin": "md"
+            },
+            {
+                "type": "text",
+                "text": total_change_text,
+                "size": "sm",
+                "weight": "bold",
+                "color": "#FF9800" if total_change != 0 else "#4CAF50",
+                "margin": "xs"
+            },
+            {
+                "type": "text",
+                "text": f"📝 修改原因：{reason}",
+                "size": "sm",
+                "margin": "sm"
+            },
+            {
+                "type": "separator",
+                "margin": "md"
+            },
+            {
+                "type": "text",
+                "text": "請確認是否執行此修改？",
+                "size": "sm",
+                "color": "#FF9800",
+                "weight": "bold",
+                "margin": "md"
+            }
+        ]
+        
+        # 構建 Flex Message
+        flex_content = {
+            "type": "bubble",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "⚠️ 確認修改",
+                        "weight": "bold",
+                        "size": "lg",
+                        "color": "#FFFFFF"
+                    }
+                ],
+                "backgroundColor": "#FF9800",
+                "paddingAll": "md"
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": body_contents
+            }
+        }
+        
+        # 創建確認/取消 Quick Reply 按鈕
+        quick_reply_items = [
+            QuickReplyItem(
+                action=MessageAction(
+                    label="✅ 確認修改",
+                    text=f"確認AI修改 {trip_id} {new_meter} {new_extra} {reason}"
+                )
+            ),
+            QuickReplyItem(
+                action=MessageAction(
+                    label="❌ 取消修改",
+                    text="取消AI修改"
+                )
+            ),
+            QuickReplyItem(
+                action=MessageAction(
+                    label="📋 查看詳情",
+                    text=f"查看 {trip_id}"
+                )
+            )
+        ]
+        
+        quick_reply = QuickReply(items=quick_reply_items)
+        
+        # 🔥 返回字典格式
+        return {
+            "flex_message": flex_content,
+            "quick_reply": quick_reply,
+            "alt_text": f"AI修改確認: 班次#{trip_id}"
+        }
+        
+    except Exception as e:
+        logger.error(f"創建AI修改確認Flex Message時出錯: {e}")
+        return None
+
 def create_ai_modification_result_flex(modification_info):
     """
     創建AI修改完成結果的Flex Message
@@ -537,7 +699,7 @@ def create_ai_modification_result_flex(modification_info):
             QuickReplyItem(
                 action=MessageAction(
                     label="📋 查看詳情",
-                    text=f"班次詳情 {trip_id}"
+                    text=f"查看 {trip_id}"
                 )
             ),
             QuickReplyItem(
