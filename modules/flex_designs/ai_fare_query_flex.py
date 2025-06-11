@@ -4,7 +4,7 @@ AI 車資查詢專用 Flex Message 設計
 
 import logging
 from datetime import datetime
-from linebot.v3.messaging import FlexMessage, FlexContainer, QuickReply, QuickReplyItem, MessageAction
+from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
 
 logger = logging.getLogger(__name__)
 
