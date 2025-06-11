@@ -578,7 +578,14 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True):
                     else:
                         # 有明确原因，直接执行修改
                         result = execute_fare_modification(trip, modification_intent, user_id)
-                        return f"""🎯 智能上下文解析
+                        
+                        # 🔥 修復：正確處理字典格式的返回結果
+                        if isinstance(result, dict) and 'flex_message' in result:
+                            # 返回Flex格式結果
+                            return result
+                        else:
+                            # 降級為文字結果
+                            return f"""🎯 智能上下文解析
 
 💬「{message_text}」
 🧠 {context_info}
@@ -700,7 +707,14 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True):
                     conversation_manager.clear_pending_modification(user_id)
                     
                     result = execute_fare_modification(trip, modification_intent, user_id)
-                    return f"""✅ 修改原因已记录
+                    
+                    # 🔥 修復：正確處理字典格式的返回結果
+                    if isinstance(result, dict) and 'flex_message' in result:
+                        # 返回Flex格式結果
+                        return result
+                    else:
+                        # 降級為文字結果
+                        return f"""✅ 修改原因已记录
 
 📝 修改原因：{reason}
 
@@ -849,7 +863,14 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True):
                 else:
                     # 有明确原因，直接执行修改
                     result = execute_fare_modification(trip, modification_intent, user_id)
-                    return f"{search_header}✅ 找到唯一匹配班次並執行修改：\n\n{result}"
+                    
+                    # 🔥 修復：正確處理字典格式的返回結果
+                    if isinstance(result, dict) and 'flex_message' in result:
+                        # 返回Flex格式結果
+                        return result
+                    else:
+                        # 降級為文字結果
+                        return f"{search_header}✅ 找到唯一匹配班次並執行修改：\n\n{result}"
             
             # 只是查詢，詢問如何修改
             if use_flex:
