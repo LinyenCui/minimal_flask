@@ -946,8 +946,28 @@ def execute_fare_modification(trip: Dict, modification_intent: Dict, user_id: st
 
 或提供更明确的原因描述。"""
         
-        # 增強返回信息
-        enhanced_result = f"""🤖 AI智能修改完成
+        # 🔥 新增：返回Flex Message格式的修改結果
+        modification_info = {
+            'trip_id': trip_id,
+            'category': trip.get('category', '未分類'),
+            'route': f"{trip.get('start_point', '?')} → {trip.get('end_point', '?')}",
+            'driver_id': trip.get('driver_id', 'N/A'),
+            'old_meter': current_meter,
+            'old_extra': current_extra,
+            'new_meter': new_meter,
+            'new_extra': new_extra,
+            'reason': reason,
+            'total_change': (new_meter + new_extra) - (current_meter + current_extra)
+        }
+        
+        from modules.flex_designs.ai_fare_query_flex import create_ai_modification_result_flex
+        flex_message = create_ai_modification_result_flex(modification_info)
+        
+        if flex_message:
+            return flex_message
+        else:
+            # 如果Flex Message創建失敗，使用文本備用
+            enhanced_result = f"""🤖 AI智能修改完成
 
 {result}
 
@@ -957,8 +977,8 @@ def execute_fare_modification(trip: Dict, modification_intent: Dict, user_id: st
 • 費用變更：{current_meter}+{current_extra} → {new_meter}+{new_extra}
 • 總計變化：{(new_meter + new_extra) - (current_meter + current_extra):+d} 元
 • 修改原因：{reason}"""
-        
-        return enhanced_result
+            
+            return enhanced_result
         
     except Exception as e:
         logger.error(f"執行車資修改時出錯: {e}")
@@ -1052,15 +1072,26 @@ def parse_fare_modification_intent(message_text: str) -> Optional[Dict]:
         
         # 🔥 新增：檢測簡單數字格式 (班次ID 錶價 加成 原因)
         # 例如：修改班次1505 270 -40 怡平路沒搭車
-        simple_format_match = re.search(r'修改班次#?(\d+)\s+(\d+)\s+([+-]?\d+)', message_text)
-        if simple_format_match:
-            result['meter_fare'] = int(simple_format_match.group(2))
-            result['extra_fare'] = int(simple_format_match.group(3))
-            # 檢查是否有原因在數字後面
-            after_numbers = message_text[simple_format_match.end():].strip()
-            if after_numbers:
-                result['reason'] = after_numbers
-            logger.info(f"簡單格式解析成功: 錶價{result['meter_fare']}, 加成{result['extra_fare']}, 原因'{result.get('reason', '無')}'")
+        # 🔥 修复：支持$符号格式，如：修改班次1560$400 +100
+        simple_format_patterns = [
+            r'修改班次#?(\d+)\s+(\d+)\s+([+-]?\d+)',        # 空格分隔：修改班次1505 270 -40
+            r'修改班次#?(\d+)\$(\d+)\s+([+-]?\d+)',        # $符号格式：修改班次1560$400 +100
+            r'修改班次#?(\d+)\s+\$(\d+)\s+([+-]?\d+)',     # 空格+$格式
+        ]
+        
+        simple_format_match = None
+        for pattern in simple_format_patterns:
+            simple_format_match = re.search(pattern, message_text)
+            if simple_format_match:
+                result['meter_fare'] = int(simple_format_match.group(2))
+                result['extra_fare'] = int(simple_format_match.group(3))
+                # 檢查是否有原因在數字後面
+                after_numbers = message_text[simple_format_match.end():].strip()
+                if after_numbers and not after_numbers.isdigit() and len(after_numbers) > 2:
+                    # 🔥 过滤掉纯数字或过短的内容
+                    result['reason'] = after_numbers
+                logger.info(f"簡單格式解析成功 (模式: {pattern}): 錶價{result['meter_fare']}, 加成{result['extra_fare']}, 原因'{result.get('reason', '無')}'")
+                break
         
         # 提取錶價 - 增強版本
         if 'meter_fare' not in result:  # 如果簡單格式沒有解析到，才使用複雜模式
@@ -1167,17 +1198,20 @@ def parse_fare_modification_intent(message_text: str) -> Optional[Dict]:
         if 'reason' not in result and result:  # 只有當result有內容但沒有原因時才執行
             # 查找逗号或空格后的非数字内容，且不是费用描述
             loose_patterns = [
-                r'[，,]\s*([^0-9錶價加成]+.+?)(?:\s*$|[。，])',    # 逗号后的非费用内容
-                r'\s+([^0-9錶價加成]+.+?)(?:\s*$|[。，])',        # 空格后的非费用内容
+                r'[，,]\s*([^0-9錶價加成$+\-]+.+?)(?:\s*$|[。，])',    # 逗号后的非费用内容，排除数字、$、+、-符号
+                r'\s+([^0-9錶價加成$+\-]+.+?)(?:\s*$|[。，])',        # 空格后的非费用内容，排除数字、$、+、-符号
             ]
             
             for pattern in loose_patterns:
                 match = re.search(pattern, message_text)
                 if match:
                     potential_reason = match.group(1).strip()
-                    # 过滤掉太短或明显不是原因的内容
-                    exclude_words = ['加成', '錶價', '修改', '班次', '車資', '費用']
+                    # 🔥 增强过滤：排除纯数字、带符号的数字、费用相关词汇
+                    exclude_words = ['加成', '錶價', '修改', '班次', '車資', '費用', '+', '-', '$']
+                    is_number_like = re.match(r'^[+\-]?\d+$', potential_reason)  # 匹配 +100, -50, 100 等
+                    
                     if (len(potential_reason) > 2 and 
+                        not is_number_like and
                         not any(word in potential_reason for word in exclude_words)):
                         result['reason'] = potential_reason
                         logger.info(f"宽松原因提取成功: '{result['reason']}' 来自输入: '{message_text}'")

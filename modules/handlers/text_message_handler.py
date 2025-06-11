@@ -569,11 +569,22 @@ def process_text_message(event):
                 logger.info(f"檢測到AI智能車資查詢: {message_text}")
                 from modules.services.ai_fare_service import handle_smart_fare_query
                 
-                # 使用完整的智能車資查詢服務（暫時關閉Flex Message）
-                result = handle_smart_fare_query(message_text, user_id, use_flex=False)
+                # 🔥 升級：啟用 Flex Message + Quick Reply 界面
+                result = handle_smart_fare_query(message_text, user_id, use_flex=True)
                 
-                # 暫時只使用文字格式，確保功能正常
-                reply_text(reply_token, result)
+                # 檢查返回結果類型並用適當方式發送
+                if isinstance(result, str):
+                    # 純文字結果
+                    reply_text(reply_token, result)
+                else:
+                    # Flex Message 結果
+                    try:
+                        reply_message(reply_token, [result])
+                    except Exception as flex_error:
+                        logger.error(f"發送AI Flex Message失敗: {flex_error}")
+                        # 降級為文字模式
+                        fallback_result = handle_smart_fare_query(message_text, user_id, use_flex=False)
+                        reply_text(reply_token, fallback_result)
                 return
             except Exception as e:
                 logger.error(f"AI智能車資查詢出錯: {e}")
