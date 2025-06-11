@@ -8,7 +8,7 @@ from modules.utils.helpers import parse_date_input
 from modules.utils.line_bot import (
     reply_text, reply_message, reply_flex,
     create_postback_action, create_message_action,
-    create_flex_message
+    create_flex_message, get_line_bot_api
 )
 from modules.handlers.trip_handler import handle_query_trips, handle_trip_details, handle_change_status, handle_record_fare, handle_modify_category, handle_completed_trip_details
 from modules.flex_designs.help_flex import get_help_flex
@@ -572,19 +572,37 @@ def process_text_message(event):
                 # 🔥 升級：啟用 Flex Message + Quick Reply 界面
                 result = handle_smart_fare_query(message_text, user_id, use_flex=True)
                 
-                # 檢查返回結果類型並用適當方式發送
+                # 🔥 修復：正確處理AI返回的不同類型結果
                 if isinstance(result, str):
                     # 純文字結果
                     reply_text(reply_token, result)
                 else:
-                    # Flex Message 結果
+                    # Flex Message 結果（LineBot SDK 對象）
                     try:
-                        reply_message(reply_token, [result])
+                        from linebot.v3.messaging import FlexMessage
+                        
+                        if isinstance(result, FlexMessage):
+                            # 直接發送 FlexMessage 對象
+                            messaging_api = get_line_bot_api()
+                            from linebot.v3.messaging import ReplyMessageRequest
+                            messaging_api.reply_message(ReplyMessageRequest(
+                                reply_token=reply_token,
+                                messages=[result]
+                            ))
+                            logger.info("AI Flex Message 發送成功")
+                        else:
+                            # 其他類型，嘗試用 reply_message
+                            reply_message(reply_token, [result])
                     except Exception as flex_error:
                         logger.error(f"發送AI Flex Message失敗: {flex_error}")
+                        traceback.print_exc()
                         # 降級為文字模式
-                        fallback_result = handle_smart_fare_query(message_text, user_id, use_flex=False)
-                        reply_text(reply_token, fallback_result)
+                        try:
+                            fallback_result = handle_smart_fare_query(message_text, user_id, use_flex=False)
+                            reply_text(reply_token, fallback_result)
+                        except Exception as fallback_error:
+                            logger.error(f"AI文字模式降級也失敗: {fallback_error}")
+                            reply_text(reply_token, "❌ AI處理失敗，請稍後再試")
                 return
             except Exception as e:
                 logger.error(f"AI智能車資查詢出錯: {e}")
