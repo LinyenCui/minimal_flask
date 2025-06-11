@@ -572,27 +572,23 @@ def process_text_message(event):
                 # 🔥 升級：啟用 Flex Message + Quick Reply 界面
                 result = handle_smart_fare_query(message_text, user_id, use_flex=True)
                 
-                # 🔥 修復：正確處理AI返回的不同類型結果
+                # 🔥 修復：參考司機指派確認的成功處理方式
                 if isinstance(result, str):
                     # 純文字結果
                     reply_text(reply_token, result)
-                else:
-                    # Flex Message 結果（LineBot SDK 對象）
+                elif isinstance(result, dict) and 'flex_message' in result and 'quick_reply' in result:
+                    # 🔥 字典格式結果（和司機指派確認一樣）
                     try:
-                        from linebot.v3.messaging import FlexMessage
+                        from linebot.v3.messaging import FlexMessage, FlexContainer
                         
-                        if isinstance(result, FlexMessage):
-                            # 直接發送 FlexMessage 對象
-                            messaging_api = get_line_bot_api()
-                            from linebot.v3.messaging import ReplyMessageRequest
-                            messaging_api.reply_message(ReplyMessageRequest(
-                                reply_token=reply_token,
-                                messages=[result]
-                            ))
-                            logger.info("AI Flex Message 發送成功")
-                        else:
-                            # 其他類型，嘗試用 reply_message
-                            reply_message(reply_token, [result])
+                        flex_message = FlexMessage(
+                            alt_text=result.get("alt_text", "AI修改完成"),
+                            contents=FlexContainer.from_dict(result['flex_message']),
+                            quick_reply=result['quick_reply']
+                        )
+                        
+                        reply_message(reply_token, [flex_message])
+                        logger.info("成功發送AI修改完成的 Flex Message 與 Quick Reply")
                     except Exception as flex_error:
                         logger.error(f"發送AI Flex Message失敗: {flex_error}")
                         traceback.print_exc()
@@ -603,6 +599,10 @@ def process_text_message(event):
                         except Exception as fallback_error:
                             logger.error(f"AI文字模式降級也失敗: {fallback_error}")
                             reply_text(reply_token, "❌ AI處理失敗，請稍後再試")
+                else:
+                    # 其他未知格式
+                    logger.warning(f"AI返回了未知格式的結果: {type(result)}")
+                    reply_text(reply_token, "❌ AI返回了無法識別的結果格式")
                 return
             except Exception as e:
                 logger.error(f"AI智能車資查詢出錯: {e}")

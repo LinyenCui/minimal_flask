@@ -946,7 +946,7 @@ def execute_fare_modification(trip: Dict, modification_intent: Dict, user_id: st
 
 或提供更明确的原因描述。"""
         
-        # 🔥 新增：返回Flex Message格式的修改結果
+        # 🔥 修復：返回字典格式，和司機指派確認一致
         modification_info = {
             'trip_id': trip_id,
             'category': trip.get('category', '未分類'),
@@ -961,10 +961,11 @@ def execute_fare_modification(trip: Dict, modification_intent: Dict, user_id: st
         }
         
         from modules.flex_designs.ai_fare_query_flex import create_ai_modification_result_flex
-        flex_message = create_ai_modification_result_flex(modification_info)
+        flex_result = create_ai_modification_result_flex(modification_info)
         
-        if flex_message:
-            return flex_message
+        if flex_result and isinstance(flex_result, dict):
+            # 🔥 直接返回字典格式（create_ai_modification_result_flex 已經返回正確格式）
+            return flex_result
         else:
             # 如果Flex Message創建失敗，使用文本備用
             enhanced_result = f"""🤖 AI智能修改完成

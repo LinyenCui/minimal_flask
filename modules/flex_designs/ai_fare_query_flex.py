@@ -553,11 +553,12 @@ def create_ai_modification_result_flex(modification_info):
         
         quick_reply = QuickReply(items=quick_reply_items)
         
-        return FlexMessage(
-            alt_text=f"AI修改完成: 班次#{trip_id}",
-            contents=FlexContainer.from_dict(flex_content),
-            quick_reply=quick_reply
-        )
+        # 🔥 修復：返回字典格式，和司機指派確認一致
+        return {
+            "flex_message": flex_content,  # 直接返回字典
+            "quick_reply": quick_reply,    # Quick Reply 對象
+            "alt_text": f"AI修改完成: 班次#{trip_id}"
+        }
         
     except Exception as e:
         logger.error(f"創建AI修改結果Flex Message時出錯: {e}")
