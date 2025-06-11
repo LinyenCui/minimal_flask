@@ -676,8 +676,42 @@ def process_text_message(event):
                     logger.info(f"檢測到待執行修改，將消息交給AI處理: {message_text}")
                     from modules.services.ai_fare_service import handle_smart_fare_query
                     
-                    result = handle_smart_fare_query(message_text, user_id, use_flex=False)
-                    reply_text(reply_token, result)
+                    result = handle_smart_fare_query(message_text, user_id, use_flex=True)
+                    
+                    # 🔥 修復：正確處理AI返回的不同類型結果（和上面保持一致）
+                    if isinstance(result, str):
+                        # 純文字結果
+                        reply_text(reply_token, result)
+                    elif isinstance(result, dict) and 'flex_message' in result and 'quick_reply' in result:
+                        # 🔥 字典格式結果（和司機指派確認一樣）
+                        try:
+                            from linebot.v3.messaging import FlexMessage, FlexContainer
+                            
+                            flex_message = FlexMessage(
+                                alt_text=result.get("alt_text", "AI處理完成"),
+                                contents=FlexContainer.from_dict(result['flex_message']),
+                                quick_reply=result['quick_reply']
+                            )
+                            
+                            reply_message(reply_token, [flex_message])
+                            logger.info("成功發送AI處理完成的 Flex Message 與 Quick Reply")
+                        except Exception as flex_error:
+                            logger.error(f"發送AI Flex Message失敗: {flex_error}")
+                            traceback.print_exc()
+                            # 降級為文字模式
+                            try:
+                                fallback_result = handle_smart_fare_query(message_text, user_id, use_flex=False)
+                                if isinstance(fallback_result, str):
+                                    reply_text(reply_token, fallback_result)
+                                else:
+                                    reply_text(reply_token, "❌ AI處理完成但無法顯示結果")
+                            except Exception as fallback_error:
+                                logger.error(f"AI文字模式降級也失敗: {fallback_error}")
+                                reply_text(reply_token, "❌ AI處理失敗，請稍後再試")
+                    else:
+                        # 其他未知格式
+                        logger.warning(f"AI返回了未知格式的結果: {type(result)}")
+                        reply_text(reply_token, "❌ AI返回了無法識別的結果格式")
                     return
                 except Exception as e:
                     logger.error(f"AI上下文處理出錯: {e}")
