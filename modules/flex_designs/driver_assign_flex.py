@@ -247,39 +247,6 @@ def get_driver_assign_confirm_flex(trip_id, driver_id, driver_info=None, trip_in
                 }
             ],
             "spacing": "md"
-        },
-        "footer": {
-            "type": "box",
-            "layout": "vertical",
-            "contents": [
-                {
-                    "type": "box",
-                    "layout": "horizontal",
-                    "contents": [
-                        {
-                            "type": "button",
-                            "action": {
-                                "type": "message",
-                                "label": "確認指派",
-                                "text": f"確認指派 {trip_id} {driver_id}"
-                            },
-                            "style": "primary",
-                            "color": "#4CAF50"
-                        },
-                        {
-                            "type": "button",
-                            "action": {
-                                "type": "message",
-                                "label": "取消",
-                                "text": f"取消指派 {trip_id}"
-                            },
-                            "style": "secondary",
-                            "color": "#999999"
-                        }
-                    ],
-                    "spacing": "sm"
-                }
-            ]
         }
     }
     

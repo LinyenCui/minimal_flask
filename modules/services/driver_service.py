@@ -177,7 +177,31 @@ def handle_driver_assign_select(trip_id, driver_id):
         # 生成確認界面 (現在傳遞了更多信息)
         flex_content = get_driver_assign_confirm_flex(trip_id, driver_id, driver_info, trip_info)
         
-        return flex_content, None
+        # 創建 Quick Reply 按鈕
+        from modules.utils.line_bot import QuickReply, QuickReplyItem, MessageAction
+        
+        quick_reply_items = [
+            QuickReplyItem(
+                action=MessageAction(
+                    label="✅ 確認指派",
+                    text=f"確認指派 {trip_id} {driver_id}"
+                )
+            ),
+            QuickReplyItem(
+                action=MessageAction(
+                    label="❌ 取消",
+                    text=f"取消指派 {trip_id}"
+                )
+            )
+        ]
+        
+        quick_reply = QuickReply(items=quick_reply_items)
+        
+        # 返回包含 Flex Message 和 Quick Reply 的結構（與 trip_details_flex 格式一致）
+        return {
+            "flex_message": flex_content,
+            "quick_reply": quick_reply
+        }, None
         
     except Exception as e:
         logger.error(f"處理選擇司機請求時出錯: {e}")

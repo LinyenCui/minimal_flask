@@ -30,7 +30,7 @@ def handle_trip_details_flex(trip_id):
             t.end_point, t.status, d.id as driver_id, d.plate_number,
             t.category, t.fixed_trip_id, t.meter_fare as base_fare,
             t.extra_fare, t.modification_reason, t.passenger_leave_reason, t.trip_type, t.custom_start_point, t.custom_via_point,
-            t.custom_end_point
+            t.custom_end_point, t.passenger_name
         FROM trips t
         LEFT JOIN drivers d ON t.driver_id = d.id
         WHERE t.trip_id = :trip_id

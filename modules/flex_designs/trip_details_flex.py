@@ -136,6 +136,18 @@ def get_trip_details_flex(trip_id, trip_data):
     else:
         body_contents.append({ "type": "box", "layout": "horizontal", "margin": "md", "contents": [ { "type": "text", "text": "司機", "size": "sm", "color": "#555555", "flex": 2 },{ "type": "text", "text": "未指派", "size": "sm", "color": "#111111", "flex": 5 }]})
     
+    # 🔥 新增：顯示搭載人員（使用複合姓名處理功能）
+    passenger_name = trip_data.get('passenger_name')
+    if passenger_name:
+        try:
+            from modules.utils.passenger_name_handler import get_passengers_display_text
+            display_passenger = get_passengers_display_text(passenger_name)
+            body_contents.append({ "type": "box", "layout": "horizontal", "margin": "md", "contents": [ { "type": "text", "text": "搭載人員", "size": "sm", "color": "#555555", "flex": 2 },{ "type": "text", "text": display_passenger, "size": "sm", "color": "#111111", "flex": 5, "wrap": True }]})
+        except Exception as e:
+            logger.error(f"處理搭載人員顯示時出錯: {e}")
+            # 如果處理失敗，顯示原始姓名
+            body_contents.append({ "type": "box", "layout": "horizontal", "margin": "md", "contents": [ { "type": "text", "text": "搭載人員", "size": "sm", "color": "#555555", "flex": 2 },{ "type": "text", "text": passenger_name, "size": "sm", "color": "#111111", "flex": 5, "wrap": True }]})
+    
     # 🔥 調整順序：先顯示基本車資
     if trip_data.get('base_fare') is not None:
         body_contents.append({ "type": "box", "layout": "horizontal", "margin": "md", "contents": [ { "type": "text", "text": "基本車資", "size": "sm", "color": "#555555", "flex": 2 },{ "type": "text", "text": f"{trip_data.get('base_fare')} 元", "size": "sm", "color": "#111111", "flex": 5 }]})

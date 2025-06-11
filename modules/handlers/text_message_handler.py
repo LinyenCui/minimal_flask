@@ -306,11 +306,31 @@ def process_text_message(event):
                 
                 logger.info(f"處理司機選擇: 班次={trip_id}, 司機={driver_id}")
                 
-                flex_content, error_message = handle_driver_assign_select(trip_id, driver_id)
+                result, error_message = handle_driver_assign_select(trip_id, driver_id)
                 
-                if flex_content and error_message is None:
-                    # 發送確認界面
-                    reply_flex(reply_token, "確認指派司機", flex_content)
+                if result and error_message is None:
+                    # 檢查返回結果是否包含 flex_message 和 quick_reply
+                    if isinstance(result, dict) and 'flex_message' in result and 'quick_reply' in result:
+                        # 發送包含 Quick Reply 的確認界面
+                        try:
+                            from linebot.v3.messaging import FlexMessage, FlexContainer
+                            
+                            flex_message = FlexMessage(
+                                alt_text="確認指派司機",
+                                contents=FlexContainer.from_dict(result['flex_message']),
+                                quick_reply=result['quick_reply']
+                            )
+                            
+                            reply_message(reply_token, [flex_message])
+                            logger.info("成功發送確認指派司機的 Flex Message 與 Quick Reply")
+                        except Exception as flex_error:
+                            logger.error(f"發送確認指派司機 Flex Message 時出錯: {flex_error}")
+                            traceback.print_exc()
+                            # 發送文本版本作為後備
+                            reply_text(reply_token, "無法顯示確認界面，請直接輸入：確認指派 [班次ID] [司機ID] 或 取消指派 [班次ID]")
+                    else:
+                        # 兼容舊格式，直接發送 Flex Message
+                        reply_flex(reply_token, "確認指派司機", result)
                 else:
                     # 發送錯誤消息
                     reply_text(reply_token, error_message or "無法載入確認界面")
