@@ -563,56 +563,154 @@ def process_text_message(event):
              return
         # --- 結束新增 ---
         
-        # --- 新增：AI修改確認處理 ---
+        # --- AI修改確認處理（保持原格式，但照搬預約叫車邏輯）---
         elif message_text.startswith("確認AI修改"):
             try:
+                # 🔥 兼容模式：既支持上下文，也支持命令參數
+                from modules.utils.conversation_context import conversation_manager
+                pending_modification = conversation_manager.get_pending_modification(user_id)
+                
+                # 解析確認命令的參數
                 parts = message_text.split()
+                
                 if len(parts) >= 4:
+                    # 用戶提供了完整的確認參數
                     trip_id = int(parts[1])
                     new_meter = int(parts[2])
                     new_extra = int(parts[3])
                     reason = " ".join(parts[4:]) if len(parts) > 4 else "AI智能修改"
+                    logger.info(f"🔧 從確認命令解析參數: trip_id={trip_id}, meter={new_meter}, extra={new_extra}, reason='{reason}'")
+                elif pending_modification:
+                    # 從上下文獲取參數
+                    trip_id = pending_modification['trip_id']
+                    new_meter = pending_modification['meter_fare']
+                    new_extra = pending_modification['extra_fare']
+                    reason = pending_modification.get('reason', 'AI智能修改')
+                    logger.info(f"🔧 從上下文獲取參數: trip_id={trip_id}, meter={new_meter}, extra={new_extra}, reason='{reason}'")
+                else:
+                    reply_text(reply_token, "❌ 沒有待確認的修改操作，且確認命令格式不正確")
+                    return
+                
+                logger.info(f"🔥 用戶確認AI修改，真正執行數據庫UPDATE: trip_id={trip_id}, meter={new_meter}, extra={new_extra}")
+                
+                # 🔥 照搬預約叫車：真正執行數據庫操作
+                from modules.handlers.trip_handler import handle_record_fare
+                modify_command = f"記錄車資 {trip_id} {new_meter} {new_extra} {reason}"
+                
+                result = handle_record_fare(modify_command, user_id=user_id)
+                
+                # 🔥 照搬預約叫車：清除待確認狀態（如果存在的話）
+                if pending_modification:
+                    conversation_manager.clear_pending_modification(user_id)
+                
+                # 🔥 照搬預約叫車：返回成功消息
+                if "需要說明原因" in result or "修改原因" in result:
+                    reply_text(reply_token, f"❌ 修改被系統拒絕：{result}")
+                else:
+                    # 修改成功，重新查詢班次信息以獲取完整數據
+                    from modules.models.base import db
+                    from sqlalchemy import text
                     
-                    logger.info(f"處理AI修改確認: 班次={trip_id}, 費用={new_meter}+{new_extra}, 原因={reason}")
+                    try:
+                        # 查詢已完成班次的完整信息
+                        completed_trip_query = """
+                        SELECT start_point, end_point, driver_id, category, meter_fare, extra_fare
+                        FROM completed_trips 
+                        WHERE id = :trip_id
+                        """
+                        completed_result = db.session.execute(text(completed_trip_query), {'trip_id': trip_id}).fetchone()
+                        
+                        if completed_result:
+                            # 使用實際的班次數據
+                            start_point, end_point, driver_id, category, old_meter, old_extra = completed_result
+                            success_info = {
+                                'trip_id': trip_id,
+                                'category': category or '未分類',
+                                'route': f"{start_point or '?'} → {end_point or '?'}",
+                                'driver_id': driver_id or 'N/A',
+                                'old_meter': old_meter or 0,
+                                'old_extra': old_extra or 0,
+                                'new_meter': new_meter,
+                                'new_extra': new_extra,
+                                'total_change': (new_meter + new_extra) - ((old_meter or 0) + (old_extra or 0)),
+                                'reason': reason,
+                                'success': True
+                            }
+                        else:
+                            # 如果查詢失敗，使用基本信息
+                            success_info = {
+                                'trip_id': trip_id,
+                                'category': '未分類',
+                                'route': '? → ?',
+                                'driver_id': 'N/A',
+                                'old_meter': 0,
+                                'old_extra': 0,
+                                'new_meter': new_meter,
+                                'new_extra': new_extra,
+                                'total_change': 0,
+                                'reason': reason,
+                                'success': True
+                            }
+                    except Exception as query_error:
+                        logger.error(f"查詢班次信息失敗: {query_error}")
+                        # 降級為基本信息
+                        success_info = {
+                            'trip_id': trip_id,
+                            'category': '未分類',
+                            'route': '? → ?',
+                            'driver_id': 'N/A',
+                            'old_meter': 0,
+                            'old_extra': 0,
+                            'new_meter': new_meter,
+                            'new_extra': new_extra,
+                            'total_change': 0,
+                            'reason': reason,
+                            'success': True
+                        }
                     
-                    from modules.services.ai_fare_service import execute_confirmed_ai_modification
-                    result = execute_confirmed_ai_modification(trip_id, new_meter, new_extra, reason, user_id)
+                    # 顯示成功界面
+                    from modules.flex_designs.ai_fare_query_flex import create_ai_modification_result_flex
                     
-                    # 處理返回結果
-                    if isinstance(result, str):
-                        reply_text(reply_token, result)
-                    elif isinstance(result, dict) and 'flex_message' in result and 'quick_reply' in result:
+                    flex_result = create_ai_modification_result_flex(success_info)
+                    if flex_result and isinstance(flex_result, dict) and 'flex_message' in flex_result:
                         try:
                             from linebot.v3.messaging import FlexMessage, FlexContainer
                             
                             flex_message = FlexMessage(
-                                alt_text=result.get("alt_text", "AI修改完成"),
-                                contents=FlexContainer.from_dict(result['flex_message']),
-                                quick_reply=result['quick_reply']
+                                alt_text=flex_result.get("alt_text", "AI修改完成"),
+                                contents=FlexContainer.from_dict(flex_result['flex_message']),
+                                quick_reply=flex_result.get('quick_reply')
                             )
                             
                             reply_message(reply_token, [flex_message])
-                            logger.info("成功發送AI修改完成的 Flex Message 與 Quick Reply")
+                            logger.info("✅ 成功發送AI修改完成的 Flex Message")
                         except Exception as flex_error:
                             logger.error(f"發送AI修改完成 Flex Message失敗: {flex_error}")
-                            reply_text(reply_token, f"修改完成，但顯示出錯: {str(result)}")
+                            reply_text(reply_token, f"✅ AI修改執行成功\n\n📋 班次：#{trip_id}\n💰 新費用：{new_meter}+{new_extra} = {new_meter + new_extra}元\n📝 原因：{reason}\n\n{result}")
                     else:
-                        reply_text(reply_token, "❌ AI修改返回了未知格式")
-                else:
-                    reply_text(reply_token, "確認AI修改命令格式不正確。")
-                return
-            except ValueError:
-                reply_text(reply_token, "確認AI修改參數必須是數字。")
-                return
+                        reply_text(reply_token, f"✅ AI修改執行成功\n\n📋 班次：#{trip_id}\n💰 新費用：{new_meter}+{new_extra} = {new_meter + new_extra}元\n📝 原因：{reason}\n\n{result}")
+                
             except Exception as e:
                 logger.error(f"處理AI修改確認時出錯: {e}")
                 traceback.print_exc()
-                reply_text(reply_token, f"處理AI修改確認失敗: {str(e)}")
-                return
+                reply_text(reply_token, "❌ 處理確認時出錯")
+            return
         
         # 取消AI修改
         elif message_text == "取消AI修改":
-            reply_text(reply_token, "❌ AI修改已取消\n\n💡 您可以重新發起修改命令或使用其他功能。")
+            try:
+                # 完全重置用戶的對話上下文
+                from modules.utils.conversation_context import conversation_manager
+                conversation_manager.reset_context(user_id)
+                
+                logger.info(f"用戶 {user_id} 取消AI修改，已重置對話上下文")
+                
+                # 🔥 簡化：直接使用可靠的文字反饋，確保用戶一定能看到
+                reply_text(reply_token, "✅ 取消修改流程\n\n🔒 數據庫未被修改，您可以重新發起命令。")
+                    
+            except Exception as e:
+                logger.error(f"處理取消AI修改時出錯: {e}")
+                reply_text(reply_token, "✅ 取消修改流程")
             return
         # --- 結束新增 ---
             

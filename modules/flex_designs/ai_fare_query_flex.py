@@ -129,7 +129,8 @@ def create_ai_search_result_flex(search_info, trips, confidence):
                 "margin": "md"
             })
             
-            display_count = min(5, len(trips))
+            MAX_DISPLAY = 15  # 調高顯示上限，與未完成班次清單風格一致
+            display_count = min(MAX_DISPLAY, len(trips))
             for i, trip in enumerate(trips[:display_count]):
                 meter_fare = trip.get('meter_fare', 0) or 0
                 extra_fare = trip.get('extra_fare', 0) or 0
@@ -139,18 +140,22 @@ def create_ai_search_result_flex(search_info, trips, confidence):
                 else:
                     fare_display = f"{meter_fare}{extra_fare}"
                 
+                driver_display = trip.get('driver_id', 'N/A')
+                if driver_display and driver_display != 'N/A':
+                    driver_display = f"#{driver_display}"
+                
                 body_contents.append({
                     "type": "text",
-                    "text": f"📍 {i+1}. #{trip['id']} ({trip.get('category', '?')}) - {trip.get('start_point', '?')} → {trip.get('end_point', '?')} | 🚕{trip.get('driver_id', 'N/A')} | 💰{fare_display}",
+                    "text": f"📍 {i+1}. #{trip['id']} ({trip.get('category', '?')}) - {trip.get('start_point', '?')} → {trip.get('end_point', '?')} | 🚕{driver_display} | 💰{fare_display}",
                     "size": "xs",
                     "wrap": True,
                     "margin": "xs"
                 })
             
-            if len(trips) > 5:
+            if len(trips) > MAX_DISPLAY:
                 body_contents.append({
                     "type": "text",
-                    "text": f"...還有 {len(trips) - 5} 個班次",
+                    "text": f"...還有 {len(trips) - MAX_DISPLAY} 個班次",
                     "size": "xs",
                     "color": "#666666",
                     "margin": "xs"
@@ -450,6 +455,9 @@ def create_ai_modification_confirm_flex(modification_info):
         fare_change_text = f"💰 費用變更：{old_meter}+{old_extra} → {new_meter}+{new_extra}"
         total_change_text = f"📊 總計變化：{total_change:+d} 元"
         
+        # 格式化司機顯示
+        driver_display = f"#{driver_id}" if driver_id and driver_id != 'N/A' else 'N/A'
+        
         body_contents = [
             {
                 "type": "text",
@@ -477,7 +485,7 @@ def create_ai_modification_confirm_flex(modification_info):
             },
             {
                 "type": "text",
-                "text": f"🚕 司機：{driver_id}",
+                "text": f"🚕 司機：{driver_display}",
                 "size": "sm",
                 "margin": "xs"
             },
@@ -612,6 +620,9 @@ def create_ai_modification_result_flex(modification_info):
         fare_change_text = f"💰 費用變更：{old_meter}+{old_extra} → {new_meter}+{new_extra}"
         total_change_text = f"📊 總計變化：{total_change:+d} 元"
         
+        # 格式化司機顯示  
+        driver_display = f"#{driver_id}" if driver_id and driver_id != 'N/A' else 'N/A'
+        
         body_contents = [
             {
                 "type": "text",
@@ -639,7 +650,7 @@ def create_ai_modification_result_flex(modification_info):
             },
             {
                 "type": "text",
-                "text": f"🚕 司機：{driver_id}",
+                "text": f"🚕 司機：{driver_display}",
                 "size": "sm",
                 "margin": "xs"
             },
@@ -705,16 +716,30 @@ def create_ai_modification_result_flex(modification_info):
             QuickReplyItem(
                 action=MessageAction(
                     label="🔍 查詢其他",
-                    text="查詢今天完成班次"
-                )
-            ),
-            QuickReplyItem(
-                action=MessageAction(
-                    label="📊 查看歷史",
-                    text=f"查詢司機{driver_id}本週班次"
+                    text="查已完成 診所"  # 直接指定類別，避免觸發類別選擇
                 )
             )
         ]
+        
+        # 只有當司機ID不是N/A時，才添加司機歷史查詢按鈕
+        if driver_id and driver_id != 'N/A':
+            quick_reply_items.append(
+                QuickReplyItem(
+                    action=MessageAction(
+                        label="📊 查看歷史",
+                        text="診所班次"  # 使用正確的診所班次命令
+                    )
+                )
+            )
+        else:
+            quick_reply_items.append(
+                QuickReplyItem(
+                    action=MessageAction(
+                        label="🤖 AI查詢",
+                        text="查詢今天診所車資"
+                    )
+                )
+            )
         
         quick_reply = QuickReply(items=quick_reply_items)
         
@@ -727,4 +752,97 @@ def create_ai_modification_result_flex(modification_info):
         
     except Exception as e:
         logger.error(f"創建AI修改結果Flex Message時出錯: {e}")
+        return None
+
+def create_ai_modification_cancel_flex():
+    """
+    創建AI修改取消確認的Flex Message（參考預約成功模式）
+    """
+    try:
+        # 構建取消確認界面
+        flex_content = {
+            "type": "bubble",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "❌ 修改已取消",
+                        "weight": "bold",
+                        "size": "lg",
+                        "color": "#FFFFFF"
+                    }
+                ],
+                "backgroundColor": "#4CAF50",  # 使用綠色背景，表示操作成功
+                "paddingAll": "md"
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "✅ AI修改已成功取消！",
+                        "size": "lg",
+                        "weight": "bold",
+                        "color": "#4CAF50",
+                        "margin": "md"
+                    },
+                    {
+                        "type": "separator",
+                        "margin": "md"
+                    },
+                    {
+                        "type": "text",
+                        "text": "🔒 數據庫未被修改",
+                        "size": "sm",
+                        "color": "#666666",
+                        "margin": "md"
+                    },
+                    {
+                        "type": "text",
+                        "text": "💡 您可以重新發起修改命令或使用其他功能",
+                        "size": "sm",
+                        "color": "#666666",
+                        "margin": "sm",
+                        "wrap": True
+                    }
+                ]
+            }
+        }
+        
+        # 創建有用的 Quick Reply 按鈕
+        quick_reply_items = [
+            QuickReplyItem(
+                action=MessageAction(
+                    label="🔍 重新查詢",
+                    text="查詢今天完成班次"
+                )
+            ),
+            QuickReplyItem(
+                action=MessageAction(
+                    label="🤖 AI查詢",
+                    text="查詢今天診所車資"
+                )
+            ),
+            QuickReplyItem(
+                action=MessageAction(
+                    label="💡 查看幫助",
+                    text="幫助"
+                )
+            )
+        ]
+        
+        quick_reply = QuickReply(items=quick_reply_items)
+        
+        # 返回字典格式
+        return {
+            "flex_message": flex_content,
+            "quick_reply": quick_reply,
+            "alt_text": "AI修改已取消"
+        }
+        
+    except Exception as e:
+        logger.error(f"創建AI修改取消Flex Message時出錯: {e}")
         return None 

@@ -110,13 +110,17 @@ def update_completed_trips():
         
         print(f"[{now}] 當前日期: {current_date}, 當前時間: {current_time}")
         
-        # 使用應用上下文和DB_ENGINE進行數據庫操作
-        engine = current_app.config.get('DB_ENGINE')
-        if not engine:
-            print(f"[{now}] 找不到數據庫引擎配置")
-            return "找不到數據庫引擎配置"
+        # 使用已導入的數據庫引擎進行操作
+        try:
+            from database import engine as db_engine
+        except ImportError:
+            # 如果無法導入，嘗試使用Flask配置
+            db_engine = current_app.config.get('DB_ENGINE')
+            if not db_engine:
+                print(f"[{now}] 找不到數據庫引擎配置")
+                return "找不到數據庫引擎配置"
             
-        with engine.connect() as conn:
+        with db_engine.connect() as conn:
             # 開始事務
             trans = conn.begin()
             try:
@@ -154,7 +158,7 @@ def update_completed_trips():
                     trip_id = trip[0]
                     print(f"[{now}] 處理班次 #{trip_id}")
                     
-                    # 查詢班次信息
+                    # 查詢班次信息（包含custom字段以處理臨時班次）
                     query = """
                     SELECT 
                         t.trip_id, 
@@ -170,7 +174,11 @@ def update_completed_trips():
                         t.status,
                         t.unique_code,
                         t.fixed_trip_id,
-                        t.passenger_name
+                        t.passenger_name,
+                        t.custom_start_point,
+                        t.custom_via_point,
+                        t.custom_end_point,
+                        t.trip_type
                     FROM 
                         trips t
                     WHERE 
@@ -269,6 +277,17 @@ def update_completed_trips():
                     
                     # 插入到completed_trips表
                     try:
+                        # 根據班次類型選擇正確的字段（臨時班次使用custom字段，固定班次使用常規字段）
+                        trip_type = trip_info[17]
+                        is_temp_trip = trip_type == 'temp'
+                        
+                        # 為臨時班次使用custom字段，為固定班次使用常規字段
+                        final_start_point = trip_info[14] if is_temp_trip and trip_info[14] else trip_info[3]
+                        final_via_point = trip_info[15] if is_temp_trip and trip_info[15] else trip_info[4]
+                        final_end_point = trip_info[16] if is_temp_trip and trip_info[16] else trip_info[5]
+                        
+                        print(f"[{now}] 班次 #{trip_id} 類型: {trip_type}, 起點: '{final_start_point}', 途經: '{final_via_point}', 終點: '{final_end_point}'")
+                        
                         insert_query = """
                         INSERT INTO completed_trips 
                         (date, start_point, via_point, end_point, meter_fare, extra_fare, category, driver_id, unique_code, passenger_name) 
@@ -280,9 +299,9 @@ def update_completed_trips():
                             text(insert_query), 
                             {
                                 "date": trip_info[1],
-                                "start_point": trip_info[3],
-                                "via_point": trip_info[4],
-                                "end_point": trip_info[5],
+                                "start_point": final_start_point,
+                                "via_point": final_via_point,
+                                "end_point": final_end_point,
                                 "meter_fare": trip_info[6],
                                 "extra_fare": trip_info[7],
                                 "category": trip_info[8],
