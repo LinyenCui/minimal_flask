@@ -86,14 +86,14 @@ def update_single_trip(app, trip_id):
             # 獲取當前日期和時間
             now = get_taiwan_time()
             
-            # 查詢班次詳細信息，確保包含 trip_type, custom_start_point, custom_end_point
+            # 查詢班次詳細信息，確保包含 trip_type, custom_start_point, custom_end_point, custom_via_point
             query = """
             SELECT 
                 t.trip_id, t.date, t.time, 
                 t.start_point, t.via_point, t.end_point, 
                 t.meter_fare, t.extra_fare, t.category, t.driver_id,
                 t.status, t.unique_code, t.fixed_trip_id,
-                t.trip_type, t.custom_start_point, t.custom_end_point
+                t.trip_type, t.custom_start_point, t.custom_end_point, t.custom_via_point
             FROM 
                 trips t
             WHERE 
@@ -297,7 +297,7 @@ def update_completed_trips():
                     t.start_point, t.via_point, t.end_point, 
                     t.meter_fare, t.extra_fare, t.category, t.driver_id,
                     t.status, t.unique_code, t.fixed_trip_id,
-                    t.trip_type, t.custom_start_point, t.custom_end_point, t.passenger_name,
+                    t.trip_type, t.custom_start_point, t.custom_end_point, t.custom_via_point, t.passenger_name,
                     t.passenger_leave_reason, t.modification_reason
                 FROM trips t WHERE t.trip_id = :trip_id FOR UPDATE
                 """)
