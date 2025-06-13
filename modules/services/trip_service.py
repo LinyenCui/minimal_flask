@@ -282,9 +282,16 @@ def update_completed_trips():
                         is_temp_trip = trip_type == 'temp'
                         
                         # 為臨時班次使用custom字段，為固定班次使用常規字段
-                        final_start_point = trip_info[14] if is_temp_trip and trip_info[14] else trip_info[3]
-                        final_via_point = trip_info[15] if is_temp_trip and trip_info[15] else trip_info[4]
-                        final_end_point = trip_info[16] if is_temp_trip and trip_info[16] else trip_info[5]
+                        if is_temp_trip:
+                            # 臨時班次：優先使用custom字段，即使為None或空字符串也不fallback
+                            final_start_point = trip_info[14]  # custom_start_point
+                            final_via_point = trip_info[15]    # custom_via_point
+                            final_end_point = trip_info[16]    # custom_end_point
+                        else:
+                            # 固定班次：使用常規字段
+                            final_start_point = trip_info[3]   # start_point
+                            final_via_point = trip_info[4]     # via_point
+                            final_end_point = trip_info[5]     # end_point
                         
                         print(f"[{now}] 班次 #{trip_id} 類型: {trip_type}, 起點: '{final_start_point}', 途經: '{final_via_point}', 終點: '{final_end_point}'")
                         
