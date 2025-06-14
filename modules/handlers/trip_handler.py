@@ -329,6 +329,9 @@ def handle_record_fare(message_text, user_id=None):
     """處理記錄已完成班次車資的命令 - 增強版：支持修改原因追蹤"""
     try:
         parts = message_text.split()
+        
+        logger.info(f"🔧 handle_record_fare 收到命令: '{message_text}'")
+        
         if len(parts) < 3:
             return "命令格式不正確。正確格式：記錄車資 [ID] [錶價] [加成] [修改原因]"
             
@@ -372,6 +375,8 @@ def handle_record_fare(message_text, user_id=None):
         current_meter = current_trip[1] or 0
         current_extra = current_trip[2] or 0
         
+        logger.info(f"🔧 比較數據: 數據庫({current_meter}+{current_extra}) vs 新值({meter_fare}+{extra_fare}), 原因: '{reason}'")
+        
         # 🔥 簡化邏輯：按照用戶初衷，只在車資變更時要求原因
         meter_changed = current_meter != meter_fare
         extra_changed = current_extra != extra_fare
@@ -398,6 +403,8 @@ def handle_record_fare(message_text, user_id=None):
         # 更新車資並記錄修改信息
         from modules.utils.taiwan_time import get_taiwan_time
         
+        logger.info(f"🔧 準備執行數據庫更新: trip_id={completed_trip_id}, meter={meter_fare}, extra={extra_fare}")
+        
         update_query = sql_text("""
         UPDATE completed_trips 
         SET meter_fare = :meter_fare, 
@@ -418,6 +425,7 @@ def handle_record_fare(message_text, user_id=None):
         })
         
         db.session.commit()
+        logger.info(f"🔧 數據庫更新完成！")
         
         # 格式化變更信息
         change_info = []

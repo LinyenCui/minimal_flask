@@ -278,6 +278,17 @@ class ConversationContextManager:
         context = self.get_context(user_id)
         context.pending_modification = None
     
+    def reset_context(self, user_id: str):
+        """完全重置用戶的對話上下文（用於取消操作）"""
+        context = self.get_context(user_id)
+        context.last_query_result = None
+        context.pending_modification = None
+        context.active_trip_id = None
+        context.conversation_history = []
+        context.context_expires_at = datetime.now() + timedelta(minutes=30)
+        
+        logger.info(f"已重置用戶 {user_id} 的完整對話上下文")
+    
     def set_recent_trip_id(self, user_id: str, trip_id: int):
         """記錄用戶最近查看的班次ID"""
         context = self.get_context(user_id)

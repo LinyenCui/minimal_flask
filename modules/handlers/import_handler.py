@@ -33,7 +33,7 @@ def handle_import_fixed_trips_week(message_text):
         
         # 在匯入新班次之前，先將所有未完成的班次移到已完成班次表
         # 這確保了不會丟失任何班次信息
-        from modules.services.trip_service import update_completed_trips
+        from modules.services.scheduler_service import update_completed_trips
         update_completed_trips()
         
         # 清空班次總覽表

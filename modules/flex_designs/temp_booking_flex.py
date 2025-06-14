@@ -549,9 +549,9 @@ def get_temp_booking_confirm_flex(date_str, time_str, start_point, end_point=Non
             "contents": [
                 { "type": "text", "text": "乘客", "size": "sm", "color": "#555555", "flex": 2 },
                 { "type": "text", "text": display_text, "size": "sm", "color": "#111111", "flex": 4, "weight": "bold", "wrap": True }
-            ],
-            "margin": "md"
-        })
+        ],
+        "margin": "md"
+    })
     
     # Enhanced Quick Reply options
     quick_reply_items = [

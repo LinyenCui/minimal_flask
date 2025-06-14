@@ -921,10 +921,8 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True):
         return f"❌ 處理查詢時出錯: {str(e)}"
 
 def execute_fare_modification(trip: Dict, modification_intent: Dict, user_id: str) -> str:
-    """執行車資修改"""
+    """準備車資修改確認界面（參考預約叫車邏輯 - 收集信息，暫停等待確認）"""
     try:
-        from modules.handlers.trip_handler import handle_record_fare
-        
         trip_id = trip['id']
         current_meter = trip['meter_fare']
         current_extra = trip['extra_fare']
@@ -934,40 +932,25 @@ def execute_fare_modification(trip: Dict, modification_intent: Dict, user_id: st
         new_extra = modification_intent.get('extra_fare', current_extra)
         reason = modification_intent.get('reason', '透過AI智能修改')
         
-        # 🔥 调试日志：显示修改参数
-        logger.info(f"AI修改车资执行: trip_id={trip_id}, meter={current_meter}->{new_meter}, extra={current_extra}->{new_extra}, reason='{reason}'")
-        
         # 🔥 确保原因不为空
         if not reason or reason.strip() == '':
             reason = '透過AI智能修改'
-            logger.info(f"原因为空，使用默认原因: '{reason}'")
         
-        # 構建修改命令 - 🔥 确保格式正确
-        modify_command = f"記錄車資 {trip_id} {new_meter} {new_extra} {reason.strip()}"
-        logger.info(f"AI构建的修改命令: '{modify_command}'")
+        logger.info(f"📋 準備AI修改確認界面: trip_id={trip_id}, meter={current_meter}->{new_meter}, extra={current_extra}->{new_extra}, reason='{reason}'")
         
-        # 調用原有的修改功能
-        result = handle_record_fare(modify_command, user_id=user_id)
+        # 🔥 參考預約叫車：保存待執行的修改到上下文（關鍵步驟！）
+        from modules.utils.conversation_context import conversation_manager
+        conversation_manager.set_pending_modification(user_id, {
+            'trip_id': trip_id,
+            'meter_fare': new_meter,
+            'extra_fare': new_extra,
+            'reason': reason,
+            'trip': trip
+        })
         
-        # 🔥 检查是否还在要求原因（表示修改失败）
-        if "需要說明原因" in result or "修改原因" in result or "請使用完整格式" in result:
-            logger.warning(f"AI修改被拒绝，handle_record_fare返回: {result}")
-            return f"""❌ AI修改失败
-
-📝 您的输入包含了修改意图，但系统仍要求原因说明。
-
-🔧 调试信息：
-• 班次ID: {trip_id}
-• 费用: {new_meter}+{new_extra}
-• 提取的原因: '{reason}'
-• 构建的命令: '{modify_command}'
-
-💡 请尝试使用传统格式：
-記錄車資 {trip_id} {new_meter} {new_extra} [您的原因]
-
-或提供更明确的原因描述。"""
+        logger.info(f"✅ 已保存待執行修改到上下文: trip_id={trip_id}")
         
-        # 🔥 修復：返回確認界面，參考預約叫車模式
+        # 🔥 參考預約叫車：收集信息，顯示確認界面，不執行數據庫操作
         modification_info = {
             'trip_id': trip_id,
             'category': trip.get('category', '未分類'),
@@ -985,7 +968,8 @@ def execute_fare_modification(trip: Dict, modification_intent: Dict, user_id: st
         flex_result = create_ai_modification_confirm_flex(modification_info)
         
         if flex_result and isinstance(flex_result, dict):
-            # 🔥 返回確認界面（讓用戶確認或取消）
+            # 🔥 返回確認界面（像預約叫車一樣暫停等待用戶響應）
+            logger.info(f"✅ 已顯示確認界面，等待用戶響應")
             return flex_result
         else:
             # 如果Flex Message創建失敗，使用文本備用
@@ -1005,86 +989,13 @@ def execute_fare_modification(trip: Dict, modification_intent: Dict, user_id: st
             return confirmation_text
         
     except Exception as e:
-        logger.error(f"執行車資修改時出錯: {e}")
+        logger.error(f"準備車資修改確認時出錯: {e}")
         import traceback
         traceback.print_exc()
-        return f"❌ 修改失敗: {str(e)}"
+        return f"❌ 準備修改確認失敗: {str(e)}"
 
-def execute_confirmed_ai_modification(trip_id: int, new_meter: int, new_extra: int, reason: str, user_id: str) -> str:
-    """執行已確認的AI車資修改"""
-    try:
-        from modules.handlers.trip_handler import handle_record_fare
-        
-        # 🔥 确保原因不为空
-        if not reason or reason.strip() == '':
-            reason = '透過AI智能修改'
-        
-        # 構建修改命令
-        modify_command = f"記錄車資 {trip_id} {new_meter} {new_extra} {reason.strip()}"
-        logger.info(f"執行確認的AI修改命令: '{modify_command}'")
-        
-        # 調用原有的修改功能
-        result = handle_record_fare(modify_command, user_id=user_id)
-        
-        # 🔥 检查是否还在要求原因（表示修改失败）
-        if "需要說明原因" in result or "修改原因" in result or "請使用完整格式" in result:
-            logger.warning(f"確認的AI修改被拒绝，handle_record_fare返回: {result}")
-            return f"""❌ AI修改確認失败
-
-📝 修改確認被系統拒絕。
-
-🔧 调试信息：
-• 班次ID: {trip_id}
-• 费用: {new_meter}+{new_extra}
-• 原因: '{reason}'
-• 命令: '{modify_command}'
-
-💡 請嘗試使用传统格式：
-記錄車資 {trip_id} {new_meter} {new_extra} [您的原因]"""
-        
-        # 查詢班次信息用於顯示
-        from modules.services.ai_fare_service import CompletedTripMatcher
-        matcher = CompletedTripMatcher()
-        criteria = {'trip_id': trip_id}
-        matching_trips = matcher.search_completed_trips(criteria)
-        
-        if matching_trips:
-            trip = matching_trips[0]
-            
-            # 構建修改完成信息
-            modification_info = {
-                'trip_id': trip_id,
-                'category': trip.get('category', '未分類'),
-                'route': f"{trip.get('start_point', '?')} → {trip.get('end_point', '?')}",
-                'driver_id': trip.get('driver_id', 'N/A'),
-                'old_meter': trip.get('meter_fare', 0) - (new_meter - trip.get('meter_fare', 0)),  # 計算舊值
-                'old_extra': trip.get('extra_fare', 0) - (new_extra - trip.get('extra_fare', 0)),  # 計算舊值
-                'new_meter': new_meter,
-                'new_extra': new_extra,
-                'reason': reason,
-                'total_change': 0  # 已經修改完成，變化為0
-            }
-            
-            from modules.flex_designs.ai_fare_query_flex import create_ai_modification_result_flex
-            flex_result = create_ai_modification_result_flex(modification_info)
-            
-            if flex_result and isinstance(flex_result, dict):
-                return flex_result
-        
-        # 文本備用版本
-        return f"""✅ AI修改執行成功
-
-📋 班次：#{trip_id}
-💰 新費用：{new_meter}+{new_extra} = {new_meter + new_extra}元
-📝 原因：{reason}
-
-{result}"""
-        
-    except Exception as e:
-        logger.error(f"執行確認AI修改時出錯: {e}")
-        import traceback
-        traceback.print_exc()
-        return f"❌ 執行修改失敗: {str(e)}"
+# 🔥 注意：execute_confirmed_ai_modification 函數已移除
+# 確認邏輯現在直接在 text_message_handler.py 中處理，照搬預約叫車的模式
 
 def format_multiple_trips_summary(trips: List[Dict]) -> str:
     """格式化多個班次的摘要 - 简洁版"""

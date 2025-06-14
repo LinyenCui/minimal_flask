@@ -140,7 +140,7 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
             # 回退檢查舊的modification_reason欄位
             elif modification_reason and ("乘客請假" in modification_reason or "請假" in modification_reason):
                 display_status = "請假"
-            
+        
             # 根據狀態添加不同的表情符號
             status_emoji = {
                 "準備": "🟢",

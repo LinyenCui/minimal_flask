@@ -320,9 +320,9 @@ def handle_confirm_input(user_id, message_text):
                 success_message += f"乘客：{display_passenger}\n"
             
             success_message += (
-                f"類別：{booking_data['category']}\n"
-                f"狀態：待派\n\n"
-                "我們會盡快為您指派司機。"
+                 f"類別：{booking_data['category']}\n"
+                 f"狀態：待派\n\n"
+                 "我們會盡快為您指派司機。"
             )
             return {"type": "text", "text": success_message}
         
