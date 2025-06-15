@@ -32,6 +32,11 @@ def get_help_flex():
                 },
                 {
                     "type": "button",
+                    "action": {"type": "message", "label": "📋 固定班表查詢", "text": "/固定班表 "},
+                    "style": "primary", "color": "#32CD32", "margin": "sm", "height": "sm"
+                },
+                {
+                    "type": "button",
                     "action": {"type": "postback", "label": "📄 顯示完整指令", "data": "action=help_text", "displayText": "幫助文字"},
                     "style": "secondary", "margin": "sm", "height": "sm"
                 }

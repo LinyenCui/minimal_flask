@@ -28,6 +28,7 @@ class ConversationContext:
     last_query_result: Optional[QueryResult] = None
     conversation_history: List[Dict] = None
     active_trip_id: Optional[int] = None  # 當前操作的班次ID
+    active_fixed_schedule_id: Optional[int] = None  # 當前操作的固定班次ID
     pending_modification: Optional[Dict] = None  # 待執行的修改
     context_expires_at: Optional[datetime] = None
     
@@ -284,6 +285,7 @@ class ConversationContextManager:
         context.last_query_result = None
         context.pending_modification = None
         context.active_trip_id = None
+        context.active_fixed_schedule_id = None
         context.conversation_history = []
         context.context_expires_at = datetime.now() + timedelta(minutes=30)
         
@@ -293,15 +295,31 @@ class ConversationContextManager:
         """記錄用戶最近查看的班次ID"""
         context = self.get_context(user_id)
         context.active_trip_id = trip_id
+        context.active_fixed_schedule_id = None  # 清除固定班次ID，避免混淆
         context.context_expires_at = datetime.now() + timedelta(minutes=30)
         
         self._add_to_history(context, 'view_trip', {'trip_id': trip_id})
-        logger.info(f"記錄用戶 {user_id} 最近查看班次: {trip_id}")
+        logger.info(f"記錄用戶 {user_id} 最近查看班次: {trip_id}，已清除固定班次上下文")
     
     def get_recent_trip_id(self, user_id: str) -> Optional[int]:
         """獲取用戶最近查看的班次ID"""
         context = self.get_context(user_id)
         return context.active_trip_id
+    
+    def set_recent_fixed_schedule_id(self, user_id: str, schedule_id: int):
+        """記錄用戶最近操作的固定班次ID"""
+        context = self.get_context(user_id)
+        context.active_fixed_schedule_id = schedule_id
+        context.active_trip_id = None  # 清除trips班次ID，避免混淆
+        context.context_expires_at = datetime.now() + timedelta(minutes=30)
+        
+        self._add_to_history(context, 'view_fixed_schedule', {'schedule_id': schedule_id})
+        logger.info(f"記錄用戶 {user_id} 最近操作固定班次: {schedule_id}，已清除trips上下文")
+    
+    def get_recent_fixed_schedule_id(self, user_id: str) -> Optional[int]:
+        """獲取用戶最近操作的固定班次ID"""
+        context = self.get_context(user_id)
+        return context.active_fixed_schedule_id
     
     def _add_to_history(self, context: ConversationContext, action_type: str, data: Dict):
         """添加操作到對話歷史"""

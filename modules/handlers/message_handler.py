@@ -15,14 +15,17 @@ KNOWN_COMMANDS = {
     "預約叫車",      # This is our AI booking command
     "預約叫車幫助",  # Help for AI booking
     "查詢班次", "診所班次", "查已完成", "指派司機", "完成班次", "回報問題",
-    "取消預約", "取消指派", "更新已完成班次", "取消AI修改"
+    "取消預約", "取消指派", "更新已完成班次", "取消AI修改",
+    "fix-sequence"   # Database sequence repair command
 }
 
 # Commands that *can* take arguments
 COMMANDS_WITH_ARGS = {
     "查詢班次", "診所班次", "查已完成", "班次詳情", "指派司機", "指派", 
     "記錄車資", "修改類別", "生成周報表", "生成週報表", "生成周報", "生成週報",
-    "確認指派", "取消指派", "確認AI修改", "取消AI修改", "查看"
+    "確認指派", "取消指派", "確認AI修改", "取消AI修改", "查看", "修改班次",
+    "固定班次請假", "固定班次恢復",  # 固定班次請假相關命令
+    "固定班表"  # 新增固定班表查詢命令（去掉前綴，因為前綴會被預處理掉）
 }
 
 def is_from_button(message_text):
@@ -83,14 +86,29 @@ def should_process(message_text, source_type, user_id):
         
         logger.info("[should_process] Group: Checking for commands with args pattern...")
         for cmd_arg_original_case in COMMANDS_WITH_ARGS:
-             if command_body.startswith(f"{cmd_arg_original_case} "):
+             # 特殊處理「修改班次」指令，支持「修改班次#數字」格式
+             if cmd_arg_original_case == "修改班次":
+                  if command_body.startswith("修改班次#") or command_body.startswith("修改班次 "):
+                       logger.info(f"[should_process] Group message matches '修改班次' pattern")
+                       return True, command_body
+             elif command_body.startswith(f"{cmd_arg_original_case} "):
                   logger.info(f"[should_process] Group message starts with command+arg pattern: '{cmd_arg_original_case}'")
-                  return True, command_body 
+                  return True, command_body
+        
+        # 特殊處理「固定班次#ID請假」格式
+        if re.match(r"固定班次#\d+請假", command_body):
+            logger.info(f"[should_process] Group message matches '固定班次#ID請假' pattern")
+            return True, command_body 
                   
         logger.info("[should_process] Group/Room: Not a KNOWN command (already checked), mention, or command+arg pattern, ignoring.")
         return False, command_body 
 
     if source_type == "user":
+        # 特殊處理「固定班次#ID請假」格式
+        if re.match(r"固定班次#\d+請假", command_body):
+            logger.info(f"[should_process] Private chat matches '固定班次#ID請假' pattern")
+            return True, command_body
+        
         logger.info("[should_process] Private chat and not a KNOWN command. Processing.")
         return True, command_body 
                 

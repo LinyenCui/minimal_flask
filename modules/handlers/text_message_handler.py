@@ -18,6 +18,11 @@ from modules.handlers.temp_booking_handler import (
     temp_booking_states,
     handle_temp_booking_help
 )
+from modules.handlers.sequence_fix_handler import (
+    handle_sequence_fix_start,
+    handle_sequence_fix_message,
+    sequence_fix_states
+)
 from modules.services.driver_service import handle_driver_assign_request, handle_driver_assign_select, handle_driver_assign_confirm, handle_driver_assign_cancel
 
 # AI功能導入
@@ -38,6 +43,15 @@ def process_text_message(event):
     logger.info(f"Processing text message handed over: '{message_text}' (Normalized: '{command_text_lower}')") 
     
     try:
+        # 檢查用戶是否在序列修復流程中
+        if user_id in sequence_fix_states:
+            logger.info(f"用戶 {user_id} 在序列修復流程中，處理消息: {message_text}")
+            response = handle_sequence_fix_message(user_id, message_text)
+            
+            if response:
+                reply_text(reply_token, response.get("text", "處理中..."))
+            return
+        
         # 檢查用戶是否在臨時預約流程中
         if user_id in temp_booking_states:
             # 處理臨時預約消息
@@ -122,6 +136,15 @@ def process_text_message(event):
                             reply_text(reply_token, "開始臨時預約流程...")
                 else:
                     reply_text(reply_token, response.get("text", "開始臨時預約流程..."))
+            return
+        
+        # 序列修復命令
+        elif command_text_lower == "fix-sequence":
+            logger.info(f"用戶 {user_id} 請求序列修復")
+            response = handle_sequence_fix_start(user_id)
+            
+            if response:
+                reply_text(reply_token, response.get("text", "檢查序列中..."))
             return
         
         # 查詢班次 (東洋/臨時)
@@ -563,6 +586,57 @@ def process_text_message(event):
              return
         # --- 結束新增 ---
         
+        # --- 新增：固定班表查詢功能 ---
+        elif message_text.startswith("固定班表"):
+            from modules.handlers.fixed_schedule_query_handler import handle_fixed_schedule_query
+            result = handle_fixed_schedule_query(message_text, user_id)
+            
+            # 檢查回傳的結果類型
+            if isinstance(result, dict) and result.get("type") == "quick_reply":
+                # 發送帶有 Quick Reply 的訊息
+                try:
+                    reply_message(reply_token, [result])
+                    logger.info("成功發送固定班表查詢的 Quick Reply 訊息")
+                except Exception as e:
+                    logger.error(f"發送固定班表查詢 Quick Reply 訊息失敗: {e}")
+                    # 降級為純文字
+                    reply_text(reply_token, result.get("text", "查詢失敗"))
+            else:
+                # 純文字回應
+                reply_text(reply_token, result)
+            return
+        
+        # --- 新增：固定班次請假功能 ---
+        elif message_text.startswith("固定班次#") and message_text.endswith("請假"):
+            # 處理固定班次#ID請假的交互模式
+            import re
+            match = re.match(r"固定班次#(\d+)請假", message_text)
+            if match:
+                schedule_id = match.group(1)
+                # 記錄固定班次ID到上下文（用於簡化請假格式）
+                try:
+                    from modules.utils.conversation_context import conversation_manager
+                    conversation_manager.set_recent_fixed_schedule_id(user_id, int(schedule_id))
+                except Exception as context_error:
+                    logger.error(f"記錄固定班次ID到上下文時出錯: {context_error}")
+                
+                # 提供交互提示（類似乘客請假）
+                reply_text(reply_token, f"固定班次 #{schedule_id} 乘客長期請假\n\n請輸入：[原因] [加成]\n\n例如：\n診所乘客長期住院 -50\n出國一個月 0\n搬家不再需要 -100\n\n💡 提示：先寫原因，最後寫加成金額")
+                return
+        
+        elif message_text.startswith("固定班次請假"):
+            from modules.handlers.fixed_schedule_leave_handler import handle_fixed_schedule_leave_command
+            result = handle_fixed_schedule_leave_command(message_text, user_id)
+            reply_text(reply_token, result)
+            return
+            
+        elif message_text.startswith("固定班次恢復"):
+            from modules.handlers.fixed_schedule_leave_handler import handle_fixed_schedule_restore_command
+            result = handle_fixed_schedule_restore_command(message_text, user_id)
+            reply_text(reply_token, result)
+            return
+        # --- 結束新增 ---
+        
         # --- AI修改確認處理（保持原格式，但照搬預約叫車邏輯）---
         elif message_text.startswith("確認AI修改"):
             try:
@@ -797,8 +871,14 @@ def process_text_message(event):
                 # 嘗試從對話上下文獲取最近的班次ID
                 from modules.utils.conversation_context import conversation_manager
                 recent_trip_id = conversation_manager.get_recent_trip_id(user_id)
+                recent_fixed_schedule_id = conversation_manager.get_recent_fixed_schedule_id(user_id)
                 
+                # 🔧 添加調試日誌
+                logger.info(f"簡單請假格式檢測 - 用戶: {user_id}, trips上下文: {recent_trip_id}, 固定班次上下文: {recent_fixed_schedule_id}, 輸入: '{message_text}'")
+                
+                # 🔧 修正：優先處理trips請假（因為用戶剛查看trips班次詳情）
                 if recent_trip_id:
+                    # 處理一般班次請假
                     logger.info(f"檢測到簡單請假格式，班次ID: {recent_trip_id}, 加成: {amount}, 原因: {reason}")
                     
                     # 構造完整的乘客請假命令
@@ -812,9 +892,24 @@ def process_text_message(event):
                     except Exception as e:
                         logger.error(f"處理簡單請假格式時出錯: {e}")
                         # 如果出錯，繼續往下執行其他邏輯
+                elif recent_fixed_schedule_id:
+                    # 如果沒有trips上下文，再處理固定班次請假
+                    logger.info(f"檢測到固定班次簡單請假格式，固定班次ID: {recent_fixed_schedule_id}, 加成: {amount}, 原因: {reason}")
+                    
+                    # 構造完整的固定班次請假命令
+                    full_command = f"固定班次請假 {recent_fixed_schedule_id} {amount} {reason}"
+                    
+                    try:
+                        from modules.handlers.fixed_schedule_leave_handler import handle_fixed_schedule_leave_command
+                        result = handle_fixed_schedule_leave_command(full_command, user_id)
+                        reply_text(reply_token, result)
+                        return
+                    except Exception as e:
+                        logger.error(f"處理固定班次簡單請假格式時出錯: {e}")
+                        # 如果出錯，繼續往下執行其他邏輯
                 else:
                     # 如果找不到最近的班次ID，提示用戶
-                    reply_text(reply_token, f"檢測到請假資料（{reason} {amount}），但找不到對應的班次。\n\n請使用完整格式：\n乘客請假 [班次ID] {amount} {reason}")
+                    reply_text(reply_token, f"檢測到請假資料（{reason} {amount}），但找不到對應的班次。\n\n請使用完整格式：\n• 乘客請假 [班次ID] {amount} {reason}\n• 固定班次請假 [固定班次ID] {amount} {reason}")
                     return
             
             # 🔥 新增：检查是否有AI上下文需要处理（例如pending_modification）
@@ -917,9 +1012,12 @@ def get_help_text():
 6. 指派司機 [ID] - 為班次指派司機 (通過按鈕選擇)
 7. 記錄車資 [ID] [錶價] [加成] - 記錄費用 (加成可選/可為負, 默認0)
 8. 修改類別 [ID] [新類別] - 修改已完成班次的類別 (診所/東洋/臨時)
-9. 預約叫車 - 通過自然語言描述開始預約 (推薦)
-10. 預約叫車幫助 - 顯示「預約叫車」的說明
-11. 幫助 - 顯示此幫助信息
+9. /固定班表 [客戶簡稱] - 查詢固定班次並提供操作選項
+10. 固定班次請假 [ID] [加成] [原因] - 設定固定班次長期請假
+11. 固定班次恢復 [ID] - 恢復固定班次為準備狀態
+12. 預約叫車 - 通過自然語言描述開始預約 (推薦)
+13. 預約叫車幫助 - 顯示「預約叫車」的說明
+14. 幫助 - 顯示此幫助信息
 
 在群組中使用時，可選擇性在命令前添加前綴... (例如 !, #, /)
 """

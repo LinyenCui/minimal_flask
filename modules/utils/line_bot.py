@@ -132,6 +132,36 @@ def reply_message(reply_token, messages):
                     
                     processed_messages.append(flex_msg)
                     logger.info(f"添加Flex消息到處理列表: {flex_msg}")
+                elif msg.get("type") == "quick_reply":
+                    # 處理帶有Quick Reply的文字訊息
+                    text_msg = TextMessage(text=msg.get("text", ""))
+                    
+                    # 處理Quick Reply
+                    if "quick_reply" in msg and "items" in msg["quick_reply"]:
+                        quick_reply_items = []
+                        
+                        logger.info(f"處理Quick Reply文字訊息項目: {msg['quick_reply']['items']}")
+                        
+                        for item in msg["quick_reply"]["items"]:
+                            if "action" in item and item["action"].get("type") == "message":
+                                action_data = item["action"]
+                                action = MessageAction(
+                                    label=action_data.get("label", ""),
+                                    text=action_data.get("text", "")
+                                )
+                                quick_reply_items.append(
+                                    QuickReplyItem(action=action)
+                                )
+                                logger.info(f"添加Quick Reply項目: {action_data.get('label')}, 文本: {action_data.get('text')}")
+                        
+                        # 創建QuickReply並賦值
+                        if quick_reply_items:
+                            qr = QuickReply(items=quick_reply_items)
+                            text_msg.quick_reply = qr
+                            logger.info(f"成功為文字訊息設置QuickReply")
+                    
+                    processed_messages.append(text_msg)
+                    logger.info(f"添加帶Quick Reply的文字訊息到處理列表")
                 else:
                     # 未知類型，跳過
                     logger.warning(f"未知的消息類型: {msg.get('type')}")
@@ -229,4 +259,32 @@ def reply_flex(reply_token, alt_text, flex_content):
         import traceback
         traceback.print_exc()
         current_app.logger.error(f"發送Flex Message時出錯: {e}")
-        return False 
+        return False
+
+def get_user_profile(user_id):
+    """獲取用戶的profile信息"""
+    try:
+        messaging_api = get_line_bot_api()
+        profile = messaging_api.get_profile(user_id)
+        return {
+            "display_name": profile.display_name,
+            "user_id": profile.user_id,
+            "picture_url": getattr(profile, 'picture_url', None),
+            "status_message": getattr(profile, 'status_message', None)
+        }
+    except Exception as e:
+        logger.error(f"獲取用戶profile時出錯: {e}")
+        return None
+
+def get_user_display_name(user_id):
+    """獲取用戶的顯示名稱"""
+    try:
+        profile = get_user_profile(user_id)
+        if profile:
+            return profile.get("display_name", "未知用戶")
+        else:
+            # 如果無法獲取profile，返回用戶ID的簡化版本
+            return f"用戶{user_id[-4:]}"
+    except Exception as e:
+        logger.error(f"獲取用戶顯示名稱時出錯: {e}")
+        return f"用戶{user_id[-4:]}" if user_id else "未知用戶"

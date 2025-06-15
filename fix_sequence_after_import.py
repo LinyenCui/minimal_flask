@@ -103,16 +103,49 @@ def fix_all_sequences():
         db.session.commit()
         print("\n🎉 所有序列檢查完成")
 
+def quick_fix():
+    """快速修復模式（直接修復所有序列）"""
+    print("🚀 快速修復模式")
+    print("="*30)
+    print("⚠️ 此模式會直接修復所有序列，適合資料搬移後使用")
+    
+    confirm = input("確定要繼續嗎？(y/N): ").strip().lower()
+    if confirm != 'y':
+        print("已取消操作")
+        return
+    
+    fix_all_sequences()
+    print("\n✅ 快速修復完成！現在可以正常使用排程功能了")
+
 if __name__ == '__main__':
+    import sys
+    
+    # 支援命令行參數
+    if len(sys.argv) > 1:
+        if sys.argv[1] == '--quick' or sys.argv[1] == '-q':
+            quick_fix()
+            sys.exit(0)
+        elif sys.argv[1] == '--help' or sys.argv[1] == '-h':
+            print("使用方法：")
+            print("  python fix_sequence_after_import.py          # 互動模式")
+            print("  python fix_sequence_after_import.py --quick  # 快速修復所有序列")
+            print("  python fix_sequence_after_import.py --help   # 顯示說明")
+            sys.exit(0)
+    
+    print("🔧 資料庫序列修復工具")
+    print("="*40)
     print("請選擇操作：")
     print("1. 只修復 completed_trips 序列")
     print("2. 檢查並修復所有序列")
+    print("3. 快速修復模式（推薦用於資料搬移後）")
     
-    choice = input("\n請輸入選項 (1/2): ").strip()
+    choice = input("\n請輸入選項 (1/2/3): ").strip()
     
     if choice == '1':
         fix_completed_trips_sequence()
     elif choice == '2':
         fix_all_sequences()
+    elif choice == '3':
+        quick_fix()
     else:
-        print("無效選項") 
+        print("❌ 無效選項") 

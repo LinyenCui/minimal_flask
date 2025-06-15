@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>資料庫工具 - 管理後台</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f5f5f7;
+            color: #1d1d1f;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .tool-card {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .btn-primary {
+            background: #007AFF;
+            color: white;
+        }
+        
+        .btn-warning {
+            background: #FF9500;
+            color: white;
+        }
+        
+        .btn-success {
+            background: #34C759;
+            color: white;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        
+        .status-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        
+        .status-table th,
+        .status-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e1e1e6;
+        }
+        
+        .status-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+        }
+        
+        .status-ok { color: #34C759; }
+        .status-warning { color: #FF9500; }
+        .status-error { color: #FF3B30; }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #007AFF;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        
+        .alert-success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        
+        .alert-error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        
+        .description {
+            background: #f8f9fa;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #007AFF;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛠️ 資料庫工具</h1>
+            <p>管理和維護資料庫序列的專用工具</p>
+        </div>
+        
+        <div id="alerts"></div>
+        
+        <!-- 序列檢查工具 -->
+        <div class="tool-card">
+            <h2>🔍 序列狀態檢查</h2>
+            <div class="description">
+                <p><strong>功能說明：</strong>檢查所有資料表的序列狀態，發現需要修復的序列。</p>
+                <p><strong>使用時機：</strong>從Render匯入資料後，或懷疑序列有問題時。</p>
+            </div>
+            
+            <button class="btn btn-primary" onclick="checkSequences()">
+                檢查序列狀態
+            </button>
+            
+            <div id="sequence-status" style="margin-top: 20px;"></div>
+        </div>
+        
+        <!-- 序列修復工具 -->
+        <div class="tool-card">
+            <h2>🔧 序列修復工具</h2>
+            <div class="description">
+                <p><strong>功能說明：</strong>自動修復所有有問題的序列，確保新資料插入時不會發生主鍵衝突。</p>
+                <p><strong>注意事項：</strong>此操作會直接修改資料庫序列，建議先檢查狀態。</p>
+            </div>
+            
+            <button class="btn btn-success" onclick="fixSequences('all')">
+                修復所有序列
+            </button>
+            <button class="btn btn-warning" onclick="fixSequences('completed_trips')">
+                只修復 completed_trips
+            </button>
+            <button class="btn btn-warning" onclick="fixSequences('trips')">
+                只修復 trips
+            </button>
+            
+            <div id="fix-results" style="margin-top: 20px;"></div>
+        </div>
+        
+        <!-- 使用說明 -->
+        <div class="tool-card">
+            <h2>📚 使用說明</h2>
+            <div class="description">
+                <h3>🔄 資料搬移流程：</h3>
+                <ol style="margin: 10px 0; padding-left: 20px;">
+                    <li>執行 <code>TRUNCATE TABLE xxx RESTART IDENTITY CASCADE;</code></li>
+                    <li>匯入資料（INSERT 語句）</li>
+                    <li><strong>重要：</strong>使用此工具修復序列</li>
+                    <li>驗證序列狀態正常</li>
+                </ol>
+                
+                <h3>⚠️ 常見問題：</h3>
+                <ul style="margin: 10px 0; padding-left: 20px;">
+                    <li>忘記修復序列 → 新增資料時出現主鍵衝突</li>
+                    <li>序列值小於最大ID → 需要立即修復</li>
+                    <li>排程功能異常 → 通常是序列問題導致</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <div class="loading" id="loading">
+        <div class="spinner"></div>
+        <div>處理中...</div>
+    </div>
+
+    <script>
+        function showAlert(message, type = 'success') {
+            const alertsContainer = document.getElementById('alerts');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            alert.style.display = 'block';
+            
+            alertsContainer.innerHTML = '';
+            alertsContainer.appendChild(alert);
+            
+            setTimeout(() => {
+                alert.style.display = 'none';
+            }, 5000);
+        }
+        
+        function showLoading(show = true) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        }
+        
+        async function checkSequences() {
+            showLoading(true);
+            
+            try {
+                const response = await fetch('/admin/check-sequences');
+                const data = await response.json();
+                
+                if (data.success) {
+                    displaySequenceStatus(data.sequences);
+                    showAlert('序列狀態檢查完成', 'success');
+                } else {
+                    showAlert('檢查失敗: ' + data.message, 'error');
+                }
+            } catch (error) {
+                showAlert('檢查失敗: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        function displaySequenceStatus(sequences) {
+            const container = document.getElementById('sequence-status');
+            
+            if (sequences.length === 0) {
+                container.innerHTML = '<p>沒有找到序列資料</p>';
+                return;
+            }
+            
+            let html = `
+                <table class="status-table">
+                    <thead>
+                        <tr>
+                            <th>資料表</th>
+                            <th>最大ID</th>
+                            <th>序列值</th>
+                            <th>狀態</th>
+                            <th>說明</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            sequences.forEach(seq => {
+                const statusClass = seq.status === 'ok' ? 'status-ok' : 
+                                  seq.status === 'warning' ? 'status-warning' : 'status-error';
+                
+                const statusText = seq.status === 'ok' ? '✅ 正常' :
+                                 seq.status === 'warning' ? '⚠️ 需修復' : '❌ 錯誤';
+                
+                const description = seq.needs_fix ? '序列值過小，需要修復' :
+                                  seq.error ? seq.error : '序列正常';
+                
+                html += `
+                    <tr>
+                        <td>${seq.table}</td>
+                        <td>${seq.max_id || 'N/A'}</td>
+                        <td>${seq.sequence_value || 'N/A'}</td>
+                        <td class="${statusClass}">${statusText}</td>
+                        <td>${description}</td>
+                    </tr>
+                `;
+            });
+            
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+        
+        async function fixSequences(action) {
+            if (!confirm('確定要修復序列嗎？此操作會直接修改資料庫。')) {
+                return;
+            }
+            
+            showLoading(true);
+            
+            try {
+                const response = await fetch('/admin/fix-sequences', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ action: action })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayFixResults(data.results);
+                    showAlert(data.message, 'success');
+                    // 自動重新檢查狀態
+                    setTimeout(checkSequences, 1000);
+                } else {
+                    showAlert('修復失敗: ' + data.message, 'error');
+                }
+            } catch (error) {
+                showAlert('修復失敗: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        function displayFixResults(results) {
+            const container = document.getElementById('fix-results');
+            
+            if (results.length === 0) {
+                container.innerHTML = '<p>沒有修復結果</p>';
+                return;
+            }
+            
+            let html = `
+                <h3>修復結果：</h3>
+                <table class="status-table">
+                    <thead>
+                        <tr>
+                            <th>資料表</th>
+                            <th>最大ID</th>
+                            <th>原序列值</th>
+                            <th>新序列值</th>
+                            <th>狀態</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            results.forEach(result => {
+                const statusClass = result.status === 'ok' ? 'status-ok' : 
+                                  result.status === 'fixed' ? 'status-success' : 'status-error';
+                
+                const statusText = result.status === 'ok' ? '✅ 本來就正常' :
+                                 result.status === 'fixed' ? '🔧 已修復' : '❌ 修復失敗';
+                
+                html += `
+                    <tr>
+                        <td>${result.table}</td>
+                        <td>${result.max_id || 'N/A'}</td>
+                        <td>${result.old_sequence || 'N/A'}</td>
+                        <td>${result.new_sequence || 'N/A'}</td>
+                        <td class="${statusClass}">${statusText}</td>
+                    </tr>
+                `;
+            });
+            
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+        
+        // 頁面載入時自動檢查序列狀態
+        document.addEventListener('DOMContentLoaded', function() {
+            checkSequences();
+        });
+    </script>
+</body>
+</html> 

@@ -36,10 +36,23 @@ SELECT MAX(id) FROM completed_trips;
 
 ## 🛠️ 自動化工具
 
-使用提供的Python腳本：
+### 方法1：命令行工具（推薦）
 ```bash
+# 快速修復模式（資料搬移後使用）
+python fix_sequence_after_import.py --quick
+
+# 或使用互動模式
 python fix_sequence_after_import.py
 ```
+
+### 方法2：網頁管理介面（常態化）
+訪問：`http://你的域名/admin/database-tools`
+
+特點：
+- 視覺化介面
+- 即時狀態檢查
+- 一鍵修復功能
+- 詳細修復報告
 
 ## 📋 檢查清單
 

@@ -11,7 +11,7 @@ from modules.models.trip import Trip, FixedSchedule
 from modules.models.driver import Driver
 from modules.models.customer import Customer
 from modules.utils.helpers import parse_date_input
-from modules.utils.line_bot import reply_text, reply_flex  # 添加必要的LINE Bot工具函数
+from modules.utils.line_bot import reply_text, reply_flex, get_user_display_name  # 添加必要的LINE Bot工具函数
 from modules.utils.taiwan_time import get_taiwan_time
 
 logger = logging.getLogger(__name__)
@@ -415,10 +415,13 @@ def handle_record_fare(message_text, user_id=None):
         WHERE id = :id
         """)
         
+        # 獲取用戶顯示名稱
+        user_display_name = get_user_display_name(user_id) if user_id else "系統用戶"
+        
         db.session.execute(update_query, {
             "meter_fare": meter_fare,
             "extra_fare": extra_fare,
-            "modified_by": user_id,
+            "modified_by": user_display_name,
             "modification_reason": reason or '車資調整',
             "modification_time": get_taiwan_time(),
             "id": completed_trip_id

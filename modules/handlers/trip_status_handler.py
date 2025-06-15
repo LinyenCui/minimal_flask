@@ -27,13 +27,14 @@ def handle_update_trip_status(message_text):
 
         trip_date, trip_time, current_status, fixed_trip_id, driver_id = trip_info.date, trip_info.time, trip_info.status, trip_info.fixed_trip_id, trip_info.driver_id
 
-        # --- 狀態有效性預先檢查 (因為時間檢查可能依賴 new_status != current_status) ---
+        # --- 狀態有效性預先檢查 ---
         valid_statuses_for_manual_change = ["準備", "取消", "衝突", "請假"]
         if new_status not in valid_statuses_for_manual_change:
             return f"無效的目標狀態：{new_status}。可用選項：準備、取消、衝突、請假。"
 
         # --- 通用時間限制判斷 ---
-        if new_status != current_status: # 只有當確實要改變狀態時，才執行嚴格的時間檢查
+        # 對於非「準備」狀態且要改變狀態時，執行時間檢查
+        if new_status != current_status and new_status != "準備":
             if trip_date and trip_time:
                 trip_datetime_naive = datetime.combine(trip_date, trip_time)
                 now_naive = datetime.now()
@@ -43,26 +44,65 @@ def handle_update_trip_status(message_text):
                 if (trip_datetime_naive - now_naive) < timedelta(minutes=30):
                     logger.info(f"Attempt to modify trip {trip_id} to {new_status} within 30 minutes. Current time: {now_naive}, Trip time: {trip_datetime_naive}")
                     return f"該班次執行時間距目前時間不足30分鐘，無法將狀態從「{current_status}」修改為「{new_status}」。請聯絡管理員。"
-            else: # 如果沒有日期時間，但嘗試修改狀態，則阻止
+            else:
                 logger.warning(f"Trip {trip_id} is missing date or time, cannot apply time-based modification lock for status change to {new_status}.")
                 return f"班次 {trip_id} 缺少日期或時間資訊，無法修改狀態。"
-        elif new_status == current_status:
-             return f"班次 #{trip_id} 目前狀態已是「{current_status}」，無需修改。"
         
-        # --- 特定狀態轉換邏輯和二次確認提示 (在時間檢查通過後執行) ---
-        # (current_status 在這裡可能已被上面的查詢更新，但為了保險，可以考慮重新查詢或使用 trip_info.status)
-        # current_status = trip_info.status # 確保 current_status 是最新的
-
+        # --- 特定狀態轉換邏輯 ---
         if new_status == "準備":
             if current_status == "待派" and not driver_id:
                 return f"班次 #{trip_id} 必須先指派司機才能設為「準備」。"
-            update_query = "UPDATE trips SET status = :new_status WHERE trip_id = :trip_id RETURNING trip_id"
-            result = db.session.execute(text(update_query), {"trip_id": trip_id, "new_status": new_status})
-            db.session.commit()
-            if result.fetchone():
-                return f"✅ 已成功將班次 #{trip_id} 的狀態從「{current_status}」更改為「準備」。"
+            
+            # 🔧 修正：檢查是否為請假狀態（需要清除請假原因）或有負數加成
+            check_leave_query = """
+            SELECT passenger_leave_reason, modification_reason, extra_fare 
+            FROM trips 
+            WHERE trip_id = :trip_id
+            """
+            leave_info = db.session.execute(text(check_leave_query), {"trip_id": trip_id}).fetchone()
+            
+            has_leave_reason = (leave_info and leave_info[0]) or (leave_info and leave_info[1] and "乘客請假" in leave_info[1])
+            original_extra_fare = leave_info[2] if leave_info else 0
+            
+            if has_leave_reason or original_extra_fare < 0:
+                # 這是「改回準備」- 清除請假原因和負數加成
+                update_query = """
+                UPDATE trips 
+                SET passenger_leave_reason = NULL,
+                    modification_reason = CASE 
+                        WHEN modification_reason LIKE '%乘客請假%' THEN NULL 
+                        ELSE modification_reason 
+                    END,
+                    extra_fare = CASE
+                        WHEN extra_fare < 0 THEN 0
+                        ELSE extra_fare
+                    END
+                WHERE trip_id = :trip_id 
+                RETURNING trip_id, extra_fare
+                """
+                result = db.session.execute(text(update_query), {"trip_id": trip_id})
+                db.session.commit()
+                
+                updated_trip = result.fetchone()
+                if updated_trip:
+                    success_msg = f"✅ 已成功清除班次 #{trip_id} 的請假狀態，恢復為準備狀態。"
+                    if original_extra_fare < 0:
+                        success_msg += f"\n💰 加成恢復：{original_extra_fare} → {updated_trip[1]} (變動+{-original_extra_fare})"
+                    return success_msg
+                else:
+                    return f"清除班次 #{trip_id} 請假狀態時出錯。"
+            elif current_status != new_status:
+                # 這是一般的狀態修改
+                update_query = "UPDATE trips SET status = :new_status WHERE trip_id = :trip_id RETURNING trip_id"
+                result = db.session.execute(text(update_query), {"trip_id": trip_id, "new_status": new_status})
+                db.session.commit()
+                if result.fetchone():
+                    return f"✅ 已成功將班次 #{trip_id} 的狀態從「{current_status}」更改為「準備」。"
+                else:
+                    return f"更新班次 #{trip_id} 狀態為「準備」時出錯。"
             else:
-                return f"更新班次 #{trip_id} 狀態為「準備」時出錯。"
+                # 狀態相同且沒有請假原因，無需修改
+                return f"班次 #{trip_id} 目前狀態已是「{current_status}」，無需修改。"
 
         if new_status == "取消":
             # 直接執行取消操作

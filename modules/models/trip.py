@@ -123,9 +123,13 @@ class FixedSchedule(db.Model):
     category = db.Column(db.String(50))
     driver_id = db.Column(db.String(10))
     direction = db.Column(db.String(50))
+    status = db.Column(db.String(20), default='準備')         # 狀態欄位
+    note = db.Column(db.Text, nullable=True)                 # 說明欄位
+    modified_by = db.Column(db.String(100), nullable=True)   # 修改者欄位
+    modification_time = db.Column(db.DateTime, nullable=True) # 修改時間欄位
     
     def __repr__(self):
-        return f"<FixedSchedule {self.id} {self.departure_time}>"
+        return f"<FixedSchedule {self.id} {self.departure_time} {self.status}>"
 
 class CompletedTrip(db.Model):
     __tablename__ = 'completed_trips'

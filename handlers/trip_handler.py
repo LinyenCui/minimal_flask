@@ -258,14 +258,33 @@ def handle_import_fixed_trips(message_text):
                         schedule_time = datetime.strptime(schedule.time, "%H:%M").time()
                         pickup_datetime = datetime.combine(target_date, schedule_time)
                         
-                        # 插入新班次
+                        # 🔧 修正：統一邏輯 - 固定班次匯入時檢查請假狀態
+                        # 查詢固定班次的狀態和請假信息
+                        status_query = """
+                        SELECT status, note, surcharge 
+                        FROM fixed_schedules 
+                        WHERE id = :schedule_id
+                        """
+                        schedule_info = conn.execute(sql_text(status_query), {"schedule_id": schedule.schedule_id}).fetchone()
+                        
+                        # 根據固定班次狀態設定trips欄位
+                        if schedule_info and schedule_info.status == '請假' and schedule_info.note:
+                            # 固定班次是請假狀態
+                            passenger_leave_reason = schedule_info.note
+                            extra_fare = schedule_info.surcharge if schedule_info.surcharge else 0
+                        else:
+                            # 固定班次是正常狀態
+                            passenger_leave_reason = None
+                            extra_fare = schedule_info.surcharge if schedule_info and schedule_info.surcharge else 0
+                        
+                        # 插入新班次（統一邏輯：status始終為準備）
                         insert_query = """
                         INSERT INTO trips (
                             date, time, start_point, end_point, 
-                            driver_id, status, fixed_trip_id
+                            driver_id, status, passenger_leave_reason, extra_fare, fixed_trip_id
                         ) VALUES (
                             :date, :time, :start_point, :end_point,
-                            NULL, '待派', :fixed_trip_id
+                            NULL, '準備', :passenger_leave_reason, :extra_fare, :fixed_trip_id
                         )
                         """
                         
@@ -274,6 +293,8 @@ def handle_import_fixed_trips(message_text):
                             "time": pickup_datetime.time(),
                             "start_point": schedule.customer_id,
                             "end_point": schedule.customer_id,
+                            "passenger_leave_reason": passenger_leave_reason,
+                            "extra_fare": extra_fare,
                             "fixed_trip_id": schedule.schedule_id
                         })
                         

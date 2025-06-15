@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy.sql import text
 import logging
 from modules.models.base import db
+from modules.utils.line_bot import get_user_display_name
 
 # 建立日誌記錄器
 logger = logging.getLogger(__name__)
@@ -80,11 +81,14 @@ def process_passenger_leave(trip_id, surcharge_adjustment, reason, user_id):
             RETURNING trip_id
             """
             
+            # 獲取用戶顯示名稱
+            user_display_name = get_user_display_name(user_id) if user_id else "系統用戶"
+            
             result = db.session.execute(text(update_query), {
                 "trip_id": trip_id,
                 "new_extra_fare": new_extra_fare,
                 "leave_reason": reason,
-                "user_id": user_id or "系統用戶",
+                "user_id": user_display_name,
                 "mod_time": datetime.now()
             })
         except Exception as new_field_error:
@@ -100,10 +104,13 @@ def process_passenger_leave(trip_id, surcharge_adjustment, reason, user_id):
             RETURNING trip_id
             """
             
+            # 獲取用戶顯示名稱
+            user_display_name = get_user_display_name(user_id) if user_id else "系統用戶"
+            
             result = db.session.execute(text(update_query), {
                 "trip_id": trip_id,
                 "new_extra_fare": new_extra_fare,
-                "user_id": user_id or "系統用戶",
+                "user_id": user_display_name,
                 "reason": f"乘客請假: {reason}",
                 "mod_time": datetime.now()
             })
