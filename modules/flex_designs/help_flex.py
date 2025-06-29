@@ -7,7 +7,7 @@ def get_help_flex():
             "type": "box",
             "layout": "vertical",
             "contents": [
-                {"type": "text", "text": "常用功能", "weight": "bold", "size": "md", "color": "#ffffff"}
+                {"type": "text", "text": "📚 系統功能總覽", "weight": "bold", "size": "md", "color": "#ffffff"}
             ],
             "backgroundColor": "#4682B4", "paddingTop": "8px", "paddingBottom": "8px"
         },
@@ -15,6 +15,8 @@ def get_help_flex():
             "type": "box",
             "layout": "vertical",
             "contents": [
+                # 第一層：常用功能
+                {"type": "text", "text": "🎯 常用功能", "weight": "bold", "size": "sm", "color": "#2E8B57", "margin": "md"},
                 {
                     "type": "button",
                     "action": {"type": "message", "label": "🔍 查詢班次", "text": "查詢班次"},
@@ -27,18 +29,39 @@ def get_help_flex():
                 },
                 {
                     "type": "button",
-                    "action": {"type": "message", "label": "📝 預約叫車 (AI推薦)", "text": "預約叫車"},
+                    "action": {"type": "message", "label": "📝 預約叫車", "text": "預約叫車"},
                     "style": "primary", "color": "#FF6B6E", "margin": "sm", "height": "sm"
                 },
+                
+                # 第二層：進階功能
+                {"type": "text", "text": "🚀 進階功能", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
                 {
                     "type": "button",
-                    "action": {"type": "message", "label": "📋 固定班表查詢", "text": "/固定班表 "},
-                    "style": "primary", "color": "#32CD32", "margin": "sm", "height": "sm"
+                    "action": {"type": "postback", "label": "🤖 AI功能說明", "data": "action=help_ai_features", "displayText": "AI功能說明"},
+                    "style": "secondary", "color": "#32CD32", "margin": "sm", "height": "sm"
                 },
                 {
                     "type": "button",
-                    "action": {"type": "postback", "label": "📄 顯示完整指令", "data": "action=help_text", "displayText": "幫助文字"},
-                    "style": "secondary", "margin": "sm", "height": "sm"
+                    "action": {"type": "postback", "label": "📋 固定班次功能", "data": "action=help_fixed_schedule", "displayText": "固定班次功能"},
+                    "style": "secondary", "color": "#DDA0DD", "margin": "sm", "height": "sm"
+                },
+                {
+                    "type": "button",
+                    "action": {"type": "postback", "label": "🔧 請假與狀態", "data": "action=help_leave_status", "displayText": "請假與狀態"},
+                    "style": "secondary", "color": "#20B2AA", "margin": "sm", "height": "sm"
+                },
+                
+                # 第三層：管理功能
+                {"type": "text", "text": "⚙️ 管理功能", "weight": "bold", "size": "sm", "color": "#8B4513", "margin": "md"},
+                {
+                    "type": "button",
+                    "action": {"type": "postback", "label": "📊 報表與匯出", "data": "action=help_reports", "displayText": "報表與匯出"},
+                    "style": "secondary", "color": "#4169E1", "margin": "sm", "height": "sm"
+                },
+                {
+                    "type": "button",
+                    "action": {"type": "postback", "label": "🛠️ 維護工具", "data": "action=help_maintenance", "displayText": "維護工具"},
+                    "style": "secondary", "color": "#B22222", "margin": "sm", "height": "sm"
                 }
             ]
         },
@@ -46,8 +69,312 @@ def get_help_flex():
             "type": "box",
             "layout": "vertical",
             "contents": [
-                {"type": "text", "text": "輸入「預約叫車幫助」或「幫助文字」查看指令", "size": "xs", "color": "#888888", "align": "center"}
+                {"type": "text", "text": "💡 點擊按鈕查看詳細說明", "size": "xs", "color": "#888888", "align": "center"},
+                {"type": "text", "text": "或輸入「完整指令」查看所有指令", "size": "xs", "color": "#888888", "align": "center"}
             ]
         }
     }
     return help_bubble
+
+
+def get_ai_features_help():
+    """AI功能說明"""
+    return {
+        "type": "bubble",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "🤖 AI功能說明", "weight": "bold", "size": "md", "color": "#ffffff"}
+            ],
+            "backgroundColor": "#32CD32", "paddingTop": "8px", "paddingBottom": "8px"
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "🔍 AI車資查詢", "weight": "bold", "size": "sm", "color": "#2E8B57"},
+                {"type": "text", "text": "智能檢測車資相關查詢請求", "size": "xs", "color": "#666666", "wrap": True},
+                {"type": "text", "text": "• 查詢今天車資", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 查詢台中車資", "size": "xs"},
+                {"type": "text", "text": "• 查詢6/1車資", "size": "xs"},
+                {"type": "text", "text": "• 修改班次123車資500", "size": "xs"},
+                
+                {"type": "text", "text": "📝 預約叫車AI", "weight": "bold", "size": "sm", "color": "#2E8B57", "margin": "md"},
+                {"type": "text", "text": "自然語言描述預約需求", "size": "xs", "color": "#666666", "wrap": True},
+                {"type": "text", "text": "• 預約叫車：明天2點從台中到彰化", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 預約叫車：今天下午診所回家", "size": "xs"},
+                
+                {"type": "text", "text": "💡 使用技巧", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
+                {"type": "text", "text": "• AI會自動檢測車資相關詞彙", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 支援日期、地點、金額組合查詢", "size": "xs"},
+                {"type": "text", "text": "• 一次顯示所有結果，無需翻頁", "size": "xs"}
+            ]
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "button",
+                    "action": {"type": "message", "label": "🔙 返回幫助", "text": "幫助"},
+                    "style": "secondary", "margin": "sm", "height": "sm"
+                }
+            ]
+        }
+    }
+
+
+def get_fixed_schedule_help():
+    """固定班次功能說明"""
+    return {
+        "type": "bubble",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "📋 固定班次功能", "weight": "bold", "size": "md", "color": "#ffffff"}
+            ],
+            "backgroundColor": "#DDA0DD", "paddingTop": "8px", "paddingBottom": "8px"
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "🔍 查詢固定班次", "weight": "bold", "size": "sm", "color": "#8B008B"},
+                {"type": "text", "text": "• /固定班表 [客戶簡稱]", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 範例: /固定班表 診所", "size": "xs"},
+                
+                {"type": "text", "text": "📥 匯入功能", "weight": "bold", "size": "sm", "color": "#8B008B", "margin": "md"},
+                {"type": "text", "text": "• 匯入固定班次 [月/日]", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 範例: 匯入固定班次 6/1", "size": "xs"},
+                
+                {"type": "text", "text": "🔵 長期請假功能", "weight": "bold", "size": "sm", "color": "#8B008B", "margin": "md"},
+                {"type": "text", "text": "適用於住院、出國等長期請假", "size": "xs", "color": "#666666", "wrap": True},
+                {"type": "text", "text": "• 固定班次請假 [ID] [加成] [原因]", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 固定班次恢復 [ID]", "size": "xs"},
+                {"type": "text", "text": "• 範例: 固定班次請假 5 -50 住院", "size": "xs"},
+                
+                {"type": "text", "text": "💡 特色", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
+                {"type": "text", "text": "• 一次設定，自動應用所有匯入", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 支援負加成（車資減免）", "size": "xs"},
+                {"type": "text", "text": "• 可隨時恢復正常狀態", "size": "xs"}
+            ]
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "button",
+                    "action": {"type": "message", "label": "🔙 返回幫助", "text": "幫助"},
+                    "style": "secondary", "margin": "sm", "height": "sm"
+                }
+            ]
+        }
+    }
+
+
+def get_leave_status_help():
+    """請假與狀態功能說明"""
+    return {
+        "type": "bubble",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "🔧 請假與狀態", "weight": "bold", "size": "md", "color": "#ffffff"}
+            ],
+            "backgroundColor": "#20B2AA", "paddingTop": "8px", "paddingBottom": "8px"
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "🔵 乘客請假", "weight": "bold", "size": "sm", "color": "#008B8B"},
+                {"type": "text", "text": "• 乘客請假 [班次ID] [加成] [原因]", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 範例: 乘客請假 123 -30 生病", "size": "xs"},
+                
+                {"type": "text", "text": "🔄 狀態修改", "weight": "bold", "size": "sm", "color": "#008B8B", "margin": "md"},
+                {"type": "text", "text": "• 班次詳情 [ID] - 查看並修改", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 可改為：準備/取消/衝突/請假", "size": "xs"},
+                
+                {"type": "text", "text": "⏰ 30分鐘限制", "weight": "bold", "size": "sm", "color": "#008B8B", "margin": "md"},
+                {"type": "text", "text": "執行前30分鐘內不可修改狀態", "size": "xs", "color": "#666666", "wrap": True},
+                {"type": "text", "text": "• 防止臨時變更影響排班", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 確保有充足準備時間", "size": "xs"},
+                {"type": "text", "text": "• 指派司機功能不受限制", "size": "xs"},
+                
+                {"type": "text", "text": "💡 統一邏輯", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
+                {"type": "text", "text": "• 請假不改變業務流程狀態", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 請假班次依然會正常執行", "size": "xs"},
+                {"type": "text", "text": "• 只影響車資（通常為負加成）", "size": "xs"}
+            ]
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "button",
+                    "action": {"type": "message", "label": "🔙 返回幫助", "text": "幫助"},
+                    "style": "secondary", "margin": "sm", "height": "sm"
+                }
+            ]
+        }
+    }
+
+
+def get_reports_help():
+    """報表與匯出功能說明"""
+    return {
+        "type": "bubble",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "📊 報表與匯出", "weight": "bold", "size": "md", "color": "#ffffff"}
+            ],
+            "backgroundColor": "#4169E1", "paddingTop": "8px", "paddingBottom": "8px"
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "📈 週報表功能", "weight": "bold", "size": "sm", "color": "#0000CD"},
+                {"type": "text", "text": "• 生成周報表 [類別]", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 範例: 生成周報表 東洋", "size": "xs"},
+                {"type": "text", "text": "• 類別: 診所/東洋/全部", "size": "xs"},
+                
+                {"type": "text", "text": "☁️ Google Drive", "weight": "bold", "size": "sm", "color": "#0000CD", "margin": "md"},
+                {"type": "text", "text": "自動上傳到對應資料夾", "size": "xs", "color": "#666666", "wrap": True},
+                {"type": "text", "text": "• 診所報表 → 診所資料夾", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 東洋報表 → 東洋資料夾", "size": "xs"},
+                {"type": "text", "text": "• 包含修改原因和請假原因", "size": "xs"},
+                
+                {"type": "text", "text": "🔍 其他查詢", "weight": "bold", "size": "sm", "color": "#0000CD", "margin": "md"},
+                {"type": "text", "text": "• 查已完成 [日期] [類別]", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 範例: 查已完成 6/1 東洋", "size": "xs"},
+                {"type": "text", "text": "• 查看 [ID] - 已完成班次詳情", "size": "xs"},
+                
+                {"type": "text", "text": "💡 報表特色", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
+                {"type": "text", "text": "• Excel格式，包含所有必要欄位", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 動態標題（診所/東洋/全部）", "size": "xs"},
+                {"type": "text", "text": "• 合併說明欄位", "size": "xs"}
+            ]
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "button",
+                    "action": {"type": "message", "label": "🔙 返回幫助", "text": "幫助"},
+                    "style": "secondary", "margin": "sm", "height": "sm"
+                }
+            ]
+        }
+    }
+
+
+def get_maintenance_help():
+    """維護工具功能說明"""
+    return {
+        "type": "bubble",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "🛠️ 維護工具", "weight": "bold", "size": "md", "color": "#ffffff"}
+            ],
+            "backgroundColor": "#B22222", "paddingTop": "8px", "paddingBottom": "8px"
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "⚙️ 系統維護", "weight": "bold", "size": "sm", "color": "#8B0000"},
+                {"type": "text", "text": "• 更新已完成班次", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 待派班次 - 查看未指派班次", "size": "xs"},
+                {"type": "text", "text": "• 指派司機 [ID] - 指派司機", "size": "xs"},
+                
+                {"type": "text", "text": "🔧 資料修復", "weight": "bold", "size": "sm", "color": "#8B0000", "margin": "md"},
+                {"type": "text", "text": "• /fix-sequence - 修復序列", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 解決資料匯入後的ID衝突", "size": "xs"},
+                {"type": "text", "text": "• 自動檢測並修復序列問題", "size": "xs"},
+                
+                {"type": "text", "text": "💰 車資管理", "weight": "bold", "size": "sm", "color": "#8B0000", "margin": "md"},
+                {"type": "text", "text": "• 記錄車資 [ID] [錶價] [加成]", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 修改類別 [ID] [新類別]", "size": "xs"},
+                {"type": "text", "text": "• 範例: 記錄車資 123 450 50", "size": "xs"},
+                
+                {"type": "text", "text": "⚠️ 注意事項", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
+                {"type": "text", "text": "• 維護工具需謹慎使用", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 資料修復前建議先備份", "size": "xs"},
+                {"type": "text", "text": "• 有問題時建議查看日誌", "size": "xs"}
+            ]
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "button",
+                    "action": {"type": "message", "label": "🔙 返回幫助", "text": "幫助"},
+                    "style": "secondary", "margin": "sm", "height": "sm"
+                }
+            ]
+        }
+    }
+
+
+def get_complete_commands_help():
+    """完整指令列表"""
+    return {
+        "type": "bubble",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "📜 完整指令列表", "weight": "bold", "size": "md", "color": "#ffffff"}
+            ],
+            "backgroundColor": "#4682B4", "paddingTop": "8px", "paddingBottom": "8px"
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "🔍 查詢類", "weight": "bold", "size": "sm", "color": "#2E8B57"},
+                {"type": "text", "text": "• 查詢班次 - 查詢東洋/臨時班次", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 診所班次 - 查詢診所班次", "size": "xs"},
+                {"type": "text", "text": "• 查已完成 [日期] [類別] - 查已完成班次", "size": "xs"},
+                {"type": "text", "text": "• 班次詳情 [ID] - 查看班次詳情", "size": "xs"},
+                {"type": "text", "text": "• 查看 [ID] - 查看已完成班次詳情", "size": "xs"},
+                {"type": "text", "text": "• /固定班表 [客戶] - 查詢固定班次", "size": "xs"},
+                
+                {"type": "text", "text": "📝 預約類", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
+                {"type": "text", "text": "• 預約叫車 - AI自然語言預約", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 預約叫車幫助 - 預約功能說明", "size": "xs"},
+                
+                {"type": "text", "text": "🤖 AI功能類", "weight": "bold", "size": "sm", "color": "#32CD32", "margin": "md"},
+                {"type": "text", "text": "• 查詢[地點/日期]車資 - AI車資查詢", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 修改班次[ID]車資[金額] - AI車資修改", "size": "xs"},
+                
+                {"type": "text", "text": "🔄 狀態類", "weight": "bold", "size": "sm", "color": "#8B008B", "margin": "md"},
+                {"type": "text", "text": "• 乘客請假 [ID] [加成] [原因]", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 固定班次請假 [ID] [加成] [原因]", "size": "xs"},
+                {"type": "text", "text": "• 固定班次恢復 [ID]", "size": "xs"}
+            ]
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "button",
+                    "action": {"type": "message", "label": "🔙 返回幫助", "text": "幫助"},
+                    "style": "secondary", "margin": "sm", "height": "sm"
+                }
+            ]
+        }
+    }

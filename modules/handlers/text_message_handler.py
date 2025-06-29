@@ -457,6 +457,13 @@ def process_text_message(event):
             reply_text(reply_token, help_text)
             return
             
+        # 完整指令列表
+        elif message_text == '完整指令':
+            from modules.flex_designs.help_flex import get_complete_commands_help
+            help_flex = get_complete_commands_help()
+            reply_flex(reply_token, "完整指令列表", help_flex)
+            return
+            
         # 處理匯入固定班次（一整周）
         elif message_text.startswith("匯入固定班次"):
             from modules.handlers.import_handler import handle_import_fixed_trips_week

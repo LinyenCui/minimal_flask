@@ -55,7 +55,9 @@ def generate_weekly_report(category=None):
             ct.meter_fare, 
             ct.extra_fare,
             COALESCE(ct.meter_fare, 0) + COALESCE(ct.extra_fare, 0) as actual_fare,
-            ct.driver_id
+            ct.driver_id,
+            ct.modification_reason,
+            ct.passenger_leave_reason
         FROM 
             completed_trips ct
         WHERE 
@@ -83,7 +85,23 @@ def generate_weekly_report(category=None):
         
         # 創建DataFrame
         df = pd.DataFrame(completed_trips)
-        df.columns = ['ID', '日期', '起點', '途經點', '終點', '錶價', '加成', '實收', '司機編號']
+        df.columns = ['ID', '日期', '起點', '途經點', '終點', '錶價', '加成', '實收', '司機編號', '修改原因', '請假原因']
+        
+        # 處理說明欄位：合併修改原因和請假原因
+        def combine_remarks(row):
+            modification = row['修改原因'] if pd.notna(row['修改原因']) and row['修改原因'].strip() else ""
+            leave = row['請假原因'] if pd.notna(row['請假原因']) and row['請假原因'].strip() else ""
+            
+            if modification and leave:
+                return f"{modification}\n{leave}"
+            elif modification:
+                return modification
+            elif leave:
+                return leave
+            else:
+                return ""
+        
+        df['說明'] = df.apply(combine_remarks, axis=1)
         
         # 處理日期和星期
         df['日期'] = pd.to_datetime(df['日期'])
@@ -91,8 +109,8 @@ def generate_weekly_report(category=None):
         df['星期'] = df['日期'].dt.dayofweek.map(weekday_map)
         df['日期'] = df['日期'].dt.strftime('%Y-%m-%d')
         
-        # 重排列順序
-        df = df[['ID', '日期', '星期', '起點', '途經點', '終點', '司機編號', '錶價', '加成', '實收']]
+        # 重排列順序，添加說明欄
+        df = df[['ID', '日期', '星期', '起點', '途經點', '終點', '司機編號', '錶價', '加成', '實收', '說明']]
         
         # 計算總計
         total_meter_fare = df['錶價'].sum()
@@ -116,20 +134,31 @@ def generate_weekly_report(category=None):
         worksheet = workbook.active
         worksheet.title = '班次詳情'
         
-        # 添加標題
-        title = f"診所班次請款單 ({last_sunday.strftime('%Y/%m/%d')} - {last_saturday.strftime('%Y/%m/%d')})"
+        # 根據類別動態生成標題
+        if category == "東洋":
+            title_prefix = "東洋班次請款單"
+        elif category == "診所":
+            title_prefix = "診所班次請款單"
+        else:
+            title_prefix = "班次請款單"
+        
+        title = f"{title_prefix} ({last_sunday.strftime('%Y/%m/%d')} - {last_saturday.strftime('%Y/%m/%d')})"
         worksheet.cell(row=1, column=1).value = title
-        worksheet.merge_cells('A1:J1')
+        worksheet.merge_cells('A1:K1')  # 擴展到K列，因為多了說明欄
         
         # 添加表頭
-        headers = ['ID', '日期', '星期', '起點', '途經點', '終點', '司機編號', '錶價', '加成', '實收']
+        headers = ['ID', '日期', '星期', '起點', '途經點', '終點', '司機編號', '錶價', '加成', '實收', '說明']
         for col_num, header in enumerate(headers, 1):
             worksheet.cell(row=2, column=col_num).value = header
         
         # 添加數據
         for row_num, row_data in enumerate(df.values, 3):
             for col_num, cell_value in enumerate(row_data, 1):
-                worksheet.cell(row=row_num, column=col_num).value = cell_value
+                cell = worksheet.cell(row=row_num, column=col_num)
+                cell.value = cell_value
+                # 對說明欄使用換行對齊
+                if col_num == 11:  # 說明欄
+                    cell.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
         
         # 添加總計行
         total_row = len(df) + 3
@@ -202,6 +231,7 @@ def generate_weekly_report(category=None):
             'H': 12,  # 錶價/簽名欄中間
             'I': 12,  # 加成/簽名欄結束
             'J': 12,  # 實收
+            'K': 25,  # 說明欄（加寬以容納換行文字）
         }
         
         for col_letter, width in column_widths.items():
@@ -239,8 +269,14 @@ def generate_weekly_report(category=None):
                     cell.alignment = Alignment(horizontal='right', vertical='center')
                     if isinstance(cell.value, (int, float)):
                         cell.number_format = '#,##0'
+                elif col == 11:  # 說明欄
+                    cell.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
                 else:
                     cell.alignment = Alignment(horizontal='center', vertical='center')
+                
+                # 設置說明欄的行高自動調整
+                if col == 11 and cell.value and '\n' in str(cell.value):
+                    worksheet.row_dimensions[row].height = max(30, len(str(cell.value).split('\n')) * 15)
         
         # 總計行樣式
         total_label = worksheet.cell(row=total_row, column=9)

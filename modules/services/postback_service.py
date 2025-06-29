@@ -149,6 +149,37 @@ def handle_postback(event):
             help_text = get_help_text()
             reply_text(reply_token, help_text)
             
+        elif action == 'help_text':
+            from modules.handlers.text_message_handler import get_help_text
+            help_text = get_help_text()
+            reply_text(reply_token, help_text)
+            
+        # 新的分層級幫助功能
+        elif action == 'help_ai_features':
+            from modules.flex_designs.help_flex import get_ai_features_help
+            help_flex = get_ai_features_help()
+            reply_flex(reply_token, "AI功能說明", help_flex)
+            
+        elif action == 'help_fixed_schedule':
+            from modules.flex_designs.help_flex import get_fixed_schedule_help
+            help_flex = get_fixed_schedule_help()
+            reply_flex(reply_token, "固定班次功能", help_flex)
+            
+        elif action == 'help_leave_status':
+            from modules.flex_designs.help_flex import get_leave_status_help
+            help_flex = get_leave_status_help()
+            reply_flex(reply_token, "請假與狀態", help_flex)
+            
+        elif action == 'help_reports':
+            from modules.flex_designs.help_flex import get_reports_help
+            help_flex = get_reports_help()
+            reply_flex(reply_token, "報表與匯出", help_flex)
+            
+        elif action == 'help_maintenance':
+            from modules.flex_designs.help_flex import get_maintenance_help
+            help_flex = get_maintenance_help()
+            reply_flex(reply_token, "維護工具", help_flex)
+            
         elif action == 'update_status' and 'trip_id' in params:
             trip_id = params['trip_id']
             
