@@ -244,6 +244,10 @@ def get_reports_help():
                 {"type": "text", "text": "📈 週報表功能", "weight": "bold", "size": "sm", "color": "#0000CD"},
                 {"type": "text", "text": "• 生成周報表 [類別]", "size": "xs", "margin": "sm"},
                 {"type": "text", "text": "• 範例: 生成周報表 東洋", "size": "xs"},
+                {"type": "separator", "margin": "md"},
+                {"type": "text", "text": "📅 月報表功能", "weight": "bold", "size": "sm", "color": "#0000CD"},
+                {"type": "text", "text": "• 生成月報表 [類別]", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 範例: 生成月報表 診所", "size": "xs"},
                 {"type": "text", "text": "• 類別: 診所/東洋/全部", "size": "xs"},
                 
                 {"type": "text", "text": "☁️ Google Drive", "weight": "bold", "size": "sm", "color": "#0000CD", "margin": "md"},

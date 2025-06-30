@@ -568,6 +568,22 @@ def process_text_message(event):
                 reply_text(reply_token, f"生成報表失敗: {str(e)}")
                 return
         
+        # 生成月報表
+        elif message_text.startswith("生成月報表") or message_text.startswith("生成月報"):
+            try:
+                logger.info(f"處理生成月報表命令: {message_text}")
+                from modules.services.report_service import handle_generate_monthly_report
+                
+                # 調用報表生成函數
+                result = handle_generate_monthly_report(message_text)
+                reply_text(reply_token, result)
+                return
+            except Exception as e:
+                logger.error(f"處理生成月報表時出錯: {e}")
+                traceback.print_exc()
+                reply_text(reply_token, f"生成月報表失敗: {str(e)}")
+                return
+        
         # 班次詳情的簡寫命令
         elif message_text.startswith("班次"):
             parts = message_text.split()
@@ -1023,8 +1039,10 @@ def get_help_text():
 10. 固定班次請假 [ID] [加成] [原因] - 設定固定班次長期請假
 11. 固定班次恢復 [ID] - 恢復固定班次為準備狀態
 12. 預約叫車 - 通過自然語言描述開始預約 (推薦)
-13. 預約叫車幫助 - 顯示「預約叫車」的說明
-14. 幫助 - 顯示此幫助信息
+13. 生成周報表 [類別] - 生成上週班次報表 (類別: 診所/東洋/全部)
+14. 生成月報表 [類別] - 生成上個月班次報表 (類別: 診所/東洋/全部)
+15. 預約叫車幫助 - 顯示「預約叫車」的說明
+16. 幫助 - 顯示此幫助信息
 
 在群組中使用時，可選擇性在命令前添加前綴... (例如 !, #, /)
 """
