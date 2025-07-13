@@ -19,7 +19,7 @@ def get_help_flex():
                 {"type": "text", "text": "🎯 常用功能", "weight": "bold", "size": "sm", "color": "#2E8B57", "margin": "md"},
                 {
                     "type": "button",
-                    "action": {"type": "message", "label": "🔍 查詢班次", "text": "查詢班次"},
+                    "action": {"type": "message", "label": "🔍 東洋班次", "text": "東洋班次"},
                     "style": "primary", "color": "#1E90FF", "margin": "sm", "height": "sm"
                 },
                 {
@@ -310,6 +310,7 @@ def get_maintenance_help():
                 {"type": "text", "text": "💰 車資管理", "weight": "bold", "size": "sm", "color": "#8B0000", "margin": "md"},
                 {"type": "text", "text": "• 記錄車資 [ID] [錶價] [加成]", "size": "xs", "margin": "sm"},
                 {"type": "text", "text": "• 修改類別 [ID] [新類別]", "size": "xs"},
+                {"type": "text", "text": "• 批量加成 - 問答式批量加成", "size": "xs"},
                 {"type": "text", "text": "• 範例: 記錄車資 123 450 50", "size": "xs"},
                 
                 {"type": "text", "text": "⚠️ 注意事項", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
@@ -349,7 +350,7 @@ def get_complete_commands_help():
             "layout": "vertical",
             "contents": [
                 {"type": "text", "text": "🔍 查詢類", "weight": "bold", "size": "sm", "color": "#2E8B57"},
-                {"type": "text", "text": "• 查詢班次 - 查詢東洋/臨時班次", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 東洋班次 - 查詢東洋/臨時班次", "size": "xs", "margin": "sm"},
                 {"type": "text", "text": "• 診所班次 - 查詢診所班次", "size": "xs"},
                 {"type": "text", "text": "• 查已完成 [日期] [類別] - 查已完成班次", "size": "xs"},
                 {"type": "text", "text": "• 班次詳情 [ID] - 查看班次詳情", "size": "xs"},

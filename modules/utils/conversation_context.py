@@ -30,6 +30,8 @@ class ConversationContext:
     active_trip_id: Optional[int] = None  # 當前操作的班次ID
     active_fixed_schedule_id: Optional[int] = None  # 當前操作的固定班次ID
     pending_modification: Optional[Dict] = None  # 待執行的修改
+    is_in_leave_mode: bool = False  # 是否在請假模式中
+    leave_mode_expires_at: Optional[datetime] = None  # 請假模式過期時間
     context_expires_at: Optional[datetime] = None
     
     def __post_init__(self):
@@ -320,6 +322,41 @@ class ConversationContextManager:
         """獲取用戶最近操作的固定班次ID"""
         context = self.get_context(user_id)
         return context.active_fixed_schedule_id
+    
+    def set_leave_mode(self, user_id: str, trip_id: int = None):
+        """設置用戶進入請假模式"""
+        context = self.get_context(user_id)
+        context.is_in_leave_mode = True
+        context.leave_mode_expires_at = datetime.now() + timedelta(minutes=10)  # 請假模式10分鐘過期
+        
+        if trip_id:
+            context.active_trip_id = trip_id
+        
+        self._add_to_history(context, 'enter_leave_mode', {'trip_id': trip_id})
+        logger.info(f"用戶 {user_id} 進入請假模式，班次ID: {trip_id}")
+    
+    def is_in_leave_mode(self, user_id: str) -> bool:
+        """檢查用戶是否在請假模式中"""
+        context = self.get_context(user_id)
+        
+        # 檢查請假模式是否過期
+        if context.is_in_leave_mode and context.leave_mode_expires_at:
+            if datetime.now() > context.leave_mode_expires_at:
+                logger.info(f"用戶 {user_id} 的請假模式已過期")
+                context.is_in_leave_mode = False
+                context.leave_mode_expires_at = None
+                return False
+        
+        return context.is_in_leave_mode
+    
+    def clear_leave_mode(self, user_id: str):
+        """清除用戶的請假模式"""
+        context = self.get_context(user_id)
+        context.is_in_leave_mode = False
+        context.leave_mode_expires_at = None
+        
+        self._add_to_history(context, 'exit_leave_mode', {})
+        logger.info(f"用戶 {user_id} 退出請假模式")
     
     def _add_to_history(self, context: ConversationContext, action_type: str, data: Dict):
         """添加操作到對話歷史"""

@@ -446,8 +446,8 @@ def handle_query_trips(message_text=None):
     date = None
     category = None
     
-    # 解析命令參數
-    if message_text and len(message_text.strip()) > 4:  # 排除只有"查詢班次"的情況
+        # 解析命令參數
+    if message_text and len(message_text.strip()) > 4:  # 排除只有"東洋班次"的情況
         parts = message_text.strip().split()
         if len(parts) > 1:
             date_input = parts[1]

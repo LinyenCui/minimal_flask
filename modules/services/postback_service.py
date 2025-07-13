@@ -42,13 +42,13 @@ def handle_postback(event):
         action = params.get('action', '')
         
         if action == 'query_trips':
-            # 使用Flex版本的查詢班次功能
+            # 使用Flex版本的東洋班次功能
             try:
-                logger.info("處理查詢班次postback，使用Flex版本")
+                logger.info("處理東洋班次postback，使用Flex版本")
                 from modules.services.trip_query_service import handle_query_trips_flex, handle_query_trips
                 
-                # 調用Flex版本的查詢班次
-                flex_content, error_message = handle_query_trips_flex('查詢班次')
+                # 調用Flex版本的東洋班次
+                flex_content, error_message = handle_query_trips_flex('東洋班次')
                 
                 if flex_content and error_message is None:
                     # 使用Flex版本回覆
@@ -56,13 +56,13 @@ def handle_postback(event):
                 else:
                     # 如果出錯，使用文本版本
                     logger.warning(f"使用Flex版本失敗，回退到文本版本。錯誤: {error_message}")
-                    result = handle_query_trips('查詢班次')
+                    result = handle_query_trips('東洋班次')
                     reply_text(reply_token, result)
             except Exception as e:
-                logger.error(f"處理Flex版本查詢班次時出錯: {e}")
+                logger.error(f"處理Flex版本東洋班次時出錯: {e}")
                 traceback.print_exc()
                 # 使用文本版本作為後備
-                result = handle_query_trips('查詢班次')
+                result = handle_query_trips('東洋班次')
                 reply_text(reply_token, f"Flex消息處理錯誤，使用文本版本：\n{result}")
             
         elif action == 'query_fixed_trips':
@@ -206,7 +206,7 @@ def handle_postback(event):
                 
                 # 🚨 新增：所有狀態修改都使用新的處理邏輯
                 from modules.handlers.trip_status_handler import handle_update_trip_status
-                result = handle_update_trip_status(f"修改狀態 {trip_id} {new_status}")
+                result = handle_update_trip_status(f"修改狀態 {trip_id} {new_status}", user_id=user_id)
                 reply_text(reply_token, result)
             else:
                 # 情況 2: 不帶 status 參數 (來自 Flex 主按鈕)，重新顯示詳情+QuickReply

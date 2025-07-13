@@ -96,6 +96,17 @@ def process_text_message(event):
                         reply_text(reply_token, response.get("text", "處理中..."))
             return
         
+        # 檢查用戶是否在批量加成流程中
+        from modules.handlers.batch_allowance_handler import batch_allowance_states, handle_batch_allowance_message
+        if user_id in batch_allowance_states:
+            # 處理批量加成消息
+            logger.info(f"用戶 {user_id} 在批量加成流程中，處理消息: {message_text}")
+            response = handle_batch_allowance_message(user_id, message_text)
+            
+            if response:
+                reply_text(reply_token, response.get("text", "處理中..."))
+            return
+        
         # 臨時預約命令
         if command_text_lower == "預約叫車":
             logger.info(f"用戶 {user_id} 請求 預約叫車 (AI流程)")
@@ -147,14 +158,24 @@ def process_text_message(event):
                 reply_text(reply_token, response.get("text", "檢查序列中..."))
             return
         
-        # 查詢班次 (東洋/臨時)
-        elif message_text.startswith("查詢班次"):
+        # 批量加成命令
+        elif command_text_lower == "batch-allowance" or command_text_lower == "批量加成":
+            logger.info(f"用戶 {user_id} 請求批量加成")
+            from modules.handlers.batch_allowance_handler import handle_batch_allowance_start
+            response = handle_batch_allowance_start(user_id)
+            
+            if response:
+                reply_text(reply_token, response.get("text", "啟動批量加成中..."))
+            return
+        
+        # 東洋班次 (東洋/臨時)
+        elif message_text.startswith("東洋班次"):
             try:
                 parts = message_text.split()
                 # --- 修改：如果帶有日期參數，則執行查詢；否則觸發日期選擇 --- 
                 if len(parts) > 1:
                     # 執行實際查詢 (東洋/臨時)
-                    logger.info(f"處理查詢班次命令 (帶日期): {message_text}")
+                    logger.info(f"處理東洋班次命令 (帶日期): {message_text}")
                     from modules.services.trip_query_service import handle_query_trips_flex
                     flex_content, result_message = handle_query_trips_flex(message_text)
                     logger.info(f"handle_query_trips_flex返回: flex={bool(flex_content)}, msg='{result_message}'")
@@ -166,7 +187,7 @@ def process_text_message(event):
                         reply_text(reply_token, "查詢完成，但沒有找到任何信息。")
                 else:
                     # 觸發日期選擇
-                    logger.info(f"處理查詢班次命令 (觸發日期選擇): {message_text}")
+                    logger.info(f"處理東洋班次命令 (觸發日期選擇): {message_text}")
                     from modules.services.trip_query_service import request_toyo_temp_trip_date_selection
                     reply_msg, error_message = request_toyo_temp_trip_date_selection()
                     if reply_msg and error_message is None:
@@ -175,7 +196,7 @@ def process_text_message(event):
                         reply_text(reply_token, error_message or "無法生成日期選擇")
                 return 
             except Exception as e:
-                logger.error(f"處理查詢班次時出錯: {e}")
+                logger.error(f"處理東洋班次時出錯: {e}")
                 traceback.print_exc()
                 # 使用文本版本作為後備
                 from modules.services.trip_query_service import handle_query_trips
@@ -640,8 +661,11 @@ def process_text_message(event):
                 try:
                     from modules.utils.conversation_context import conversation_manager
                     conversation_manager.set_recent_fixed_schedule_id(user_id, int(schedule_id))
+                    # 🔧 修正：設置請假模式標記，允許簡單請假格式
+                    conversation_manager.set_leave_mode(user_id=user_id, trip_id=int(schedule_id))
+                    logger.info(f"設置用戶 {user_id} 進入固定班次請假模式，固定班次 #{schedule_id}")
                 except Exception as context_error:
-                    logger.error(f"記錄固定班次ID到上下文時出錯: {context_error}")
+                    logger.error(f"記錄固定班次ID到上下文或設置請假模式時出錯: {context_error}")
                 
                 # 提供交互提示（類似乘客請假）
                 reply_text(reply_token, f"固定班次 #{schedule_id} 乘客長期請假\n\n請輸入：[原因] [加成]\n\n例如：\n診所乘客長期住院 -50\n出國一個月 0\n搬家不再需要 -100\n\n💡 提示：先寫原因，最後寫加成金額")
@@ -883,57 +907,104 @@ def process_text_message(event):
         # 未識別的命令
         else:
             # 🚨 新增：檢測簡單請假格式（原因結尾加數字）
+            # 🔧 修復：先排除已知的命令格式，避免誤判
             import re
-            simple_leave_pattern = r'^(.+)\s+(-?\d+)$'
-            simple_leave_match = re.match(simple_leave_pattern, message_text.strip())
             
-            if simple_leave_match:
-                reason = simple_leave_match.group(1)
-                amount = simple_leave_match.group(2)
+            # 先檢查是否是已知的命令格式，避免誤判
+            # 檢查「指派1585 5386」這種無效格式並提供正確提示
+            invalid_assign_match = re.match(r'^指派(\d+)\s+(\d+)$', message_text.strip())
+            if invalid_assign_match:
+                trip_id = invalid_assign_match.group(1)
+                driver_id = invalid_assign_match.group(2)
+                reply_text(reply_token, f"❌ 指派命令格式不正確\n\n正確格式：\n• 指派 {trip_id} （觸發司機選擇）\n• 指派司機 {trip_id} {driver_id} （選擇司機）\n• 確認指派 {trip_id} {driver_id} （確認指派）\n\n💡 建議：使用「指派 {trip_id}」來選擇司機")
+                return
+            
+            known_command_patterns = [
+                r'^指派\s+\d+\s+\d+$',  # 指派 1585 5386
+                r'^指派司機\s+\d+\s+\d+$',  # 指派司機 1585 5386
+                r'^記錄車資\s+\d+\s+\d+\s+\d+',  # 記錄車資 ID 錶價 加成
+                r'^修改類別\s+\d+\s+\w+$',  # 修改類別 ID 類別
+                r'^查看\s+\d+$',  # 查看 ID
+                r'^班次\s+\d+$',  # 班次 ID
+                r'^班次詳情\s+\d+$',  # 班次詳情 ID
+                r'^確認指派\s+\d+\s+\d+$',  # 確認指派 ID DRIVER_ID
+                r'^取消指派\s+\d+$',  # 取消指派 ID
+                r'^確認AI修改\s+\d+\s+\d+\s+\d+',  # 確認AI修改 ID 錶價 加成
+            ]
+            
+            is_known_command = False
+            for pattern in known_command_patterns:
+                if re.match(pattern, message_text.strip()):
+                    is_known_command = True
+                    logger.info(f"檢測到已知命令格式: {pattern}, 跳過簡單請假格式檢測")
+                    break
+            
+            if not is_known_command:
+                # 只有在不是已知命令格式時，才檢測簡單請假格式
+                simple_leave_pattern = r'^(.+)\s+(-?\d+)$'
+                simple_leave_match = re.match(simple_leave_pattern, message_text.strip())
                 
-                # 嘗試從對話上下文獲取最近的班次ID
-                from modules.utils.conversation_context import conversation_manager
-                recent_trip_id = conversation_manager.get_recent_trip_id(user_id)
-                recent_fixed_schedule_id = conversation_manager.get_recent_fixed_schedule_id(user_id)
-                
-                # 🔧 添加調試日誌
-                logger.info(f"簡單請假格式檢測 - 用戶: {user_id}, trips上下文: {recent_trip_id}, 固定班次上下文: {recent_fixed_schedule_id}, 輸入: '{message_text}'")
-                
-                # 🔧 修正：優先處理trips請假（因為用戶剛查看trips班次詳情）
-                if recent_trip_id:
-                    # 處理一般班次請假
-                    logger.info(f"檢測到簡單請假格式，班次ID: {recent_trip_id}, 加成: {amount}, 原因: {reason}")
+                if simple_leave_match:
+                    reason = simple_leave_match.group(1)
+                    amount = simple_leave_match.group(2)
                     
-                    # 構造完整的乘客請假命令
-                    full_command = f"乘客請假 {recent_trip_id} {amount} {reason}"
+                    # 🔧 修正：只有在明確的請假模式下才允許簡單請假格式
+                    from modules.utils.conversation_context import conversation_manager
+                    is_in_leave_mode = conversation_manager.is_in_leave_mode(user_id)
                     
-                    try:
-                        from modules.handlers.passenger_leave_handler import handle_passenger_leave_command
-                        result = handle_passenger_leave_command(full_command, user_id)
-                        reply_text(reply_token, result)
-                        return
-                    except Exception as e:
-                        logger.error(f"處理簡單請假格式時出錯: {e}")
-                        # 如果出錯，繼續往下執行其他邏輯
-                elif recent_fixed_schedule_id:
-                    # 如果沒有trips上下文，再處理固定班次請假
-                    logger.info(f"檢測到固定班次簡單請假格式，固定班次ID: {recent_fixed_schedule_id}, 加成: {amount}, 原因: {reason}")
-                    
-                    # 構造完整的固定班次請假命令
-                    full_command = f"固定班次請假 {recent_fixed_schedule_id} {amount} {reason}"
-                    
-                    try:
-                        from modules.handlers.fixed_schedule_leave_handler import handle_fixed_schedule_leave_command
-                        result = handle_fixed_schedule_leave_command(full_command, user_id)
-                        reply_text(reply_token, result)
-                        return
-                    except Exception as e:
-                        logger.error(f"處理固定班次簡單請假格式時出錯: {e}")
-                        # 如果出錯，繼續往下執行其他邏輯
-                else:
-                    # 如果找不到最近的班次ID，提示用戶
-                    reply_text(reply_token, f"檢測到請假資料（{reason} {amount}），但找不到對應的班次。\n\n請使用完整格式：\n• 乘客請假 [班次ID] {amount} {reason}\n• 固定班次請假 [固定班次ID] {amount} {reason}")
-                    return
+                    if is_in_leave_mode:
+                        # 用戶在請假模式下，處理簡單請假格式
+                        recent_trip_id = conversation_manager.get_recent_trip_id(user_id)
+                        recent_fixed_schedule_id = conversation_manager.get_recent_fixed_schedule_id(user_id)
+                        
+                        logger.info(f"請假模式下的簡單請假格式 - 用戶: {user_id}, trips上下文: {recent_trip_id}, 固定班次上下文: {recent_fixed_schedule_id}, 輸入: '{message_text}'")
+                        
+                        if recent_trip_id:
+                            # 處理一般班次請假
+                            logger.info(f"檢測到簡單請假格式，班次ID: {recent_trip_id}, 加成: {amount}, 原因: {reason}")
+                            
+                            # 構造完整的乘客請假命令
+                            full_command = f"乘客請假 {recent_trip_id} {amount} {reason}"
+                            
+                            try:
+                                from modules.handlers.passenger_leave_handler import handle_passenger_leave_command
+                                result = handle_passenger_leave_command(full_command, user_id)
+                                
+                                # 處理完成後清除請假模式
+                                conversation_manager.clear_leave_mode(user_id)
+                                
+                                reply_text(reply_token, result)
+                                return
+                            except Exception as e:
+                                logger.error(f"處理簡單請假格式時出錯: {e}")
+                                # 如果出錯，繼續往下執行其他邏輯
+                        elif recent_fixed_schedule_id:
+                            # 如果沒有trips上下文，再處理固定班次請假
+                            logger.info(f"檢測到固定班次簡單請假格式，固定班次ID: {recent_fixed_schedule_id}, 加成: {amount}, 原因: {reason}")
+                            
+                            # 構造完整的固定班次請假命令
+                            full_command = f"固定班次請假 {recent_fixed_schedule_id} {amount} {reason}"
+                            
+                            try:
+                                from modules.handlers.fixed_schedule_leave_handler import handle_fixed_schedule_leave_command
+                                result = handle_fixed_schedule_leave_command(full_command, user_id)
+                                
+                                # 處理完成後清除請假模式
+                                conversation_manager.clear_leave_mode(user_id)
+                                
+                                reply_text(reply_token, result)
+                                return
+                            except Exception as e:
+                                logger.error(f"處理固定班次簡單請假格式時出錯: {e}")
+                                # 如果出錯，繼續往下執行其他邏輯
+                        else:
+                            # 如果找不到最近的班次ID，提示用戶
+                            reply_text(reply_token, f"檢測到請假資料（{reason} {amount}），但找不到對應的班次。\n\n請使用完整格式：\n• 乘客請假 [班次ID] {amount} {reason}\n• 固定班次請假 [固定班次ID] {amount} {reason}")
+                            return
+                    else:
+                        # 用戶不在請假模式，不處理簡單請假格式
+                        logger.info(f"檢測到類似請假格式但用戶不在請假模式: '{message_text}'")
+                        # 繼續往下執行其他邏輯
             
             # 🔥 新增：检查是否有AI上下文需要处理（例如pending_modification）
             from modules.utils.conversation_context import conversation_manager
@@ -1027,7 +1098,7 @@ def process_text_message_with_text(message_text, reply_token, user_id):
 def get_help_text():
     """取得文字版幫助信息"""
     return """可用命令列表：
-1. 查詢班次 - 查詢東洋/臨時未完成班次(通過日期按鈕選擇)
+1. 東洋班次 - 查詢東洋/臨時未完成班次(通過日期按鈕選擇)
 2. 診所班次 - 查詢診所班次(通過日期按鈕選擇)
 3. 查已完成 [日期] [類別] - 查已完成班次(日期默認今天, 類別可選)
 4. 班次詳情 [ID] - 查看班次詳細信息 (可修改狀態)
@@ -1041,8 +1112,9 @@ def get_help_text():
 12. 預約叫車 - 通過自然語言描述開始預約 (推薦)
 13. 生成周報表 [類別] - 生成上週班次報表 (類別: 診所/東洋/全部)
 14. 生成月報表 [類別] - 生成上個月班次報表 (類別: 診所/東洋/全部)
-15. 預約叫車幫助 - 顯示「預約叫車」的說明
-16. 幫助 - 顯示此幫助信息
+15. 批量加成 - 問答式批量加成功能 (春節/颱風假期等)
+16. 預約叫車幫助 - 顯示「預約叫車」的說明
+17. 幫助 - 顯示此幫助信息
 
 在群組中使用時，可選擇性在命令前添加前綴... (例如 !, #, /)
 """

@@ -93,6 +93,23 @@ def process_passenger_leave(trip_id, surcharge_adjustment, reason, user_id):
             })
         except Exception as new_field_error:
             logger.info(f"passenger_leave_reason欄位不存在，使用舊欄位: {new_field_error}")
+            
+            # 獲取現有的 modification_reason 以便追加
+            current_reason_query = "SELECT modification_reason FROM trips WHERE trip_id = :trip_id"
+            current_reason_result = db.session.execute(text(current_reason_query), {"trip_id": trip_id}).fetchone()
+            current_reason = current_reason_result[0] if current_reason_result else None
+            
+            # 使用統一的 modification_reason 管理工具
+            from modules.utils.modification_utils import build_modification_update_dict
+            user_display_name = get_user_display_name(user_id) if user_id else "系統用戶"
+            
+            modification_updates = build_modification_update_dict(
+                current_reason, 
+                f"乘客請假: {reason}", 
+                user_display_name, 
+                "trips"
+            )
+            
             # 回退到舊的modification_reason欄位
             update_query = """
             UPDATE trips
@@ -104,15 +121,12 @@ def process_passenger_leave(trip_id, surcharge_adjustment, reason, user_id):
             RETURNING trip_id
             """
             
-            # 獲取用戶顯示名稱
-            user_display_name = get_user_display_name(user_id) if user_id else "系統用戶"
-            
             result = db.session.execute(text(update_query), {
                 "trip_id": trip_id,
                 "new_extra_fare": new_extra_fare,
-                "user_id": user_display_name,
-                "reason": f"乘客請假: {reason}",
-                "mod_time": datetime.now()
+                "user_id": modification_updates["modified_by"],
+                "reason": modification_updates["modification_reason"],
+                "mod_time": modification_updates["modification_time"]
             })
         
         # 提交事務

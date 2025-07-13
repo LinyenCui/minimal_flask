@@ -921,7 +921,7 @@ def request_toyo_temp_trip_date_selection():
             button_item = QuickReplyItem(
                 action=MessageAction(
                     label=label,
-                    text=f"查詢班次 {date_str_iso}" # <-- 注意命令文本不同
+                    text=f"東洋班次 {date_str_iso}" # <-- 注意命令文本不同
                 )
             )
             if current_day == today:

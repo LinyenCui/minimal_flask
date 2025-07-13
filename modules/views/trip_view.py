@@ -138,7 +138,7 @@ def format_trips_flex(trips, date):
                     "action": {
                         "type": "message",
                         "label": "查詢其他日期",
-                        "text": "!查詢班次"
+                        "text": "!東洋班次"
                     },
                     "style": "primary",
                     "color": "#27ACB2"

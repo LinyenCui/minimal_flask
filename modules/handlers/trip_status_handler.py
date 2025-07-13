@@ -4,12 +4,36 @@
 from datetime import datetime, timedelta
 from sqlalchemy.sql import text
 import logging
+import re
 from modules.models.base import db
 
 # 建立日誌記錄器
 logger = logging.getLogger(__name__)
 
-def handle_update_trip_status(message_text):
+def remove_leave_from_modification_reason(modification_reason):
+    """
+    從 modification_reason 中移除請假相關的記錄，保留其他修改記錄
+    """
+    if not modification_reason:
+        return None
+    
+    # 按分號分割各個修改記錄
+    parts = [part.strip() for part in modification_reason.split(';')]
+    
+    # 過濾掉請假相關的記錄
+    filtered_parts = []
+    for part in parts:
+        # 檢查是否為請假相關記錄
+        if not ("乘客請假" in part or "請假" in part.lower()):
+            filtered_parts.append(part)
+    
+    # 重新組合
+    if not filtered_parts:
+        return None
+    
+    return '; '.join(filtered_parts)
+
+def handle_update_trip_status(message_text, user_id=None):
     """處理修改班次狀態的請求"""
     try:
         parts = message_text.split()
@@ -63,16 +87,16 @@ def handle_update_trip_status(message_text):
             
             has_leave_reason = (leave_info and leave_info[0]) or (leave_info and leave_info[1] and "乘客請假" in leave_info[1])
             original_extra_fare = leave_info[2] if leave_info else 0
+            original_modification_reason = leave_info[1] if leave_info else None
             
             if has_leave_reason or original_extra_fare < 0:
-                # 這是「改回準備」- 清除請假原因和負數加成
+                # 這是「改回準備」- 清除請假原因和負數加成，但保留其他修改記錄
+                cleaned_modification_reason = remove_leave_from_modification_reason(original_modification_reason)
+                
                 update_query = """
                 UPDATE trips 
                 SET passenger_leave_reason = NULL,
-                    modification_reason = CASE 
-                        WHEN modification_reason LIKE '%乘客請假%' THEN NULL 
-                        ELSE modification_reason 
-                    END,
+                    modification_reason = :cleaned_reason,
                     extra_fare = CASE
                         WHEN extra_fare < 0 THEN 0
                         ELSE extra_fare
@@ -80,7 +104,10 @@ def handle_update_trip_status(message_text):
                 WHERE trip_id = :trip_id 
                 RETURNING trip_id, extra_fare
                 """
-                result = db.session.execute(text(update_query), {"trip_id": trip_id})
+                result = db.session.execute(text(update_query), {
+                    "trip_id": trip_id,
+                    "cleaned_reason": cleaned_modification_reason
+                })
                 db.session.commit()
                 
                 updated_trip = result.fetchone()
@@ -88,6 +115,8 @@ def handle_update_trip_status(message_text):
                     success_msg = f"✅ 已成功清除班次 #{trip_id} 的請假狀態，恢復為準備狀態。"
                     if original_extra_fare < 0:
                         success_msg += f"\n💰 加成恢復：{original_extra_fare} → {updated_trip[1]} (變動+{-original_extra_fare})"
+                    if cleaned_modification_reason:
+                        success_msg += f"\n📝 保留其他修改記錄：{cleaned_modification_reason}"
                     return success_msg
                 else:
                     return f"清除班次 #{trip_id} 請假狀態時出錯。"
@@ -125,6 +154,17 @@ def handle_update_trip_status(message_text):
                 return f"將班次 #{trip_id} 設為衝突狀態時出錯。"
 
         if new_status == "請假":
+            # 🔧 修正：設置請假模式標記，允許簡單請假格式
+            if user_id:
+                try:
+                    from modules.utils.conversation_context import conversation_manager
+                    conversation_manager.set_leave_mode(user_id=user_id, trip_id=int(trip_id))
+                    logger.info(f"設置用戶 {user_id} 進入請假模式，班次 #{trip_id}")
+                except Exception as context_error:
+                    logger.error(f"設置請假模式時出錯: {context_error}")
+            else:
+                logger.warning(f"無法設置請假模式：未提供 user_id")
+            
             return f"班次 #{trip_id} 乘客請假\n\n請輸入：[原因] [加成]\n\n例如：\n新建路乘客臨時有事 -30\n中華南路乘客身體不適 -50\n\n💡 提示：先寫原因，最後寫加成金額"
 
         logger.error(f"Reached unexpected end of handle_update_trip_status logic for trip {trip_id} to {new_status}.")

@@ -6,6 +6,7 @@ from modules.config import COMMAND_PREFIXES
 import re
 import logging
 from modules.handlers.temp_booking_handler import temp_booking_states
+from modules.handlers.batch_allowance_handler import batch_allowance_states
 
 logger = logging.getLogger(__name__)
 
@@ -14,14 +15,15 @@ KNOWN_COMMANDS = {
     "幫助", "幫助文字", 
     "預約叫車",      # This is our AI booking command
     "預約叫車幫助",  # Help for AI booking
-    "查詢班次", "診所班次", "查已完成", "指派司機", "完成班次", "回報問題",
+    "東洋班次", "診所班次", "查已完成", "指派司機", "完成班次", "回報問題",
     "取消預約", "取消指派", "更新已完成班次", "取消AI修改",
-    "fix-sequence"   # Database sequence repair command
+    "fix-sequence",   # Database sequence repair command
+    "批量加成", "batch-allowance"   # Batch allowance command
 }
 
 # Commands that *can* take arguments
 COMMANDS_WITH_ARGS = {
-    "查詢班次", "診所班次", "查已完成", "班次詳情", "指派司機", "指派", 
+    "東洋班次", "診所班次", "查已完成", "班次詳情", "指派司機", "指派", 
     "記錄車資", "修改類別", "生成周報表", "生成週報表", "生成周報", "生成週報",
     "確認指派", "取消指派", "確認AI修改", "取消AI修改", "查看", "修改班次",
     "固定班次請假", "固定班次恢復",  # 固定班次請假相關命令
@@ -50,6 +52,12 @@ def should_process(message_text, source_type, user_id):
     if user_id in temp_booking_states and not any(cmd in message_text.lower() for cmd in cancel_commands):
         if not any(message_text.startswith(f"{p}{cmd}") for p in ["!", "#", "/"] for cmd in cancel_commands):
             logger.info("[should_process] User in booking state, returning True")
+            return True, message_text
+    
+    # 檢查用戶是否在批量加成狀態中
+    if user_id in batch_allowance_states and not any(cmd in message_text.lower() for cmd in cancel_commands):
+        if not any(message_text.startswith(f"{p}{cmd}") for p in ["!", "#", "/"] for cmd in cancel_commands):
+            logger.info("[should_process] User in batch allowance state, returning True")
             return True, message_text
              
     prefix = None
