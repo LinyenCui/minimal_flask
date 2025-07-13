@@ -400,10 +400,27 @@ def handle_record_fare(message_text, user_id=None):
 
 範例：記錄車資 {completed_trip_id} {meter_fare} {extra_fare} 客戶要求調整價格"""
 
-        # 更新車資並記錄修改信息
+        # 獲取現有的 modification_reason 以便追加
+        current_reason_query = sql_text("SELECT modification_reason FROM completed_trips WHERE id = :id")
+        current_reason_result = db.session.execute(current_reason_query, {"id": completed_trip_id}).fetchone()
+        current_reason = current_reason_result[0] if current_reason_result else None
+        
+        # 使用統一的 modification_reason 管理工具
+        from modules.utils.modification_utils import build_modification_update_dict
         from modules.utils.taiwan_time import get_taiwan_time
         
         logger.info(f"🔧 準備執行數據庫更新: trip_id={completed_trip_id}, meter={meter_fare}, extra={extra_fare}")
+        
+        # 獲取用戶顯示名稱
+        user_display_name = get_user_display_name(user_id) if user_id else "系統用戶"
+        
+        # 構建修改信息字典
+        modification_updates = build_modification_update_dict(
+            current_reason, 
+            reason or '車資調整', 
+            user_display_name, 
+            "completed_trips"
+        )
         
         update_query = sql_text("""
         UPDATE completed_trips 
@@ -415,15 +432,12 @@ def handle_record_fare(message_text, user_id=None):
         WHERE id = :id
         """)
         
-        # 獲取用戶顯示名稱
-        user_display_name = get_user_display_name(user_id) if user_id else "系統用戶"
-        
         db.session.execute(update_query, {
             "meter_fare": meter_fare,
             "extra_fare": extra_fare,
-            "modified_by": user_display_name,
-            "modification_reason": reason or '車資調整',
-            "modification_time": get_taiwan_time(),
+            "modified_by": modification_updates["modified_by"],
+            "modification_reason": modification_updates["modification_reason"],
+            "modification_time": modification_updates["modification_time"],
             "id": completed_trip_id
         })
         

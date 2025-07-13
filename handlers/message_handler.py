@@ -13,6 +13,7 @@ from models.driver import Driver
 from models.fixed_schedule import FixedSchedule
 from models.trip import Trip
 from models.completed_trip import CompletedTrip
+from modules.services.ai_service import extract_booking_info_with_gemini
 import logging
 
 # 配置 LINE Bot API
@@ -286,18 +287,58 @@ def setup_line_bot(app):
             reply_text = "請輸入預約日期（格式：YYYY-MM-DD）："
         
         else:
-            # 簡單的回覆邏輯
-            logger.info("執行默認回覆")
-            reply_text = (
-                f"您發送了: {message_text}\n\n"
-                "可用命令：\n"
-                "- 測試數據庫：測試數據庫連接\n"
-                "- 數據庫表：查看數據庫表列表\n"
-                "- 查詢班次：查看今天的班次\n"
-                "- 待派班次：查看所有待派的班次\n"
-                "- 指派 [班次ID] [司機ID]：為班次指派司機\n"
-                "- 預約：開始預約新班次"
-            )
+            # 嘗試使用 AI 理解用戶意圖
+            logger.info(f"未知指令 '{message_text}'，嘗試交由 AI 處理")
+            try:
+                extracted_info = extract_booking_info_with_gemini(message_text)
+                if extracted_info:
+                    # 如果 AI 成功提取信息，格式化並回覆
+                    logger.info(f"AI 提取到預約資訊: {extracted_info}")
+                    reply_text = "好的，我幫您看看。請問您是要預約：\n\n"
+                    details = []
+                    if extracted_info.get('customer_name'):
+                        details.append(f"乘客: {extracted_info['customer_name']}")
+                    if extracted_info.get('date'):
+                        details.append(f"日期: {extracted_info['date']}")
+                    if extracted_info.get('time'):
+                        details.append(f"時間: {extracted_info['time']}")
+                    if extracted_info.get('start_point'):
+                        details.append(f"起點: {extracted_info['start_point']}")
+                    if extracted_info.get('end_point'):
+                        details.append(f"終點: {extracted_info['end_point']}")
+                    
+                    if details:
+                        reply_text += "\n".join(details)
+                        reply_text += "\n\n如果資訊正確，請直接開始預約流程。"
+                    else:
+                        # 雖然有回傳但內容為空
+                        reply_text = "抱歉，我好像沒能完全理解您的意思。您可以試著說「預約」來開始，或參考以下指令。"
+                        reply_text += (
+                            "\n\n可用命令：\n"
+                            "- 測試數據庫\n"
+                            "- 數據庫表\n"
+                            "- 查詢班次\n"
+                            "- 待派班次\n"
+                            "- 指派 [班次ID] [司機ID]\n"
+                            "- 預約"
+                        )
+
+                else:
+                    # 如果 AI 無法提取信息，回覆通用幫助訊息
+                    logger.info("AI 未能提取有效資訊，回覆通用幫助訊息")
+                    reply_text = (
+                        f"您好，我不確定如何處理「{message_text}」。\n\n"
+                        "您可以試試以下指令：\n"
+                        "- 測試數據庫\n"
+                        "- 數據庫表\n"
+                        "- 查詢班次\n"
+                        "- 待派班次\n"
+                        "- 指派 [班次ID] [司機ID]\n"
+                        "- 預約"
+                    )
+            except Exception as e:
+                logger.error(f"調用 AI 服務時發生錯誤: {e}")
+                reply_text = "抱歉，AI 服務暫時無法使用，請稍後再試。"
         
         logger.info(f"準備回覆: {reply_text[:50]}...")
         

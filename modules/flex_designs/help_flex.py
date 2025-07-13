@@ -42,6 +42,11 @@ def get_help_flex():
                 },
                 {
                     "type": "button",
+                    "action": {"type": "postback", "label": "🔮 未來時間態", "data": "action=help_future_mode", "displayText": "未來時間態說明"},
+                    "style": "secondary", "color": "#9370DB", "margin": "sm", "height": "sm"
+                },
+                {
+                    "type": "button",
                     "action": {"type": "postback", "label": "📋 固定班次功能", "data": "action=help_fixed_schedule", "displayText": "固定班次功能"},
                     "style": "secondary", "color": "#DDA0DD", "margin": "sm", "height": "sm"
                 },
@@ -75,6 +80,77 @@ def get_help_flex():
         }
     }
     return help_bubble
+
+
+def get_future_mode_help():
+    """未來時間態功能說明"""
+    return {
+        "type": "bubble",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "🔮 未來時間態功能", "weight": "bold", "size": "md", "color": "#ffffff"}
+            ],
+            "backgroundColor": "#9370DB", "paddingTop": "8px", "paddingBottom": "8px"
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "📅 太陽週次匯入", "weight": "bold", "size": "sm", "color": "#9370DB"},
+                {"type": "text", "text": "• 匯入固定班次 本週", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 匯入固定班次 下週", "size": "xs"},
+                {"type": "text", "text": "• 支援太陽週次（週日到週六）", "size": "xs"},
+                {"type": "text", "text": "• 本週：追加模式（不清空現有）", "size": "xs"},
+                {"type": "text", "text": "• 下週：規劃模式（清空重新規劃）", "size": "xs"},
+                
+                {"type": "text", "text": "🔄 覆蓋功能", "weight": "bold", "size": "sm", "color": "#FF8C00", "margin": "md"},
+                {"type": "text", "text": "• 匯入固定班次 [週次] 覆蓋", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 覆蓋已存在的該週次固定班次", "size": "xs"},
+                {"type": "text", "text": "• 警告：會讓原先的班次修改失效", "size": "xs"},
+                
+                {"type": "text", "text": "🗑️ 清理功能（獨立）", "weight": "bold", "size": "sm", "color": "#DC143C", "margin": "md"},
+                {"type": "text", "text": "• 清理trips 已完成", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 清理trips 過去", "size": "xs"},
+                {"type": "text", "text": "• 清理trips 全部", "size": "xs"},
+                {"type": "text", "text": "• 不影響當前和未來的班次", "size": "xs"},
+                
+                {"type": "text", "text": "🚫 安全限制", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
+                {"type": "text", "text": "• 不允許匯入過去時間態", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 禁止：匯入固定班次 上週", "size": "xs"},
+                {"type": "text", "text": "• 防止：過去時間態數據污染", "size": "xs"},
+                
+                {"type": "text", "text": "📝 預約系統", "weight": "bold", "size": "sm", "color": "#FF6B6E", "margin": "md"},
+                {"type": "text", "text": "• 預約叫車 - AI自然語言預約", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 支援未來日期預約", "size": "xs"},
+                {"type": "text", "text": "• 智能時間規劃", "size": "xs"},
+                
+                {"type": "text", "text": "🔧 固定班表管理", "weight": "bold", "size": "sm", "color": "#DDA0DD", "margin": "md"},
+                {"type": "text", "text": "• /固定班表 [客戶簡稱]", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 查詢與編輯固定排程", "size": "xs"},
+                {"type": "text", "text": "• 長期請假管理", "size": "xs"},
+                
+                {"type": "text", "text": "💡 使用範例", "weight": "bold", "size": "sm", "color": "#32CD32", "margin": "md"},
+                {"type": "text", "text": "匯入固定班次 下週", "size": "xs", "margin": "sm", "color": "#0066CC"},
+                {"type": "text", "text": "匯入固定班次 本週 覆蓋", "size": "xs", "color": "#0066CC"},
+                {"type": "text", "text": "清理trips 已完成", "size": "xs", "color": "#0066CC"},
+                {"type": "text", "text": "預約叫車", "size": "xs", "color": "#0066CC"},
+                {"type": "text", "text": "/固定班表 信智", "size": "xs", "color": "#0066CC"}
+            ]
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "button",
+                    "action": {"type": "message", "label": "🔙 返回幫助", "text": "幫助"},
+                    "style": "secondary", "margin": "sm", "height": "sm"
+                }
+            ]
+        }
+    }
 
 
 def get_ai_features_help():
@@ -349,26 +425,29 @@ def get_complete_commands_help():
             "type": "box",
             "layout": "vertical",
             "contents": [
-                {"type": "text", "text": "🔍 查詢類", "weight": "bold", "size": "sm", "color": "#2E8B57"},
-                {"type": "text", "text": "• 東洋班次 - 查詢東洋/臨時班次", "size": "xs", "margin": "sm"},
-                {"type": "text", "text": "• 診所班次 - 查詢診所班次", "size": "xs"},
-                {"type": "text", "text": "• 查已完成 [日期] [類別] - 查已完成班次", "size": "xs"},
-                {"type": "text", "text": "• 班次詳情 [ID] - 查看班次詳情", "size": "xs"},
-                {"type": "text", "text": "• 查看 [ID] - 查看已完成班次詳情", "size": "xs"},
+                {"type": "text", "text": "🔮 未來時間態", "weight": "bold", "size": "sm", "color": "#9370DB"},
+                {"type": "text", "text": "• 匯入固定班次 [週次] - 太陽週次匯入", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 預約叫車 - AI自然語言預約", "size": "xs"},
                 {"type": "text", "text": "• /固定班表 [客戶] - 查詢固定班次", "size": "xs"},
                 
-                {"type": "text", "text": "📝 預約類", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
-                {"type": "text", "text": "• 預約叫車 - AI自然語言預約", "size": "xs", "margin": "sm"},
-                {"type": "text", "text": "• 預約叫車幫助 - 預約功能說明", "size": "xs"},
+                {"type": "text", "text": "⏰ 現在時間態", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
+                {"type": "text", "text": "• 東洋班次 - 查詢東洋/臨時班次", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 診所班次 - 查詢診所班次", "size": "xs"},
+                {"type": "text", "text": "• 班次詳情 [ID] - 查看班次詳情", "size": "xs"},
+                {"type": "text", "text": "• 指派司機 [ID] - 指派司機", "size": "xs"},
+                {"type": "text", "text": "• 乘客請假 [ID] [加成] [原因]", "size": "xs"},
                 
-                {"type": "text", "text": "🤖 AI功能類", "weight": "bold", "size": "sm", "color": "#32CD32", "margin": "md"},
-                {"type": "text", "text": "• 查詢[地點/日期]車資 - AI車資查詢", "size": "xs", "margin": "sm"},
-                {"type": "text", "text": "• 修改班次[ID]車資[金額] - AI車資修改", "size": "xs"},
+                {"type": "text", "text": "📚 過去時間態", "weight": "bold", "size": "sm", "color": "#2E8B57", "margin": "md"},
+                {"type": "text", "text": "• 查已完成 [日期] [類別] - 查已完成班次", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 查看 [ID] - 查看已完成班次詳情", "size": "xs"},
+                {"type": "text", "text": "• 記錄車資 [ID] [錶價] [加成]", "size": "xs"},
+                {"type": "text", "text": "• 生成周報表 [類別] - 週報表", "size": "xs"},
+                {"type": "text", "text": "• 生成月報表 [類別] - 月報表", "size": "xs"},
                 
-                {"type": "text", "text": "🔄 狀態類", "weight": "bold", "size": "sm", "color": "#8B008B", "margin": "md"},
-                {"type": "text", "text": "• 乘客請假 [ID] [加成] [原因]", "size": "xs", "margin": "sm"},
-                {"type": "text", "text": "• 固定班次請假 [ID] [加成] [原因]", "size": "xs"},
-                {"type": "text", "text": "• 固定班次恢復 [ID]", "size": "xs"}
+                {"type": "text", "text": "🛠️ 特殊功能", "weight": "bold", "size": "sm", "color": "#32CD32", "margin": "md"},
+                {"type": "text", "text": "• 批量加成 - 問答式批量加成", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 查詢[地點/日期]車資 - AI車資查詢", "size": "xs"},
+                {"type": "text", "text": "• 修改班次[ID]車資[金額] - AI車資修改", "size": "xs"}
             ]
         },
         "footer": {

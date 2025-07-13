@@ -155,6 +155,11 @@ def handle_postback(event):
             reply_text(reply_token, help_text)
             
         # 新的分層級幫助功能
+        elif action == 'help_future_mode':
+            from modules.flex_designs.help_flex import get_future_mode_help
+            help_flex = get_future_mode_help()
+            reply_flex(reply_token, "未來時間態功能說明", help_flex)
+            
         elif action == 'help_ai_features':
             from modules.flex_designs.help_flex import get_ai_features_help
             help_flex = get_ai_features_help()

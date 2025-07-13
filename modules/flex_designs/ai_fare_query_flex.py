@@ -129,7 +129,7 @@ def create_ai_search_result_flex(search_info, trips, confidence):
                 "margin": "md"
             })
             
-            MAX_DISPLAY = 15  # 調高顯示上限，與未完成班次清單風格一致
+            MAX_DISPLAY = 50  # 大幅提高顯示上限，支援顯示更多班次（如颱風假等特殊情況）
             display_count = min(MAX_DISPLAY, len(trips))
             for i, trip in enumerate(trips[:display_count]):
                 meter_fare = trip.get('meter_fare', 0) or 0
