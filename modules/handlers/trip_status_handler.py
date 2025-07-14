@@ -86,7 +86,7 @@ def handle_update_trip_status(message_text, user_id=None):
             leave_info = db.session.execute(text(check_leave_query), {"trip_id": trip_id}).fetchone()
             
             has_leave_reason = (leave_info and leave_info[0]) or (leave_info and leave_info[1] and "乘客請假" in leave_info[1])
-            original_extra_fare = leave_info[2] if leave_info else 0
+            original_extra_fare = leave_info[2] if leave_info and leave_info[2] is not None else 0
             original_modification_reason = leave_info[1] if leave_info else None
             
             if has_leave_reason or original_extra_fare < 0:

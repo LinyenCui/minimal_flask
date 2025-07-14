@@ -80,19 +80,14 @@ def init_vertexai():
 def extract_booking_info_with_gemini(user_text: str) -> dict | None:
     """Extract booking info from text using Gemini API."""
     try:
-        # --- REMOVED: Explicit initialize Vertex AI before calling --- 
-        # init_vertexai()
-        # --- END REMOVED ---
+        # 必須先初始化 Vertex AI
+        init_vertexai()
         
-        # --- MODIFIED: Load prompt from file and format --- 
-        # model = GenerativeModel(MODEL_ID)
-        # Construct the prompt
-        # prompt = f"""... (Old prompt string removed) ..."""
+        # 載入 prompt 模板並格式化
         base_prompt = load_prompt_from_file(_PROMPT_FILE_PATH)
-        prompt = base_prompt.format(user_text=user_text) # Format the prompt with user input
-        # --- END MODIFIED ---
+        prompt = base_prompt.format(user_text=user_text)
 
-        # --- ADDED: Initialize model after getting prompt content (optional, but can be here) ---
+        # 初始化模型
         model = GenerativeModel(MODEL_ID)
         # --- END ADDED ---
         

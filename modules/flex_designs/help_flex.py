@@ -161,7 +161,7 @@ def get_ai_features_help():
             "type": "box",
             "layout": "vertical",
             "contents": [
-                {"type": "text", "text": "🤖 AI功能說明", "weight": "bold", "size": "md", "color": "#ffffff"}
+                {"type": "text", "text": "🤖 智能助手系統", "weight": "bold", "size": "md", "color": "#ffffff"}
             ],
             "backgroundColor": "#32CD32", "paddingTop": "8px", "paddingBottom": "8px"
         },
@@ -169,22 +169,28 @@ def get_ai_features_help():
             "type": "box",
             "layout": "vertical",
             "contents": [
-                {"type": "text", "text": "🔍 AI車資查詢", "weight": "bold", "size": "sm", "color": "#2E8B57"},
-                {"type": "text", "text": "智能檢測車資相關查詢請求", "size": "xs", "color": "#666666", "wrap": True},
-                {"type": "text", "text": "• 查詢今天車資", "size": "xs", "margin": "sm"},
-                {"type": "text", "text": "• 查詢台中車資", "size": "xs"},
-                {"type": "text", "text": "• 查詢6/1車資", "size": "xs"},
-                {"type": "text", "text": "• 修改班次123車資500", "size": "xs"},
+                {"type": "text", "text": "🧠 智能命令解析", "weight": "bold", "size": "sm", "color": "#2E8B57"},
+                {"type": "text", "text": "自然語言理解，不需要記憶指令格式", "size": "xs", "color": "#666666", "wrap": True},
+                {"type": "text", "text": "• 匯入本週固定班次 → 系統自動理解", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 今天診所班次查詢 → 自動轉換", "size": "xs"},
+                {"type": "text", "text": "• 班次1896請假感冒 → 智能處理", "size": "xs"},
                 
-                {"type": "text", "text": "📝 預約叫車AI", "weight": "bold", "size": "sm", "color": "#2E8B57", "margin": "md"},
-                {"type": "text", "text": "自然語言描述預約需求", "size": "xs", "color": "#666666", "wrap": True},
-                {"type": "text", "text": "• 預約叫車：明天2點從台中到彰化", "size": "xs", "margin": "sm"},
-                {"type": "text", "text": "• 預約叫車：今天下午診所回家", "size": "xs"},
+                {"type": "text", "text": "🎯 上下文引導", "weight": "bold", "size": "sm", "color": "#2E8B57", "margin": "md"},
+                {"type": "text", "text": "當不確定意圖時，提供友善選項", "size": "xs", "color": "#666666", "wrap": True},
+                {"type": "text", "text": "• 自動提供可能的操作選項", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 避免「未識別命令」的困擾", "size": "xs"},
+                {"type": "text", "text": "• 像真人一樣引導操作", "size": "xs"},
                 
-                {"type": "text", "text": "💡 使用技巧", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
-                {"type": "text", "text": "• AI會自動檢測車資相關詞彙", "size": "xs", "margin": "sm"},
-                {"type": "text", "text": "• 支援日期、地點、金額組合查詢", "size": "xs"},
-                {"type": "text", "text": "• 一次顯示所有結果，無需翻頁", "size": "xs"}
+                {"type": "text", "text": "🔍 真正的AI查詢", "weight": "bold", "size": "sm", "color": "#2E8B57", "margin": "md"},
+                {"type": "text", "text": "使用Gemini API進行深度理解", "size": "xs", "color": "#666666", "wrap": True},
+                {"type": "text", "text": "• 7/12司機5386診所班次 ✓", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 查詢今天車資 ✓", "size": "xs"},
+                {"type": "text", "text": "• 修改班次123車資500 ✓", "size": "xs"},
+                
+                {"type": "text", "text": "⚡ 使用體驗", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
+                {"type": "text", "text": "• 像跟真人對話一樣自然", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 自動選擇最適合的處理方式", "size": "xs"},
+                {"type": "text", "text": "• 智能後備，確保操作成功", "size": "xs"}
             ]
         },
         "footer": {

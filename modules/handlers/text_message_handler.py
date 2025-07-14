@@ -27,6 +27,7 @@ from modules.services.driver_service import handle_driver_assign_request, handle
 
 # AI功能導入
 from modules.services.ai_fare_service import should_use_ai_query
+from modules.services.smart_assistant import process_with_smart_assistant, format_smart_response
 
 # 設定日誌
 logger = logging.getLogger(__name__)
@@ -842,8 +843,42 @@ def process_text_message(event):
             return
         # --- 結束新增 ---
             
-        # --- 🔥 修改：AI智能車資查詢檢測 ---
-        elif should_use_ai_query(message_text):
+        # --- 🤖 智能助手系統整合 ---
+        # 優先嘗試智能助手處理
+        try:
+            logger.info(f"🤖 智能助手處理用戶訊息: {message_text}")
+            smart_result = process_with_smart_assistant(message_text, user_id)
+            
+            if smart_result["type"] == "execute_command":
+                # 智能助手成功解析命令，執行標準命令
+                command = smart_result["command"]
+                logger.info(f"✅ 智能助手解析成功，執行命令: {command}")
+                
+                # 遞迴調用處理標準命令
+                from modules.handlers.text_message_handler import process_text_message_with_text
+                return process_text_message_with_text(command, reply_token, user_id)
+                
+            elif smart_result["type"] == "smart_guidance":
+                # 智能助手提供引導
+                guidance_text = format_smart_response(smart_result)
+                logger.info(f"🎯 智能助手提供引導: {guidance_text}")
+                reply_text(reply_token, guidance_text)
+                return
+                
+            elif smart_result["type"] == "suggestions":
+                # 智能助手提供建議
+                suggestion_text = format_smart_response(smart_result)
+                logger.info(f"💡 智能助手提供建議: {suggestion_text}")
+                reply_text(reply_token, suggestion_text)
+                return
+                
+        except Exception as smart_error:
+            logger.error(f"智能助手處理失敗: {smart_error}")
+            # 繼續使用傳統AI處理
+            pass
+            
+        # --- 🔥 傳統AI智能車資查詢檢測 (後備方案) ---
+        if should_use_ai_query(message_text):
             try:
                 logger.info(f"檢測到AI智能車資查詢: {message_text}")
                 from modules.services.ai_fare_service import handle_smart_fare_query
@@ -1065,9 +1100,32 @@ def process_text_message(event):
                     traceback.print_exc()
                     # 如果AI处理失败，继续原有逻辑
             
-            # 檢查是否可能是AI查詢但檢測失敗
+            # 🚀 使用智能助手處理未識別的命令
+            try:
+                from modules.services.smart_assistant import process_with_smart_assistant, format_smart_response
+                
+                logger.info(f"🤖 啟動智能助手處理: {message_text}")
+                smart_result = process_with_smart_assistant(message_text, user_id)
+                
+                if smart_result["type"] == "execute_command":
+                    # 智能助手解析出了標準命令，遞歸處理
+                    logger.info(f"✅ 智能助手解析成功，執行命令: {smart_result['command']}")
+                    process_text_message_with_text(smart_result["command"], reply_token, user_id)
+                    return
+                else:
+                    # 提供智能引導或建議
+                    smart_response = format_smart_response(smart_result)
+                    logger.info(f"🎯 智能助手提供引導: {smart_result['type']}")
+                    reply_text(reply_token, smart_response)
+                    return
+                    
+            except Exception as smart_error:
+                logger.error(f"智能助手處理失敗: {smart_error}")
+                traceback.print_exc()
+                # 如果智能助手失敗，回退到原有邏輯
+                
+            # 原有的fallback邏輯（當智能助手也失敗時）
             if any(keyword in message_text.lower() for keyword in ['車資', '費用', '查詢', '查', '找']):
-                # 提供AI查詢建議
                 suggestions = "💡 可能您想要使用AI車資查詢功能？\n\n範例:\n"
                 suggestions += "• 查詢今天台中車資\n"
                 suggestions += "• 查詢明天彰化車資\n" 
