@@ -51,6 +51,7 @@ class AdvancedQueryProcessor:
         try:
             # 解析查詢條件
             conditions = self._parse_query_conditions(command)
+            self.logger.info(f"🔍 解析查詢條件: {conditions}")
             
             # 構建SQL查詢
             base_query = """
@@ -78,16 +79,21 @@ class AdvancedQueryProcessor:
                 date_condition, date_params = self._build_date_condition(conditions['date'])
                 where_conditions.append(date_condition)
                 params.update(date_params)
+                self.logger.info(f"🗓️ 添加日期條件: {date_condition}, 參數: {date_params}")
+            else:
+                self.logger.warning(f"⚠️ 沒有解析到日期條件！命令: {command}")
             
             # 添加類別條件
             if conditions.get('category'):
                 where_conditions.append("ct.category = :category")
                 params['category'] = conditions['category']
+                self.logger.info(f"🏷️ 添加類別條件: {conditions['category']}")
             
             # 添加司機條件
             if conditions.get('driver_id'):
                 where_conditions.append("ct.driver_id = :driver_id")
                 params['driver_id'] = conditions['driver_id']
+                self.logger.info(f"👨‍💼 添加司機條件: {conditions['driver_id']}")
             
             # 添加金額條件
             if conditions.get('amount_condition'):
@@ -95,6 +101,7 @@ class AdvancedQueryProcessor:
                 if amount_condition:
                     where_conditions.append(amount_condition['sql'])
                     params.update(amount_condition['params'])
+                    self.logger.info(f"💰 添加金額條件: {amount_condition}")
             
             # 組合完整查詢
             if where_conditions:
@@ -104,12 +111,27 @@ class AdvancedQueryProcessor:
                 
             full_query += " ORDER BY ct.date DESC, ct.id DESC LIMIT 50"
             
-            self.logger.info(f"📊 執行SQL: {full_query}")
-            self.logger.info(f"📊 參數: {params}")
+            self.logger.info(f"📊 完整SQL查詢: {full_query}")
+            self.logger.info(f"📊 查詢參數: {params}")
             
             # 執行查詢
             result = db.session.execute(text(full_query), params)
             trips = result.fetchall()
+            
+            self.logger.info(f"📊 查詢結果數量: {len(trips)}")
+            
+            # 🔥 新增：記錄結果的日期分布
+            if trips:
+                date_counts = {}
+                for trip in trips:
+                    date_str = str(trip.date)
+                    date_counts[date_str] = date_counts.get(date_str, 0) + 1
+                
+                self.logger.info(f"📊 結果日期分布: {date_counts}")
+                
+                # 檢查是否有異常的日期分布
+                if len(date_counts) > 5:
+                    self.logger.warning(f"⚠️ 查詢結果跨越了太多日期，可能日期條件沒有正確應用!")
             
             # 🔥 修復：將SQLAlchemy Row對象轉換為字典，避免保存後失效
             trips_dict_list = []
@@ -131,6 +153,7 @@ class AdvancedQueryProcessor:
             # 保存查詢結果供翻頁使用（保存字典格式）
             context = get_conversation_context(user_id)
             context.save_query_result('completed_trips', command, trips_dict_list, conditions)
+            self.logger.info(f"💾 保存查詢結果供翻頁使用: {len(trips_dict_list)} 個結果")
             
             # 🔥 新增：聚合查詢處理
             if is_aggregation:
@@ -447,7 +470,7 @@ class AdvancedQueryProcessor:
             driver_id = getattr(trip, 'driver_id', None)
             driver_name = getattr(trip, 'driver_name', None)
             
-            driver_info = f"司機#{driver_id}" if driver_id else "未指派"
+            driver_info = f"司機{driver_id}" if driver_id else "未指派"
             if driver_name:
                 driver_info += f"({driver_name})"
             
@@ -457,11 +480,15 @@ class AdvancedQueryProcessor:
             start_point = getattr(trip, 'start_point', '未知') or '未知'
             end_point = getattr(trip, 'end_point', '未知') or '未知'
             total_amount = getattr(trip, 'total_amount', 0) or 0
+            
+            # 🔥 新增：添加日期顯示，與第二頁格式保持一致
+            trip_date = getattr(trip, 'date', None)
+            date_str = str(trip_date) if trip_date else 'N/A'
                 
-            result_text += f"📍 {i}. #{trip_id} ({category}) - "
-            result_text += f"{start_point} → {end_point} | "
-            result_text += f"{driver_info} | "
-            result_text += f"💰 {total_amount:.0f}元\n"
+            # 🔥 修復：統一格式，添加日期顯示
+            result_text += f"📍 {i}. #{trip_id} - {start_point} → {end_point}"
+            result_text += f" | {driver_info} | {date_str}"
+            result_text += f" | 💰 {total_amount:.0f}元\n"
         
         if len(trips) > 10:
             result_text += f"\n... 還有 {len(trips) - 10} 筆結果\n"
