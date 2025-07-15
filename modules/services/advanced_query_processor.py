@@ -110,9 +110,26 @@ class AdvancedQueryProcessor:
             result = db.session.execute(text(full_query), params)
             trips = result.fetchall()
             
-            # 保存查詢結果供翻頁使用
+            # 🔥 修復：將SQLAlchemy Row對象轉換為字典，避免保存後失效
+            trips_dict_list = []
+            for trip in trips:
+                trip_dict = {
+                    'id': trip.id,
+                    'date': trip.date,
+                    'start_point': trip.start_point, 
+                    'end_point': trip.end_point,
+                    'category': trip.category,
+                    'driver_id': trip.driver_id,
+                    'meter_fare': trip.meter_fare,
+                    'extra_fare': trip.extra_fare,
+                    'total_amount': trip.total_amount,
+                    'driver_name': trip.driver_name
+                }
+                trips_dict_list.append(trip_dict)
+            
+            # 保存查詢結果供翻頁使用（保存字典格式）
             context = get_conversation_context(user_id)
-            context.save_query_result('completed_trips', command, trips, conditions)
+            context.save_query_result('completed_trips', command, trips_dict_list, conditions)
             
             # 🔥 新增：聚合查詢處理
             if is_aggregation:
@@ -199,9 +216,25 @@ class AdvancedQueryProcessor:
             result = db.session.execute(text(full_query), params)
             trips = result.fetchall()
             
-            # 保存查詢結果供翻頁使用
+            # 🔥 修復：將SQLAlchemy Row對象轉換為字典，避免保存後失效
+            trips_dict_list = []
+            for trip in trips:
+                trip_dict = {
+                    'trip_id': trip.trip_id,
+                    'date': trip.date,
+                    'time': trip.time,
+                    'start_point': trip.start_point,
+                    'end_point': trip.end_point,
+                    'category': trip.category,
+                    'driver_id': trip.driver_id,
+                    'status': trip.status,
+                    'driver_name': trip.driver_name
+                }
+                trips_dict_list.append(trip_dict)
+            
+            # 保存查詢結果供翻頁使用（保存字典格式）
             context = get_conversation_context(user_id)
-            context.save_query_result('current_trips', command, trips, conditions)
+            context.save_query_result('current_trips', command, trips_dict_list, conditions)
             
             return self._format_current_trips_result(trips, command, conditions)
             
