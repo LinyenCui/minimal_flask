@@ -11,6 +11,7 @@ from sqlalchemy import text
 from modules.models.base import db
 from modules.utils.taiwan_time import get_taiwan_date
 from modules.utils.conversation_context import get_conversation_context
+from modules.utils.helpers import parse_date_input
 
 logger = logging.getLogger(__name__)
 
@@ -250,8 +251,11 @@ class AdvancedQueryProcessor:
         """解析查詢命令中的條件"""
         conditions = {}
         
-        # 解析日期條件
-        date_patterns = {
+        # 🔥 修復：解析日期條件 - 支援具體日期格式
+        date_found = False
+        
+        # 1. 先檢查相對日期
+        relative_date_patterns = {
             '今天': 'today',
             '昨天': 'yesterday', 
             '明天': 'tomorrow',
@@ -259,10 +263,41 @@ class AdvancedQueryProcessor:
             '上週': 'last_week'
         }
         
-        for date_text, date_type in date_patterns.items():
+        for date_text, date_type in relative_date_patterns.items():
             if date_text in command:
                 conditions['date'] = date_type
+                date_found = True
                 break
+        
+        # 2. 🔥 新增：如果沒找到相對日期，嘗試解析具體日期格式
+        if not date_found:
+            # 各種日期格式的正則表達式
+            date_patterns = [
+                r'\d{4}-\d{1,2}-\d{1,2}',  # YYYY-MM-DD
+                r'\d{1,2}/\d{1,2}',         # MM/DD 或 M/D  
+                r'\d{1,2}-\d{1,2}',         # MM-DD 或 M-D
+                r'\d{1,2}月\d{1,2}日?',     # MM月DD日
+                r'(?<!\d)\d{3,4}(?!\d)'     # MMDD格式（避免被司機ID誤判）
+            ]
+            
+            for pattern in date_patterns:
+                matches = re.findall(pattern, command)
+                for match in matches:
+                    try:
+                        # 🔥 關鍵：使用統一的日期解析器
+                        parsed_date = parse_date_input(match)
+                        if parsed_date:
+                            # 將解析出的具體日期轉換為字符串格式
+                            conditions['date'] = parsed_date.strftime('%Y-%m-%d')
+                            date_found = True
+                            self.logger.info(f"🗓️ 解析具體日期: '{match}' → '{conditions['date']}'")
+                            break
+                    except Exception as e:
+                        self.logger.warning(f"日期解析失敗: {match}, 錯誤: {e}")
+                        continue
+                
+                if date_found:
+                    break
         
         # 解析類別條件
         if '診所' in command:
@@ -319,7 +354,7 @@ class AdvancedQueryProcessor:
         return conditions
     
     def _build_date_condition(self, date_type: str, table_prefix: str = "ct") -> Tuple[str, Dict]:
-        """構建日期條件SQL - 支援不同表前綴"""
+        """構建日期條件SQL - 支援不同表前綴和具體日期"""
         if date_type == 'today':
             return f"{table_prefix}.date = :today", {'today': get_taiwan_date()}
         elif date_type == 'yesterday':
@@ -328,8 +363,13 @@ class AdvancedQueryProcessor:
         elif date_type == 'tomorrow':
             tomorrow = get_taiwan_date() + timedelta(days=1)
             return f"{table_prefix}.date = :tomorrow", {'tomorrow': tomorrow}
+        elif date_type and re.match(r'^\d{4}-\d{2}-\d{2}$', date_type):
+            # 🔥 新增：處理具體日期格式 (YYYY-MM-DD)
+            self.logger.info(f"🗓️ 構建具體日期條件: {date_type}")
+            return f"{table_prefix}.date = :specific_date", {'specific_date': date_type}
         else:
-            # 預設今天
+            # 🔥 修復：如果無法識別，記錄警告並使用今天作為fallback
+            self.logger.warning(f"⚠️ 無法識別的日期類型: {date_type}，使用今天作為fallback")
             return f"{table_prefix}.date = :today", {'today': get_taiwan_date()}
     
     def _build_amount_condition(self, amount_condition: Dict) -> Optional[Dict]:
