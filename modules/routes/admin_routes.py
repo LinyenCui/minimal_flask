@@ -65,7 +65,7 @@ def fix_table_sequence(table_name, sequence_name, id_column):
             'status': 'ok'
         }
         
-        if current_seq <= max_id:
+        if current_seq < max_id:  # 修正邏輯：只有當序列值小於最大ID時才需要修復
             next_val = max_id + 1
             fix_query = f"SELECT setval('{sequence_name}', {next_val}, false);"
             db.session.execute(text(fix_query))
@@ -111,8 +111,8 @@ def check_sequences():
                     'table': table_name,
                     'max_id': max_id,
                     'sequence_value': current_seq,
-                    'needs_fix': current_seq <= max_id,
-                    'status': 'warning' if current_seq <= max_id else 'ok'
+                    'needs_fix': current_seq < max_id,  # 修正邏輯：只有當序列值小於最大ID時才需要修復
+                    'status': 'warning' if current_seq < max_id else 'ok'
                 })
                 
             except Exception as e:

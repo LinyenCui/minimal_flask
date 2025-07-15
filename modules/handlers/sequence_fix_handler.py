@@ -77,7 +77,7 @@ def format_sequence_report(results, need_fix):
     """格式化序列檢查報告"""
     if not results:
         return "❌ 無法獲取序列狀態"
-    
+
     report_lines = ["🔍 資料庫序列檢查報告", "=" * 25]
     
     for result in results:
@@ -93,12 +93,22 @@ def format_sequence_report(results, need_fix):
     
     report_lines.append("\n" + "=" * 25)
     
+    # 生成網頁版工具連結
+    import os
+    domain = os.getenv('APP_DOMAIN', 'localhost:3000')  # 修正為實際運行的端口
+    protocol = 'https' if 'render.com' in domain or 'herokuapp.com' in domain else 'http'
+    admin_url = f"{protocol}://{domain}/admin/database-tools"
+    
     if need_fix:
         report_lines.append(f"⚠️ 發現 {len(need_fix)} 個表需要修復")
         report_lines.append("\n回覆「確認修復」來執行修復")
         report_lines.append("回覆「取消」來取消操作")
+        report_lines.append("\n💡 網頁版工具:")
+        report_lines.append(admin_url)
     else:
         report_lines.append("✅ 所有序列狀態正常")
+        report_lines.append("\n💡 網頁版工具:")
+        report_lines.append(admin_url)
     
     return "\n".join(report_lines)
 

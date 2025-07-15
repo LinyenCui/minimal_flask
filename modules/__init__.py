@@ -10,7 +10,10 @@ import os
 from modules.services.ai_service import init_vertexai
 
 def create_app():
-    app = Flask(__name__)
+    # 設置正確的模板文件夾路徑（相對於項目根目錄）
+    import os
+    template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'templates'))
+    app = Flask(__name__, template_folder=template_dir)
     
     # 配置
     app.config['LINE_CHANNEL_TOKEN'] = os.environ.get('LINE_CHANNEL_TOKEN', '')

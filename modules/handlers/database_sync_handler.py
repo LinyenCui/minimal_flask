@@ -6,7 +6,7 @@ import subprocess
 import datetime
 import asyncio
 from modules.models.base import db
-from modules.utils.helpers import get_user_display_name
+from modules.utils.line_bot import get_user_display_name
 import logging
 
 logger = logging.getLogger(__name__)
@@ -158,7 +158,7 @@ def handle_database_sync_request(event, line_bot_api):
         response = "❌ Render 資料庫連線設定不完整\n"
         response += "缺少以下環境變數：\n"
         response += "\n".join([f"• {config}" for config in missing_config])
-        return response
+        return {"type": "text", "text": response}
     
     # 顯示當前狀態
     response = "📊 資料庫同步狀態檢查\n"
@@ -177,13 +177,36 @@ def handle_database_sync_request(event, line_bot_api):
     if "連線失敗" in render_stats or "錯誤" in render_stats:
         response += "❌ 無法連線到 Render 資料庫\n"
         response += "請檢查網路連線和設定"
-        return response
+        return {"type": "text", "text": response}
     
     response += "⚠️ 同步將會覆蓋本地資料庫\n"
-    response += "請回覆「確認同步」開始同步\n"
-    response += "或回覆「取消」放棄操作"
+    response += "請選擇操作："
     
-    return response
+    # 創建 Quick Reply 確認選項
+    from modules.utils.line_bot import QuickReply, QuickReplyItem, MessageAction
+    
+    quick_reply_items = [
+        QuickReplyItem(
+            action=MessageAction(
+                label="✅ 確認同步",
+                text="確認同步"
+            )
+        ),
+        QuickReplyItem(
+            action=MessageAction(
+                label="❌ 取消操作",
+                text="取消"
+            )
+        )
+    ]
+    
+    quick_reply = QuickReply(items=quick_reply_items)
+    
+    return {
+        "type": "text",
+        "text": response,
+        "quick_reply": quick_reply.to_dict()
+    }
 
 def handle_database_sync_confirm(event, line_bot_api):
     """處理資料庫同步確認"""

@@ -8,8 +8,12 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 import json
+import time
 
 logger = logging.getLogger(__name__)
+
+# 全域變數存儲會話狀態
+conversation_states = {}
 
 @dataclass
 class QueryResult:
@@ -21,391 +25,277 @@ class QueryResult:
     result_type: str  # 'single', 'multiple', 'none'
     confidence: str
 
-@dataclass
 class ConversationContext:
-    """對話上下文數據結構"""
-    user_id: str
-    last_query_result: Optional[QueryResult] = None
-    conversation_history: List[Dict] = None
-    active_trip_id: Optional[int] = None  # 當前操作的班次ID
-    active_fixed_schedule_id: Optional[int] = None  # 當前操作的固定班次ID
-    pending_modification: Optional[Dict] = None  # 待執行的修改
-    is_in_leave_mode: bool = False  # 是否在請假模式中
-    leave_mode_expires_at: Optional[datetime] = None  # 請假模式過期時間
-    context_expires_at: Optional[datetime] = None
+    """會話上下文管理器 - 管理用戶的查詢結果和翻頁狀態"""
     
-    def __post_init__(self):
-        if self.conversation_history is None:
-            self.conversation_history = []
-        if self.context_expires_at is None:
-            # 上下文有效期30分鐘
-            self.context_expires_at = datetime.now() + timedelta(minutes=30)
-
-class ConversationContextManager:
-    """對話上下文管理器"""
+    def __init__(self, user_id: str):
+        self.user_id = user_id
+        self.state_key = f"context_{user_id}"
     
-    def __init__(self):
-        # 使用內存存儲，實際部署可考慮Redis或數據庫
-        self._contexts: Dict[str, ConversationContext] = {}
-        self._cleanup_interval = timedelta(minutes=10)
-        self._last_cleanup = datetime.now()
+    def save_query_result(self, query_type: str, command: str, all_results: List, conditions: Dict = None):
+        """保存查詢結果供翻頁使用"""
+        global conversation_states
+        
+        state = {
+            'query_type': query_type,  # 'completed_trips' 或 'current_trips'
+            'command': command,
+            'all_results': all_results,
+            'conditions': conditions or {},
+            'current_page': 0,
+            'page_size': 10,
+            'timestamp': time.time()
+        }
+        
+        conversation_states[self.state_key] = state
+        
+    def get_query_result(self) -> Optional[Dict]:
+        """獲取保存的查詢結果"""
+        global conversation_states
+        
+        if self.state_key not in conversation_states:
+            return None
+            
+        state = conversation_states[self.state_key]
+        
+        # 檢查時效性（5分鐘內有效）
+        if time.time() - state['timestamp'] > 300:
+            self.clear_context()
+            return None
+            
+        return state
     
-    def get_context(self, user_id: str) -> ConversationContext:
-        """獲取用戶的對話上下文"""
-        self._cleanup_expired()
+    def get_page_results(self, page_num: int = 0, page_size: int = 10) -> Dict:
+        """獲取分頁結果"""
+        state = self.get_query_result()
+        if not state:
+            return {'type': 'error', 'message': '沒有可用的查詢結果'}
         
-        if user_id not in self._contexts:
-            self._contexts[user_id] = ConversationContext(user_id=user_id)
+        all_results = state['all_results']
+        total_results = len(all_results)
         
-        context = self._contexts[user_id]
+        if total_results == 0:
+            return {'type': 'no_results', 'message': '沒有找到符合條件的記錄'}
         
-        # 檢查上下文是否過期
-        if context.context_expires_at and datetime.now() > context.context_expires_at:
-            logger.info(f"用戶 {user_id} 的上下文已過期，重置")
-            self._contexts[user_id] = ConversationContext(user_id=user_id)
-            context = self._contexts[user_id]
+        # 計算分頁
+        start_idx = page_num * page_size
+        end_idx = start_idx + page_size
+        page_results = all_results[start_idx:end_idx]
         
-        return context
-    
-    def update_query_result(self, user_id: str, query: str, criteria: Dict, 
-                           trips: List[Dict], confidence: str):
-        """更新查詢結果到上下文"""
-        context = self.get_context(user_id)
+        if not page_results:
+            return {'type': 'error', 'message': '頁面超出範圍'}
         
-        # 判斷結果類型
-        if not trips:
-            result_type = 'none'
-        elif len(trips) == 1:
-            result_type = 'single'
-            context.active_trip_id = trips[0]['id']
+        # 更新當前頁數
+        state['current_page'] = page_num
+        conversation_states[self.state_key] = state
+        
+        # 格式化結果
+        result_text = f"📊 查詢結果 (第 {page_num + 1} 頁)\n"
+        result_text += f"找到 {total_results} 筆記錄，顯示第 {start_idx + 1}-{min(end_idx, total_results)} 筆\n\n"
+        
+        query_type = state['query_type']
+        
+        # 根據查詢類型格式化結果
+        if query_type == 'completed_trips':
+            # 已完成班次
+            for trip in page_results:
+                trip_id = trip.get('id', 'N/A')
+                date_str = trip.get('date', 'N/A')
+                start_point = trip.get('start_point', 'N/A')
+                end_point = trip.get('end_point', 'N/A')
+                driver_id = trip.get('driver_id', 'N/A')
+                
+                result_text += f"  🚗 #{trip_id} - {start_point} → {end_point}"
+                result_text += f" | 司機{driver_id} | {date_str}\n"
+                
         else:
-            result_type = 'multiple'
-            context.active_trip_id = None
+            # 當前班次 (current_trips)
+            for trip in page_results:
+                # 支援不同的資料結構
+                if hasattr(trip, 'trip_id'):
+                    # SQLAlchemy Row 對象
+                    trip_id = trip.trip_id
+                    start_point = trip.start_point
+                    end_point = trip.end_point
+                    driver_id = trip.driver_id
+                    driver_info = f"司機{driver_id}" if driver_id else "未指派司機"
+                else:
+                    # 字典格式
+                    trip_id = trip.get('trip_id', trip.get('id', 'N/A'))
+                    start_point = trip.get('start_point', 'N/A')
+                    end_point = trip.get('end_point', 'N/A')
+                    driver_id = trip.get('driver_id', 'N/A')
+                    driver_info = f"司機{driver_id}" if driver_id else "未指派司機"
+                        
+                result_text += f"  📍 #{trip_id} - {start_point} → {end_point}"
+                result_text += f" | {driver_info}\n"
+            result_text += "\n"
         
-        query_result = QueryResult(
-            query=query,
-            criteria=criteria,
-            trips=trips,
-            timestamp=datetime.now(),
-            result_type=result_type,
-            confidence=confidence
-        )
+        # 計算總頁數
+        total_pages = (total_results + page_size - 1) // page_size
         
-        context.last_query_result = query_result
-        context.context_expires_at = datetime.now() + timedelta(minutes=30)
+        # 翻頁提示
+        if page_num + 1 < total_pages:
+            result_text += f"\n💡 輸入「更多」或「下一頁」查看第 {page_num + 2} 頁"
+        else:
+            result_text += f"\n🔚 已顯示全部結果"
         
-        # 添加到對話歷史
-        self._add_to_history(context, 'query', {
-            'query': query,
-            'result_count': len(trips),
-            'result_type': result_type
-        })
-        
-        logger.info(f"用戶 {user_id} 查詢結果已更新: {result_type}, {len(trips)} 個班次")
+        return {
+            'type': 'success',
+            'message': result_text,
+            'page': page_num + 1,
+            'total_pages': total_pages
+        }
     
-    def try_resolve_incomplete_query(self, user_id: str, current_query: str) -> Optional[Dict]:
-        """嘗試使用上下文解析不完整的查詢"""
-        context = self.get_context(user_id)
-        
-        if not context.last_query_result:
+    def clear_context(self):
+        """清除會話上下文"""
+        global conversation_states
+        if self.state_key in conversation_states:
+            del conversation_states[self.state_key]
+    
+    def has_cached_results(self) -> bool:
+        """檢查是否有緩存的查詢結果"""
+        return self.get_query_result() is not None
+    
+    def get_next_page(self) -> Optional[str]:
+        """獲取下一頁結果"""
+        state = self.get_query_result()
+        if not state:
             return None
         
-        last_result = context.last_query_result
+        current_page = state.get('current_page', 0)
+        page_size = state.get('page_size', 10)
+        all_results = state['all_results']
+        total_results = len(all_results)
         
-        # 檢查是否是基於上一次結果的操作
-        resolution_patterns = [
-            # 基於序號的引用
-            (r'第(\d+)個', 'sequence_reference'),
-            (r'第([一二三四五六七八九十]+)個', 'sequence_chinese_reference'),  # 🔥 新增：中文數字序號
-            (r'第一個|第1個|首個', 'first_item'),
-            (r'第二個|第2個', 'second_item'),  # 🔥 新增：明確的第二個
-            (r'第三個|第3個', 'third_item'),  # 🔥 新增：明確的第三個
-            (r'最後一個|最後', 'last_item'),
-            
-            # 基於班次ID的操作
-            (r'修改班次#?(\d+)', 'trip_id_reference'),
-            (r'#(\d+)', 'trip_id_reference'),
-            
-            # 基於上下文的修改操作
-            (r'改成|調整|修改', 'context_modification'),
-            (r'錶價|加成|費用', 'context_modification'),
-        ]
+        # 計算下一頁
+        next_page = current_page + 1
+        start_idx = next_page * page_size
         
-        import re
-        for pattern, operation_type in resolution_patterns:
-            match = re.search(pattern, current_query, re.IGNORECASE)
-            if match:
-                return self._resolve_operation(context, current_query, operation_type, match)
+        # 檢查是否還有下一頁
+        if start_idx >= total_results:
+            return "📊 已經是最後一頁了\n\n💡 可以重新執行查詢命令獲取新的結果"
         
-        return None
+        # 獲取下一頁結果
+        page_result = self.get_page_results(next_page, page_size)
+        
+        if page_result.get('type') == 'error':
+            return page_result['message']
+        
+        return page_result.get('message', "無法格式化結果")
+
+
+class ConversationManager:
+    """全局對話管理器 - 管理所有用戶的對話狀態"""
     
-    def _resolve_operation(self, context: ConversationContext, query: str, 
-                          operation_type: str, match) -> Optional[Dict]:
-        """解析具體的操作類型"""
-        last_result = context.last_query_result
-        
-        if operation_type == 'sequence_reference':
-            # 例如："修改第1個的費用"
-            try:
-                index = int(match.group(1)) - 1
-                if 0 <= index < len(last_result.trips):
-                    target_trip = last_result.trips[index]
-                    return {
-                        'resolved': True,
-                        'trip_id': target_trip['id'],
-                        'trip': target_trip,
-                        'context_info': f"基於上次查詢「{last_result.query}」的第{index+1}個結果"
-                    }
-            except (ValueError, IndexError):
-                pass
-        
-        elif operation_type == 'sequence_chinese_reference':
-            # 例如："修改第二個的費用"
-            try:
-                chinese_number = match.group(1)
-                # 中文數字轉換
-                chinese_to_arabic = {
-                    '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
-                    '六': 6, '七': 7, '八': 8, '九': 9, '十': 10
-                }
-                if chinese_number in chinese_to_arabic:
-                    index = chinese_to_arabic[chinese_number] - 1
-                    if 0 <= index < len(last_result.trips):
-                        target_trip = last_result.trips[index]
-                        return {
-                            'resolved': True,
-                            'trip_id': target_trip['id'],
-                            'trip': target_trip,
-                            'context_info': f"基於上次查詢「{last_result.query}」的第{index+1}個結果"
-                        }
-            except (ValueError, IndexError):
-                pass
-        
-        elif operation_type == 'first_item':
-            # 例如："修改第一個"
-            if last_result.trips:
-                target_trip = last_result.trips[0]
-                return {
-                    'resolved': True,
-                    'trip_id': target_trip['id'],
-                    'trip': target_trip,
-                    'context_info': f"基於上次查詢「{last_result.query}」的第一個結果"
-                }
-        
-        elif operation_type == 'second_item':
-            # 例如："修改第二個"
-            if len(last_result.trips) >= 2:
-                target_trip = last_result.trips[1]
-                return {
-                    'resolved': True,
-                    'trip_id': target_trip['id'],
-                    'trip': target_trip,
-                    'context_info': f"基於上次查詢「{last_result.query}」的第二個結果"
-                }
-        
-        elif operation_type == 'third_item':
-            # 例如："修改第三個"
-            if len(last_result.trips) >= 3:
-                target_trip = last_result.trips[2]
-                return {
-                    'resolved': True,
-                    'trip_id': target_trip['id'],
-                    'trip': target_trip,
-                    'context_info': f"基於上次查詢「{last_result.query}」的第三個結果"
-                }
-        
-        elif operation_type == 'last_item':
-            # 例如："修改最後一個"
-            if last_result.trips:
-                target_trip = last_result.trips[-1]
-                return {
-                    'resolved': True,
-                    'trip_id': target_trip['id'],
-                    'trip': target_trip,
-                    'context_info': f"基於上次查詢「{last_result.query}」的最後一個結果"
-                }
-        
-        elif operation_type == 'trip_id_reference':
-            # 例如："修改班次#309"
-            try:
-                referenced_id = int(match.group(1))
-                # 檢查這個ID是否在上次查詢結果中
-                for trip in last_result.trips:
-                    if trip['id'] == referenced_id:
-                        return {
-                            'resolved': True,
-                            'trip_id': referenced_id,
-                            'trip': trip,
-                            'context_info': f"基於上次查詢「{last_result.query}」中的班次#{referenced_id}"
-                        }
-            except (ValueError, IndexError):
-                pass
-        
-        elif operation_type == 'context_modification':
-            # 例如："改成錶價400加成80"
-            if last_result.result_type == 'single':
-                # 只有一個結果時，可以直接應用修改
-                target_trip = last_result.trips[0]
-                return {
-                    'resolved': True,
-                    'trip_id': target_trip['id'],
-                    'trip': target_trip,
-                    'context_info': f"基於上次查詢「{last_result.query}」的唯一結果"
-                }
-            elif last_result.result_type == 'multiple':
-                # 多個結果時，提示用戶指定
-                return {
-                    'resolved': False,
-                    'needs_clarification': True,
-                    'message': f"上次查詢「{last_result.query}」找到了{len(last_result.trips)}個班次，請指定要修改哪一個",
-                    'available_trips': last_result.trips
-                }
-        
-        return None
-    
-    def set_pending_modification(self, user_id: str, modification_data: Dict):
-        """設置待執行的修改操作"""
-        context = self.get_context(user_id)
-        context.pending_modification = modification_data
-        context.context_expires_at = datetime.now() + timedelta(minutes=30)
-        
-        self._add_to_history(context, 'pending_modification', modification_data)
-    
-    def get_pending_modification(self, user_id: str) -> Optional[Dict]:
-        """獲取待執行的修改操作"""
-        context = self.get_context(user_id)
-        return context.pending_modification
-    
-    def clear_pending_modification(self, user_id: str):
-        """清除待執行的修改操作"""
-        context = self.get_context(user_id)
-        context.pending_modification = None
-    
-    def reset_context(self, user_id: str):
-        """完全重置用戶的對話上下文（用於取消操作）"""
-        context = self.get_context(user_id)
-        context.last_query_result = None
-        context.pending_modification = None
-        context.active_trip_id = None
-        context.active_fixed_schedule_id = None
-        context.conversation_history = []
-        context.context_expires_at = datetime.now() + timedelta(minutes=30)
-        
-        logger.info(f"已重置用戶 {user_id} 的完整對話上下文")
+    def __init__(self):
+        # 存儲各種用戶狀態
+        self.user_states = {}
+        # 用戶最近操作的班次ID
+        self.recent_trip_ids = {}
+        # 用戶最近操作的固定班次ID  
+        self.recent_fixed_schedule_ids = {}
+        # 用戶請假模式狀態
+        self.leave_modes = {}
+        # 待執行的修改操作
+        self.pending_modifications = {}
     
     def set_recent_trip_id(self, user_id: str, trip_id: int):
-        """記錄用戶最近查看的班次ID"""
-        context = self.get_context(user_id)
-        context.active_trip_id = trip_id
-        context.active_fixed_schedule_id = None  # 清除固定班次ID，避免混淆
-        context.context_expires_at = datetime.now() + timedelta(minutes=30)
-        
-        self._add_to_history(context, 'view_trip', {'trip_id': trip_id})
-        logger.info(f"記錄用戶 {user_id} 最近查看班次: {trip_id}，已清除固定班次上下文")
+        """設定用戶最近操作的班次ID"""
+        self.recent_trip_ids[user_id] = trip_id
+        logger.info(f"設定用戶 {user_id} 最近班次ID: {trip_id}")
     
     def get_recent_trip_id(self, user_id: str) -> Optional[int]:
-        """獲取用戶最近查看的班次ID"""
-        context = self.get_context(user_id)
-        return context.active_trip_id
+        """獲取用戶最近操作的班次ID"""
+        return self.recent_trip_ids.get(user_id)
     
     def set_recent_fixed_schedule_id(self, user_id: str, schedule_id: int):
-        """記錄用戶最近操作的固定班次ID"""
-        context = self.get_context(user_id)
-        context.active_fixed_schedule_id = schedule_id
-        context.active_trip_id = None  # 清除trips班次ID，避免混淆
-        context.context_expires_at = datetime.now() + timedelta(minutes=30)
-        
-        self._add_to_history(context, 'view_fixed_schedule', {'schedule_id': schedule_id})
-        logger.info(f"記錄用戶 {user_id} 最近操作固定班次: {schedule_id}，已清除trips上下文")
+        """設定用戶最近操作的固定班次ID"""
+        self.recent_fixed_schedule_ids[user_id] = schedule_id
+        logger.info(f"設定用戶 {user_id} 最近固定班次ID: {schedule_id}")
     
     def get_recent_fixed_schedule_id(self, user_id: str) -> Optional[int]:
         """獲取用戶最近操作的固定班次ID"""
-        context = self.get_context(user_id)
-        return context.active_fixed_schedule_id
+        return self.recent_fixed_schedule_ids.get(user_id)
     
-    def set_leave_mode(self, user_id: str, trip_id: int = None):
-        """設置用戶進入請假模式"""
-        context = self.get_context(user_id)
-        context.is_in_leave_mode = True
-        context.leave_mode_expires_at = datetime.now() + timedelta(minutes=10)  # 請假模式10分鐘過期
-        
-        if trip_id:
-            context.active_trip_id = trip_id
-        
-        self._add_to_history(context, 'enter_leave_mode', {'trip_id': trip_id})
+    def set_leave_mode(self, user_id: str, trip_id: int):
+        """設定用戶進入請假模式"""
+        self.leave_modes[user_id] = {
+            'trip_id': trip_id,
+            'timestamp': time.time()
+        }
         logger.info(f"用戶 {user_id} 進入請假模式，班次ID: {trip_id}")
     
     def is_in_leave_mode(self, user_id: str) -> bool:
-        """檢查用戶是否在請假模式中"""
-        context = self.get_context(user_id)
+        """檢查用戶是否在請假模式"""
+        if user_id not in self.leave_modes:
+            return False
         
-        # 檢查請假模式是否過期
-        if context.is_in_leave_mode and context.leave_mode_expires_at:
-            if datetime.now() > context.leave_mode_expires_at:
-                logger.info(f"用戶 {user_id} 的請假模式已過期")
-                context.is_in_leave_mode = False
-                context.leave_mode_expires_at = None
-                return False
+        # 檢查時效性（5分鐘內有效）
+        mode_data = self.leave_modes[user_id]
+        if time.time() - mode_data['timestamp'] > 300:
+            self.clear_leave_mode(user_id)
+            return False
         
-        return context.is_in_leave_mode
+        return True
     
     def clear_leave_mode(self, user_id: str):
         """清除用戶的請假模式"""
-        context = self.get_context(user_id)
-        context.is_in_leave_mode = False
-        context.leave_mode_expires_at = None
-        
-        self._add_to_history(context, 'exit_leave_mode', {})
-        logger.info(f"用戶 {user_id} 退出請假模式")
+        if user_id in self.leave_modes:
+            del self.leave_modes[user_id]
+            logger.info(f"清除用戶 {user_id} 的請假模式")
     
-    def _add_to_history(self, context: ConversationContext, action_type: str, data: Dict):
-        """添加操作到對話歷史"""
-        history_item = {
-            'timestamp': datetime.now().isoformat(),
-            'action_type': action_type,
-            'data': data
-        }
+    def get_pending_modification(self, user_id: str) -> Optional[Dict]:
+        """獲取用戶待執行的修改操作"""
+        if user_id not in self.pending_modifications:
+            return None
         
-        context.conversation_history.append(history_item)
+        # 檢查時效性（5分鐘內有效）
+        modification_data = self.pending_modifications[user_id]
+        if time.time() - modification_data['timestamp'] > 300:
+            self.clear_pending_modification(user_id)
+            return None
         
-        # 保持歷史記錄在合理長度內
-        if len(context.conversation_history) > 20:
-            context.conversation_history = context.conversation_history[-15:]
+        return modification_data
     
-    def _cleanup_expired(self):
-        """清理過期的上下文"""
-        now = datetime.now()
-        
-        if now - self._last_cleanup < self._cleanup_interval:
-            return
-        
-        expired_users = []
-        for user_id, context in self._contexts.items():
-            if context.context_expires_at and now > context.context_expires_at:
-                expired_users.append(user_id)
-        
-        for user_id in expired_users:
-            del self._contexts[user_id]
-            logger.info(f"清理用戶 {user_id} 的過期上下文")
-        
-        self._last_cleanup = now
+    def set_pending_modification(self, user_id: str, modification_data: Dict):
+        """設定用戶待執行的修改操作"""
+        modification_data['timestamp'] = time.time()
+        self.pending_modifications[user_id] = modification_data
+        logger.info(f"設定用戶 {user_id} 待執行修改: {modification_data}")
     
-    def get_context_summary(self, user_id: str) -> str:
-        """獲取上下文摘要（用於調試）"""
-        context = self.get_context(user_id)
-        
-        if not context.last_query_result:
-            return "無活躍上下文"
-        
-        last_result = context.last_query_result
-        age = datetime.now() - last_result.timestamp
-        
-        return f"""📋 對話上下文摘要：
-• 上次查詢：「{last_result.query}」
-• 查詢時間：{age.seconds//60}分鐘前
-• 結果數量：{len(last_result.trips)}個班次
-• 當前操作班次：{context.active_trip_id or '無'}
-• 待執行修改：{'是' if context.pending_modification else '否'}"""
+    def clear_pending_modification(self, user_id: str):
+        """清除用戶待執行的修改操作"""
+        if user_id in self.pending_modifications:
+            del self.pending_modifications[user_id]
+            logger.info(f"清除用戶 {user_id} 的待執行修改")
+    
+    def reset_context(self, user_id: str):
+        """重置用戶的所有上下文狀態"""
+        self.recent_trip_ids.pop(user_id, None)
+        self.recent_fixed_schedule_ids.pop(user_id, None)
+        self.clear_leave_mode(user_id)
+        self.clear_pending_modification(user_id)
+        logger.info(f"重置用戶 {user_id} 的所有上下文狀態")
 
-# 全局上下文管理器實例
-conversation_manager = ConversationContextManager() 
+
+def get_conversation_context(user_id: str) -> ConversationContext:
+    """獲取用戶的會話上下文"""
+    return ConversationContext(user_id)
+
+def clear_all_expired_contexts():
+    """清理所有過期的會話上下文（定期清理）"""
+    global conversation_states
+    current_time = time.time()
+    expired_keys = [
+        key for key, state in conversation_states.items()
+        if current_time - state['timestamp'] > 300  # 5分鐘過期
+    ]
+    
+    for key in expired_keys:
+        del conversation_states[key]
+    
+    if expired_keys:
+        print(f"清理了 {len(expired_keys)} 個過期的會話上下文")
+
+# 🔥 創建全局conversation_manager實例
+conversation_manager = ConversationManager() 

@@ -18,7 +18,8 @@ KNOWN_COMMANDS = {
     "東洋班次", "診所班次", "查已完成", "指派司機", "完成班次", "回報問題",
     "取消預約", "取消指派", "更新已完成班次", "取消AI修改",
     "fix-sequence",   # Database sequence repair command
-    "批量加成", "batch-allowance"   # Batch allowance command
+    "批量加成", "batch-allowance",   # Batch allowance command
+    "資料庫同步", "確認同步", "取消"   # Database sync and maintenance commands
 }
 
 # Commands that *can* take arguments

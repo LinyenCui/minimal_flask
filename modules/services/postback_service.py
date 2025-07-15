@@ -185,6 +185,22 @@ def handle_postback(event):
             help_flex = get_maintenance_help()
             reply_flex(reply_token, "維護工具", help_flex)
             
+        # 新增的系統指南功能
+        elif action == 'help_production_line':
+            from modules.flex_designs.help_flex import get_production_line_help
+            help_flex = get_production_line_help()
+            reply_flex(reply_token, "生產線思維指南", help_flex)
+            
+        elif action == 'help_quick_reference':
+            from modules.flex_designs.help_flex import get_quick_reference_help
+            help_flex = get_quick_reference_help()
+            reply_flex(reply_token, "快速參考指南", help_flex)
+            
+        elif action == 'help_advanced_leave':
+            from modules.flex_designs.help_flex import get_advanced_leave_help
+            help_flex = get_advanced_leave_help()
+            reply_flex(reply_token, "高級請假系統", help_flex)
+            
         elif action == 'update_status' and 'trip_id' in params:
             trip_id = params['trip_id']
             

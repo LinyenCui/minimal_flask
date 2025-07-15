@@ -33,6 +33,19 @@ def get_help_flex():
                     "style": "primary", "color": "#FF6B6E", "margin": "sm", "height": "sm"
                 },
                 
+                # 新增：系統指南
+                {"type": "text", "text": "📖 系統指南", "weight": "bold", "size": "sm", "color": "#FF8C00", "margin": "md"},
+                {
+                    "type": "button",
+                    "action": {"type": "postback", "label": "🏭 生產線思維指南", "data": "action=help_production_line", "displayText": "生產線思維指南"},
+                    "style": "primary", "color": "#FF8C00", "margin": "sm", "height": "sm"
+                },
+                {
+                    "type": "button",
+                    "action": {"type": "postback", "label": "⚡ 快速參考", "data": "action=help_quick_reference", "displayText": "快速參考"},
+                    "style": "primary", "color": "#32CD32", "margin": "sm", "height": "sm"
+                },
+                
                 # 第二層：進階功能
                 {"type": "text", "text": "🚀 進階功能", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
                 {
@@ -383,11 +396,13 @@ def get_maintenance_help():
                 {"type": "text", "text": "• 更新已完成班次", "size": "xs", "margin": "sm"},
                 {"type": "text", "text": "• 待派班次 - 查看未指派班次", "size": "xs"},
                 {"type": "text", "text": "• 指派司機 [ID] - 指派司機", "size": "xs"},
+                {"type": "text", "text": "• 資料庫同步 - 從Render同步資料", "size": "xs"},
                 
                 {"type": "text", "text": "🔧 資料修復", "weight": "bold", "size": "sm", "color": "#8B0000", "margin": "md"},
                 {"type": "text", "text": "• /fix-sequence - 修復序列", "size": "xs", "margin": "sm"},
                 {"type": "text", "text": "• 解決資料匯入後的ID衝突", "size": "xs"},
                 {"type": "text", "text": "• 自動檢測並修復序列問題", "size": "xs"},
+                {"type": "text", "text": "• 網頁版工具: 輸入 /fix-sequence 查看網址", "size": "xs"},
                 
                 {"type": "text", "text": "💰 車資管理", "weight": "bold", "size": "sm", "color": "#8B0000", "margin": "md"},
                 {"type": "text", "text": "• 記錄車資 [ID] [錶價] [加成]", "size": "xs", "margin": "sm"},
@@ -399,6 +414,178 @@ def get_maintenance_help():
                 {"type": "text", "text": "• 維護工具需謹慎使用", "size": "xs", "margin": "sm"},
                 {"type": "text", "text": "• 資料修復前建議先備份", "size": "xs"},
                 {"type": "text", "text": "• 有問題時建議查看日誌", "size": "xs"}
+            ]
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "button",
+                    "action": {"type": "message", "label": "🔙 返回幫助", "text": "幫助"},
+                    "style": "secondary", "margin": "sm", "height": "sm"
+                }
+            ]
+        }
+    }
+
+
+def get_production_line_help():
+    """生產線思維指南"""
+    return {
+        "type": "bubble",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "🏭 生產線派班思維", "weight": "bold", "size": "md", "color": "#ffffff"}
+            ],
+            "backgroundColor": "#FF8C00", "paddingTop": "8px", "paddingBottom": "8px"
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "🎯 核心概念", "weight": "bold", "size": "sm", "color": "#FF6347"},
+                {"type": "text", "text": "將班次管理比喻為日夜不停的自動化生產線", "size": "xs", "color": "#666666", "wrap": True},
+                
+                {"type": "text", "text": "⏰ 三時間態架構", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
+                {"type": "text", "text": "• 未來態（整備區域）：fixed_schedules", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "  原料模板，規劃準備中", "size": "xs", "margin": "sm", "color": "#666666"},
+                {"type": "text", "text": "• 現在態（生產線）：trips表", "size": "xs"},
+                {"type": "text", "text": "  正在流動執行的產品", "size": "xs", "margin": "sm", "color": "#666666"},
+                {"type": "text", "text": "• 過去態（成品倉庫）：completed_trips", "size": "xs"},
+                {"type": "text", "text": "  已完成的產品記錄", "size": "xs", "margin": "sm", "color": "#666666"},
+                
+                {"type": "text", "text": "👨‍🔧 工作人員干預", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
+                {"type": "text", "text": "• 請假：標記瑕疵但繼續流程", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 取消/衝突：從生產線拿掉", "size": "xs"},
+                {"type": "text", "text": "• 指派司機：分配工作人員", "size": "xs"},
+                
+                {"type": "text", "text": "🤖 AI智能理解", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
+                {"type": "text", "text": "• 「明天司機5386所有班次」", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• AI理解：查詢生產線上明天的班次", "size": "xs"},
+                {"type": "text", "text": "• 自動生成正確查詢條件", "size": "xs"},
+                
+                {"type": "text", "text": "📋 實際操作", "weight": "bold", "size": "sm", "color": "#32CD32", "margin": "md"},
+                {"type": "text", "text": "• 匯入固定班次 = 投料到生產線", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 更新已完成班次 = 自動收成", "size": "xs"},
+                {"type": "text", "text": "• 查詢班次 = 監控生產狀況", "size": "xs"}
+            ]
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "button",
+                    "action": {"type": "postback", "label": "📚 高級請假系統", "data": "action=help_advanced_leave", "displayText": "高級請假系統"},
+                    "style": "primary", "color": "#9370DB", "margin": "sm", "height": "sm"
+                },
+                {
+                    "type": "button",
+                    "action": {"type": "message", "label": "🔙 返回幫助", "text": "幫助"},
+                    "style": "secondary", "margin": "sm", "height": "sm"
+                }
+            ]
+        }
+    }
+
+
+def get_quick_reference_help():
+    """快速參考指南"""
+    return {
+        "type": "bubble",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "⚡ 快速參考指南", "weight": "bold", "size": "md", "color": "#ffffff"}
+            ],
+            "backgroundColor": "#32CD32", "paddingTop": "8px", "paddingBottom": "8px"
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "🔮 未來態操作", "weight": "bold", "size": "sm", "color": "#9370DB"},
+                {"type": "text", "text": "• 匯入固定班次 [本週/下週]", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 預約叫車", "size": "xs"},
+                {"type": "text", "text": "• /固定班表 [客戶]", "size": "xs"},
+                {"type": "text", "text": "• 固定班次請假 [ID] [加成] [原因]", "size": "xs"},
+                
+                {"type": "text", "text": "⏰ 現在態操作", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
+                {"type": "text", "text": "• 東洋班次 / 診所班次", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 班次詳情 [ID]", "size": "xs"},
+                {"type": "text", "text": "• 指派司機 [ID]", "size": "xs"},
+                {"type": "text", "text": "• 乘客請假 [ID] [加成] [原因]", "size": "xs"},
+                
+                {"type": "text", "text": "📚 過去態操作", "weight": "bold", "size": "sm", "color": "#2E8B57", "margin": "md"},
+                {"type": "text", "text": "• 查已完成 [日期] [類別]", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 記錄車資 [ID] [錶價] [加成]", "size": "xs"},
+                {"type": "text", "text": "• 生成周報表 [類別]", "size": "xs"},
+                {"type": "text", "text": "• 生成月報表 [類別]", "size": "xs"},
+                
+                {"type": "text", "text": "🎯 狀態快速識別", "weight": "bold", "size": "sm", "color": "#FF8C00", "margin": "md"},
+                {"type": "text", "text": "• 待派：紅色 🔴 需要指派司機", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 準備：綠色 🟢 已準備好執行", "size": "xs"},
+                {"type": "text", "text": "• 請假：黃色 🟡 請假(原因)", "size": "xs"},
+                {"type": "text", "text": "• 取消：灰色 ⚫ 不執行", "size": "xs"},
+                {"type": "text", "text": "• 衝突：橙色 🟠 時間衝突", "size": "xs"}
+            ]
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "button",
+                    "action": {"type": "message", "label": "🔙 返回幫助", "text": "幫助"},
+                    "style": "secondary", "margin": "sm", "height": "sm"
+                }
+            ]
+        }
+    }
+
+
+def get_advanced_leave_help():
+    """高級請假系統解析"""
+    return {
+        "type": "bubble",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "📚 高級請假系統", "weight": "bold", "size": "md", "color": "#ffffff"}
+            ],
+            "backgroundColor": "#9370DB", "paddingTop": "8px", "paddingBottom": "8px"
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "🎭 三層次障眼法", "weight": "bold", "size": "sm", "color": "#8B008B"},
+                {"type": "text", "text": "請假是一種巧妙的「障眼法」設計", "size": "xs", "color": "#666666", "wrap": True},
+                
+                {"type": "text", "text": "第一層（表面顯示）", "weight": "bold", "size": "xs", "color": "#8B008B", "margin": "md"},
+                {"type": "text", "text": "• 用戶看到「請假(感冒)」", "size": "xs", "margin": "sm"},
+                
+                {"type": "text", "text": "第二層（系統實現）", "weight": "bold", "size": "xs", "color": "#8B008B", "margin": "md"},
+                {"type": "text", "text": "• status='準備'（正常狀態）", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• passenger_leave_reason='感冒'", "size": "xs"},
+                
+                {"type": "text", "text": "第三層（生產線邏輯）", "weight": "bold", "size": "xs", "color": "#8B008B", "margin": "md"},
+                {"type": "text", "text": "• 正常執行所有業務流程", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 自動掉入 completed_trips", "size": "xs"},
+                {"type": "text", "text": "• 車資通常為負數或零", "size": "xs"},
+                
+                {"type": "text", "text": "🔄 三種請假模式", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
+                {"type": "text", "text": "• 臨時請假（現在態）：trips表", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 長期請假（未來態）：fixed_schedules", "size": "xs"},
+                {"type": "text", "text": "• 跨時間態恢復：自動傳承機制", "size": "xs"},
+                
+                {"type": "text", "text": "🎯 設計哲學", "weight": "bold", "size": "sm", "color": "#32CD32", "margin": "md"},
+                {"type": "text", "text": "讓複雜的業務需求在簡潔的技術架構上優雅地運行", "size": "xs", "color": "#666666", "wrap": True, "margin": "sm"}
             ]
         },
         "footer": {
@@ -453,7 +640,12 @@ def get_complete_commands_help():
                 {"type": "text", "text": "🛠️ 特殊功能", "weight": "bold", "size": "sm", "color": "#32CD32", "margin": "md"},
                 {"type": "text", "text": "• 批量加成 - 問答式批量加成", "size": "xs", "margin": "sm"},
                 {"type": "text", "text": "• 查詢[地點/日期]車資 - AI車資查詢", "size": "xs"},
-                {"type": "text", "text": "• 修改班次[ID]車資[金額] - AI車資修改", "size": "xs"}
+                {"type": "text", "text": "• 修改班次[ID]車資[金額] - AI車資修改", "size": "xs"},
+                
+                {"type": "text", "text": "📖 系統指南", "weight": "bold", "size": "sm", "color": "#FF8C00", "margin": "md"},
+                {"type": "text", "text": "• 生產線思維指南 - 核心概念與架構", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 快速參考 - 操作速查與狀態識別", "size": "xs"},
+                {"type": "text", "text": "• 高級請假系統 - 障眼法設計解析", "size": "xs"}
             ]
         },
         "footer": {

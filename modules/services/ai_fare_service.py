@@ -10,7 +10,8 @@ from typing import List, Dict, Optional, Tuple
 from modules.models.base import db
 from modules.utils.taiwan_time import get_taiwan_time, get_taiwan_date
 from modules.utils.helpers import parse_date_input  # 🔥 修復：使用系統統一的日期解析器
-from modules.utils.conversation_context import conversation_manager  # 🔥 新增：對話上下文管理
+# from modules.utils.conversation_context import conversation_manager  # 🔥 新增：對話上下文管理
+# from modules.utils.enhanced_date_parser import EnhancedDateParser
 from sqlalchemy import text
 import traceback
 
@@ -59,41 +60,41 @@ def should_use_ai_query(message_text: str) -> bool:
     # 檢查是否有數字模式（可能是費用或ID）
     has_numbers = bool(re.search(r'\d+', message_text))
     
-    # 決策邏輯
-    # 1. 明確的車資相關查詢
+    # 決策邏輯 - 🔧 修復：只處理真正的車資查詢，不要貪心攔截所有班次查詢
+    # 1. 明確的車資相關查詢（必須包含車資詞彙）
     if has_fare and has_action:
         return True
     
-    # 2. 有班次ID的操作
-    if has_trip_id and (has_action or has_modification):
+    # 2. 有班次ID的車資操作（必須包含車資詞彙）
+    if has_trip_id and has_fare and (has_action or has_modification):
         return True
     
-    # 3. 班次相關查詢
-    if has_trip and (has_action or has_time or has_location or has_driver):
+    # 🔥 刪除：貪心的班次查詢攔截邏輯
+    # if has_trip and (has_action or has_time or has_location or has_driver):
+    #     return True
+    
+    # 3. 修改意圖（必須包含車資詞彙）
+    if has_modification and has_numbers and has_fare:
         return True
     
-    # 4. 修改意圖
-    if has_modification and has_numbers:
+    # 4. 車資相關的地點+時間查詢
+    if has_location and has_time and has_action and has_fare:
         return True
     
-    # 5. 地點+時間組合查詢
-    if has_location and has_time and has_action:
+    # 5. 司機車資查詢（必須包含車資詞彙）
+    if has_driver and (has_action or has_time) and has_numbers and has_fare:
         return True
     
-    # 6. 司機相關查詢
-    if has_driver and (has_action or has_time) and has_numbers:
-        return True
-    
-    # 7. 自然語言模式檢測
-    natural_patterns = [
-        r'我要查.*的.*',           # 我要查今天的班次
-        r'.*的.*班次',             # 今天的診所班次  
-        r'.*司機.*的.*',           # 司機123的班次
-        r'.*費用.*是.*',           # 這個費用是多少
+    # 6. 自然語言車資模式檢測
+    fare_patterns = [
+        r'.*車資.*',               # 明確提到車資
+        r'.*費用.*',               # 明確提到費用  
+        r'.*金額.*',               # 明確提到金額
         r'.*錶價.*加成.*',         # 錶價400加成80
+        r'修改.*班次.*\d+.*元',    # 修改班次費用
     ]
     
-    for pattern in natural_patterns:
+    for pattern in fare_patterns:
         if re.search(pattern, message_text):
             return True
     
@@ -534,205 +535,485 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True):
         logger.info(f"處理智能車資查詢: {message_text}")
         
         # 🔥 新增：首先嘗試使用對話上下文解析不完整查詢
-        context_resolution = conversation_manager.try_resolve_incomplete_query(user_id, message_text)
+        # context_resolution = conversation_manager.try_resolve_incomplete_query(user_id, message_text)
         
-        if context_resolution:
-            if context_resolution.get('resolved'):
-                # 成功通過上下文解析到具體班次
-                trip = context_resolution['trip']
-                context_info = context_resolution['context_info']
+        # if context_resolution:
+        #     if context_resolution.get('resolved'):
+        #         # 成功通過上下文解析到具體班次
+        #         trip = context_resolution['trip']
+        #         context_info = context_resolution['context_info']
                 
-                # 檢查是否有修改意圖
-                modification_intent = parse_fare_modification_intent(message_text)
+        #         # 檢查是否有修改意圖
+        #         modification_intent = parse_fare_modification_intent(message_text)
                 
-                if modification_intent:
-                    # 🔥 核心修复：检查是否有明确原因
-                    reason = modification_intent.get('reason', '')
+        #         if modification_intent:
+        #             # 🔥 核心修复：检查是否有明确原因
+        #             reason = modification_intent.get('reason', '')
                     
-                    # 🔥 判断原因是否是AI推断的默认原因（需要追问）
-                    default_reasons = ['透過AI智能修改', '錶價260加成', '費用調整要求']
-                    is_default_reason = not reason or reason in default_reasons or len(reason.strip()) < 3
+        #             # 🔥 判断原因是否是AI推断的默认原因（需要追问）
+        #             default_reasons = ['透過AI智能修改', '錶價260加成', '費用調整要求']
+        #             is_default_reason = not reason or reason in default_reasons or len(reason.strip()) < 3
                     
-                    if is_default_reason:
-                        # 需要追问原因，不直接执行修改
-                        meter_change = modification_intent.get('meter_fare', trip['meter_fare'])
-                        extra_change = modification_intent.get('extra_fare', trip['extra_fare'])
+        #             if is_default_reason:
+        #                 # 需要追问原因，不直接执行修改
+        #                 meter_change = modification_intent.get('meter_fare', trip['meter_fare'])
+        #                 extra_change = modification_intent.get('extra_fare', trip['extra_fare'])
                         
-                        # 保存待执行的修改到上下文
-                        conversation_manager.set_pending_modification(user_id, {
-                            'trip_id': trip['id'],
-                            'meter_fare': meter_change,
-                            'extra_fare': extra_change,
-                            'trip': trip
-                        })
+        #                 # 保存待执行的修改到上下文
+        #                 conversation_manager.set_pending_modification(user_id, {
+        #                     'trip_id': trip['id'],
+        #                     'meter_fare': meter_change,
+        #                     'extra_fare': extra_change,
+        #                     'trip': trip
+        #                 })
                         
-                        return f"""✅ 已理解要修改的内容：
+        #                 return f"""✅ 已理解要修改的内容：
 
-📋 班次：#{trip['id']} ({trip['category']})
-📍 路線：{trip['start_point']} → {trip['end_point']}
-💰 費用變更：{trip['meter_fare']}+{trip['extra_fare']} → {meter_change}+{extra_change}
-📊 總計變化：{(meter_change + extra_change) - (trip['meter_fare'] + trip['extra_fare']):+d} 元
+        # 📋 班次：#{trip['id']} ({trip['category']})
+        # 📍 路線：{trip['start_point']} → {trip['end_point']}
+        # 💰 費用變更：{trip['meter_fare']}+{trip['extra_fare']} → {meter_change}+{extra_change}
+        # 📊 總計變化：{(meter_change + extra_change) - (trip['meter_fare'] + trip['extra_fare']):+d} 元
 
-❓ 請說明修改原因：
-（例如：客戶要求調整、等候時間過長、夜班費用等）"""
-                    else:
-                        # 有明确原因，直接执行修改
-                        result = execute_fare_modification(trip, modification_intent, user_id)
+        # ❓ 請說明修改原因：
+        # （例如：客戶要求調整、等候時間過長、夜班費用等）"""
+        #             else:
+        #                 # 有明确原因，直接执行修改
+        #                 result = execute_fare_modification(trip, modification_intent, user_id)
                         
-                        # 🔥 修復：正確處理字典格式的返回結果
-                        if isinstance(result, dict) and 'flex_message' in result:
-                            # 返回Flex格式結果
-                            return result
-                        else:
-                            # 降級為文字結果
-                            return f"""🎯 智能上下文解析
+        #                 # 🔥 修復：正確處理字典格式的返回結果
+        #                 if isinstance(result, dict) and 'flex_message' in result:
+        #                     # 返回Flex格式結果
+        #                     return result
+        #                 else:
+        #                     # 降級為文字結果
+        #                     return f"""🎯 智能上下文解析
 
-💬「{message_text}」
-🧠 {context_info}
+        # 💬「{message_text}」
+        # 🧠 {context_info}
 
-{result}"""
-                else:
-                    # 只是查詢，詢問如何修改
-                    meter_fare = trip['meter_fare'] or 0
-                    extra_fare = trip['extra_fare'] or 0
+        # {result}"""
+        #         else:
+        #             # 只是查詢，詢問如何修改
+        #             meter_fare = trip['meter_fare'] or 0
+        #             extra_fare = trip['extra_fare'] or 0
                     
-                    if extra_fare >= 0:
-                        fare_display = f"錶價 {meter_fare}, 加成 {extra_fare}"
-                    else:
-                        fare_display = f"錶價 {meter_fare}, 加成 {extra_fare}"
+        #             if extra_fare >= 0:
+        #                 fare_display = f"錶價 {meter_fare}, 加成 {extra_fare}"
+        #             else:
+        #                 fare_display = f"錶價 {meter_fare}, 加成 {extra_fare}"
                     
-                    return f"""🎯 智能解析結果
+        #             return f"""🎯 智能解析結果
 
-💬「{message_text}」
-🧠 {context_info}
+        # 💬「{message_text}」
+        # 🧠 {context_info}
 
-📋 班次 #{trip['id']} ({trip['category']})
-📍 {trip['start_point']} → {trip['end_point']}
-🚕 {trip['driver_id']} | 💰 {fare_display}
+        # 📋 班次 #{trip['id']} ({trip['category']})
+        # 📍 {trip['start_point']} → {trip['end_point']}
+        # 🚕 {trip['driver_id']} | 💰 {fare_display}
 
-請告訴我要如何調整費用？
-例如：「改成錶價400加成80，客戶要求調整」"""
+        # 請告訴我要如何調整費用？
+        # 例如：「改成錶價400加成80，客戶要求調整」"""
             
-            elif context_resolution.get('needs_clarification'):
-                # 需要用戶澄清
-                message = context_resolution['message']
-                available_trips = context_resolution['available_trips']
-                trips_summary = format_multiple_trips_summary(available_trips)
+        #         elif context_resolution.get('needs_clarification'):
+        #             # 需要用戶澄清
+        #             message = context_resolution['message']
+        #             available_trips = context_resolution['available_trips']
+        #             trips_summary = format_multiple_trips_summary(available_trips)
                 
-                if use_flex:
-                    from modules.flex_designs.ai_fare_query_flex import create_ai_clarification_flex
-                    search_info = {'query': message_text}
-                    return create_ai_clarification_flex(search_info, message, available_trips)
-                else:
-                    return f"""🤔 需要您澄清
+        #             if use_flex:
+        #                 from modules.flex_designs.ai_fare_query_flex import create_ai_clarification_flex
+        #                 search_info = {'query': message_text}
+        #                 return create_ai_clarification_flex(search_info, message, available_trips)
+        #             else:
+        #                 return f"""🤔 需要您澄清
 
-💬「{message_text}」
-⚠️ {message}
+        # 💬「{message_text}」
+        # ⚠️ {message}
 
-{trips_summary}
+        # {trips_summary}
 
-💡 操作提示：
-• 修改第1個費用為400加成80
-• 修改班次#{available_trips[0]['id']}"""
+        # 💡 操作提示：
+        # • 修改第1個費用為400加成80
+        # • 修改班次#{available_trips[0]['id']}"""
         
+        #         # 🔥 检查是否是对之前追问的回复（用户提供原因）
+        #         pending_modification = conversation_manager.get_pending_modification(user_id)
+        #         if pending_modification:
+        #             # 🔥 修復：檢查用戶是否想要開始新的查詢而不是回覆原因
+        #             # 如果輸入包含新的車資查詢關鍵詞，清除舊的pending並重新處理
+        #             new_query_indicators = [
+        #                 '查詢', '查', '找', '搜尋', '顯示', '看',  # 查詢動詞
+        #                 '修改班次#', '班次#', '#',  # 新的班次ID
+        #                 '今天', '明天', '昨天', '月', '日',  # 時間詞
+        #                 '台中', '彰化', '診所', '醫院'  # 地點詞
+        #             ]
+                
+        #             is_new_query = any(indicator in message_text for indicator in new_query_indicators)
+                
+        #             # 🔥 新增：檢查是否包含新的修改意圖（不同的班次或費用）
+        #             current_modification = parse_fare_modification_intent(message_text)
+        #             is_new_modification = False
+                
+        #             if current_modification:
+        #                 # 如果有新的費用意圖，檢查是否與待執行的不同
+        #                 pending_trip_id = pending_modification.get('trip_id')
+        #                 new_meter = current_modification.get('meter_fare')
+        #                 new_extra = current_modification.get('extra_fare')
+                
+        #                 # 檢查班次ID或費用是否不同
+        #                 trip_id_in_text = re.search(r'班次#?(\d+)|#(\d+)', message_text)
+        #                 if trip_id_in_text:
+        #                     mentioned_trip_id = int(trip_id_in_text.group(1) or trip_id_in_text.group(2))
+        #                     if mentioned_trip_id != pending_trip_id:
+        #                         is_new_modification = True
+                
+        #                 # 檢查費用是否不同
+        #                 if new_meter and new_meter != pending_modification.get('meter_fare'):
+        #                     is_new_modification = True
+        #                 if new_extra and new_extra != pending_modification.get('extra_fare'):
+        #                     is_new_modification = True
+            
+        #             if is_new_query or is_new_modification:
+        #                 # 用戶想要開始新的查詢或修改，清除舊的pending
+        #                 logger.info(f"用戶開始新查詢，清除待執行修改: {message_text}")
+        #                 conversation_manager.clear_pending_modification(user_id)
+        #                 # 重新處理這個消息（遞歸調用）
+        #                 return handle_smart_fare_query(message_text, user_id)
+            
+        #             # 確實是在回覆原因
+        #             reason = message_text.strip()
+            
+        #             # 🔥 增強原因驗證：更寬鬆的判斷邏輯
+        #             if len(reason) > 1 and not reason.isdigit():
+        #                 # 🔥 過濾明顯不是原因的回覆
+        #                 not_reason_patterns = [
+        #                     r'^錶價\d+',         # 錶價數字
+        #                     r'^加成[+-]?\d+',    # 加成數字
+        #                     r'^\d+$',            # 純數字
+        #                     r'^[+-]?\d+$',       # 帶符號的純數字
+        #                 ]
+                
+        #                 is_not_reason = any(re.match(pattern, reason) for pattern in not_reason_patterns)
+                
+        #                 if not is_not_reason:
+        #                     # 执行之前暂停的修改
+        #                     trip = pending_modification['trip']
+        #                     modification_intent = {
+        #                         'meter_fare': pending_modification['meter_fare'],
+        #                         'extra_fare': pending_modification['extra_fare'],
+        #                         'reason': reason
+        #                     }
+                    
+        #                     # 清除待执行修改
+        #                     conversation_manager.clear_pending_modification(user_id)
+                    
+        #                     result = execute_fare_modification(trip, modification_intent, user_id)
+                    
+        #                     # 🔥 修復：正確處理字典格式的返回結果
+        #                     if isinstance(result, dict) and 'flex_message' in result:
+        #                         # 返回Flex格式結果
+        #                         return result
+        #                     else:
+        #                         # 降級為文字結果
+        #                         return f"""✅ 修改原因已记录
+
+        # 📝 修改原因：{reason}
+
+        # {result}"""
+            
+        #             # 原因無效，繼續要求
+        #             return f"""❓ 请提供更具体的修改原因：
+
+        # 当前输入：「{reason}」
+        # ❌ 原因过于简短或可能不是原因描述
+
+        # 💡 请说明为什么要修改费用，例如：
+        # • 客戶要求調整價格
+        # • 等候時間過長  
+        # • 夜班服務費
+        # • 路線變更
+
+        # 💭 如果要查詢其他班次，請直接說「查詢...」開始新查詢。"""
+        
+        #         # 🔥 如果上下文無法解析，繼續原有的智能解析流程
+        #         modification_intent = parse_fare_modification_intent(message_text)
+        
+        #         matcher = CompletedTripMatcher()
+        #         criteria = matcher.parse_natural_query(message_text)
+        
+        #         logger.info(f"解析條件: {criteria}")
+        #         logger.info(f"修改意圖: {modification_intent}")
+        
+        #         # 🔥 新增：信心度檢查和條件顯示
+        #         confidence = criteria.get('confidence', 'high')
+        
+        #         # 格式化AI理解的條件
+        #         understood_criteria = format_understood_criteria(criteria)
+        
+        #         # 如果信心度很低，詢問用戶澄清
+        #         if confidence == 'very_low':
+        #             if use_flex:
+        #                 from modules.flex_designs.ai_fare_query_flex import create_ai_very_low_confidence_flex
+        #                 search_info = {'query': message_text}
+        #                 return create_ai_very_low_confidence_flex(search_info)
+        #             else:
+        #                 return f"""🤔 抱歉，我無法理解您的查詢條件
+
+        # 💬 {message_text}
+
+        # 💡 請嘗試更明確的描述：
+        #   日期：「5/30」、「今天」、「昨天」
+        #   司機：「司機123」、「123號司機」  
+        #   類別：「診所」、「東洋」、「臨時」
+        #   班次ID：「班次#322」、「修改班次#322」
+
+        # 或使用「查已完成」查看完整列表後再選擇修改。"""
+
+        #         # 如果信心度低，顯示理解並詢問確認
+        #         if confidence == 'low':
+        #             if use_flex:
+        #                 from modules.flex_designs.ai_fare_query_flex import create_ai_low_confidence_flex
+        #                 search_info = {'query': message_text}
+        #                 return create_ai_low_confidence_flex(search_info, understood_criteria)
+        #             else:
+        #                 return f"""⚠️ 請確認我的理解是否正確
+
+        # 💬 {message_text}
+
+        # {understood_criteria}
+
+        # 如果正確請說「確認」，如果不對請重新描述您的需求。"""
+
+        #         # 搜索匹配的班次
+        #         matching_trips = matcher.search_completed_trips(criteria)
+        
+        #         # 🔥 新增：保存查詢結果到對話上下文
+        #         conversation_manager.update_query_result(
+        #             user_id=user_id,
+        #             query=message_text,
+        #             criteria=criteria,
+        #             trips=matching_trips,
+        #             confidence=confidence
+        #         )
+        
+        #         # 🔥 新增：總是顯示搜索條件，提高透明度
+        #         search_header = f"""🔍 AI智能搜索
+
+        # 💬 {message_text}
+        # {understood_criteria}
+
+        # """
+        
+        #         if not matching_trips:
+        #             if use_flex:
+        #                 from modules.flex_designs.ai_fare_query_flex import create_ai_search_result_flex
+        #                 search_info = {
+        #                     'query': message_text,
+        #                     'criteria_text': understood_criteria.replace('\n', ', ').replace('  ', '')
+        #                 }
+        #                 return create_ai_search_result_flex(search_info, [], confidence)
+        #             else:
+        #                 return f"""{search_header}❌ 找不到符合條件的班次記錄
+
+        # 💡 建議：
+        # • 嘗試更寬泛的條件（如「今天的診所班次」）
+        # • 使用「查已完成」查看完整列表
+        # • 確認日期和關鍵詞是否正確
+        # • 檢查司機ID是否存在"""
+        
+        #         elif len(matching_trips) == 1:
+        #             trip = matching_trips[0]
+            
+        #             # 🔥 修復：正確格式化費用顯示
+        #             meter_fare = trip['meter_fare'] or 0
+        #             extra_fare = trip['extra_fare'] or 0
+            
+        #             if extra_fare >= 0:
+        #                 fare_display = f"錶價 {meter_fare}, 加成 {extra_fare}"
+        #             else:
+        #                 fare_display = f"錶價 {meter_fare}, 加成 {extra_fare}"  # 負數自帶負號
+            
+        #             # 🔥 如果有修改意圖，检查是否需要追问原因
+        #             if modification_intent:
+        #                 reason = modification_intent.get('reason', '')
+        #                 default_reasons = ['透過AI智能修改', '錶價260加成', '費用調整要求']
+        #                 is_default_reason = not reason or reason in default_reasons or len(reason.strip()) < 3
+                
+        #                 if is_default_reason:
+        #                     # 需要追问原因
+        #                     meter_change = modification_intent.get('meter_fare', meter_fare)
+        #                     extra_change = modification_intent.get('extra_fare', extra_fare)
+                    
+        #                     # 保存待执行的修改到上下文
+        #                     conversation_manager.set_pending_modification(user_id, {
+        #                         'trip_id': trip['id'],
+        #                         'meter_fare': meter_change,
+        #                         'extra_fare': extra_change,
+        #                         'trip': trip
+        #                     })
+                    
+        #                     return f"""{search_header}✅ 已理解要修改的内容：
+
+        # 📋 班次：#{trip['id']} ({trip['category']})
+        # 📍 路線：{trip['start_point']} → {trip['end_point']}
+        # 💰 費用變更：{meter_fare}+{extra_fare} → {meter_change}+{extra_change}
+        # 📊 總計變化：{(meter_change + extra_change) - (meter_fare + extra_fare):+d} 元
+
+        # ❓ 請說明修改原因：
+        #   例如：客戶要求調整、等候時間過長、夜班費用等"""
+        #                 else:
+        #                     # 有明确原因，直接执行修改
+        #                     result = execute_fare_modification(trip, modification_intent, user_id)
+                    
+        #                     # 🔥 修復：正確處理字典格式的返回結果
+        #                     if isinstance(result, dict) and 'flex_message' in result:
+        #                         # 返回Flex格式結果
+        #                         return result
+        #                     else:
+        #                         # 降級為文字結果
+        #                         return f"{search_header}✅ 找到唯一匹配班次並執行修改：\n\n{result}"
+            
+        #             # 只是查詢，詢問如何修改
+        #             if use_flex:
+        #                 from modules.flex_designs.ai_fare_query_flex import create_ai_search_result_flex
+        #                 search_info = {
+        #                     'query': message_text,
+        #                     'criteria_text': understood_criteria.replace('\n', ', ').replace('  ', '')
+        #                 }
+        #                 return create_ai_search_result_flex(search_info, [trip], confidence)
+        #             else:
+        #                 return f"""{search_header}🎯 找到唯一匹配的班次：
+
+        # 📋 班次 #{trip['id']} ({trip['category']})
+        # 📍 路線：{trip['start_point']} → {trip['end_point']}
+        # 🚕 {trip['driver_id']}
+        # 💰 當前費用：{fare_display}
+
+        # 請告訴我要如何調整費用？
+        # 例如：「改成錶價400加成80，客戶要求調整」
+
+        # 或使用傳統格式：記錄車資 {trip['id']} [錶價] [加成] [原因]
+
+        # 💡 提示：現在您可以直接說「改成錶價XXX加成XXX」，我會記住這個班次！"""
+        
+        #         else:
+        #             # 多個匹配的情況 - 🔥 修復：直接顯示所有結果，不使用分頁
+        #             if use_flex:
+        #                 from modules.flex_designs.ai_fare_query_flex import create_ai_search_result_flex
+        #                 search_info = {
+        #                     'query': message_text,
+        #                     'criteria_text': understood_criteria.replace('\n', ', ').replace('  ', '')
+        #                 }
+        #                 return create_ai_search_result_flex(search_info, matching_trips, confidence)
+        #             else:
+        #                 trips_summary = format_multiple_trips_summary(matching_trips)
+                
+        #                 if modification_intent:
+        #                     return f"""{search_header}⚠️ 找到 {len(matching_trips)} 個匹配班次，請選擇：
+
+        # {trips_summary}"""
+                
+        #                 # 只是查詢多個結果
+        #                 return f"""{search_header}{trips_summary}"""
+            
         # 🔥 检查是否是对之前追问的回复（用户提供原因）
-        pending_modification = conversation_manager.get_pending_modification(user_id)
-        if pending_modification:
-            # 🔥 修復：檢查用戶是否想要開始新的查詢而不是回覆原因
-            # 如果輸入包含新的車資查詢關鍵詞，清除舊的pending並重新處理
-            new_query_indicators = [
-                '查詢', '查', '找', '搜尋', '顯示', '看',  # 查詢動詞
-                '修改班次#', '班次#', '#',  # 新的班次ID
-                '今天', '明天', '昨天', '月', '日',  # 時間詞
-                '台中', '彰化', '診所', '醫院'  # 地點詞
-            ]
+        # pending_modification = conversation_manager.get_pending_modification(user_id)
+        # if pending_modification:
+        #     # 🔥 修復：檢查用戶是否想要開始新的查詢而不是回覆原因
+        #     # 如果輸入包含新的車資查詢關鍵詞，清除舊的pending並重新處理
+        #     new_query_indicators = [
+        #         '查詢', '查', '找', '搜尋', '顯示', '看',  # 查詢動詞
+        #         '修改班次#', '班次#', '#',  # 新的班次ID
+        #         '今天', '明天', '昨天', '月', '日',  # 時間詞
+        #         '台中', '彰化', '診所', '醫院'  # 地點詞
+        #     ]
             
-            is_new_query = any(indicator in message_text for indicator in new_query_indicators)
+        #     is_new_query = any(indicator in message_text for indicator in new_query_indicators)
             
-            # 🔥 新增：檢查是否包含新的修改意圖（不同的班次或費用）
-            current_modification = parse_fare_modification_intent(message_text)
-            is_new_modification = False
+        #     # 🔥 新增：檢查是否包含新的修改意圖（不同的班次或費用）
+        #     current_modification = parse_fare_modification_intent(message_text)
+        #     is_new_modification = False
             
-            if current_modification:
-                # 如果有新的費用意圖，檢查是否與待執行的不同
-                pending_trip_id = pending_modification.get('trip_id')
-                new_meter = current_modification.get('meter_fare')
-                new_extra = current_modification.get('extra_fare')
+        #     if current_modification:
+        #         # 如果有新的費用意圖，檢查是否與待執行的不同
+        #         pending_trip_id = pending_modification.get('trip_id')
+        #         new_meter = current_modification.get('meter_fare')
+        #         new_extra = current_modification.get('extra_fare')
                 
-                # 檢查班次ID或費用是否不同
-                trip_id_in_text = re.search(r'班次#?(\d+)|#(\d+)', message_text)
-                if trip_id_in_text:
-                    mentioned_trip_id = int(trip_id_in_text.group(1) or trip_id_in_text.group(2))
-                    if mentioned_trip_id != pending_trip_id:
-                        is_new_modification = True
+        #         # 檢查班次ID或費用是否不同
+        #         trip_id_in_text = re.search(r'班次#?(\d+)|#(\d+)', message_text)
+        #         if trip_id_in_text:
+        #             mentioned_trip_id = int(trip_id_in_text.group(1) or trip_id_in_text.group(2))
+        #             if mentioned_trip_id != pending_trip_id:
+        #                 is_new_modification = True
                 
-                # 檢查費用是否不同
-                if new_meter and new_meter != pending_modification.get('meter_fare'):
-                    is_new_modification = True
-                if new_extra and new_extra != pending_modification.get('extra_fare'):
-                    is_new_modification = True
+        #         # 檢查費用是否不同
+        #         if new_meter and new_meter != pending_modification.get('meter_fare'):
+        #             is_new_modification = True
+        #         if new_extra and new_extra != pending_modification.get('extra_fare'):
+        #             is_new_modification = True
             
-            if is_new_query or is_new_modification:
-                # 用戶想要開始新的查詢或修改，清除舊的pending
-                logger.info(f"用戶開始新查詢，清除待執行修改: {message_text}")
-                conversation_manager.clear_pending_modification(user_id)
-                # 重新處理這個消息（遞歸調用）
-                return handle_smart_fare_query(message_text, user_id)
+        #     if is_new_query or is_new_modification:
+        #         # 用戶想要開始新的查詢或修改，清除舊的pending
+        #         logger.info(f"用戶開始新查詢，清除待執行修改: {message_text}")
+        #         conversation_manager.clear_pending_modification(user_id)
+        #         # 重新處理這個消息（遞歸調用）
+        #         return handle_smart_fare_query(message_text, user_id)
             
-            # 確實是在回覆原因
-            reason = message_text.strip()
+        #     # 確實是在回覆原因
+        #     reason = message_text.strip()
             
-            # 🔥 增強原因驗證：更寬鬆的判斷邏輯
-            if len(reason) > 1 and not reason.isdigit():
-                # 🔥 過濾明顯不是原因的回覆
-                not_reason_patterns = [
-                    r'^錶價\d+',         # 錶價數字
-                    r'^加成[+-]?\d+',    # 加成數字
-                    r'^\d+$',            # 純數字
-                    r'^[+-]?\d+$',       # 帶符號的純數字
-                ]
+        #     # 🔥 增強原因驗證：更寬鬆的判斷邏輯
+        #     if len(reason) > 1 and not reason.isdigit():
+        #         # 🔥 過濾明顯不是原因的回覆
+        #         not_reason_patterns = [
+        #             r'^錶價\d+',         # 錶價數字
+        #             r'^加成[+-]?\d+',    # 加成數字
+        #             r'^\d+$',            # 純數字
+        #             r'^[+-]?\d+$',       # 帶符號的純數字
+        #         ]
                 
-                is_not_reason = any(re.match(pattern, reason) for pattern in not_reason_patterns)
+        #         is_not_reason = any(re.match(pattern, reason) for pattern in not_reason_patterns)
                 
-                if not is_not_reason:
-                    # 执行之前暂停的修改
-                    trip = pending_modification['trip']
-                    modification_intent = {
-                        'meter_fare': pending_modification['meter_fare'],
-                        'extra_fare': pending_modification['extra_fare'],
-                        'reason': reason
-                    }
+        #         if not is_not_reason:
+        #             # 执行之前暂停的修改
+        #             trip = pending_modification['trip']
+        #             modification_intent = {
+        #                 'meter_fare': pending_modification['meter_fare'],
+        #                 'extra_fare': pending_modification['extra_fare'],
+        #                 'reason': reason
+        #             }
                     
-                    # 清除待执行修改
-                    conversation_manager.clear_pending_modification(user_id)
+        #             # 清除待执行修改
+        #             conversation_manager.clear_pending_modification(user_id)
                     
-                    result = execute_fare_modification(trip, modification_intent, user_id)
+        #             result = execute_fare_modification(trip, modification_intent, user_id)
                     
-                    # 🔥 修復：正確處理字典格式的返回結果
-                    if isinstance(result, dict) and 'flex_message' in result:
-                        # 返回Flex格式結果
-                        return result
-                    else:
-                        # 降級為文字結果
-                        return f"""✅ 修改原因已记录
+        #                     # 🔥 修復：正確處理字典格式的返回結果
+        #                     if isinstance(result, dict) and 'flex_message' in result:
+        #                         # 返回Flex格式結果
+        #                         return result
+        #                     else:
+        #                         # 降級為文字結果
+        #                         return f"""✅ 修改原因已记录
 
-📝 修改原因：{reason}
+        # 📝 修改原因：{reason}
 
-{result}"""
+        # {result}"""
             
-            # 原因無效，繼續要求
-            return f"""❓ 请提供更具体的修改原因：
+        #     # 原因無效，繼續要求
+        #     return f"""❓ 请提供更具体的修改原因：
 
-当前输入：「{reason}」
-❌ 原因过于简短或可能不是原因描述
+        # 当前输入：「{reason}」
+        # ❌ 原因过于简短或可能不是原因描述
 
-💡 请说明为什么要修改费用，例如：
-• 客戶要求調整價格
-• 等候時間過長  
-• 夜班服務費
-• 路線變更
+        # 💡 请说明为什么要修改费用，例如：
+        # • 客戶要求調整價格
+        # • 等候時間過長  
+        # • 夜班服務費
+        # • 路線變更
 
-💭 如果要查詢其他班次，請直接說「查詢...」開始新查詢。"""
+        # 💭 如果要查詢其他班次，請直接說「查詢...」開始新查詢。"""
         
         # 🔥 如果上下文無法解析，繼續原有的智能解析流程
         modification_intent = parse_fare_modification_intent(message_text)
@@ -749,51 +1030,9 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True):
         # 格式化AI理解的條件
         understood_criteria = format_understood_criteria(criteria)
         
-        # 如果信心度很低，詢問用戶澄清
-        if confidence == 'very_low':
-            if use_flex:
-                from modules.flex_designs.ai_fare_query_flex import create_ai_very_low_confidence_flex
-                search_info = {'query': message_text}
-                return create_ai_very_low_confidence_flex(search_info)
-            else:
-                return f"""🤔 抱歉，我無法理解您的查詢條件
-
-💬 {message_text}
-
-💡 請嘗試更明確的描述：
-  日期：「5/30」、「今天」、「昨天」
-  司機：「司機123」、「123號司機」  
-  類別：「診所」、「東洋」、「臨時」
-  班次ID：「班次#322」、「修改班次#322」
-
-或使用「查已完成」查看完整列表後再選擇修改。"""
-
-        # 如果信心度低，顯示理解並詢問確認
-        if confidence == 'low':
-            if use_flex:
-                from modules.flex_designs.ai_fare_query_flex import create_ai_low_confidence_flex
-                search_info = {'query': message_text}
-                return create_ai_low_confidence_flex(search_info, understood_criteria)
-            else:
-                return f"""⚠️ 請確認我的理解是否正確
-
-💬 {message_text}
-
-{understood_criteria}
-
-如果正確請說「確認」，如果不對請重新描述您的需求。"""
-
+        # 🔥 移除愚蠢的確認邏輯，直接執行查詢！
         # 搜索匹配的班次
         matching_trips = matcher.search_completed_trips(criteria)
-        
-        # 🔥 新增：保存查詢結果到對話上下文
-        conversation_manager.update_query_result(
-            user_id=user_id,
-            query=message_text,
-            criteria=criteria,
-            trips=matching_trips,
-            confidence=confidence
-        )
         
         # 🔥 新增：總是顯示搜索條件，提高透明度
         search_header = f"""🔍 AI智能搜索
@@ -844,12 +1083,12 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True):
                     extra_change = modification_intent.get('extra_fare', extra_fare)
                     
                     # 保存待执行的修改到上下文
-                    conversation_manager.set_pending_modification(user_id, {
-                        'trip_id': trip['id'],
-                        'meter_fare': meter_change,
-                        'extra_fare': extra_change,
-                        'trip': trip
-                    })
+                    # conversation_manager.set_pending_modification(user_id, {
+                    #     'trip_id': trip['id'],
+                    #     'meter_fare': meter_change,
+                    #     'extra_fare': extra_change,
+                    #     'trip': trip
+                    # })
                     
                     return f"""{search_header}✅ 已理解要修改的内容：
 
@@ -939,14 +1178,14 @@ def execute_fare_modification(trip: Dict, modification_intent: Dict, user_id: st
         logger.info(f"📋 準備AI修改確認界面: trip_id={trip_id}, meter={current_meter}->{new_meter}, extra={current_extra}->{new_extra}, reason='{reason}'")
         
         # 🔥 參考預約叫車：保存待執行的修改到上下文（關鍵步驟！）
-        from modules.utils.conversation_context import conversation_manager
-        conversation_manager.set_pending_modification(user_id, {
-            'trip_id': trip_id,
-            'meter_fare': new_meter,
-            'extra_fare': new_extra,
-            'reason': reason,
-            'trip': trip
-        })
+        # from modules.utils.conversation_context import conversation_manager
+        # conversation_manager.set_pending_modification(user_id, {
+        #     'trip_id': trip_id,
+        #     'meter_fare': new_meter,
+        #     'extra_fare': new_extra,
+        #     'reason': reason,
+        #     'trip': trip
+        # })
         
         logger.info(f"✅ 已保存待執行修改到上下文: trip_id={trip_id}")
         

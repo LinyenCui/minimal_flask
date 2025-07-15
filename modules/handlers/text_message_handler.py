@@ -37,7 +37,16 @@ def process_text_message(event):
     # 傳入的 event.message.text 應該是已經過 webhook.py 處理的文本
     message_text = event.message.text 
     reply_token = event.reply_token
-    user_id = event.source.user_id
+    
+    # 🚨 修復：安全獲取user_id，避免Source沒有user_id屬性的錯誤
+    try:
+        user_id = event.source.user_id if hasattr(event.source, 'user_id') else None
+        if not user_id:
+            logger.warning(f"無法獲取user_id，Source類型: {type(event.source)}")
+            return
+    except Exception as e:
+        logger.error(f"獲取user_id時出錯: {e}")
+        return
     
     # 記錄將要處理的文本
     command_text_lower = message_text.strip().lower()
@@ -540,45 +549,69 @@ def process_text_message(event):
             reply_text(reply_token, result_text)
             return
             
+        # 🔥 新增：查詢班次命令 - 支援複雜條件
+        elif message_text.startswith("查詢班次"):
+            try:
+                logger.info(f"🔍 處理查詢班次命令: {message_text}")
+                from modules.services.advanced_query_processor import AdvancedQueryProcessor
+                
+                # 使用高級查詢處理器
+                processor = AdvancedQueryProcessor()
+                result = processor.process_complex_query(message_text, user_id)
+                
+                if result["type"] == "success":
+                    reply_text(reply_token, result["message"])
+                elif result["type"] == "invalid_status":
+                    reply_text(reply_token, result["message"])
+                elif result["type"] == "no_results":
+                    reply_text(reply_token, result["message"]) 
+                elif result["type"] == "error":
+                    reply_text(reply_token, result["message"])
+                elif result["type"] == "fallback":
+                    # 回退到傳統處理
+                    reply_text(reply_token, "⚠️ 查詢格式複雜，請使用更具體的命令")
+                else:
+                    reply_text(reply_token, "🤖 查詢處理中...")
+                    
+                return
+            except Exception as e:
+                logger.error(f"❌ 處理查詢班次命令時出錯: {e}")
+                traceback.print_exc()
+                reply_text(reply_token, f"查詢班次失敗: {str(e)}")
+                return
+            
         # --- 修改：查詢已完成班次 --- 
         elif message_text.startswith("查已完成"):
-             try:
-                 parts = message_text.split()
-                 date_str = None
-                 category_filter = None
-                 query_date = get_taiwan_date() # 默認日期為今天
-
-                 # 解析參數
-                 if len(parts) > 1:
-                     # 嘗試解析第一個參數為日期
-                     try:
-                         query_date = parse_date_input(parts[1])
-                         date_str = parts[1] # 記錄用戶輸入的日期字符串
-                         if len(parts) > 2:
-                             category_filter = parts[2]
-                     except ValueError:
-                         # 如果第一個參數不是日期，則假定它是類別
-                         category_filter = parts[1]
-                         date_str = query_date.strftime("%Y-%m-%d") # 使用默認日期
-                         
-                 if category_filter:
-                     # 如果提供了類別，直接查詢
-                     from modules.services.trip_query_service import handle_query_completed_trips
-                     result_text = handle_query_completed_trips(message_text) # 傳遞原始命令文本
-                     reply_text(reply_token, result_text)
-                 else:
-                     # 如果沒有提供類別，顯示類別選擇 Quick Reply
-                     from modules.services.trip_query_service import request_completed_trip_category_selection
-                     reply_msg, error_message = request_completed_trip_category_selection(query_date)
-                     if reply_msg and error_message is None:
-                         reply_message(reply_token, [reply_msg])
-                     else:
-                         reply_text(reply_token, error_message or "無法生成類別選擇")
-             except Exception as e:
-                 logger.error(f"處理查已完成命令時出錯: {e}")
-                 traceback.print_exc()
-                 reply_text(reply_token, f"查詢已完成班次失敗: {str(e)}")
-             return
+            try:
+                logger.info(f"🔍 處理查已完成命令: {message_text}")
+                from modules.services.advanced_query_processor import AdvancedQueryProcessor
+                
+                # 🔥 修復：使用高級查詢處理器（包含總和計算功能）
+                processor = AdvancedQueryProcessor()
+                result = processor.process_complex_query(message_text, user_id)
+                
+                if result["type"] == "success":
+                    reply_text(reply_token, result["message"])
+                elif result["type"] == "invalid_status":
+                    reply_text(reply_token, result["message"])
+                elif result["type"] == "no_results":
+                    reply_text(reply_token, result["message"]) 
+                elif result["type"] == "error":
+                    reply_text(reply_token, result["message"])
+                elif result["type"] == "fallback":
+                    # 回退到傳統處理
+                    from modules.services.trip_query_service import handle_query_completed_trips
+                    result_text = handle_query_completed_trips(message_text)
+                    reply_text(reply_token, result_text)
+                else:
+                    reply_text(reply_token, "🤖 查詢處理中...")
+                    
+                return
+            except Exception as e:
+                logger.error(f"❌ 處理查已完成命令時出錯: {e}")
+                traceback.print_exc()
+                reply_text(reply_token, f"查詢失敗: {str(e)}")
+                return
         # --- 結束修改 ---
             
         # 生成周報表
@@ -620,9 +653,9 @@ def process_text_message(event):
                 # 格式是「班次 123」，當作「班次詳情 123」處理
                 trip_id = int(parts[1])
                 logger.info(f"簡寫命令，處理為班次詳情: {trip_id}")
-                # 遞迴調用自己，但使用完整命令
-                process_text_message_with_text(f"班次詳情 {trip_id}", reply_token, user_id)
-                return
+                # 修改message_text為完整命令，繼續處理
+                message_text = f"班次詳情 {trip_id}"
+                # 不要return，讓代碼繼續執行
             
         # --- 新增：修改類別 --- 
         elif message_text.startswith("修改類別"):
@@ -843,6 +876,25 @@ def process_text_message(event):
             return
         # --- 結束新增 ---
             
+        # 🔥 新增：翻頁功能 - "更多"命令處理
+        elif message_text in ["更多", "下一頁", "更多結果"]:
+            try:
+                logger.info(f"🔄 處理翻頁命令: {message_text}")
+                from modules.utils.conversation_context import get_conversation_context
+                
+                context = get_conversation_context(user_id)
+                next_page_result = context.get_next_page()
+                
+                if next_page_result:
+                    reply_text(reply_token, next_page_result)
+                else:
+                    reply_text(reply_token, "💡 沒有更多結果或會話已過期\n\n請重新執行查詢命令")
+                return
+            except Exception as e:
+                logger.error(f"❌ 處理翻頁命令時出錯: {e}")
+                reply_text(reply_token, "翻頁功能暫時不可用，請重新查詢")
+                return
+            
         # --- 🤖 智能助手系統整合 ---
         # 優先嘗試智能助手處理
         try:
@@ -850,13 +902,68 @@ def process_text_message(event):
             smart_result = process_with_smart_assistant(message_text, user_id)
             
             if smart_result["type"] == "execute_command":
-                # 智能助手成功解析命令，執行標準命令
                 command = smart_result["command"]
+                
+                # 🔥 新增：統計金額命令處理
+                if command.startswith("統計金額") or (command.startswith("查已完成") and any(k in command for k in ['總和', '總計', '統計', '金額總和'])):
+                    try:
+                        from modules.services.advanced_query_processor import AdvancedQueryProcessor
+                        processor = AdvancedQueryProcessor()
+                        
+                        # 強制設為聚合查詢
+                        if command.startswith("查已完成"):
+                            command = command.replace("查已完成", "統計金額", 1)
+                        
+                        result = processor.process_complex_query(command, user_id)
+                        
+                        if result.get('type') == 'aggregation_success':
+                            reply_text(reply_token, result['message'])
+                            return
+                        elif result.get('type') == 'no_results':
+                            reply_text(reply_token, result['message'])
+                            return
+                        else:
+                            logger.error(f"統計金額處理失敗: {result}")
+                    except Exception as e:
+                        logger.error(f"統計金額命令執行失敗: {e}")
+                        reply_text(reply_token, f"❌ 統計金額執行失敗：{str(e)}")
+                        return
+                
+                # 🔧 修復無限遞歸：直接執行命令而不是改變message_text
+                logger.info(f"🎯 智能助手生成命令: {command}")
                 logger.info(f"✅ 智能助手解析成功，執行命令: {command}")
                 
-                # 遞迴調用處理標準命令
-                from modules.handlers.text_message_handler import process_text_message_with_text
-                return process_text_message_with_text(command, reply_token, user_id)
+                # 🔥 直接執行命令，不要改變message_text避免無限遞歸
+                if command.startswith("查已完成"):
+                    from modules.services.advanced_query_processor import AdvancedQueryProcessor
+                    processor = AdvancedQueryProcessor()
+                    result = processor.process_complex_query(command, user_id)
+                    
+                    if result.get('type') == 'success':
+                        reply_text(reply_token, result['message'])
+                    elif result.get('type') == 'no_results':
+                        reply_text(reply_token, result['message'])
+                    else:
+                        reply_text(reply_token, f"❌ 查詢執行失敗")
+                    return
+                
+                elif command.startswith("查詢班次"):
+                    from modules.services.advanced_query_processor import AdvancedQueryProcessor
+                    processor = AdvancedQueryProcessor()
+                    result = processor.process_complex_query(command, user_id)
+                    
+                    if result.get('type') == 'success':
+                        reply_text(reply_token, result['message'])
+                    elif result.get('type') == 'no_results':
+                        reply_text(reply_token, result['message'])
+                    else:
+                        reply_text(reply_token, f"❌ 查詢執行失敗")
+                    return
+                
+                else:
+                    # 其他命令嘗試傳統處理
+                    reply_text(reply_token, f"✅ 收到命令：{command}\n正在處理...")
+                    return
                 
             elif smart_result["type"] == "smart_guidance":
                 # 智能助手提供引導
@@ -1102,16 +1209,17 @@ def process_text_message(event):
             
             # 🚀 使用智能助手處理未識別的命令
             try:
-                from modules.services.smart_assistant import process_with_smart_assistant, format_smart_response
-                
                 logger.info(f"🤖 啟動智能助手處理: {message_text}")
                 smart_result = process_with_smart_assistant(message_text, user_id)
                 
                 if smart_result["type"] == "execute_command":
-                    # 智能助手解析出了標準命令，遞歸處理
-                    logger.info(f"✅ 智能助手解析成功，執行命令: {smart_result['command']}")
-                    process_text_message_with_text(smart_result["command"], reply_token, user_id)
-                    return
+                    # 智能助手解析出了標準命令，修改message_text繼續處理
+                    command = smart_result["command"]
+                    logger.info(f"✅ 智能助手解析成功，執行命令: {command}")
+                    
+                    # 修改message_text為AI生成的命令，讓它繼續被下面的邏輯處理
+                    message_text = command
+                    # 不要return，讓代碼繼續執行
                 else:
                     # 提供智能引導或建議
                     smart_response = format_smart_response(smart_result)
@@ -1141,24 +1249,6 @@ def process_text_message(event):
         traceback.print_exc()
         reply_text(reply_token, f"處理命令時出錯: {str(e)}")
 
-# 輔助函數，用於處理特定文本的消息處理
-def process_text_message_with_text(message_text, reply_token, user_id):
-    """使用指定的文本處理消息，模擬收到該消息"""
-    from linebot.v3.webhooks import TextMessageContent, MessageEvent, Source
-    
-    # 創建一個模擬的事件對象
-    fake_message = TextMessageContent(text=message_text, id="custom_message_id")
-    fake_event = MessageEvent(
-        type="message",
-        mode="active",
-        timestamp=0,
-        source=Source(type="user", user_id=user_id),
-        message=fake_message,
-        reply_token=reply_token
-    )
-    
-    # 調用消息處理函數
-    process_text_message(fake_event)
 
 def get_help_text():
     """取得文字版幫助信息"""
@@ -1191,11 +1281,17 @@ def get_help_text():
 18. 預約叫車幫助 - 顯示「預約叫車」的說明
 19. 幫助 - 顯示此幫助信息
 
+📖 系統指南 (新增)
+20. 生產線思維指南 - 理解派班系統的核心概念與三時間態架構
+21. 快速參考 - 常用操作與狀態識別速查表
+22. 高級請假系統 - 三層次障眼法設計與跨時間態恢復機制
+
 💡 範例：
 • 匯入固定班次 下週
 • 匯入固定班次 本週 覆蓋
 • 清理trips 已完成
 • 東洋班次 明天
 
+📚 完整文檔：使用圖形化幫助菜單可訪問更詳細的系統指南
 在群組中使用時，可選擇性在命令前添加前綴... (例如 !, #, /)
 """

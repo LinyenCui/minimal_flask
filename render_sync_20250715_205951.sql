@@ -1,0 +1,2963 @@
+--
+-- PostgreSQL database dump
+--
+
+-- Dumped from database version 16.9 (Debian 16.9-1.pgdg120+1)
+-- Dumped by pg_dump version 16.8 (Homebrew)
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+ALTER TABLE IF EXISTS ONLY public.trips DROP CONSTRAINT IF EXISTS trips_start_point_fkey;
+ALTER TABLE IF EXISTS ONLY public.trips DROP CONSTRAINT IF EXISTS trips_fixed_trip_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.trips DROP CONSTRAINT IF EXISTS trips_end_point_fkey;
+ALTER TABLE IF EXISTS ONLY public.trips DROP CONSTRAINT IF EXISTS trips_driver_id_fkey;
+ALTER TABLE IF EXISTS ONLY public.fixed_schedules DROP CONSTRAINT IF EXISTS fixed_schedules_start_point_fkey;
+ALTER TABLE IF EXISTS ONLY public.fixed_schedules DROP CONSTRAINT IF EXISTS fixed_schedules_end_point_fkey;
+ALTER TABLE IF EXISTS ONLY public.completed_trips DROP CONSTRAINT IF EXISTS completed_trips_driver_id_fkey;
+DROP TRIGGER IF EXISTS trigger_set_schedule_id ON public.fixed_schedules;
+DROP INDEX IF EXISTS public.idx_trips_status;
+DROP INDEX IF EXISTS public.idx_trips_driver;
+DROP INDEX IF EXISTS public.idx_trips_date;
+DROP INDEX IF EXISTS public.idx_completed_trips_driver;
+DROP INDEX IF EXISTS public.idx_completed_trips_date;
+DROP INDEX IF EXISTS public.customers_short_name_key;
+ALTER TABLE IF EXISTS ONLY public.trips DROP CONSTRAINT IF EXISTS trips_pkey;
+ALTER TABLE IF EXISTS ONLY public.persons DROP CONSTRAINT IF EXISTS persons_pkey;
+ALTER TABLE IF EXISTS ONLY public.fixed_schedules DROP CONSTRAINT IF EXISTS fixed_schedules_pkey;
+ALTER TABLE IF EXISTS ONLY public.drivers DROP CONSTRAINT IF EXISTS drivers_pkey;
+ALTER TABLE IF EXISTS ONLY public.customers DROP CONSTRAINT IF EXISTS customers_pkey;
+ALTER TABLE IF EXISTS ONLY public.completed_trips DROP CONSTRAINT IF EXISTS completed_trips_pkey;
+DROP TABLE IF EXISTS public.trips;
+DROP SEQUENCE IF EXISTS public.trips_trip_id_seq;
+DROP TABLE IF EXISTS public.persons;
+DROP SEQUENCE IF EXISTS public.persons_id_seq;
+DROP TABLE IF EXISTS public.fixed_schedules;
+DROP TABLE IF EXISTS public.drivers;
+DROP SEQUENCE IF EXISTS public.customers_id_seq;
+DROP TABLE IF EXISTS public.customers;
+DROP TABLE IF EXISTS public.completed_trips;
+DROP SEQUENCE IF EXISTS public.completed_trips_id_seq;
+DROP FUNCTION IF EXISTS public.set_schedule_id();
+DROP FUNCTION IF EXISTS public.set_driver_id();
+DROP FUNCTION IF EXISTS public.set_customer_id();
+DROP FUNCTION IF EXISTS public.get_next_available_id();
+-- *not* dropping schema, since initdb creates it
+--
+-- Name: public; Type: SCHEMA; Schema: -; Owner: dispatch_system_db_user
+--
+
+-- *not* creating schema, since initdb creates it
+
+
+ALTER SCHEMA public OWNER TO dispatch_system_db_user;
+
+--
+-- Name: get_next_available_id(); Type: FUNCTION; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE FUNCTION public.get_next_available_id() RETURNS integer
+    LANGUAGE plpgsql
+    AS $$
+DECLARE next_id INTEGER;
+BEGIN
+    SELECT MIN(t1.id + 1) INTO next_id FROM customers t1 
+    WHERE NOT EXISTS (SELECT 1 FROM customers t2 WHERE t2.id = t1.id + 1);
+    IF next_id IS NULL THEN
+        SELECT COALESCE(MAX(id) + 1, 1) INTO next_id FROM customers;
+    END IF;
+    RETURN next_id;
+END;
+$$;
+
+
+ALTER FUNCTION public.get_next_available_id() OWNER TO dispatch_system_db_user;
+
+--
+-- Name: set_customer_id(); Type: FUNCTION; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE FUNCTION public.set_customer_id() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF NEW.id IS NULL THEN
+        NEW.id = get_next_available_id();
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.set_customer_id() OWNER TO dispatch_system_db_user;
+
+--
+-- Name: set_driver_id(); Type: FUNCTION; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE FUNCTION public.set_driver_id() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF NEW.id IS NULL THEN
+        NEW.id = get_next_available_id();
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.set_driver_id() OWNER TO dispatch_system_db_user;
+
+--
+-- Name: set_schedule_id(); Type: FUNCTION; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE FUNCTION public.set_schedule_id() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF NEW.id IS NULL THEN
+        NEW.id = get_next_available_id();
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.set_schedule_id() OWNER TO dispatch_system_db_user;
+
+--
+-- Name: completed_trips_id_seq; Type: SEQUENCE; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE SEQUENCE public.completed_trips_id_seq
+    START WITH 642
+    INCREMENT BY 1
+    NO MINVALUE
+    MAXVALUE 2147483647
+    CACHE 1;
+
+
+ALTER SEQUENCE public.completed_trips_id_seq OWNER TO dispatch_system_db_user;
+
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+--
+-- Name: completed_trips; Type: TABLE; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE TABLE public.completed_trips (
+    id integer DEFAULT nextval('public.completed_trips_id_seq'::regclass) NOT NULL,
+    date date NOT NULL,
+    start_point character varying(100),
+    via_point character varying(100),
+    end_point character varying(100),
+    meter_fare integer,
+    extra_fare integer,
+    actual_fare integer GENERATED ALWAYS AS (
+CASE
+    WHEN ((meter_fare IS NOT NULL) AND (extra_fare IS NOT NULL)) THEN (meter_fare + extra_fare)
+    WHEN (meter_fare IS NOT NULL) THEN meter_fare
+    ELSE NULL::integer
+END) STORED,
+    category character varying(50),
+    driver_id integer,
+    remarks text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    unique_code character varying(30),
+    trip_type character varying(20) DEFAULT 'fixed'::character varying NOT NULL,
+    status character varying(20),
+    modified_by text,
+    modification_reason text,
+    modification_time timestamp without time zone,
+    passenger_name text,
+    passenger_leave_reason text
+);
+
+
+ALTER TABLE public.completed_trips OWNER TO dispatch_system_db_user;
+
+--
+-- Name: customers; Type: TABLE; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE TABLE public.customers (
+    id integer NOT NULL,
+    name character varying(100) NOT NULL,
+    address character varying(200) NOT NULL,
+    short_name character varying(50),
+    category character varying(50),
+    remarks text,
+    contact_phone character varying(20)
+);
+
+
+ALTER TABLE public.customers OWNER TO dispatch_system_db_user;
+
+--
+-- Name: customers_id_seq; Type: SEQUENCE; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE SEQUENCE public.customers_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.customers_id_seq OWNER TO dispatch_system_db_user;
+
+--
+-- Name: customers_id_seq1; Type: SEQUENCE; Schema: public; Owner: dispatch_system_db_user
+--
+
+ALTER TABLE public.customers ALTER COLUMN id ADD GENERATED BY DEFAULT AS IDENTITY (
+    SEQUENCE NAME public.customers_id_seq1
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+-- Name: drivers; Type: TABLE; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE TABLE public.drivers (
+    id integer NOT NULL,
+    name character varying(50) NOT NULL,
+    plate_number character varying(20),
+    car_brand character varying(50),
+    car_model character varying(50)
+);
+
+
+ALTER TABLE public.drivers OWNER TO dispatch_system_db_user;
+
+--
+-- Name: fixed_schedules; Type: TABLE; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE TABLE public.fixed_schedules (
+    id integer NOT NULL,
+    route_number character varying(10),
+    departure_time time without time zone NOT NULL,
+    start_point character varying(100),
+    via_point character varying(100),
+    end_point character varying(100),
+    base_fare integer,
+    surcharge integer,
+    total_fare integer GENERATED ALWAYS AS (
+CASE
+    WHEN ((base_fare IS NOT NULL) AND (surcharge IS NOT NULL)) THEN (base_fare + surcharge)
+    WHEN (base_fare IS NOT NULL) THEN base_fare
+    ELSE NULL::integer
+END) STORED,
+    category character varying(50) NOT NULL,
+    driver_id character varying(10),
+    direction character varying(1),
+    status character varying(20) DEFAULT '準備'::character varying,
+    note text,
+    modified_by character varying,
+    modification_time timestamp without time zone
+);
+
+
+ALTER TABLE public.fixed_schedules OWNER TO dispatch_system_db_user;
+
+--
+-- Name: persons_id_seq; Type: SEQUENCE; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE SEQUENCE public.persons_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    MAXVALUE 2147483647
+    CACHE 1;
+
+
+ALTER SEQUENCE public.persons_id_seq OWNER TO dispatch_system_db_user;
+
+--
+-- Name: persons; Type: TABLE; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE TABLE public.persons (
+    id integer DEFAULT nextval('public.persons_id_seq'::regclass) NOT NULL,
+    name character varying(100) NOT NULL,
+    contact character varying(100),
+    email character varying(200),
+    role character varying(50),
+    remarks text
+);
+
+
+ALTER TABLE public.persons OWNER TO dispatch_system_db_user;
+
+--
+-- Name: trips_trip_id_seq; Type: SEQUENCE; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE SEQUENCE public.trips_trip_id_seq
+    START WITH 383
+    INCREMENT BY 1
+    NO MINVALUE
+    MAXVALUE 2147483647
+    CACHE 1;
+
+
+ALTER SEQUENCE public.trips_trip_id_seq OWNER TO dispatch_system_db_user;
+
+--
+-- Name: trips; Type: TABLE; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE TABLE public.trips (
+    trip_id integer DEFAULT nextval('public.trips_trip_id_seq'::regclass) NOT NULL,
+    fixed_trip_id integer,
+    week_number integer,
+    date date,
+    "time" time without time zone,
+    start_point character varying(100),
+    via_point character varying(100),
+    end_point character varying(100),
+    meter_fare integer,
+    extra_fare integer,
+    actual_fare integer GENERATED ALWAYS AS (
+CASE
+    WHEN ((meter_fare IS NOT NULL) AND (extra_fare IS NOT NULL)) THEN (meter_fare + extra_fare)
+    WHEN (meter_fare IS NOT NULL) THEN meter_fare
+    ELSE NULL::integer
+END) STORED,
+    category character varying(50),
+    driver_id integer,
+    status character varying(20),
+    unique_code character varying(30),
+    trip_type character varying(20) DEFAULT 'fixed'::character varying NOT NULL,
+    custom_start_point character varying(100),
+    custom_via_point character varying(100),
+    custom_end_point character varying(100),
+    modified_by text,
+    modification_reason text,
+    modification_time timestamp without time zone,
+    passenger_name text,
+    passenger_leave_reason text
+);
+
+
+ALTER TABLE public.trips OWNER TO dispatch_system_db_user;
+
+--
+-- Data for Name: completed_trips; Type: TABLE DATA; Schema: public; Owner: dispatch_system_db_user
+--
+
+COPY public.completed_trips (id, date, start_point, via_point, end_point, meter_fare, extra_fare, category, driver_id, remarks, created_at, unique_code, trip_type, status, modified_by, modification_reason, modification_time, passenger_name, passenger_leave_reason) FROM stdin;
+909	2025-04-12	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-04-12 11:31:44.809926	30_102_15	fixed	\N	\N	\N	\N	\N	\N
+910	2025-04-12	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-04-12 11:31:44.809926	31_102_15	fixed	\N	\N	\N	\N	\N	\N
+1073	2025-04-23	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-04-22 23:11:52.212563	17_113_17	fixed	\N	\N	\N	\N	\N	\N
+1074	2025-04-23	海東六街	\N	診所	185	\N	診所	61553	\N	2025-04-22 23:11:52.212563	46_113_17	fixed	\N	\N	\N	\N	\N	\N
+1075	2025-04-23	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-04-22 23:11:52.212563	42_113_17	fixed	\N	\N	\N	\N	\N	\N
+911	2025-04-12	診所	\N	南寧街	120	\N	診所	533	\N	2025-04-12 11:31:44.809926	36_102_15	fixed	\N	\N	\N	\N	\N	\N
+1110	2025-04-24	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-04-24 07:45:15.720115	31_114_17	fixed	\N	\N	\N	\N	\N	\N
+558	2025-03-24	東洋前門	\N	二井家	1400	\N	東洋	5386	\N	2025-03-24 20:51:06.519934	39_83_13	fixed	\N	\N	\N	\N	\N	\N
+922	2025-04-14	診所	\N	大灣二街	275	\N	診所	533	\N	2025-04-14 05:32:29.614019	5_104_16	fixed	\N	\N	\N	\N	\N	\N
+923	2025-04-14	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-04-14 05:32:29.614019	19_104_16	fixed	\N	\N	\N	\N	\N	\N
+924	2025-04-14	永大路	\N	診所	280	\N	診所	533	\N	2025-04-14 05:32:29.614019	6_104_16	fixed	\N	\N	\N	\N	\N	\N
+925	2025-04-14	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-04-14 05:32:29.614019	18_104_16	fixed	\N	\N	\N	\N	\N	\N
+926	2025-04-14	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-04-14 05:32:29.614019	7_104_16	fixed	\N	\N	\N	\N	\N	\N
+940	2025-04-07	東洋前門	\N	HANNSTAR	550	\N	東洋	5386	2025-04-04	2025-04-14 18:33:41.246233	C_940	temp	\N	\N	\N	\N	\N	\N
+948	2025-04-11	中正四路	民權路156巷	公園北路	1860	\N	東洋	5386	\N	2025-04-14 18:49:41.216371	C_948	temp	\N	\N	\N	\N	\N	\N
+961	2025-04-15	南寧街	\N	診所	120	\N	診所	61553	\N	2025-04-15 03:39:11.206916	35_105_16	fixed	\N	\N	\N	\N	\N	\N
+981	2025-04-16	臨時地點	\N	臨時地點	\N	\N	臨時	28530	\N	2025-04-16 08:30:14.447554	T_1988	fixed	\N	\N	\N	\N	\N	\N
+982	2025-04-16	診所	\N	仁和路	220	\N	診所	533	\N	2025-04-16 08:30:14.447554	10_106_16	fixed	\N	\N	\N	\N	\N	\N
+983	2025-04-16	診所	\N	安定	500	\N	診所	5386	\N	2025-04-16 08:30:14.447554	12_106_16	fixed	\N	\N	\N	\N	\N	\N
+984	2025-04-16	診所	\N	永大路	280	\N	診所	61553	\N	2025-04-16 08:30:14.447554	16_106_16	fixed	\N	\N	\N	\N	\N	\N
+985	2025-04-16	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-04-16 08:30:14.447554	4_106_16	fixed	\N	\N	\N	\N	\N	\N
+986	2025-04-16	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-04-16 08:30:14.447554	14_106_16	fixed	\N	\N	\N	\N	\N	\N
+987	2025-04-16	同安路	\N	診所	220	\N	診所	61553	\N	2025-04-16 08:30:14.447554	15_106_16	fixed	\N	\N	\N	\N	\N	\N
+1005	2025-04-18	診所	\N	大灣二街	275	\N	診所	533	\N	2025-04-18 06:00:16.41391	5_108_16	fixed	\N	\N	\N	\N	\N	\N
+1006	2025-04-18	診所	\N	長溪路	210	\N	診所	61553	\N	2025-04-18 06:00:16.41391	13_108_16	fixed	\N	\N	\N	\N	\N	\N
+1007	2025-04-18	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-04-18 06:00:16.41391	19_108_16	fixed	\N	\N	\N	\N	\N	\N
+1008	2025-04-18	永大路	\N	診所	280	\N	診所	533	\N	2025-04-18 06:00:16.41391	6_108_16	fixed	\N	\N	\N	\N	\N	\N
+1009	2025-04-18	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-04-18 06:00:16.41391	18_108_16	fixed	\N	\N	\N	\N	\N	\N
+1010	2025-04-18	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-04-18 06:00:16.41391	7_108_16	fixed	\N	\N	\N	\N	\N	\N
+1011	2025-04-18	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-04-18 06:00:16.41391	2_108_16	fixed	\N	\N	\N	\N	\N	\N
+1111	2025-04-24	診所	\N	南寧街	120	\N	診所	533	\N	2025-04-24 07:45:15.720115	36_114_17	fixed	\N	\N	\N	\N	\N	\N
+1116	2025-04-25	大灣二街	\N	診所	275	\N	診所	533	\N	2025-04-24 21:30:30.042974	1_115_17	fixed	\N	\N	\N	\N	\N	\N
+1100	2025-04-24	古堡街	安北路+和緯五	診所	230	-30	診所	533	\N	2025-04-24 06:43:47.522741	23_114_17	fixed	\N	\N	\N	\N	\N	\N
+1156	2025-04-28	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-04-27 23:44:29.193413	17_118_18	fixed	\N	\N	\N	\N	\N	\N
+1157	2025-04-28	大灣二街	\N	診所	275	\N	診所	533	\N	2025-04-27 23:44:29.193413	1_118_18	fixed	\N	\N	\N	\N	\N	\N
+1158	2025-04-28	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-04-27 23:44:29.193413	2_118_18	fixed	\N	\N	\N	\N	\N	\N
+1159	2025-04-28	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-04-27 23:44:29.193413	38_118_18	fixed	\N	\N	\N	\N	\N	\N
+1160	2025-04-28	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-04-27 23:44:29.193413	42_118_18	fixed	\N	\N	\N	\N	\N	\N
+1332	2025-05-07	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-05-07 04:18:33.301309	19_127_19	fixed	\N	\N	\N	\N	\N	\N
+1012	2025-04-18	高鐵站	\N	東洋前門	\N	\N	臨時	5386	\N	2025-04-18 06:00:16.41391	T_1997	temp	\N	\N	\N	\N	\N	\N
+1031	2025-04-18	高鐵站	\N	新戶家	\N	\N	東洋	28530	\N	2025-04-20 01:05:26.650816	C_1031	temp	\N	\N	\N	\N	\N	\N
+1033	2025-04-20	新戶家	\N	北安羽球館	200	\N	東洋	28530	\N	2025-04-20 06:49:43.781017	T_2127	temp	\N	\N	\N	\N	\N	\N
+1185	2025-04-29	診所	\N	忠孝街	85	\N	診所	533	\N	2025-04-29 05:52:19.085886	25_119_18	fixed	\N	\N	\N	\N	\N	\N
+1186	2025-04-29	公園南路	海安路	診所	90	\N	診所	533	\N	2025-04-29 05:52:19.085886	26_119_18	fixed	\N	\N	\N	\N	\N	\N
+1187	2025-04-29	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-04-29 05:52:19.085886	29_119_18	fixed	\N	\N	\N	\N	\N	\N
+1188	2025-04-29	信智	\N	診所	140	\N	診所	61553	\N	2025-04-29 05:52:19.085886	32_119_18	fixed	\N	\N	\N	\N	\N	\N
+1189	2025-04-29	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-04-29 05:52:19.085886	33_119_18	fixed	\N	\N	\N	\N	\N	\N
+1190	2025-04-29	南寧街	\N	診所	120	\N	診所	61553	\N	2025-04-29 05:52:19.085886	35_119_18	fixed	\N	\N	\N	\N	\N	\N
+1217	2025-04-30	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-04-30 08:02:20.227728	20_120_18	fixed	\N	\N	\N	\N	\N	\N
+1219	2025-04-30	高鐵站	\N	新戶家	585	0	東洋	5386	\N	2025-04-30 08:15:00.084165	T_2399	temp	\N	\N	\N	\N	\N	\N
+1262	2025-05-03	診所	\N	忠孝街	85	\N	診所	533	\N	2025-05-03 03:25:39.010439	25_123_18	fixed	\N	\N	\N	\N	\N	\N
+1263	2025-05-03	公園南路	海安路	診所	90	\N	診所	533	\N	2025-05-03 03:25:39.010439	26_123_18	fixed	\N	\N	\N	\N	\N	\N
+1264	2025-05-03	信智	\N	診所	140	\N	診所	61553	\N	2025-05-03 03:25:39.010439	32_123_18	fixed	\N	\N	\N	\N	\N	\N
+1265	2025-05-03	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-05-03 03:25:39.010439	33_123_18	fixed	\N	\N	\N	\N	\N	\N
+1266	2025-05-03	南寧街	\N	診所	120	\N	診所	61553	\N	2025-05-03 03:25:39.010439	35_123_18	fixed	\N	\N	\N	\N	\N	\N
+1267	2025-05-03	診所	安北路	怡平路	230	-90	診所	533	安北路請假	2025-05-03 03:25:39.010439	24_123_18	fixed	\N	\N	\N	\N	\N	\N
+1297	2025-05-05	東洋後門	\N	東橋十街	\N	\N	東洋	61553	\N	2025-05-05 09:16:42.815079	T_2530	temp	\N	\N	\N	\N	\N	\N
+1161	2025-04-28	東橋十街	\N	東洋後門	355	\N	東洋	61553	\N	2025-04-27 23:44:29.193413	T_2388	temp	\N	\N	\N	\N	\N	\N
+1218	2025-04-30	高鐵站	\N	台江大道	700	\N	東洋	533	\N	2025-04-30 08:11:00.089079	T_2398	temp	\N	\N	\N	\N	\N	\N
+1333	2025-05-07	永大路	\N	診所	280	\N	診所	533	\N	2025-05-07 04:18:33.301309	6_127_19	fixed	\N	\N	\N	\N	\N	\N
+1334	2025-05-07	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-05-07 04:18:33.301309	7_127_19	fixed	\N	\N	\N	\N	\N	\N
+1361	2025-05-08	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-05-08 14:30:05.911546	39_128_19	fixed	\N	\N	\N	\N	\N	\N
+1362	2025-05-08	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-05-08 14:30:05.911546	43_128_19	fixed	\N	\N	\N	\N	\N	\N
+1034	2025-04-21	診所	\N	大灣二街	275	\N	診所	533	\N	2025-04-21 03:26:49.952253	5_111_17	fixed	\N	\N	\N	\N	\N	\N
+1035	2025-04-21	診所	\N	長溪路	210	\N	診所	61553	\N	2025-04-21 03:26:49.952253	13_111_17	fixed	\N	\N	\N	\N	\N	\N
+1036	2025-04-21	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-04-21 03:26:49.952253	19_111_17	fixed	\N	\N	\N	\N	\N	\N
+463	2025-03-17	東洋前門	\N	二井家	1400	\N	東洋	5386	\N	2025-03-24 13:28:51.259354	39_76_12	fixed	\N	\N	\N	\N	\N	\N
+553	2025-03-19	東洋前門	\N	二井家	1400	\N	東洋	5386	\N	2025-03-24 16:24:04.227965	39_78_12	fixed	\N	\N	\N	\N	\N	\N
+644	2025-03-26	東洋前門	\N	二井家	1400	\N	東洋	5386	\N	2025-03-27 00:57:57.049935	39_85_13	fixed	\N	\N	\N	\N	\N	\N
+660	2025-03-27	東洋前門	\N	二井家	1400	\N	東洋	5386	\N	2025-03-28 01:32:24.352337	39_86_13	fixed	\N	\N	\N	\N	\N	\N
+717	2025-03-31	東洋前門	\N	二井家	1400	\N	東洋	5386	\N	2025-04-01 12:27:01.687265	39_90_14	fixed	\N	\N	\N	\N	\N	\N
+735	2025-04-01	東洋前門	\N	二井家	1400	\N	東洋	5386	\N	2025-04-02 04:26:01.923345	39_91_14	fixed	\N	\N	\N	\N	\N	\N
+754	2025-04-02	東洋前門	\N	二井家	1400	\N	東洋	5386	\N	2025-04-03 14:37:22.720468	39_92_14	fixed	\N	\N	\N	\N	\N	\N
+459	2025-03-17	二井家	\N	東洋前門	1400	\N	東洋	5386	\N	2025-03-24 13:28:51.259354	38_76_12	fixed	\N	\N	\N	\N	\N	\N
+460	2025-03-17	二井家	\N	東洋前門	1400	\N	東洋	28530	\N	2025-03-24 13:28:51.259354	40_76_12	fixed	\N	\N	\N	\N	\N	\N
+504	2025-03-19	二井家	\N	東洋前門	1400	\N	東洋	5386	\N	2025-03-24 14:58:39.579674	38_78_12	fixed	\N	\N	\N	\N	\N	\N
+432	2025-03-24	二井家	\N	東洋前門	1400	\N	東洋	5386	\N	2025-03-24 11:34:21.586836	38_83_13	fixed	\N	\N	\N	\N	\N	\N
+550	2025-03-19	二井家	\N	東洋前門	1400	\N	東洋	28530	\N	2025-03-24 16:24:04.227965	40_78_12	fixed	\N	\N	\N	\N	\N	\N
+625	2025-03-26	二井家	\N	東洋前門	1400	\N	東洋	5386	\N	2025-03-26 06:49:02.400017	38_85_13	fixed	\N	\N	\N	\N	\N	\N
+658	2025-03-27	二井家	\N	東洋前門	1400	\N	東洋	28530	\N	2025-03-28 01:32:24.352337	40_86_13	fixed	\N	\N	\N	\N	\N	\N
+699	2025-03-31	二井家	\N	東洋前門	1400	\N	東洋	5386	\N	2025-03-31 06:42:16.652634	38_90_14	fixed	\N	\N	\N	\N	\N	\N
+730	2025-04-01	二井家	\N	東洋前門	1400	\N	東洋	28530	\N	2025-04-01 12:27:01.687265	40_91_14	fixed	\N	\N	\N	\N	\N	\N
+738	2025-04-02	二井家	\N	東洋前門	1400	\N	東洋	5386	\N	2025-04-02 06:53:03.455856	38_92_14	fixed	\N	\N	\N	\N	\N	\N
+781	2025-04-04	二井家	\N	東洋前門	1400	\N	東洋	5386	\N	2025-04-04 14:56:04.123913	38_94_14	fixed	\N	\N	\N	\N	\N	\N
+1037	2025-04-21	仁和路	\N	診所	220	\N	診所	533	\N	2025-04-21 03:26:49.952253	9_111_17	fixed	\N	\N	\N	\N	\N	\N
+461	2025-03-17	久保田家	新戶	東洋前門	360	\N	東洋	5386	\N	2025-03-24 13:28:51.259354	41_76_12	fixed	\N	\N	\N	\N	\N	\N
+462	2025-03-17	久保田家	新戶	東洋前門	360	\N	東洋	28530	\N	2025-03-24 13:28:51.259354	42_76_12	fixed	\N	\N	\N	\N	\N	\N
+927	2025-04-14	診所	\N	仁和路	220	\N	診所	533	\N	2025-04-14 06:45:01.224892	10_104_16	fixed	\N	\N	\N	\N	\N	\N
+928	2025-04-14	同安路	\N	診所	220	\N	診所	61553	\N	2025-04-14 06:55:00.07704	15_104_16	fixed	\N	\N	\N	\N	\N	\N
+929	2025-04-14	診所	\N	安定	500	\N	診所	5386	\N	2025-04-14 07:05:00.176325	12_104_16	fixed	\N	\N	\N	\N	\N	\N
+1038	2025-04-21	安定	\N	診所	500	\N	診所	5386	\N	2025-04-21 03:26:49.952253	11_111_17	fixed	\N	\N	\N	\N	\N	\N
+1039	2025-04-21	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-04-21 03:26:49.952253	17_111_17	fixed	\N	\N	\N	\N	\N	\N
+962	2025-04-15	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-04-15 13:57:38.927191	30_105_16	fixed	\N	\N	\N	\N	\N	\N
+963	2025-04-15	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-04-15 13:57:38.927191	31_105_16	fixed	\N	\N	\N	\N	\N	\N
+964	2025-04-15	診所	\N	南寧街	120	\N	診所	533	\N	2025-04-15 13:57:38.927191	36_105_16	fixed	\N	\N	\N	\N	\N	\N
+965	2025-04-15	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-04-15 13:57:38.927191	29_105_16	fixed	\N	\N	\N	\N	\N	\N
+966	2025-04-15	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-04-15 13:57:38.927191	43_105_16	fixed	\N	\N	\N	\N	\N	\N
+988	2025-04-16	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-04-16 10:13:51.828563	43_106_16	fixed	\N	\N	\N	\N	\N	\N
+989	2025-04-16	臨時地點	\N	臨時地點	\N	\N	臨時	5386	\N	2025-04-16 10:13:51.828563	T_1996	fixed	\N	\N	\N	\N	\N	\N
+1013	2025-04-18	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-04-18 06:46:06.352898	14_108_16	fixed	\N	\N	\N	\N	\N	\N
+1040	2025-04-21	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-04-21 03:26:49.952253	18_111_17	fixed	\N	\N	\N	\N	\N	\N
+1015	2025-04-18	同安路	\N	診所	220	\N	診所	61553	\N	2025-04-18 06:55:00.10891	15_108_16	fixed	\N	\N	\N	\N	\N	\N
+1298	2025-05-05	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-05-05 09:35:01.349346	43_125_19	fixed	\N	\N	\N	\N	\N	\N
+1041	2025-04-21	大灣二街	\N	診所	275	\N	診所	533	\N	2025-04-21 03:26:49.952253	1_111_17	fixed	\N	\N	\N	\N	\N	\N
+1042	2025-04-21	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-04-21 03:26:49.952253	2_111_17	fixed	\N	\N	\N	\N	\N	\N
+1043	2025-04-21	海東六街	\N	診所	185	\N	診所	61553	\N	2025-04-21 03:26:49.952253	46_111_17	fixed	\N	\N	\N	\N	\N	\N
+1044	2025-04-21	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-04-21 03:26:49.952253	38_111_17	fixed	\N	\N	\N	\N	\N	\N
+1045	2025-04-21	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-04-21 03:26:49.952253	42_111_17	fixed	\N	\N	\N	\N	\N	\N
+1117	2025-04-25	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-04-25 00:21:45.775999	17_115_17	fixed	\N	\N	\N	\N	\N	\N
+1118	2025-04-25	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-04-25 00:21:45.775999	2_115_17	fixed	\N	\N	\N	\N	\N	\N
+1119	2025-04-25	海東六街	\N	診所	185	\N	診所	61553	\N	2025-04-25 00:21:45.775999	46_115_17	fixed	\N	\N	\N	\N	\N	\N
+1120	2025-04-25	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-04-25 00:21:45.775999	38_115_17	fixed	\N	\N	\N	\N	\N	\N
+1121	2025-04-25	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-04-25 00:21:45.775999	42_115_17	fixed	\N	\N	\N	\N	\N	\N
+1095	2025-04-24	協理家	\N	高鐵站	680	\N	東洋	28530	\N	2025-04-24 06:43:47.522741	T_2138	temp	完成	\N	\N	\N	\N	\N
+1191	2025-04-29	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-04-29 12:18:10.112607	30_119_18	fixed	\N	\N	\N	\N	\N	\N
+1192	2025-04-29	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-04-29 12:18:10.112607	39_119_18	fixed	\N	\N	\N	\N	\N	\N
+1193	2025-04-29	東洋後門	新戶家	久保田家	360	\N	東洋	533	\N	2025-04-29 12:18:10.112607	43_119_18	fixed	\N	\N	\N	\N	\N	\N
+1014	2025-04-18	東洋前門	\N	高鐵站	\N	\N	臨時	28530	\N	2025-04-18 06:46:06.352898	T_1998	temp	\N	\N	\N	\N	\N	\N
+1032	2025-04-18	高鐵站	\N	久保田家	\N	\N	東洋	5386	\N	2025-04-20 01:07:56.674914	C_1032	temp	\N	\N	\N	\N	\N	\N
+1194	2025-04-29	高鐵站	\N	協理家	705	\N	東洋	61553	\N	2025-04-29 12:18:10.112607	T_2393	temp	\N	\N	\N	\N	\N	\N
+1076	2025-04-23	長北街	文南71	高鐵站	685	\N	東洋	5386	\N	2025-04-22 23:45:00.083646	T_2133	temp	\N	\N	\N	\N	\N	\N
+1195	2025-04-29	東洋後門	\N	東橋十街	\N	\N	東洋	28530	\N	2025-04-29 12:18:10.112607	T_2394	temp	\N	\N	\N	\N	\N	\N
+1220	2025-04-30	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-04-30 11:30:54.315612	43_120_18	fixed	\N	\N	\N	\N	\N	\N
+1268	2025-05-03	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-05-03 04:00:01.254554	29_123_18	fixed	\N	\N	\N	\N	\N	\N
+1162	2025-04-28	高鐵站	\N	東洋前門	680	\N	東洋	533	\N	2025-04-28 01:08:45.243584	T_2389	temp	\N	\N	\N	\N	\N	\N
+1335	2025-05-07	東橋十街	\N	東洋後門	\N	\N	東洋	61553	\N	2025-05-07 06:15:18.090012	T_2540	temp	\N	\N	\N	\N	\N	\N
+1364	2025-05-08	東橋十街	\N	東洋後門	\N	\N	東洋	61553	\N	2025-05-08 15:50:48.524885	T_2545	temp	\N	\N	\N	\N	\N	\N
+1365	2025-05-08	東洋後門	\N	東橋十街	\N	\N	東洋	61553	\N	2025-05-08 15:50:48.524885	T_2546	temp	\N	\N	\N	\N	\N	\N
+1363	2025-05-08	慈安路187號	\N	柳營環東路一段1號	2605	0	東洋	5386	\N	2025-05-08 15:50:48.524885	T_2542	temp	\N	\N	\N	\N	\N	\N
+1366	2025-05-08	新市復興路	\N	東洋前門	705	0	東洋	5386	\N	2025-05-08 15:50:48.524885	T_2554	temp	\N	\N	\N	\N	\N	\N
+1046	2025-04-21	永大路	\N	診所	280	\N	診所	533	\N	2025-04-21 03:35:01.218016	6_111_17	fixed	\N	\N	\N	\N	\N	\N
+1114	2025-04-24	高鐵站	\N	協理家	695	\N	東洋	5386	\N	2025-04-24 16:36:52.150662	T_2139	temp	完成	\N	\N	\N	\N	\N
+1112	2025-04-24	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-04-24 16:36:52.150662	30_114_17	fixed	\N	\N	\N	\N	\N	\N
+623	2025-03-25	東洋前門	新戶	久保田家	360	\N	東洋	28530	\N	2025-03-25 17:35:00.018697	43_84_13	fixed	\N	\N	\N	\N	\N	\N
+645	2025-03-26	東洋前門	新戶	久保田家	360	\N	東洋	28530	\N	2025-03-27 00:57:57.049935	43_85_13	fixed	\N	\N	\N	\N	\N	\N
+661	2025-03-27	東洋前門	新戶	久保田家	360	\N	東洋	28530	\N	2025-03-28 01:32:24.352337	43_86_13	fixed	\N	\N	\N	\N	\N	\N
+681	2025-03-28	東洋前門	新戶	久保田家	360	\N	東洋	28530	\N	2025-03-29 04:06:20.219901	43_87_13	fixed	\N	\N	\N	\N	\N	\N
+718	2025-03-31	東洋前門	新戶	久保田家	360	\N	東洋	28530	\N	2025-04-01 12:27:01.687265	43_90_14	fixed	\N	\N	\N	\N	\N	\N
+755	2025-04-02	東洋前門	新戶	久保田家	360	\N	東洋	28530	\N	2025-04-03 14:37:22.720468	43_92_14	fixed	\N	\N	\N	\N	\N	\N
+1113	2025-04-24	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-04-24 16:36:52.150662	43_114_17	fixed	\N	\N	\N	\N	\N	\N
+842	2025-04-08	東洋前門	新戶	久保田家	360	\N	東洋	28530	\N	2025-04-09 02:16:58.012948	43_98_15	fixed	\N	\N	\N	\N	\N	\N
+809	2025-04-07	久保田家	新戶	東洋前門	360	\N	東洋	28530	\N	2025-04-07 08:49:36.457044	42_97_15	fixed	\N	\N	\N	\N	\N	\N
+1122	2025-04-25	診所	\N	長溪路	210	\N	診所	61553	\N	2025-04-25 02:37:47.959037	13_115_17	fixed	\N	\N	\N	\N	\N	\N
+860	2025-04-09	久保田家	新戶	東洋前門	360	\N	東洋	28530	\N	2025-04-10 00:57:40.395447	42_99_15	fixed	\N	\N	\N	\N	\N	\N
+930	2025-04-14	診所	民德58	育德二路	110	\N	診所	28530	\N	2025-04-14 07:05:01.653807	21_104_16	fixed	\N	\N	\N	\N	\N	\N
+827	2025-04-07	東洋前門	新戶	久保田家	360	\N	東洋	5386	\N	2025-04-07 23:36:44.95552	43_97_15	fixed	\N	\N	\N	\N	\N	\N
+831	2025-04-08	久保田家	新戶	東洋前門	360	\N	東洋	28530	\N	2025-04-08 07:55:29.647982	41_98_15	fixed	\N	\N	\N	\N	\N	\N
+861	2025-04-09	東洋前門	新戶	久保田家	360	\N	東洋	5386	\N	2025-04-10 00:57:40.395447	43_99_15	fixed	\N	\N	\N	\N	\N	\N
+942	2025-04-08	東洋後門	往返	群創D3哨	2300	\N	東洋	5386	4hour	2025-04-14 18:37:32.136689	C_942	temp	\N	\N	\N	\N	\N	\N
+950	2025-04-11	東洋後門	Park17	HANNSTAR	800	\N	東洋	5386	\N	2025-04-14 18:51:45.012959	C_950	temp	\N	\N	\N	\N	\N	\N
+967	2025-04-16	大灣二街	\N	診所	275	\N	診所	533	\N	2025-04-15 21:40:08.293678	1_106_16	fixed	\N	\N	\N	\N	\N	\N
+990	2025-04-17	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-04-16 22:04:34.66515	22_107_16	fixed	\N	\N	\N	\N	\N	\N
+1016	2025-04-18	診所	\N	永大路	280	\N	診所	61553	\N	2025-04-18 11:17:57.28428	16_108_16	fixed	\N	\N	\N	\N	\N	\N
+1123	2025-04-25	仁和路	\N	診所	220	\N	診所	533	\N	2025-04-25 02:37:47.959037	9_115_17	fixed	\N	\N	\N	\N	\N	\N
+1124	2025-04-25	安定	\N	診所	500	\N	診所	5386	\N	2025-04-25 02:37:47.959037	11_115_17	fixed	\N	\N	\N	\N	\N	\N
+1163	2025-04-28	診所	\N	長溪路	210	\N	診所	61553	\N	2025-04-28 01:55:01.223112	13_118_18	fixed	\N	\N	\N	\N	\N	\N
+1078	2025-04-23	太子龍	\N	東洋後門	300	\N	東洋	533	\N	2025-04-23 01:21:02.2884	T_2134	temp	\N	\N	\N	\N	\N	\N
+1196	2025-04-29	東洋前門	\N	高鐵站	680	0	東洋	5386	\N	2025-04-29 12:47:29.15288	T_2396	temp	\N	\N	\N	\N	\N	\N
+1077	2025-04-23	高鐵站	\N	東洋前門	680	\N	東洋	5386	\N	2025-04-23 01:21:02.2884	T_2128	temp	\N	\N	\N	\N	\N	\N
+1221	2025-05-01	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-04-30 23:49:39.696409	22_121_18	fixed	\N	\N	\N	\N	\N	\N
+1222	2025-05-01	二井家	\N	東洋後門	1400	\N	東洋	28530	\N	2025-04-30 23:49:39.696409	40_121_18	fixed	\N	\N	\N	\N	\N	\N
+1223	2025-05-01	久保田家	新戶家	東洋後門	360	\N	東洋	5386	\N	2025-04-30 23:49:39.696409	41_121_18	fixed	\N	\N	\N	\N	\N	\N
+1224	2025-05-01	安北路	\N	診所	165	0	診所	533	\N	2025-04-30 23:49:39.696409	T_2400	temp	\N	\N	\N	\N	\N	\N
+1269	2025-05-03	診所	\N	南寧街	120	\N	診所	533	\N	2025-05-03 07:27:26.361566	36_123_18	fixed	\N	\N	\N	\N	\N	\N
+1270	2025-05-03	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-05-03 07:35:00.082607	31_123_18	fixed	\N	\N	\N	\N	\N	\N
+1299	2025-05-05	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-05-05 09:35:01.41601	39_125_19	fixed	\N	\N	\N	\N	\N	\N
+1336	2025-05-07	診所	\N	仁和路	220	\N	診所	533	\N	2025-05-07 06:49:14.584849	10_127_19	fixed	\N	\N	\N	\N	\N	\N
+1367	2025-05-09	大灣二街	\N	診所	275	\N	診所	533	\N	2025-05-08 21:30:46.321597	1_129_19	fixed	\N	\N	\N	\N	\N	\N
+433	2025-03-24	久保田家	新戶	東洋前門	360	\N	東洋	28530	\N	2025-03-24 11:34:21.586836	42_83_13	fixed	\N	\N	\N	\N	\N	\N
+731	2025-04-01	久保田家	新戶	東洋前門	360	\N	東洋	5386	\N	2025-04-01 12:27:01.687265	41_91_14	fixed	\N	\N	\N	\N	\N	\N
+931	2025-04-14	診所	\N	永大路	280	\N	診所	61553	\N	2025-04-14 07:43:02.67457	16_104_16	fixed	\N	\N	\N	\N	\N	\N
+932	2025-04-14	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-04-14 07:43:02.67457	20_104_16	fixed	\N	\N	\N	\N	\N	\N
+933	2025-04-14	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-04-14 07:43:02.67457	4_104_16	fixed	\N	\N	\N	\N	\N	\N
+934	2025-04-14	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-04-14 07:43:02.67457	14_104_16	fixed	\N	\N	\N	\N	\N	\N
+943	2025-04-09	協理家	\N	高鐵站	690	\N	東洋	5386	\N	2025-04-14 18:40:35.789955	C_943	temp	\N	\N	\N	\N	\N	\N
+951	2025-04-13	小港機場	\N	立興大學城	2310	\N	東洋	5386	1hour,taxi:$160	2025-04-14 18:53:54.048934	C_951	temp	\N	\N	\N	\N	\N	\N
+968	2025-04-16	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-04-15 23:13:01.3479	17_106_16	fixed	\N	\N	\N	\N	\N	\N
+969	2025-04-16	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-04-15 23:13:01.3479	38_106_16	fixed	\N	\N	\N	\N	\N	\N
+970	2025-04-16	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-04-15 23:13:01.3479	42_106_16	fixed	\N	\N	\N	\N	\N	\N
+971	2025-04-16	臨時地點	\N	臨時地點	\N	\N	臨時	61379	\N	2025-04-15 23:13:01.3479	T_1984	fixed	\N	\N	\N	\N	\N	\N
+991	2025-04-17	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-04-17 04:27:47.04322	29_107_16	fixed	\N	\N	\N	\N	\N	\N
+992	2025-04-17	信智	\N	診所	140	\N	診所	61553	\N	2025-04-17 04:27:47.04322	32_107_16	fixed	\N	\N	\N	\N	\N	\N
+993	2025-04-17	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-04-17 04:27:47.04322	33_107_16	fixed	\N	\N	\N	\N	\N	\N
+994	2025-04-17	南寧街	\N	診所	120	\N	診所	61553	\N	2025-04-17 04:27:47.04322	35_107_16	fixed	\N	\N	\N	\N	\N	\N
+995	2025-04-17	臨時地點	\N	臨時地點	\N	\N	臨時	533	\N	2025-04-17 04:27:47.04322	T_1990	fixed	\N	\N	\N	\N	\N	\N
+996	2025-04-17	臨時地點	\N	臨時地點	\N	\N	臨時	5386	\N	2025-04-17 04:27:47.04322	T_1992	fixed	\N	\N	\N	\N	\N	\N
+997	2025-04-17	臨時地點	\N	臨時地點	\N	\N	臨時	533	\N	2025-04-17 04:27:47.04322	T_1991	fixed	\N	\N	\N	\N	\N	\N
+998	2025-04-17	臨時地點	\N	臨時地點	\N	\N	臨時	28530	\N	2025-04-17 04:27:47.04322	T_1993	fixed	\N	\N	\N	\N	\N	\N
+1017	2025-04-19	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-04-18 22:27:48.294037	22_109_16	fixed	\N	\N	\N	\N	\N	\N
+1047	2025-04-21	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-04-21 04:14:59.007461	7_111_17	fixed	\N	\N	\N	\N	\N	\N
+1079	2025-04-23	診所	\N	長溪路	210	\N	診所	61553	\N	2025-04-23 02:00:01.26878	13_113_17	fixed	\N	\N	\N	\N	\N	\N
+1375	2025-05-09	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-05-09 04:11:00.921449	38_129_19	fixed	\N	\N	\N	\N	\N	\N
+1115	2025-04-24	高鐵站	\N	新戶家	580	\N	東洋	5386	\N	2025-04-24 16:46:50.623196	C_1115	temp	完成	\N	\N	\N	\N	\N
+1125	2025-04-25	診所	\N	大灣二街	275	\N	診所	533	\N	2025-04-25 03:05:32.197299	5_115_17	fixed	\N	\N	\N	\N	\N	\N
+1126	2025-04-25	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-04-25 03:05:32.197299	18_115_17	fixed	\N	\N	\N	\N	\N	\N
+1164	2025-04-28	安定	\N	診所	500	\N	診所	5386	\N	2025-04-28 02:00:00.081515	11_118_18	fixed	\N	\N	\N	\N	\N	\N
+1080	2025-04-23	安定	\N	診所	500	\N	診所	533	\N	2025-04-23 02:00:01.26878	11_113_17	fixed	\N	\N	\N	\N	\N	\N
+972	2025-04-16	公園南路	\N	東洋後門	285	\N	東洋	61553	\N	2025-04-15 23:13:01.3479	T_1986	temp	\N	\N	\N	\N	\N	\N
+999	2025-04-17	賢北街	\N	高鐵站	635	\N	東洋	61553	\N	2025-04-17 04:27:47.04322	T_1995	temp	\N	\N	\N	\N	\N	\N
+1197	2025-04-30	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-04-29 23:19:26.07438	17_120_18	fixed	\N	\N	\N	\N	\N	\N
+1198	2025-04-30	大灣二街	\N	診所	275	\N	診所	533	\N	2025-04-29 23:19:26.07438	1_120_18	fixed	\N	\N	\N	\N	\N	\N
+1199	2025-04-30	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-04-29 23:19:26.07438	42_120_18	fixed	\N	\N	\N	\N	\N	\N
+1226	2025-05-01	診所	\N	忠孝街	85	\N	診所	533	\N	2025-05-01 07:36:35.063672	25_121_18	fixed	\N	\N	\N	\N	\N	\N
+1227	2025-05-01	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-05-01 07:36:35.063672	31_121_18	fixed	\N	\N	\N	\N	\N	\N
+1228	2025-05-01	診所	\N	南寧街	120	\N	診所	533	\N	2025-05-01 07:36:35.063672	36_121_18	fixed	\N	\N	\N	\N	\N	\N
+1229	2025-05-01	公園南路	海安路	診所	90	\N	診所	533	\N	2025-05-01 07:36:35.063672	26_121_18	fixed	\N	\N	\N	\N	\N	\N
+1230	2025-05-01	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-05-01 07:36:35.063672	29_121_18	fixed	\N	\N	\N	\N	\N	\N
+1231	2025-05-01	信智	\N	診所	140	\N	診所	61553	\N	2025-05-01 07:36:35.063672	32_121_18	fixed	\N	\N	\N	\N	\N	\N
+1232	2025-05-01	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-05-01 07:36:35.063672	33_121_18	fixed	\N	\N	\N	\N	\N	\N
+1233	2025-05-01	南寧街	\N	診所	120	\N	診所	61553	\N	2025-05-01 07:36:35.063672	35_121_18	fixed	\N	\N	\N	\N	\N	\N
+1271	2025-05-03	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-05-03 08:37:18.810925	30_123_18	fixed	\N	\N	\N	\N	\N	\N
+1376	2025-05-09	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-05-09 04:11:00.921449	42_129_19	fixed	\N	\N	\N	\N	\N	\N
+1234	2025-05-01	診所	安北路	怡平路	230	-90	診所	533	安北路請假	2025-05-01 07:36:35.063672	24_121_18	fixed	\N	\N	\N	\N	\N	\N
+1225	2025-05-01	東橋十街	\N	東洋後門	355	\N	東洋	61553	\N	2025-05-01 07:36:35.063672	T_2401	temp	\N	\N	\N	\N	\N	\N
+1300	2025-04-30	東洋	\N	東橋十街	365	\N	東洋	61553	\N	2025-05-06 03:28:38.351887	C_1300	temp	\N	\N	\N	\N	\N	\N
+1337	2025-05-07	診所	\N	安定	500	\N	診所	5386	\N	2025-05-07 07:00:01.282973	12_127_19	fixed	\N	\N	\N	\N	\N	\N
+1338	2025-05-07	同安路	\N	診所	220	\N	診所	61553	\N	2025-05-07 07:00:01.282973	15_127_19	fixed	\N	\N	\N	\N	\N	\N
+484	2025-06-07	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-06-07 08:00:01.232351	30_158_23	fixed	\N	\N	\N	\N	\N	\N
+1368	2025-05-09	診所	\N	大灣二街	275	\N	診所	533	\N	2025-05-09 04:11:00.921449	5_129_19	fixed	\N	\N	\N	\N	\N	\N
+1369	2025-05-09	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-05-09 04:11:00.921449	19_129_19	fixed	\N	\N	\N	\N	\N	\N
+1370	2025-05-09	永大路	\N	診所	280	\N	診所	533	\N	2025-05-09 04:11:00.921449	6_129_19	fixed	\N	\N	\N	\N	\N	\N
+1371	2025-05-09	安定	\N	診所	500	\N	診所	5386	\N	2025-05-09 04:11:00.921449	11_129_19	fixed	\N	\N	\N	\N	\N	\N
+1372	2025-05-09	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-05-09 04:11:00.921449	17_129_19	fixed	\N	\N	\N	\N	\N	\N
+1373	2025-05-09	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-05-09 04:11:00.921449	18_129_19	fixed	\N	\N	\N	\N	\N	\N
+1374	2025-05-09	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-05-09 04:11:00.921449	7_129_19	fixed	\N	\N	\N	\N	\N	\N
+1377	2025-05-09	仁和路	\N	診所	220	\N	診所	533	\N	2025-05-09 04:11:00.921449	9_129_19	fixed	\N	\N	\N	\N	\N	\N
+1378	2025-05-09	湖內民權路	\N	高雄中正四路	\N	\N	東洋	61553	\N	2025-05-09 04:11:00.921449	T_2549	temp	\N	\N	\N	\N	\N	\N
+1379	2025-05-09	東橋十街	\N	東洋後門	\N	\N	東洋	533	\N	2025-05-09 04:11:00.921449	T_2547	temp	\N	\N	\N	\N	\N	\N
+912	2025-04-13	東洋後門	文南71	高鐵站	680	\N	東洋	5386	\N	2025-04-13 22:47:49.766904	44_103_15	fixed	\N	\N	\N	\N	\N	\N
+913	2025-04-13	高鐵站	\N	東洋後門	680	\N	東洋	5386	\N	2025-04-13 22:47:49.766904	45_103_15	fixed	\N	\N	\N	\N	\N	\N
+914	2025-04-14	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-04-13 22:47:49.766904	17_104_16	fixed	\N	\N	\N	\N	\N	\N
+915	2025-04-14	大灣二街	\N	診所	275	\N	診所	533	\N	2025-04-13 22:47:49.766904	1_104_16	fixed	\N	\N	\N	\N	\N	\N
+916	2025-04-14	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-04-13 22:47:49.766904	38_104_16	fixed	\N	\N	\N	\N	\N	\N
+935	2025-04-14	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-04-14 11:25:14.03592	39_104_16	fixed	\N	\N	\N	\N	\N	\N
+936	2025-04-14	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-04-14 11:25:14.03592	43_104_16	fixed	\N	\N	\N	\N	\N	\N
+944	2025-04-09	高鐵站	\N	協理家	685	\N	東洋	5386	\N	2025-04-14 18:41:52.989237	C_944	temp	\N	\N	\N	\N	\N	\N
+952	2025-04-13	小港機場	\N	新戶家	2020	\N	東洋	5386	taxi:$140	2025-04-14 18:55:40.283702	C_952	temp	\N	\N	\N	\N	\N	\N
+973	2025-04-16	臨時地點	\N	臨時地點	\N	\N	臨時	533	\N	2025-04-15 23:46:29.178784	T_1985	fixed	\N	\N	\N	\N	\N	\N
+1000	2025-04-17	臨時地點	\N	臨時地點	\N	\N	臨時	28530	\N	2025-04-17 10:16:07.618422	T_1994	fixed	\N	\N	\N	\N	\N	\N
+1018	2025-04-19	古堡街	安北路+和緯五	診所	230	-30	診所	533	\N	2025-04-18 22:35:02.18519	23_109_16	fixed	\N	\N	\N	\N	\N	\N
+1048	2025-04-21	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-04-21 06:35:01.227901	14_111_17	fixed	\N	\N	\N	\N	\N	\N
+1049	2025-04-21	診所	\N	仁和路	220	\N	診所	533	\N	2025-04-21 06:45:00.160154	10_111_17	fixed	\N	\N	\N	\N	\N	\N
+1050	2025-04-21	同安路	\N	診所	220	\N	診所	61553	\N	2025-04-21 06:55:00.088998	15_111_17	fixed	\N	\N	\N	\N	\N	\N
+1051	2025-04-21	診所	\N	安定	500	\N	診所	5386	\N	2025-04-21 07:00:00.152938	12_111_17	fixed	\N	\N	\N	\N	\N	\N
+1052	2025-04-21	診所	民德58	育德二路	110	\N	診所	28530	\N	2025-04-21 07:00:00.152938	21_111_17	fixed	\N	\N	\N	\N	\N	\N
+1127	2025-04-25	診所	\N	仁和路	220	\N	診所	533	\N	2025-04-25 07:00:39.641724	10_115_17	fixed	\N	\N	\N	\N	\N	\N
+1128	2025-04-25	診所	\N	安定	500	\N	診所	5386	\N	2025-04-25 07:00:39.641724	12_115_17	fixed	\N	\N	\N	\N	\N	\N
+1129	2025-04-25	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-04-25 07:00:39.641724	19_115_17	fixed	\N	\N	\N	\N	\N	\N
+1131	2025-04-25	永大路	\N	診所	280	\N	診所	533	\N	2025-04-25 07:00:39.641724	6_115_17	fixed	\N	\N	\N	\N	\N	\N
+1132	2025-04-25	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-04-25 07:00:39.641724	14_115_17	fixed	\N	\N	\N	\N	\N	\N
+1133	2025-04-25	同安路	\N	診所	220	\N	診所	61553	\N	2025-04-25 07:00:39.641724	15_115_17	fixed	\N	\N	\N	\N	\N	\N
+1134	2025-04-25	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-04-25 07:00:39.641724	7_115_17	fixed	\N	\N	\N	\N	\N	\N
+1165	2025-04-28	診所	\N	大灣二街	275	\N	診所	533	\N	2025-04-28 06:02:39.190717	5_118_18	fixed	\N	\N	\N	\N	\N	\N
+1166	2025-04-28	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-04-28 06:02:39.190717	19_118_18	fixed	\N	\N	\N	\N	\N	\N
+1167	2025-04-28	永大路	\N	診所	280	\N	診所	533	\N	2025-04-28 06:02:39.190717	6_118_18	fixed	\N	\N	\N	\N	\N	\N
+1168	2025-04-28	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-04-28 06:02:39.190717	18_118_18	fixed	\N	\N	\N	\N	\N	\N
+1169	2025-04-28	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-04-28 06:02:39.190717	7_118_18	fixed	\N	\N	\N	\N	\N	\N
+1081	2025-04-23	東洋後門	\N	高鐵站	680	\N	東洋	28530	\N	2025-04-23 02:38:07.2434	T_2136	temp	\N	\N	\N	\N	\N	\N
+1200	2025-04-30	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-04-29 23:35:00.081916	2_120_18	fixed	\N	\N	\N	\N	\N	\N
+1235	2025-05-01	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-05-01 08:05:01.240298	30_121_18	fixed	\N	\N	\N	\N	\N	\N
+1272	2025-05-04	東洋後門	文南71	高鐵站	680	\N	東洋	5386	\N	2025-05-05 00:51:05.948364	44_124_18	fixed	\N	\N	\N	\N	\N	\N
+1273	2025-05-04	高鐵站	\N	東洋後門	680	\N	東洋	5386	\N	2025-05-05 00:51:05.948364	45_124_18	fixed	\N	\N	\N	\N	\N	\N
+1274	2025-05-05	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-05-05 00:51:05.948364	17_125_19	fixed	\N	\N	\N	\N	\N	\N
+1275	2025-05-05	大灣二街	\N	診所	275	\N	診所	533	\N	2025-05-05 00:51:05.948364	1_125_19	fixed	\N	\N	\N	\N	\N	\N
+1276	2025-05-05	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-05-05 00:51:05.948364	38_125_19	fixed	\N	\N	\N	\N	\N	\N
+1277	2025-05-05	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-05-05 00:51:05.948364	42_125_19	fixed	\N	\N	\N	\N	\N	\N
+1278	2025-05-05	和緯152	\N	診所	105	0	診所	533	\N	2025-05-05 00:51:05.948364	T_2522	temp	\N	\N	\N	\N	\N	\N
+1301	2025-04-28	東洋後門	\N	新戶家	360	\N	東洋	533	\N	2025-05-06 03:40:00.691769	C_1301	temp	\N	\N	\N	\N	\N	\N
+1340	2025-05-07	診所	\N	永大路	280	\N	診所	61553	\N	2025-05-07 07:40:50.21142	16_127_19	fixed	\N	\N	\N	\N	\N	\N
+1341	2025-05-07	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-05-07 07:40:50.21142	20_127_19	fixed	\N	\N	\N	\N	\N	\N
+1342	2025-05-07	東洋前門	\N	高鐵站	\N	\N	東洋	61367	\N	2025-05-07 07:40:50.21142	T_2544	temp	\N	\N	\N	\N	\N	\N
+1380	2025-05-09	診所	\N	安定	500	\N	診所	5386	\N	2025-05-10 01:48:09.190364	12_129_19	fixed	\N	\N	\N	\N	\N	\N
+1381	2025-05-09	診所	\N	永大路	280	\N	診所	61553	\N	2025-05-10 01:48:09.190364	16_129_19	fixed	\N	\N	\N	\N	\N	\N
+1382	2025-05-09	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-05-10 01:48:09.190364	20_129_19	fixed	\N	\N	\N	\N	\N	\N
+1383	2025-05-09	同安路	\N	診所	220	\N	診所	61553	\N	2025-05-10 01:48:09.190364	15_129_19	fixed	\N	\N	\N	\N	\N	\N
+1384	2025-05-09	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-05-10 01:48:09.190364	39_129_19	fixed	\N	\N	\N	\N	\N	\N
+1385	2025-05-09	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-05-10 01:48:09.190364	43_129_19	fixed	\N	\N	\N	\N	\N	\N
+1387	2025-05-10	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-05-10 01:48:09.190364	22_130_19	fixed	\N	\N	\N	\N	\N	\N
+1388	2025-05-09	診所	\N	仁和路	220	\N	診所	533	\N	2025-05-10 01:48:09.190364	10_129_19	fixed	\N	\N	\N	\N	\N	\N
+1386	2025-05-09	診所		育德二路	95	\N	診所	28530	\N	2025-05-10 01:48:09.190364	21_129_19	fixed	\N	\N	\N	\N	\N	\N
+1389	2025-05-09	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-05-10 01:48:09.190364	4_129_19	fixed	\N	\N	\N	\N	\N	\N
+1390	2025-05-09	東洋後門	\N	東橋十街	\N	\N	東洋	533	\N	2025-05-10 01:48:09.190364	T_2548	temp	\N	\N	\N	\N	\N	\N
+1391	2025-05-09	高雄中正四路	\N	湖內民權路	\N	\N	東洋	61553	\N	2025-05-10 01:48:09.190364	T_2550	temp	\N	\N	\N	\N	\N	\N
+917	2025-04-14	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-04-13 23:15:02.351536	42_104_16	fixed	\N	\N	\N	\N	\N	\N
+1053	2025-04-21	診所	\N	永大路	280	\N	診所	61553	\N	2025-04-21 10:08:09.4629	16_111_17	fixed	\N	\N	\N	\N	\N	\N
+945	2025-04-09	東洋後門	往返	新營環保局	2410	\N	東洋	5386	\N	2025-04-14 18:43:28.738771	C_945	temp	\N	\N	\N	\N	\N	\N
+954	2025-04-15	二井家	\N	東洋後門	1400	\N	東洋	28530	\N	2025-04-15 01:00:45.194474	40_105_16	fixed	\N	\N	\N	\N	\N	\N
+955	2025-04-15	久保田家	新戶家	東洋後門	360	\N	東洋	5386	\N	2025-04-15 01:00:45.194474	41_105_16	fixed	\N	\N	\N	\N	\N	\N
+974	2025-04-16	仁和路	\N	診所	220	\N	診所	533	\N	2025-04-16 01:55:02.404918	9_106_16	fixed	\N	\N	\N	\N	\N	\N
+953	2025-04-15	古堡街	安北路+和緯五	診所	230	-30	診所	533	和緯五請假	2025-04-15 01:00:45.194474	23_105_16	fixed	\N	\N	\N	\N	\N	\N
+1001	2025-04-18	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-04-17 22:43:31.597686	17_108_16	fixed	\N	\N	\N	\N	\N	\N
+1002	2025-04-18	大灣二街	\N	診所	275	\N	診所	533	\N	2025-04-17 22:43:31.597686	1_108_16	fixed	\N	\N	\N	\N	\N	\N
+1020	2025-04-19	診所	\N	忠孝街	85	\N	診所	533	\N	2025-04-19 04:20:59.784563	25_109_16	fixed	\N	\N	\N	\N	\N	\N
+1021	2025-04-19	公園南路	海安路	診所	90	\N	診所	533	\N	2025-04-19 04:20:59.784563	26_109_16	fixed	\N	\N	\N	\N	\N	\N
+1022	2025-04-19	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-04-19 04:20:59.784563	29_109_16	fixed	\N	\N	\N	\N	\N	\N
+1023	2025-04-19	信智	\N	診所	140	\N	診所	61553	\N	2025-04-19 04:20:59.784563	32_109_16	fixed	\N	\N	\N	\N	\N	\N
+1024	2025-04-19	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-04-19 04:20:59.784563	33_109_16	fixed	\N	\N	\N	\N	\N	\N
+1025	2025-04-19	南寧街	\N	診所	120	\N	診所	61553	\N	2025-04-19 04:20:59.784563	35_109_16	fixed	\N	\N	\N	\N	\N	\N
+1019	2025-04-19	診所	和緯五+安北路+古堡街	怡平路	270	-40	診所	533	\N	2025-04-19 04:20:59.784563	24_109_16	fixed	\N	\N	\N	\N	\N	\N
+1054	2025-04-21	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-04-21 10:08:09.4629	20_111_17	fixed	\N	\N	\N	\N	\N	\N
+1055	2025-04-21	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-04-21 10:08:09.4629	4_111_17	fixed	\N	\N	\N	\N	\N	\N
+1056	2025-04-21	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-04-21 10:08:09.4629	39_111_17	fixed	\N	\N	\N	\N	\N	\N
+1057	2025-04-21	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-04-21 10:08:09.4629	43_111_17	fixed	\N	\N	\N	\N	\N	\N
+1082	2025-04-23	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-04-23 02:55:01.425065	18_113_17	fixed	\N	\N	\N	\N	\N	\N
+1135	2025-04-25	診所	\N	永大路	280	\N	診所	61553	\N	2025-04-25 08:30:51.022034	16_115_17	fixed	\N	\N	\N	\N	\N	\N
+1136	2025-04-25	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-04-25 08:30:51.022034	4_115_17	fixed	\N	\N	\N	\N	\N	\N
+1026	2025-04-19	正義街116號	\N	高鐵站	\N	\N	臨時	5386	\N	2025-04-19 04:20:59.784563	T_2000	temp	\N	\N	\N	\N	\N	\N
+1170	2025-04-28	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-04-28 06:35:29.259583	14_118_18	fixed	\N	\N	\N	\N	\N	\N
+1201	2025-04-30	新戶家	\N	高鐵站	605	0	東洋	5386	\N	2025-04-30 01:28:04.322159	T_2395	temp	\N	\N	\N	\N	\N	\N
+1236	2025-05-01	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-05-01 10:55:02.421322	39_121_18	fixed	\N	\N	\N	\N	\N	\N
+1237	2025-05-01	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-05-01 10:55:02.421322	43_121_18	fixed	\N	\N	\N	\N	\N	\N
+1279	2025-05-05	仁和路	\N	診所	220	\N	診所	533	\N	2025-05-05 01:55:02.412307	9_125_19	fixed	\N	\N	\N	\N	\N	\N
+1238	2025-05-01	東洋後門	\N	東橋十街	360	\N	東洋	61553	\N	2025-05-01 10:55:02.421322	T_2402	temp	\N	\N	\N	\N	\N	\N
+1302	2025-05-06	信智	\N	診所	140	\N	診所	61553	\N	2025-05-06 04:34:41.8118	32_126_19	fixed	\N	\N	\N	\N	\N	\N
+1303	2025-05-06	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-05-06 04:34:41.8118	33_126_19	fixed	\N	\N	\N	\N	\N	\N
+1304	2025-05-06	南寧街	\N	診所	120	\N	診所	61553	\N	2025-05-06 04:34:41.8118	35_126_19	fixed	\N	\N	\N	\N	\N	\N
+1305	2025-05-06	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-05-06 04:34:41.8118	22_126_19	fixed	\N	\N	\N	\N	\N	\N
+1306	2025-05-06	久保田家	新戶家	東洋後門	360	\N	東洋	5386	\N	2025-05-06 04:34:41.8118	41_126_19	fixed	\N	\N	\N	\N	\N	\N
+1307	2025-05-06	馬鎮宮	\N	診所	330	\N	診所	28530	\N	2025-05-06 04:34:41.8118	29_126_19	fixed	\N	\N	\N	\N	\N	\N
+1309	2025-05-06	群創D3哨	\N	東洋後門	\N	\N	東洋	533	\N	2025-05-06 04:34:41.8118	T_2529	temp	\N	\N	\N	\N	\N	\N
+1310	2025-05-06	協理家	\N	高鐵站	\N	\N	東洋	28530	\N	2025-05-06 04:34:41.8118	T_2531	temp	\N	\N	\N	\N	\N	\N
+1311	2025-05-06	安北路	\N	診所	165	0	診所	533	\N	2025-05-06 04:34:41.8118	T_2533	temp	\N	\N	\N	\N	\N	\N
+1308	2025-05-06	東洋後門	\N	群創D3哨	1100	875	東洋	5386	\N	2025-05-06 04:34:41.8118	T_2528	temp	\N	\N	\N	\N	\N	\N
+1343	2025-05-07	東洋前門	\N	高鐵站	\N	\N	東洋	533	\N	2025-05-07 08:20:01.567456	T_2527	temp	\N	\N	\N	\N	\N	\N
+1392	2025-05-10	安北路	\N	診所	165	\N	診所	533	\N	2025-05-11 02:52:25.55945	C_1392	temp	\N	\N	\N	\N	\N	\N
+1058	2025-04-22	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-04-22 01:04:29.865208	22_112_17	fixed	\N	\N	\N	\N	\N	\N
+1059	2025-04-22	久保田家	新戶家	東洋後門	360	\N	東洋	5386	\N	2025-04-22 01:04:29.865208	41_112_17	fixed	\N	\N	\N	\N	\N	\N
+938	2025-04-11	高鐵站	\N	協理家	705	\N	東洋	28530	\N	2025-04-14 18:24:45.785815	C_938	temp	\N	\N	\N	\N	\N	\N
+946	2025-04-10	東洋後門	往返	群創路科廠	2740	\N	東洋	5386	2hour	2025-04-14 18:45:48.55413	C_946	temp	\N	\N	\N	\N	\N	\N
+956	2025-04-15	公園南路	海安路	診所	90	\N	診所	533	\N	2025-04-15 02:32:18.174556	26_105_16	fixed	\N	\N	\N	\N	\N	\N
+957	2025-04-15	信智	\N	診所	140	\N	診所	61553	\N	2025-04-15 02:32:18.174556	32_105_16	fixed	\N	\N	\N	\N	\N	\N
+958	2025-04-15	高鐵站	\N	東洋前門	\N	\N	臨時	5386	\N	2025-04-15 02:32:18.174556	T_1983	fixed	\N	\N	\N	\N	\N	\N
+975	2025-04-16	安定	\N	診所	500	\N	診所	5386	\N	2025-04-16 02:05:01.205184	11_106_16	fixed	\N	\N	\N	\N	\N	\N
+621	2025-03-25	東洋前門	\N	二井家	1400	\N	東洋	5386	\N	2025-03-25 17:35:00.003719	39_84_13	fixed	\N	\N	\N	\N	\N	\N
+568	2025-03-21	東洋前門	\N	二井家	1400	\N	東洋	5386	\N	2025-03-24 23:01:48.006936	39_80_12	fixed	\N	\N	\N	\N	\N	\N
+620	2025-03-25	東洋前門	\N	二井家	1400	\N	東洋	5386	\N	2025-03-25 17:35:00.003921	39_84_13	fixed	\N	\N	\N	\N	\N	\N
+559	2025-03-24	東洋前門	新戶	久保田家	360	\N	東洋	28530	\N	2025-03-24 20:51:06.519934	43_83_13	fixed	\N	\N	\N	\N	\N	\N
+569	2025-03-21	東洋前門	新戶	久保田家	360	\N	東洋	28530	\N	2025-03-24 23:01:48.006936	43_80_12	fixed	\N	\N	\N	\N	\N	\N
+616	2025-03-25	二井家	\N	東洋前門	1400	\N	東洋	28530	\N	2025-03-25 15:47:44.090006	40_84_13	fixed	\N	\N	\N	\N	\N	\N
+564	2025-03-21	二井家	\N	東洋前門	1400	\N	東洋	5386	\N	2025-03-24 23:01:48.006936	38_80_12	fixed	\N	\N	\N	\N	\N	\N
+565	2025-03-21	二井家	\N	東洋前門	1400	\N	東洋	28530	\N	2025-03-24 23:01:48.006936	40_80_12	fixed	\N	\N	\N	\N	\N	\N
+617	2025-03-25	久保田家	新戶	東洋前門	360	\N	東洋	5386	\N	2025-03-25 15:47:44.090006	41_84_13	fixed	\N	\N	\N	\N	\N	\N
+566	2025-03-21	久保田家	新戶	東洋前門	360	\N	東洋	5386	\N	2025-03-24 23:01:48.006936	41_80_12	fixed	\N	\N	\N	\N	\N	\N
+567	2025-03-21	久保田家	新戶	東洋前門	360	\N	東洋	28530	\N	2025-03-24 23:01:48.006936	42_80_12	fixed	\N	\N	\N	\N	\N	\N
+1027	2025-04-19	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-04-20 00:46:39.820341	30_109_16	fixed	\N	\N	\N	\N	\N	\N
+1028	2025-04-19	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-04-20 00:46:39.820341	31_109_16	fixed	\N	\N	\N	\N	\N	\N
+1061	2025-04-22	東洋後門	\N	群創D3哨	2100	\N	東洋	5386	wait 4h	2025-04-22 01:04:29.865208	T_2129	temp	\N	\N	\N	\N	\N	\N
+1137	2025-04-25	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-04-26 00:00:01.555817	39_115_17	fixed	\N	\N	\N	\N	\N	\N
+1138	2025-04-25	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-04-26 00:00:01.555817	43_115_17	fixed	\N	\N	\N	\N	\N	\N
+1140	2025-04-26	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-04-26 00:00:01.555817	22_116_17	fixed	\N	\N	\N	\N	\N	\N
+1139	2025-04-26	古堡街	安北路+和緯五	診所	230	-30	診所	533	\N	2025-04-26 00:00:01.555817	23_116_17	fixed	\N	\N	\N	\N	\N	\N
+1171	2025-04-28	診所	\N	仁和路	220	\N	診所	533	\N	2025-04-28 12:43:55.234738	10_118_18	fixed	\N	\N	\N	\N	\N	\N
+1172	2025-04-28	診所	\N	安定	500	\N	診所	5386	\N	2025-04-28 12:43:55.234738	12_118_18	fixed	\N	\N	\N	\N	\N	\N
+1173	2025-04-28	診所	\N	永大路	280	\N	診所	61553	\N	2025-04-28 12:43:55.234738	16_118_18	fixed	\N	\N	\N	\N	\N	\N
+1174	2025-04-28	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-04-28 12:43:55.234738	4_118_18	fixed	\N	\N	\N	\N	\N	\N
+1175	2025-04-28	同安路	\N	診所	220	\N	診所	61553	\N	2025-04-28 12:43:55.234738	15_118_18	fixed	\N	\N	\N	\N	\N	\N
+1177	2025-04-28	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-04-28 12:43:55.234738	39_118_18	fixed	\N	\N	\N	\N	\N	\N
+1060	2025-04-22	古堡街	安北路+和緯五	診所	230	-30	診所	533	\N	2025-04-22 01:04:29.865208	23_112_17	fixed	\N	\N	\N	\N	\N	\N
+1083	2025-04-23	診所	\N	大灣二街	275	\N	診所	533	\N	2025-04-23 03:12:36.751922	5_113_17	fixed	\N	\N	\N	\N	\N	\N
+1202	2025-04-30	仁和路	\N	診所	220	\N	診所	533	\N	2025-04-30 01:55:02.38191	9_120_18	fixed	\N	\N	\N	\N	\N	\N
+1239	2025-05-02	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-05-01 22:31:19.014945	17_122_18	fixed	\N	\N	\N	\N	\N	\N
+1240	2025-05-02	大灣二街	\N	診所	275	\N	診所	533	\N	2025-05-01 22:31:19.014945	1_122_18	fixed	\N	\N	\N	\N	\N	\N
+1280	2025-05-05	診所	\N	長溪路	210	\N	診所	61553	\N	2025-05-05 02:00:01.241743	13_125_19	fixed	\N	\N	\N	\N	\N	\N
+1003	2025-04-18	太子龍	\N	高鐵站	\N	\N	臨時	5386	\N	2025-04-17 23:15:01.312148	T_1999	temp	\N	\N	\N	\N	\N	\N
+1281	2025-05-05	安定	\N	診所	500	\N	診所	5386	\N	2025-05-05 02:00:01.241743	11_125_19	fixed	\N	\N	\N	\N	\N	\N
+1282	2025-05-05	東橋十街	\N	東洋後門	\N	\N	東洋	61553	\N	2025-05-05 02:00:01.241743	T_2523	temp	\N	\N	\N	\N	\N	\N
+1178	2025-04-28	東洋後門	安和路	東橋十街	440	\N	東洋	61553	\N	2025-04-28 12:43:55.234738	T_2390	temp	\N	\N	\N	\N	\N	\N
+1176	2025-04-28	東洋後門	新戶家	久保田家	360	\N	東洋	533	\N	2025-04-28 12:43:55.234738	43_118_18	fixed	\N	\N	\N	\N	\N	\N
+1344	2025-05-07	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-05-07 10:49:31.09341	39_127_19	fixed	\N	\N	\N	\N	\N	\N
+1345	2025-05-07	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-05-07 10:49:31.09341	43_127_19	fixed	\N	\N	\N	\N	\N	\N
+1346	2025-05-07	東洋後門	\N	東橋十街	\N	\N	東洋	61553	\N	2025-05-07 10:49:31.09341	T_2541	temp	\N	\N	\N	\N	\N	\N
+1393	2025-05-10	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-05-11 06:56:46.254838	30_130_19	fixed	\N	\N	\N	\N	\N	\N
+1394	2025-05-10	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-05-11 06:56:46.254838	31_130_19	fixed	\N	\N	\N	\N	\N	\N
+1395	2025-05-10	診所	\N	南寧街	120	\N	診所	533	\N	2025-05-11 06:56:46.254838	36_130_19	fixed	\N	\N	\N	\N	\N	\N
+1396	2025-05-10	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-05-11 06:56:46.254838	29_130_19	fixed	\N	\N	\N	\N	\N	\N
+1397	2025-05-10	信智	\N	診所	140	\N	診所	61553	\N	2025-05-11 06:56:46.254838	32_130_19	fixed	\N	\N	\N	\N	\N	\N
+1029	2025-04-19	診所	\N	南寧街	120	\N	診所	533	\N	2025-04-20 00:46:39.820341	36_109_16	fixed	\N	\N	\N	\N	\N	\N
+1398	2025-05-10	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-05-11 06:56:46.254838	33_130_19	fixed	\N	\N	\N	\N	\N	\N
+1399	2025-05-10	南寧街	\N	診所	120	\N	診所	61553	\N	2025-05-11 06:56:46.254838	35_130_19	fixed	\N	\N	\N	\N	\N	\N
+1400	2025-05-10	診所	安北路	怡平路	230	-90	診所	533	\N	2025-05-11 06:56:46.254838	24_130_19	fixed	\N	\N	\N	\N	\N	\N
+1062	2025-04-22	信智	\N	診所	140	\N	診所	61553	\N	2025-04-22 02:46:51.442914	32_112_17	fixed	\N	\N	\N	\N	\N	\N
+1064	2025-04-22	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-04-22 02:55:00.084789	33_112_17	fixed	\N	\N	\N	\N	\N	\N
+1084	2025-04-23	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-04-23 04:19:00.385901	19_113_17	fixed	\N	\N	\N	\N	\N	\N
+1085	2025-04-23	永大路	\N	診所	280	\N	診所	533	\N	2025-04-23 04:19:00.385901	6_113_17	fixed	\N	\N	\N	\N	\N	\N
+1086	2025-04-23	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-04-23 04:19:00.385901	7_113_17	fixed	\N	\N	\N	\N	\N	\N
+1142	2025-04-26	診所	\N	忠孝街	85	\N	診所	533	\N	2025-04-26 11:49:24.409198	25_116_17	fixed	\N	\N	\N	\N	\N	\N
+1143	2025-04-26	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-04-26 11:49:24.409198	30_116_17	fixed	\N	\N	\N	\N	\N	\N
+1144	2025-04-26	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-04-26 11:49:24.409198	31_116_17	fixed	\N	\N	\N	\N	\N	\N
+1145	2025-04-26	診所	\N	南寧街	120	\N	診所	533	\N	2025-04-26 11:49:24.409198	36_116_17	fixed	\N	\N	\N	\N	\N	\N
+1146	2025-04-26	公園南路	海安路	診所	90	\N	診所	533	\N	2025-04-26 11:49:24.409198	26_116_17	fixed	\N	\N	\N	\N	\N	\N
+1147	2025-04-26	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-04-26 11:49:24.409198	29_116_17	fixed	\N	\N	\N	\N	\N	\N
+1148	2025-04-26	信智	\N	診所	140	\N	診所	61553	\N	2025-04-26 11:49:24.409198	32_116_17	fixed	\N	\N	\N	\N	\N	\N
+1149	2025-04-26	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-04-26 11:49:24.409198	33_116_17	fixed	\N	\N	\N	\N	\N	\N
+1150	2025-04-26	南寧街	\N	診所	120	\N	診所	61553	\N	2025-04-26 11:49:24.409198	35_116_17	fixed	\N	\N	\N	\N	\N	\N
+1151	2025-04-26	新戶家	\N	東洋後門	360	0	東洋	5386	\N	2025-04-26 11:49:24.409198	T_2143	temp	\N	\N	\N	\N	\N	\N
+1141	2025-04-26	診所	和緯五+安北路+古堡街	怡平路	270	-40	診所	533	\N	2025-04-26 11:49:24.409198	24_116_17	fixed	\N	\N	\N	\N	\N	\N
+1063	2025-04-22	群創D3哨	\N	高鐵站	1125	\N	東洋	533	wait 1.5h	2025-04-22 02:46:51.442914	T_2131	temp	\N	\N	\N	\N	\N	\N
+1203	2025-04-30	診所	\N	長溪路	210	\N	診所	61553	\N	2025-04-30 02:00:01.25377	13_120_18	fixed	\N	\N	\N	\N	\N	\N
+1204	2025-04-30	安定	\N	診所	500	\N	診所	5386	\N	2025-04-30 02:00:01.25377	11_120_18	fixed	\N	\N	\N	\N	\N	\N
+1241	2025-05-02	診所	\N	大灣二街	275	\N	診所	533	\N	2025-05-02 04:55:08.905302	5_122_18	fixed	\N	\N	\N	\N	\N	\N
+1242	2025-05-02	診所	\N	長溪路	210	\N	診所	61553	\N	2025-05-02 04:55:08.905302	13_122_18	fixed	\N	\N	\N	\N	\N	\N
+1243	2025-05-02	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-05-02 04:55:08.905302	19_122_18	fixed	\N	\N	\N	\N	\N	\N
+1244	2025-05-02	永大路	\N	診所	280	\N	診所	533	\N	2025-05-02 04:55:08.905302	6_122_18	fixed	\N	\N	\N	\N	\N	\N
+1245	2025-05-02	仁和路	\N	診所	220	\N	診所	533	\N	2025-05-02 04:55:08.905302	9_122_18	fixed	\N	\N	\N	\N	\N	\N
+1246	2025-05-02	安定	\N	診所	500	\N	診所	5386	\N	2025-05-02 04:55:08.905302	11_122_18	fixed	\N	\N	\N	\N	\N	\N
+1247	2025-05-02	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-05-02 04:55:08.905302	18_122_18	fixed	\N	\N	\N	\N	\N	\N
+1248	2025-05-02	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-05-02 04:55:08.905302	7_122_18	fixed	\N	\N	\N	\N	\N	\N
+1249	2025-05-02	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-05-02 04:55:08.905302	2_122_18	fixed	\N	\N	\N	\N	\N	\N
+1283	2025-05-05	診所	\N	大灣二街	275	\N	診所	533	\N	2025-05-05 03:56:51.086711	5_125_19	fixed	\N	\N	\N	\N	\N	\N
+1284	2025-05-05	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-05-05 03:56:51.086711	19_125_19	fixed	\N	\N	\N	\N	\N	\N
+1285	2025-05-05	永大路	\N	診所	280	\N	診所	533	\N	2025-05-05 03:56:51.086711	6_125_19	fixed	\N	\N	\N	\N	\N	\N
+1286	2025-05-05	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-05-05 03:56:51.086711	18_125_19	fixed	\N	\N	\N	\N	\N	\N
+1347	2025-05-08	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-05-07 22:49:47.082669	22_128_19	fixed	\N	\N	\N	\N	\N	\N
+1348	2025-05-08	二井家	\N	東洋後門	1400	\N	東洋	28530	\N	2025-05-07 22:49:47.082669	40_128_19	fixed	\N	\N	\N	\N	\N	\N
+420	2025-03-23	東洋前門	文南71	高鐵站	680	\N	東洋	5386	\N	2025-03-23 18:05:31.271601	44_82_12	fixed	\N	\N	\N	\N	\N	\N
+464	2025-03-17	東洋前門	新戶	久保田家	360	\N	東洋	28530	\N	2025-03-24 13:28:51.259354	43_76_12	fixed	\N	\N	\N	\N	\N	\N
+421	2025-03-23	高鐵站	\N	東洋前門	680	\N	東洋	5386	\N	2025-03-23 18:05:31.271601	45_82_12	fixed	\N	\N	\N	\N	\N	\N
+505	2025-03-19	久保田家	新戶	東洋前門	360	\N	東洋	28530	\N	2025-03-24 14:58:39.579674	42_78_12	fixed	\N	\N	\N	\N	\N	\N
+1065	2025-04-22	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-04-22 08:29:27.740365	30_112_17	fixed	\N	\N	\N	\N	\N	\N
+1066	2025-04-22	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-04-22 08:29:27.740365	31_112_17	fixed	\N	\N	\N	\N	\N	\N
+1067	2025-04-22	診所	\N	南寧街	120	\N	診所	533	\N	2025-04-22 08:29:27.740365	36_112_17	fixed	\N	\N	\N	\N	\N	\N
+1068	2025-04-22	南寧街	\N	診所	120	\N	診所	61553	\N	2025-04-22 08:29:27.740365	35_112_17	fixed	\N	\N	\N	\N	\N	\N
+1088	2025-04-23	診所	\N	永大路	280	\N	診所	61553	\N	2025-04-23 11:07:02.170669	16_113_17	fixed	\N	\N	\N	\N	\N	\N
+1089	2025-04-23	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-04-23 11:07:02.170669	20_113_17	fixed	\N	\N	\N	\N	\N	\N
+1090	2025-04-23	診所	民德58	育德二路	110	\N	診所	28530	\N	2025-04-23 11:07:02.170669	21_113_17	fixed	\N	\N	\N	\N	\N	\N
+1091	2025-04-23	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-04-23 11:07:02.170669	14_113_17	fixed	\N	\N	\N	\N	\N	\N
+1092	2025-04-23	同安路	\N	診所	220	\N	診所	61553	\N	2025-04-23 11:07:02.170669	15_113_17	fixed	\N	\N	\N	\N	\N	\N
+1152	2025-04-26	東洋後門	\N	新戶家	360	\N	東洋	5386	\N	2025-04-26 16:35:25.149135	T_2144	temp	\N	\N	\N	\N	\N	\N
+1087	2025-04-23	診所	\N	安定	500	\N	診所	533	\N	2025-04-23 11:07:02.170669	12_113_17	fixed	\N	\N	\N	\N	\N	\N
+1069	2025-04-22	東洋後門	\N	高鐵站	680	\N	東洋	28530	\N	2025-04-22 08:29:27.740365	T_2130	temp	\N	\N	\N	\N	\N	\N
+1180	2025-04-25	東洋後門	溫外科+東洋+東橋十街	東洋後門	1260	\N	東洋	28530	\N	2025-04-28 13:07:55.781417	C_1180	temp	\N	\N	\N	\N	\N	\N
+1205	2025-04-30	診所	\N	大灣二街	275	\N	診所	533	\N	2025-04-30 02:45:01.388963	5_120_18	fixed	\N	\N	\N	\N	\N	\N
+1250	2025-05-02	診所	\N	仁和路	220	\N	診所	533	\N	2025-05-02 11:31:31.300651	10_122_18	fixed	\N	\N	\N	\N	\N	\N
+1251	2025-05-02	診所	\N	安定	500	\N	診所	5386	\N	2025-05-02 11:31:31.300651	12_122_18	fixed	\N	\N	\N	\N	\N	\N
+1252	2025-05-02	診所	\N	永大路	280	\N	診所	61553	\N	2025-05-02 11:31:31.300651	16_122_18	fixed	\N	\N	\N	\N	\N	\N
+1253	2025-05-02	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-05-02 11:31:31.300651	20_122_18	fixed	\N	\N	\N	\N	\N	\N
+1255	2025-05-02	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-05-02 11:31:31.300651	4_122_18	fixed	\N	\N	\N	\N	\N	\N
+1256	2025-05-02	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-05-02 11:31:31.300651	14_122_18	fixed	\N	\N	\N	\N	\N	\N
+1257	2025-05-02	同安路	\N	診所	220	\N	診所	61553	\N	2025-05-02 11:31:31.300651	15_122_18	fixed	\N	\N	\N	\N	\N	\N
+1254	2025-05-02	診所	民德58	育德二路	95	\N	診所	28530	\N	2025-05-02 11:31:31.300651	21_122_18	fixed	\N	\N	\N	\N	\N	\N
+1288	2025-05-05	診所	\N	和緯152	105	0	診所	533	\N	2025-05-05 04:25:01.333469	T_2525	temp	\N	\N	\N	\N	\N	\N
+1315	2025-05-06	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-05-06 14:56:18.676748	30_126_19	fixed	\N	\N	\N	\N	\N	\N
+1316	2025-05-06	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-05-06 14:56:18.676748	31_126_19	fixed	\N	\N	\N	\N	\N	\N
+1317	2025-05-06	診所	\N	南寧街	120	\N	診所	533	\N	2025-05-06 14:56:18.676748	36_126_19	fixed	\N	\N	\N	\N	\N	\N
+1318	2025-05-06	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-05-06 14:56:18.676748	39_126_19	fixed	\N	\N	\N	\N	\N	\N
+1319	2025-05-06	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-05-06 14:56:18.676748	43_126_19	fixed	\N	\N	\N	\N	\N	\N
+1320	2025-05-06	東橋十街	\N	東洋後門	\N	\N	東洋	61553	\N	2025-05-06 14:56:18.676748	T_2538	temp	\N	\N	\N	\N	\N	\N
+1321	2025-05-06	東洋後門	\N	東橋十街	\N	\N	東洋	61553	\N	2025-05-06 14:56:18.676748	T_2539	temp	\N	\N	\N	\N	\N	\N
+1322	2025-05-06	高鐵站	\N	協理家	\N	\N	東洋	533	\N	2025-05-06 14:56:18.676748	T_2532	temp	\N	\N	\N	\N	\N	\N
+1314	2025-05-06	東洋前門	\N	新市復興路	705	0	東洋	5386	\N	2025-05-06 14:56:18.676748	T_2537	temp	\N	\N	\N	\N	\N	\N
+1349	2025-05-08	久保田家	新戶家	東洋後門	360	\N	東洋	5386	\N	2025-05-07 23:10:12.806931	41_128_19	fixed	\N	\N	\N	\N	\N	\N
+554	2025-03-19	東洋前門	新戶	久保田家	360	\N	東洋	28530	\N	2025-03-24 16:24:04.227965	43_78_12	fixed	\N	\N	\N	\N	\N	\N
+622	2025-03-25	東洋前門	新戶	久保田家	360	\N	東洋	28530	\N	2025-03-25 17:35:00.018703	43_84_13	fixed	\N	\N	\N	\N	\N	\N
+551	2025-03-19	久保田家	新戶	東洋前門	360	\N	東洋	5386	\N	2025-03-24 16:24:04.227965	41_78_12	fixed	\N	\N	\N	\N	\N	\N
+636	2025-03-26	久保田家	新戶	東洋前門	360	\N	東洋	28530	\N	2025-03-26 12:16:59.504352	42_85_13	fixed	\N	\N	\N	\N	\N	\N
+659	2025-03-27	久保田家	新戶	東洋前門	360	\N	東洋	5386	\N	2025-03-28 01:32:24.352337	41_86_13	fixed	\N	\N	\N	\N	\N	\N
+1071	2025-04-22	東洋後門	\N	HANNSTAR	1100	\N	東洋	5386	往返	2025-04-22 09:44:54.572064	T_2132	temp	\N	\N	\N	\N	\N	\N
+1153	2025-04-27	台江大道	\N	高鐵站	600	\N	東洋	28530	\N	2025-04-27 12:45:36.292523	T_2145	temp	\N	\N	\N	\N	\N	\N
+1181	2025-04-29	二井家	\N	東洋後門	1400	\N	東洋	28530	\N	2025-04-28 23:08:57.177675	40_119_18	fixed	\N	\N	\N	\N	\N	\N
+1206	2025-04-30	診所	\N	仁和路	220	\N	診所	533	\N	2025-04-30 06:44:18.394998	10_120_18	fixed	\N	\N	\N	\N	\N	\N
+1207	2025-04-30	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-04-30 06:44:18.394998	19_120_18	fixed	\N	\N	\N	\N	\N	\N
+1208	2025-04-30	永大路	\N	診所	280	\N	診所	533	\N	2025-04-30 06:44:18.394998	6_120_18	fixed	\N	\N	\N	\N	\N	\N
+1209	2025-04-30	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-04-30 06:44:18.394998	14_120_18	fixed	\N	\N	\N	\N	\N	\N
+1210	2025-04-30	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-04-30 06:44:18.394998	18_120_18	fixed	\N	\N	\N	\N	\N	\N
+1211	2025-04-30	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-04-30 06:44:18.394998	7_120_18	fixed	\N	\N	\N	\N	\N	\N
+1070	2025-04-22	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-04-22 09:44:54.572064	43_112_17	fixed	\N	\N	\N	\N	\N	\N
+1259	2025-05-03	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-05-02 23:50:34.767568	22_123_18	fixed	\N	\N	\N	\N	\N	\N
+1258	2025-05-03	安北路	\N	診所	165	0	診所	533	\N	2025-05-02 23:50:34.767568	T_2403	temp	\N	\N	\N	\N	\N	\N
+1289	2025-05-05	診所	\N	仁和路	220	\N	診所	533	\N	2025-05-05 07:31:16.231098	10_125_19	fixed	\N	\N	\N	\N	\N	\N
+1290	2025-05-05	診所	\N	安定	500	\N	診所	5386	\N	2025-05-05 07:31:16.231098	12_125_19	fixed	\N	\N	\N	\N	\N	\N
+1291	2025-05-05	診所	\N	永大路	280	\N	診所	61553	\N	2025-05-05 07:31:16.231098	16_125_19	fixed	\N	\N	\N	\N	\N	\N
+1292	2025-05-05	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-05-05 07:31:16.231098	4_125_19	fixed	\N	\N	\N	\N	\N	\N
+1294	2025-05-05	同安路	\N	診所	220	\N	診所	61553	\N	2025-05-05 07:31:16.231098	15_125_19	fixed	\N	\N	\N	\N	\N	\N
+1183	2025-04-29	東橋十街	\N	東洋後門	350	\N	東洋	61553	\N	2025-04-28 23:08:57.177675	T_2392	temp	\N	\N	\N	\N	\N	\N
+1212	2025-04-30	東橋十街	\N	東洋後門	350	\N	東洋	61553	\N	2025-04-30 06:44:18.394998	T_2397	temp	\N	\N	\N	\N	\N	\N
+1182	2025-04-29	協理家	\N	高鐵站	680	\N	東洋	533	\N	2025-04-28 23:08:57.177675	T_2391	temp	\N	\N	\N	\N	\N	\N
+1323	2025-05-07	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-05-07 02:09:33.84148	17_127_19	fixed	\N	\N	\N	\N	\N	\N
+1324	2025-05-07	大灣二街	\N	診所	275	\N	診所	533	\N	2025-05-07 02:09:33.84148	1_127_19	fixed	\N	\N	\N	\N	\N	\N
+1325	2025-05-07	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-05-07 02:09:33.84148	2_127_19	fixed	\N	\N	\N	\N	\N	\N
+1326	2025-05-07	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-05-07 02:09:33.84148	38_127_19	fixed	\N	\N	\N	\N	\N	\N
+697	2025-03-31	大灣二街	\N	診所	275	\N	診所	533	\N	2025-03-31 05:56:55.346236	1_90_14	fixed	\N	\N	\N	\N	\N	\N
+698	2025-03-31	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-03-31 06:42:16.652634	17_90_14	fixed	\N	\N	\N	\N	\N	\N
+700	2025-03-31	診所	\N	大灣二街	275	\N	診所	533	\N	2025-03-31 12:15:42.017292	5_90_14	fixed	\N	\N	\N	\N	\N	\N
+701	2025-03-31	診所	\N	長溪路	210	\N	診所	61553	\N	2025-03-31 12:15:42.017292	13_90_14	fixed	\N	\N	\N	\N	\N	\N
+702	2025-03-31	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-03-31 12:15:42.017292	19_90_14	fixed	\N	\N	\N	\N	\N	\N
+703	2025-03-31	永大路	\N	診所	280	\N	診所	533	\N	2025-03-31 12:15:42.017292	6_90_14	fixed	\N	\N	\N	\N	\N	\N
+704	2025-03-31	仁和路	\N	診所	220	\N	診所	533	\N	2025-03-31 12:15:42.017292	9_90_14	fixed	\N	\N	\N	\N	\N	\N
+1293	2025-05-05	育德二路		診所	90	\N	診所	61553	\N	2025-05-05 07:31:16.231098	14_125_19	fixed	\N	\N	\N	\N	\N	\N
+705	2025-03-31	安定	\N	診所	500	\N	診所	5386	\N	2025-03-31 12:15:42.017292	11_90_14	fixed	\N	\N	\N	\N	\N	\N
+706	2025-03-31	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-03-31 12:15:42.017292	18_90_14	fixed	\N	\N	\N	\N	\N	\N
+708	2025-03-31	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-03-31 12:15:42.017292	2_90_14	fixed	\N	\N	\N	\N	\N	\N
+709	2025-03-31	診所	\N	仁和路	220	\N	診所	533	\N	2025-04-01 12:27:01.687265	10_90_14	fixed	\N	\N	\N	\N	\N	\N
+710	2025-03-31	診所	\N	安定	500	\N	診所	5386	\N	2025-04-01 12:27:01.687265	12_90_14	fixed	\N	\N	\N	\N	\N	\N
+711	2025-03-31	診所	\N	永大路	280	\N	診所	61553	\N	2025-04-01 12:27:01.687265	16_90_14	fixed	\N	\N	\N	\N	\N	\N
+712	2025-03-31	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-04-01 12:27:01.687265	20_90_14	fixed	\N	\N	\N	\N	\N	\N
+713	2025-03-31	診所	民德58	育德二路	110	\N	診所	28530	\N	2025-04-01 12:27:01.687265	21_90_14	fixed	\N	\N	\N	\N	\N	\N
+714	2025-03-31	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-04-01 12:27:01.687265	4_90_14	fixed	\N	\N	\N	\N	\N	\N
+715	2025-03-31	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-04-01 12:27:01.687265	14_90_14	fixed	\N	\N	\N	\N	\N	\N
+716	2025-03-31	同安路	\N	診所	220	\N	診所	61553	\N	2025-04-01 12:27:01.687265	15_90_14	fixed	\N	\N	\N	\N	\N	\N
+719	2025-04-01	診所	和緯五+安北路+古堡街	怡平路	270	\N	診所	533	\N	2025-04-01 12:27:01.687265	24_91_14	fixed	\N	\N	\N	\N	\N	\N
+720	2025-04-01	診所	\N	忠孝街	85	\N	診所	533	\N	2025-04-01 12:27:01.687265	25_91_14	fixed	\N	\N	\N	\N	\N	\N
+721	2025-04-01	診所	\N	灣裡路	340	\N	診所	5386	\N	2025-04-01 12:27:01.687265	28_91_14	fixed	\N	\N	\N	\N	\N	\N
+722	2025-04-01	古堡街	安北路+和緯五	診所	230	\N	診所	533	\N	2025-04-01 12:27:01.687265	23_91_14	fixed	\N	\N	\N	\N	\N	\N
+723	2025-04-01	公園南路	海安路	診所	90	\N	診所	533	\N	2025-04-01 12:27:01.687265	26_91_14	fixed	\N	\N	\N	\N	\N	\N
+724	2025-04-01	灣裡路	\N	診所	340	\N	診所	5386	\N	2025-04-01 12:27:01.687265	27_91_14	fixed	\N	\N	\N	\N	\N	\N
+725	2025-04-01	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-04-01 12:27:01.687265	29_91_14	fixed	\N	\N	\N	\N	\N	\N
+726	2025-04-01	信智	\N	診所	140	\N	診所	61553	\N	2025-04-01 12:27:01.687265	32_91_14	fixed	\N	\N	\N	\N	\N	\N
+727	2025-04-01	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-04-01 12:27:01.687265	33_91_14	fixed	\N	\N	\N	\N	\N	\N
+728	2025-04-01	南寧街	\N	診所	120	\N	診所	61553	\N	2025-04-01 12:27:01.687265	35_91_14	fixed	\N	\N	\N	\N	\N	\N
+729	2025-04-01	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-04-01 12:27:01.687265	22_91_14	fixed	\N	\N	\N	\N	\N	\N
+1327	2025-05-07	安定	\N	診所	500	\N	診所	533	\N	2025-05-07 02:09:33.84148	11_127_19	fixed	\N	\N	\N	\N	\N	\N
+1328	2025-05-07	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-05-07 02:09:33.84148	42_127_19	fixed	\N	\N	\N	\N	\N	\N
+732	2025-04-01	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-04-02 04:26:01.923345	30_91_14	fixed	\N	\N	\N	\N	\N	\N
+733	2025-04-01	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-04-02 04:26:01.923345	31_91_14	fixed	\N	\N	\N	\N	\N	\N
+1329	2025-05-07	高鐵站	\N	東洋前門	680	0	東洋	5386	\N	2025-05-07 02:09:33.84148	T_2526	temp	\N	\N	\N	\N	\N	\N
+1350	2025-05-08	診所	\N	忠孝街	85	\N	診所	533	\N	2025-05-08 08:54:45.45278	25_128_19	fixed	\N	\N	\N	\N	\N	\N
+695	2025-03-30	東洋前門	文南71	高鐵站	680	\N	東洋	5386	\N	2025-03-31 05:56:55.346236	44_89_13	fixed	\N	\N	\N	\N	\N	\N
+696	2025-03-30	高鐵站	\N	東洋前門	680	\N	東洋	5386	\N	2025-03-31 05:56:55.346236	45_89_13	fixed	\N	\N	\N	\N	\N	\N
+680	2025-03-28	久保田家	新戶	東洋前門	360	\N	東洋	28530	\N	2025-03-29 04:06:20.219901	42_87_13	fixed	\N	\N	\N	\N	\N	\N
+707	2025-03-31	久保田家	新戶	東洋前門	360	\N	東洋	28530	\N	2025-03-31 12:15:42.017292	42_90_14	fixed	\N	\N	\N	\N	\N	\N
+1351	2025-05-08	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-05-08 08:54:45.45278	30_128_19	fixed	\N	\N	\N	\N	\N	\N
+1093	2025-04-23	高鐵站	文南71	長北街	695	\N	東洋	5386	\N	2025-04-23 13:19:08.115261	T_2141	temp	\N	\N	\N	\N	\N	\N
+1094	2025-04-23	東洋前門	\N	高鐵站	680	\N	東洋	5386	\N	2025-04-23 13:19:08.115261	T_2135	temp	\N	\N	\N	\N	\N	\N
+734	2025-04-01	診所	\N	南寧街	120	\N	診所	533	\N	2025-04-02 04:26:01.923345	36_91_14	fixed	\N	\N	\N	\N	\N	\N
+1072	2025-04-23	大灣二街	\N	診所	275	\N	診所	533	\N	2025-04-22 21:58:32.084816	1_113_17	fixed	\N	\N	\N	\N	\N	\N
+737	2025-04-02	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-04-02 06:53:03.455856	17_92_14	fixed	\N	\N	\N	\N	\N	\N
+1097	2025-04-24	診所	和緯五+安北路+古堡街	怡平路	270	-40	診所	533	\N	2025-04-24 06:43:47.522741	24_114_17	fixed	\N	\N	\N	\N	\N	\N
+739	2025-04-02	大灣二街	\N	診所	275	\N	診所	533	\N	2025-04-02 06:53:03.455856	1_92_14	fixed	\N	\N	\N	\N	\N	\N
+741	2025-04-02	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-04-02 07:35:00.155908	2_92_14	fixed	\N	\N	\N	\N	\N	\N
+742	2025-04-02	診所	\N	大灣二街	275	\N	診所	533	\N	2025-04-03 14:37:22.720468	5_92_14	fixed	\N	\N	\N	\N	\N	\N
+743	2025-04-02	診所	\N	安定	500	\N	診所	5386	\N	2025-04-03 14:37:22.720468	12_92_14	fixed	\N	\N	\N	\N	\N	\N
+744	2025-04-02	診所	\N	長溪路	210	\N	診所	61553	\N	2025-04-03 14:37:22.720468	13_92_14	fixed	\N	\N	\N	\N	\N	\N
+745	2025-04-02	診所	\N	永大路	280	\N	診所	61553	\N	2025-04-03 14:37:22.720468	16_92_14	fixed	\N	\N	\N	\N	\N	\N
+746	2025-04-02	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-04-03 14:37:22.720468	19_92_14	fixed	\N	\N	\N	\N	\N	\N
+747	2025-04-02	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-04-03 14:37:22.720468	20_92_14	fixed	\N	\N	\N	\N	\N	\N
+748	2025-04-02	診所	民德58	育德二路	110	\N	診所	28530	\N	2025-04-03 14:37:22.720468	21_92_14	fixed	\N	\N	\N	\N	\N	\N
+749	2025-04-02	永大路	\N	診所	280	\N	診所	533	\N	2025-04-03 14:37:22.720468	6_92_14	fixed	\N	\N	\N	\N	\N	\N
+750	2025-04-02	安定	\N	診所	500	\N	診所	5386	\N	2025-04-03 14:37:22.720468	11_92_14	fixed	\N	\N	\N	\N	\N	\N
+751	2025-04-02	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-04-03 14:37:22.720468	14_92_14	fixed	\N	\N	\N	\N	\N	\N
+752	2025-04-02	同安路	\N	診所	220	\N	診所	61553	\N	2025-04-03 14:37:22.720468	15_92_14	fixed	\N	\N	\N	\N	\N	\N
+753	2025-04-02	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-04-03 14:37:22.720468	18_92_14	fixed	\N	\N	\N	\N	\N	\N
+756	2025-04-02	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-04-03 14:37:22.720468	7_92_14	fixed	\N	\N	\N	\N	\N	\N
+757	2025-04-03	診所	\N	忠孝街	85	\N	診所	533	\N	2025-04-03 14:37:22.720468	25_93_14	fixed	\N	\N	\N	\N	\N	\N
+758	2025-04-03	診所	\N	灣裡路	340	\N	診所	5386	\N	2025-04-03 14:37:22.720468	28_93_14	fixed	\N	\N	\N	\N	\N	\N
+759	2025-04-03	古堡街	安北路+和緯五	診所	230	\N	診所	533	\N	2025-04-03 14:37:22.720468	23_93_14	fixed	\N	\N	\N	\N	\N	\N
+760	2025-04-03	公園南路	海安路	診所	90	\N	診所	533	\N	2025-04-03 14:37:22.720468	26_93_14	fixed	\N	\N	\N	\N	\N	\N
+761	2025-04-03	灣裡路	\N	診所	340	\N	診所	5386	\N	2025-04-03 14:37:22.720468	27_93_14	fixed	\N	\N	\N	\N	\N	\N
+762	2025-04-03	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-04-03 14:37:22.720468	29_93_14	fixed	\N	\N	\N	\N	\N	\N
+763	2025-04-03	信智	\N	診所	140	\N	診所	61553	\N	2025-04-03 14:37:22.720468	32_93_14	fixed	\N	\N	\N	\N	\N	\N
+764	2025-04-03	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-04-03 14:37:22.720468	33_93_14	fixed	\N	\N	\N	\N	\N	\N
+765	2025-04-03	南寧街	\N	診所	120	\N	診所	61553	\N	2025-04-03 14:37:22.720468	35_93_14	fixed	\N	\N	\N	\N	\N	\N
+766	2025-04-03	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-04-03 14:37:22.720468	22_93_14	fixed	\N	\N	\N	\N	\N	\N
+767	2025-04-03	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-04-04 14:56:04.123913	30_93_14	fixed	\N	\N	\N	\N	\N	\N
+768	2025-04-03	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-04-04 14:56:04.123913	31_93_14	fixed	\N	\N	\N	\N	\N	\N
+769	2025-04-03	診所	\N	南寧街	120	\N	診所	533	\N	2025-04-04 14:56:04.123913	36_93_14	fixed	\N	\N	\N	\N	\N	\N
+770	2025-04-04	診所	\N	大灣二街	275	\N	診所	533	\N	2025-04-04 14:56:04.123913	5_94_14	fixed	\N	\N	\N	\N	\N	\N
+771	2025-04-04	診所	\N	仁和路	220	\N	診所	533	\N	2025-04-04 14:56:04.123913	10_94_14	fixed	\N	\N	\N	\N	\N	\N
+772	2025-04-04	診所	\N	長溪路	210	\N	診所	61553	\N	2025-04-04 14:56:04.123913	13_94_14	fixed	\N	\N	\N	\N	\N	\N
+773	2025-04-04	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-04-04 14:56:04.123913	19_94_14	fixed	\N	\N	\N	\N	\N	\N
+774	2025-04-04	永大路	\N	診所	280	\N	診所	533	\N	2025-04-04 14:56:04.123913	6_94_14	fixed	\N	\N	\N	\N	\N	\N
+775	2025-04-04	仁和路	\N	診所	220	\N	診所	533	\N	2025-04-04 14:56:04.123913	9_94_14	fixed	\N	\N	\N	\N	\N	\N
+776	2025-04-04	安定	\N	診所	500	\N	診所	5386	\N	2025-04-04 14:56:04.123913	11_94_14	fixed	\N	\N	\N	\N	\N	\N
+777	2025-04-04	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-04-04 14:56:04.123913	14_94_14	fixed	\N	\N	\N	\N	\N	\N
+778	2025-04-04	同安路	\N	診所	220	\N	診所	61553	\N	2025-04-04 14:56:04.123913	15_94_14	fixed	\N	\N	\N	\N	\N	\N
+779	2025-04-04	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-04-04 14:56:04.123913	17_94_14	fixed	\N	\N	\N	\N	\N	\N
+780	2025-04-04	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-04-04 14:56:04.123913	18_94_14	fixed	\N	\N	\N	\N	\N	\N
+783	2025-04-04	大灣二街	\N	診所	275	\N	診所	533	\N	2025-04-04 14:56:04.123913	1_94_14	fixed	\N	\N	\N	\N	\N	\N
+784	2025-04-04	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-04-04 14:56:04.123913	7_94_14	fixed	\N	\N	\N	\N	\N	\N
+785	2025-04-04	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-04-04 14:56:04.123913	2_94_14	fixed	\N	\N	\N	\N	\N	\N
+786	2025-04-04	診所	民德58	育德二路	110	\N	診所	28530	\N	2025-04-04 15:05:02.38021	21_94_14	fixed	\N	\N	\N	\N	\N	\N
+787	2025-04-04	診所	\N	安定	500	\N	診所	5386	\N	2025-04-06 02:56:55.123918	12_94_14	fixed	\N	\N	\N	\N	\N	\N
+788	2025-04-04	診所	\N	永大路	280	\N	診所	61553	\N	2025-04-06 02:56:55.123918	16_94_14	fixed	\N	\N	\N	\N	\N	\N
+789	2025-04-04	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-04-06 02:56:55.123918	20_94_14	fixed	\N	\N	\N	\N	\N	\N
+790	2025-04-04	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-04-06 02:56:55.123918	4_94_14	fixed	\N	\N	\N	\N	\N	\N
+791	2025-04-05	診所	和緯五+安北路+古堡街	怡平路	270	\N	診所	533	\N	2025-04-06 02:56:55.123918	24_95_14	fixed	\N	\N	\N	\N	\N	\N
+792	2025-04-05	診所	\N	忠孝街	85	\N	診所	533	\N	2025-04-06 02:56:55.123918	25_95_14	fixed	\N	\N	\N	\N	\N	\N
+793	2025-04-05	診所	\N	灣裡路	340	\N	診所	5386	\N	2025-04-06 02:56:55.123918	28_95_14	fixed	\N	\N	\N	\N	\N	\N
+794	2025-04-05	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-04-06 02:56:55.123918	30_95_14	fixed	\N	\N	\N	\N	\N	\N
+795	2025-04-05	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-04-06 02:56:55.123918	31_95_14	fixed	\N	\N	\N	\N	\N	\N
+796	2025-04-05	診所	\N	南寧街	120	\N	診所	533	\N	2025-04-06 02:56:55.123918	36_95_14	fixed	\N	\N	\N	\N	\N	\N
+797	2025-04-05	古堡街	安北路+和緯五	診所	230	\N	診所	533	\N	2025-04-06 02:56:55.123918	23_95_14	fixed	\N	\N	\N	\N	\N	\N
+798	2025-04-05	公園南路	海安路	診所	90	\N	診所	533	\N	2025-04-06 02:56:55.123918	26_95_14	fixed	\N	\N	\N	\N	\N	\N
+799	2025-04-05	灣裡路	\N	診所	340	\N	診所	5386	\N	2025-04-06 02:56:55.123918	27_95_14	fixed	\N	\N	\N	\N	\N	\N
+800	2025-04-05	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-04-06 02:56:55.123918	29_95_14	fixed	\N	\N	\N	\N	\N	\N
+801	2025-04-05	信智	\N	診所	140	\N	診所	61553	\N	2025-04-06 02:56:55.123918	32_95_14	fixed	\N	\N	\N	\N	\N	\N
+802	2025-04-05	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-04-06 02:56:55.123918	33_95_14	fixed	\N	\N	\N	\N	\N	\N
+803	2025-04-05	南寧街	\N	診所	120	\N	診所	61553	\N	2025-04-06 02:56:55.123918	35_95_14	fixed	\N	\N	\N	\N	\N	\N
+804	2025-04-05	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-04-06 02:56:55.123918	22_95_14	fixed	\N	\N	\N	\N	\N	\N
+1096	2025-04-23	高鐵站	\N	東洋後門	\N	\N	東洋	61153	\N	2025-04-24 06:43:47.522741	T_2140	temp	\N	\N	\N	\N	\N	\N
+736	2025-04-01	東洋前門	新戶	久保田家	360	\N	東洋	28530	\N	2025-04-02 04:26:01.923345	43_91_14	fixed	\N	\N	\N	\N	\N	\N
+740	2025-04-02	久保田家	新戶	東洋前門	360	\N	東洋	28530	\N	2025-04-02 07:18:07.679734	42_92_14	fixed	\N	\N	\N	\N	\N	\N
+782	2025-04-04	久保田家	新戶	東洋前門	360	\N	東洋	28530	\N	2025-04-04 14:56:04.123913	42_94_14	fixed	\N	\N	\N	\N	\N	\N
+1098	2025-04-24	診所	\N	忠孝街	85	\N	診所	533	\N	2025-04-24 06:43:47.522741	25_114_17	fixed	\N	\N	\N	\N	\N	\N
+807	2025-04-07	大灣二街	\N	診所	275	\N	診所	533	\N	2025-04-07 05:34:08.134033	1_97_15	fixed	\N	\N	\N	\N	\N	\N
+808	2025-04-07	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-04-07 08:49:36.457044	17_97_15	fixed	\N	\N	\N	\N	\N	\N
+810	2025-04-07	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-04-07 08:49:36.457044	2_97_15	fixed	\N	\N	\N	\N	\N	\N
+811	2025-04-07	海東六街	\N	診所	185	\N	診所	61553	\N	2025-04-07 08:49:36.457044	46_97_15	fixed	\N	\N	\N	\N	\N	\N
+812	2025-04-07	診所	\N	大灣二街	275	\N	診所	533	\N	2025-04-07 13:02:37.447425	5_97_15	fixed	\N	\N	\N	\N	\N	\N
+813	2025-04-07	診所	\N	長溪路	210	\N	診所	61553	\N	2025-04-07 13:02:37.447425	13_97_15	fixed	\N	\N	\N	\N	\N	\N
+814	2025-04-07	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-04-07 13:02:37.447425	19_97_15	fixed	\N	\N	\N	\N	\N	\N
+815	2025-04-07	永大路	\N	診所	280	\N	診所	533	\N	2025-04-07 13:02:37.447425	6_97_15	fixed	\N	\N	\N	\N	\N	\N
+816	2025-04-07	仁和路	\N	診所	220	\N	診所	533	\N	2025-04-07 13:02:37.447425	9_97_15	fixed	\N	\N	\N	\N	\N	\N
+817	2025-04-07	安定	\N	診所	500	\N	診所	5386	\N	2025-04-07 13:02:37.447425	11_97_15	fixed	\N	\N	\N	\N	\N	\N
+818	2025-04-07	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-04-07 13:02:37.447425	7_97_15	fixed	\N	\N	\N	\N	\N	\N
+819	2025-04-07	診所	\N	仁和路	220	\N	診所	533	\N	2025-04-07 23:36:44.95552	10_97_15	fixed	\N	\N	\N	\N	\N	\N
+820	2025-04-07	診所	\N	安定	500	\N	診所	5386	\N	2025-04-07 23:36:44.95552	12_97_15	fixed	\N	\N	\N	\N	\N	\N
+821	2025-04-07	診所	\N	永大路	280	\N	診所	61553	\N	2025-04-07 23:36:44.95552	16_97_15	fixed	\N	\N	\N	\N	\N	\N
+822	2025-04-07	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-04-07 23:36:44.95552	20_97_15	fixed	\N	\N	\N	\N	\N	\N
+823	2025-04-07	診所	民德58	育德二路	110	\N	診所	28530	\N	2025-04-07 23:36:44.95552	21_97_15	fixed	\N	\N	\N	\N	\N	\N
+824	2025-04-07	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-04-07 23:36:44.95552	4_97_15	fixed	\N	\N	\N	\N	\N	\N
+825	2025-04-07	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-04-07 23:36:44.95552	14_97_15	fixed	\N	\N	\N	\N	\N	\N
+826	2025-04-07	同安路	\N	診所	220	\N	診所	61553	\N	2025-04-07 23:36:44.95552	15_97_15	fixed	\N	\N	\N	\N	\N	\N
+1101	2025-04-24	公園南路	海安路	診所	90	\N	診所	533	\N	2025-04-24 06:43:47.522741	26_114_17	fixed	\N	\N	\N	\N	\N	\N
+828	2025-04-08	古堡街	安北路+和緯五	診所	230	\N	診所	533	\N	2025-04-08 07:07:07.810036	23_98_15	fixed	\N	\N	\N	\N	\N	\N
+829	2025-04-08	灣裡路	\N	診所	340	\N	診所	5386	\N	2025-04-08 07:07:07.810036	27_98_15	fixed	\N	\N	\N	\N	\N	\N
+830	2025-04-08	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-04-08 07:07:07.810036	22_98_15	fixed	\N	\N	\N	\N	\N	\N
+832	2025-04-08	診所	\N	忠孝街	85	\N	診所	533	\N	2025-04-09 02:16:58.012948	25_98_15	fixed	\N	\N	\N	\N	\N	\N
+1103	2025-04-24	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-04-24 06:43:47.522741	29_114_17	fixed	\N	\N	\N	\N	\N	\N
+834	2025-04-08	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-04-09 02:16:58.012948	30_98_15	fixed	\N	\N	\N	\N	\N	\N
+835	2025-04-08	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-04-09 02:16:58.012948	31_98_15	fixed	\N	\N	\N	\N	\N	\N
+836	2025-04-08	診所	\N	南寧街	120	\N	診所	533	\N	2025-04-09 02:16:58.012948	36_98_15	fixed	\N	\N	\N	\N	\N	\N
+837	2025-04-08	公園南路	海安路	診所	90	\N	診所	533	\N	2025-04-09 02:16:58.012948	26_98_15	fixed	\N	\N	\N	\N	\N	\N
+1104	2025-04-24	信智	\N	診所	140	\N	診所	61553	\N	2025-04-24 06:43:47.522741	32_114_17	fixed	\N	\N	\N	\N	\N	\N
+839	2025-04-08	信智	\N	診所	140	\N	診所	61553	\N	2025-04-09 02:16:58.012948	32_98_15	fixed	\N	\N	\N	\N	\N	\N
+840	2025-04-08	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-04-09 02:16:58.012948	33_98_15	fixed	\N	\N	\N	\N	\N	\N
+841	2025-04-08	南寧街	\N	診所	120	\N	診所	61553	\N	2025-04-09 02:16:58.012948	35_98_15	fixed	\N	\N	\N	\N	\N	\N
+1105	2025-04-24	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-04-24 06:43:47.522741	33_114_17	fixed	\N	\N	\N	\N	\N	\N
+843	2025-04-09	診所	\N	大灣二街	275	\N	診所	533	\N	2025-04-10 00:57:40.395447	5_99_15	fixed	\N	\N	\N	\N	\N	\N
+844	2025-04-09	診所	\N	仁和路	220	\N	診所	533	\N	2025-04-10 00:57:40.395447	10_99_15	fixed	\N	\N	\N	\N	\N	\N
+845	2025-04-09	診所	\N	安定	500	\N	診所	5386	\N	2025-04-10 00:57:40.395447	12_99_15	fixed	\N	\N	\N	\N	\N	\N
+846	2025-04-09	診所	\N	長溪路	210	\N	診所	61553	\N	2025-04-10 00:57:40.395447	13_99_15	fixed	\N	\N	\N	\N	\N	\N
+847	2025-04-09	診所	\N	永大路	280	\N	診所	61553	\N	2025-04-10 00:57:40.395447	16_99_15	fixed	\N	\N	\N	\N	\N	\N
+848	2025-04-09	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-04-10 00:57:40.395447	19_99_15	fixed	\N	\N	\N	\N	\N	\N
+849	2025-04-09	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-04-10 00:57:40.395447	20_99_15	fixed	\N	\N	\N	\N	\N	\N
+850	2025-04-09	診所	民德58	育德二路	110	\N	診所	28530	\N	2025-04-10 00:57:40.395447	21_99_15	fixed	\N	\N	\N	\N	\N	\N
+851	2025-04-09	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-04-10 00:57:40.395447	4_99_15	fixed	\N	\N	\N	\N	\N	\N
+852	2025-04-09	永大路	\N	診所	280	\N	診所	533	\N	2025-04-10 00:57:40.395447	6_99_15	fixed	\N	\N	\N	\N	\N	\N
+855	2025-04-09	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-04-10 00:57:40.395447	14_99_15	fixed	\N	\N	\N	\N	\N	\N
+856	2025-04-09	同安路	\N	診所	220	\N	診所	61553	\N	2025-04-10 00:57:40.395447	15_99_15	fixed	\N	\N	\N	\N	\N	\N
+857	2025-04-09	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-04-10 00:57:40.395447	17_99_15	fixed	\N	\N	\N	\N	\N	\N
+858	2025-04-09	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-04-10 00:57:40.395447	18_99_15	fixed	\N	\N	\N	\N	\N	\N
+862	2025-04-09	大灣二街	\N	診所	275	\N	診所	533	\N	2025-04-10 00:57:40.395447	1_99_15	fixed	\N	\N	\N	\N	\N	\N
+863	2025-04-09	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-04-10 00:57:40.395447	7_99_15	fixed	\N	\N	\N	\N	\N	\N
+864	2025-04-09	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-04-10 00:57:40.395447	2_99_15	fixed	\N	\N	\N	\N	\N	\N
+865	2025-04-09	海東六街	\N	診所	185	\N	診所	61553	\N	2025-04-10 00:57:40.395447	46_99_15	fixed	\N	\N	\N	\N	\N	\N
+866	2025-04-10	診所	和緯五+安北路+古堡街	怡平路	270	\N	診所	533	\N	2025-04-10 16:45:16.148953	24_100_15	fixed	\N	\N	\N	\N	\N	\N
+867	2025-04-10	診所	\N	忠孝街	85	\N	診所	533	\N	2025-04-10 16:45:16.148953	25_100_15	fixed	\N	\N	\N	\N	\N	\N
+868	2025-04-10	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-04-10 16:45:16.148953	30_100_15	fixed	\N	\N	\N	\N	\N	\N
+869	2025-04-10	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-04-10 16:45:16.148953	31_100_15	fixed	\N	\N	\N	\N	\N	\N
+870	2025-04-10	診所	\N	南寧街	120	\N	診所	533	\N	2025-04-10 16:45:16.148953	36_100_15	fixed	\N	\N	\N	\N	\N	\N
+871	2025-04-10	古堡街	安北路+和緯五	診所	230	\N	診所	533	\N	2025-04-10 16:45:16.148953	23_100_15	fixed	\N	\N	\N	\N	\N	\N
+872	2025-04-10	公園南路	海安路	診所	90	\N	診所	533	\N	2025-04-10 16:45:16.148953	26_100_15	fixed	\N	\N	\N	\N	\N	\N
+873	2025-04-10	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-04-10 16:45:16.148953	29_100_15	fixed	\N	\N	\N	\N	\N	\N
+874	2025-04-10	信智	\N	診所	140	\N	診所	61553	\N	2025-04-10 16:45:16.148953	32_100_15	fixed	\N	\N	\N	\N	\N	\N
+875	2025-04-10	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-04-10 16:45:16.148953	33_100_15	fixed	\N	\N	\N	\N	\N	\N
+833	2025-04-08	診所	\N	灣裡路	340	\N	診所	533	\N	2025-04-09 02:16:58.012948	28_98_15	fixed	\N	\N	\N	\N	\N	\N
+838	2025-04-08	馬鎮宮	\N	診所	330	\N	診所	533	\N	2025-04-09 02:16:58.012948	29_98_15	fixed	\N	\N	\N	\N	\N	\N
+853	2025-04-09	仁和路	\N	診所	220	\N	診所	28530	\N	2025-04-10 00:57:40.395447	9_99_15	fixed	\N	\N	\N	\N	\N	\N
+854	2025-04-09	安定	\N	診所	500	\N	診所	533	\N	2025-04-10 00:57:40.395447	11_99_15	fixed	\N	\N	\N	\N	\N	\N
+876	2025-04-10	南寧街	\N	診所	120	\N	診所	61553	\N	2025-04-10 16:45:16.148953	35_100_15	fixed	\N	\N	\N	\N	\N	\N
+877	2025-04-10	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-04-10 16:45:16.148953	22_100_15	fixed	\N	\N	\N	\N	\N	\N
+1106	2025-04-24	南寧街	\N	診所	120	\N	診所	61553	\N	2025-04-24 06:43:47.522741	35_114_17	fixed	\N	\N	\N	\N	\N	\N
+879	2025-04-11	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-04-11 08:25:45.069908	17_101_15	fixed	\N	\N	\N	\N	\N	\N
+881	2025-04-11	大灣二街	\N	診所	275	\N	診所	533	\N	2025-04-11 08:25:45.069908	1_101_15	fixed	\N	\N	\N	\N	\N	\N
+882	2025-04-11	海東六街	\N	診所	185	\N	診所	61553	\N	2025-04-11 08:25:45.069908	46_101_15	fixed	\N	\N	\N	\N	\N	\N
+883	2025-04-11	診所	\N	大灣二街	275	\N	診所	533	\N	2025-04-11 15:02:28.000333	5_101_15	fixed	\N	\N	\N	\N	\N	\N
+1107	2025-04-24	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-04-24 06:43:47.522741	22_114_17	fixed	\N	\N	\N	\N	\N	\N
+885	2025-04-11	診所	\N	長溪路	210	\N	診所	61553	\N	2025-04-11 15:02:28.000333	13_101_15	fixed	\N	\N	\N	\N	\N	\N
+886	2025-04-11	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-04-11 15:02:28.000333	19_101_15	fixed	\N	\N	\N	\N	\N	\N
+887	2025-04-11	診所	民德58	育德二路	110	\N	診所	28530	\N	2025-04-11 15:02:28.000333	21_101_15	fixed	\N	\N	\N	\N	\N	\N
+888	2025-04-11	永大路	\N	診所	280	\N	診所	533	\N	2025-04-11 15:02:28.000333	6_101_15	fixed	\N	\N	\N	\N	\N	\N
+1108	2025-04-24	久保田家	新戶家	東洋後門	360	\N	東洋	5386	\N	2025-04-24 06:43:47.522741	41_114_17	fixed	\N	\N	\N	\N	\N	\N
+891	2025-04-11	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-04-11 15:02:28.000333	14_101_15	fixed	\N	\N	\N	\N	\N	\N
+892	2025-04-11	同安路	\N	診所	220	\N	診所	61553	\N	2025-04-11 15:02:28.000333	15_101_15	fixed	\N	\N	\N	\N	\N	\N
+893	2025-04-11	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-04-11 15:02:28.000333	18_101_15	fixed	\N	\N	\N	\N	\N	\N
+894	2025-04-11	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-04-11 15:02:28.000333	7_101_15	fixed	\N	\N	\N	\N	\N	\N
+895	2025-04-11	診所	\N	永大路	280	\N	診所	61553	\N	2025-04-11 15:43:47.833093	16_101_15	fixed	\N	\N	\N	\N	\N	\N
+896	2025-04-11	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-04-11 15:43:47.833093	20_101_15	fixed	\N	\N	\N	\N	\N	\N
+1109	2025-04-23	高鐵站	\N	久保田家	580	\N	東洋	5386	\N	2025-04-24 06:43:47.522741	T_2137	temp	\N	\N	\N	\N	\N	\N
+898	2025-04-12	診所	和緯五+安北路+古堡街	怡平路	270	\N	診所	533	\N	2025-04-12 03:33:15.770956	24_102_15	fixed	\N	\N	\N	\N	\N	\N
+899	2025-04-12	診所	\N	忠孝街	85	\N	診所	533	\N	2025-04-12 03:33:15.770956	25_102_15	fixed	\N	\N	\N	\N	\N	\N
+901	2025-04-12	古堡街	安北路+和緯五	診所	230	\N	診所	533	\N	2025-04-12 03:33:15.770956	23_102_15	fixed	\N	\N	\N	\N	\N	\N
+902	2025-04-12	公園南路	海安路	診所	90	\N	診所	533	\N	2025-04-12 03:33:15.770956	26_102_15	fixed	\N	\N	\N	\N	\N	\N
+1184	2025-04-29	久保田家	新戶家	東洋後門	360	\N	東洋	5386	\N	2025-04-29 00:05:10.871238	41_119_18	fixed	\N	\N	\N	\N	\N	\N
+904	2025-04-12	信智	\N	診所	140	\N	診所	61553	\N	2025-04-12 03:33:15.770956	32_102_15	fixed	\N	\N	\N	\N	\N	\N
+905	2025-04-12	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-04-12 03:33:15.770956	33_102_15	fixed	\N	\N	\N	\N	\N	\N
+906	2025-04-12	南寧街	\N	診所	120	\N	診所	61553	\N	2025-04-12 03:33:15.770956	35_102_15	fixed	\N	\N	\N	\N	\N	\N
+907	2025-04-12	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-04-12 03:33:15.770956	22_102_15	fixed	\N	\N	\N	\N	\N	\N
+908	2025-04-12	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-04-12 04:02:36.593	29_102_15	fixed	\N	\N	\N	\N	\N	\N
+1213	2025-04-30	診所	\N	安定	500	\N	診所	5386	\N	2025-04-30 07:00:01.290707	12_120_18	fixed	\N	\N	\N	\N	\N	\N
+1354	2025-05-08	公園南路	海安路	診所	90	\N	診所	533	\N	2025-05-08 08:54:45.45278	26_128_19	fixed	\N	\N	\N	\N	\N	\N
+1030	2025-04-18	高鐵站	\N	裕和二街	\N	\N	東洋	28530	\N	2025-04-20 01:04:25.194992	C_1030	temp	\N	\N	\N	\N	\N	\N
+1215	2025-04-30	同安路	\N	診所	220	\N	診所	61553	\N	2025-04-30 07:00:01.290707	15_120_18	fixed	\N	\N	\N	\N	\N	\N
+880	2025-04-11	久保田家	新戶	東洋前門	360	\N	東洋	28530	\N	2025-04-11 08:25:45.069908	42_101_15	fixed	\N	\N	\N	\N	\N	\N
+919	2025-04-14	診所	\N	長溪路	210	\N	診所	61553	\N	2025-04-14 01:55:03.138901	13_104_16	fixed	\N	\N	\N	\N	\N	\N
+920	2025-04-14	仁和路	\N	診所	220	\N	診所	533	\N	2025-04-14 01:55:03.138901	9_104_16	fixed	\N	\N	\N	\N	\N	\N
+921	2025-04-14	安定	\N	診所	500	\N	診所	5386	\N	2025-04-14 02:05:00.154148	11_104_16	fixed	\N	\N	\N	\N	\N	\N
+878	2025-04-10	久保田家	新戶	東洋前門	360	\N	東洋	28530	\N	2025-04-10 16:45:16.148953	41_100_15	fixed	\N	\N	\N	\N	\N	\N
+897	2025-04-11	東洋前門	新戶	久保田家	360	\N	東洋	61553	\N	2025-04-11 15:43:47.833093	43_101_15	fixed	\N	\N	\N	\N	\N	\N
+1216	2025-04-30	診所	\N	永大路	280	\N	診所	61553	\N	2025-04-30 07:20:00.118454	16_120_18	fixed	\N	\N	\N	\N	\N	\N
+890	2025-04-11	安定	\N	診所	500	\N	診所	533	\N	2025-04-11 15:02:28.000333	11_101_15	fixed	\N	\N	\N	\N	\N	\N
+884	2025-04-11	診所	\N	安定	500	\N	診所	5386	\N	2025-04-11 15:02:28.000333	12_101_15	fixed	\N	\N	\N	\N	\N	\N
+889	2025-04-11	仁和路	\N	診所	220	\N	診所	28530	\N	2025-04-11 15:02:28.000333	9_101_15	fixed	\N	\N	\N	\N	\N	\N
+1260	2025-05-03	新戶家	\N	東洋後門	\N	\N	東洋	5386	\N	2025-05-03 00:48:47.668006	T_2404	temp	\N	\N	\N	\N	\N	\N
+947	2025-04-11	公園北路	民權路156巷	中正四路	1860	\N	東洋	5386	\N	2025-04-14 18:48:16.626342	C_947	temp	\N	\N	\N	\N	\N	\N
+960	2025-04-15	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-04-15 03:00:03.360434	33_105_16	fixed	\N	\N	\N	\N	\N	\N
+976	2025-04-16	臨時地點	\N	臨時地點	\N	\N	臨時	28530	\N	2025-04-16 05:40:34.004737	T_1987	fixed	\N	\N	\N	\N	\N	\N
+977	2025-04-16	診所	\N	大灣二街	275	\N	診所	533	\N	2025-04-16 05:40:34.004737	5_106_16	fixed	\N	\N	\N	\N	\N	\N
+978	2025-04-16	診所	\N	長溪路	210	\N	診所	61553	\N	2025-04-16 05:40:34.004737	13_106_16	fixed	\N	\N	\N	\N	\N	\N
+979	2025-04-16	永大路	\N	診所	280	\N	診所	533	\N	2025-04-16 05:40:34.004737	6_106_16	fixed	\N	\N	\N	\N	\N	\N
+980	2025-04-16	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-04-16 05:40:34.004737	7_106_16	fixed	\N	\N	\N	\N	\N	\N
+959	2025-04-15	診所	和緯五+安北路+古堡街	怡平路	270	-70	診所	533	和緯五、怡平路請假	2025-04-15 03:00:03.360434	24_105_16	fixed	\N	\N	\N	\N	\N	\N
+1004	2025-04-18	海東六街	\N	診所	185	\N	診所	61553	\N	2025-04-17 23:15:01.324783	46_108_16	fixed	\N	\N	\N	\N	\N	\N
+1214	2025-04-30	診所	民德58	育德二路	95	\N	診所	28530	\N	2025-04-30 07:00:01.290707	21_120_18	fixed	\N	\N	\N	\N	\N	\N
+1296	2025-05-05	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-05-05 08:28:48.282359	20_125_19	fixed	\N	\N	\N	\N	\N	\N
+1330	2025-05-07	診所	\N	大灣二街	275	\N	診所	533	\N	2025-05-07 02:45:01.27557	5_127_19	fixed	\N	\N	\N	\N	\N	\N
+1331	2025-05-07	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-05-07 02:55:00.083799	18_127_19	fixed	\N	\N	\N	\N	\N	\N
+1352	2025-05-08	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-05-08 08:54:45.45278	31_128_19	fixed	\N	\N	\N	\N	\N	\N
+1353	2025-05-08	診所	\N	南寧街	120	\N	診所	533	\N	2025-05-08 08:54:45.45278	36_128_19	fixed	\N	\N	\N	\N	\N	\N
+1355	2025-05-08	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-05-08 08:54:45.45278	29_128_19	fixed	\N	\N	\N	\N	\N	\N
+1356	2025-05-08	信智	\N	診所	140	\N	診所	61553	\N	2025-05-08 08:54:45.45278	32_128_19	fixed	\N	\N	\N	\N	\N	\N
+1357	2025-05-08	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-05-08 08:54:45.45278	33_128_19	fixed	\N	\N	\N	\N	\N	\N
+1358	2025-05-08	南寧街	\N	診所	120	\N	診所	61553	\N	2025-05-08 08:54:45.45278	35_128_19	fixed	\N	\N	\N	\N	\N	\N
+1359	2025-05-08	診所	安北路	怡平路	230	-90	診所	533	\N	2025-05-08 08:54:45.45278	24_128_19	fixed	\N	\N	\N	\N	\N	\N
+282	2025-05-11	東洋後門	文南71	高鐵站	680	\N	東洋	5386	\N	2025-05-11 18:00:00.004993	44_131_19	fixed	\N	\N	\N	\N	\N	\N
+283	2025-05-11	高鐵站	\N	東洋後門	680	\N	東洋	5386	\N	2025-05-11 18:00:00.004993	45_131_19	fixed	\N	\N	\N	\N	\N	\N
+1	2025-05-12	大灣二街	\N	診所	275	\N	診所	533	\N	2025-05-11 21:38:53.834856	1_132_20	fixed	\N	\N	\N	\N	\N	\N
+2	2025-05-12	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-05-11 22:25:03.116434	38_132_20	fixed	\N	\N	\N	\N	\N	\N
+4	2025-05-12	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-05-11 23:30:32.367639	42_132_20	fixed	\N	\N	\N	\N	\N	\N
+8	2025-05-12	診所	\N	長溪路	210	\N	診所	61553	\N	2025-05-12 01:51:49.379244	13_132_20	fixed	\N	\N	\N	\N	\N	\N
+9	2025-05-12	安定	\N	診所	500	\N	診所	533	\N	2025-05-12 02:05:01.22188	11_132_20	fixed	\N	\N	\N	\N	\N	\N
+10	2025-05-12	診所	\N	大灣二街	275	\N	診所	533	\N	2025-05-12 04:55:38.332863	5_132_20	fixed	\N	\N	\N	\N	\N	\N
+12	2025-05-12	永大路	\N	診所	280	\N	診所	533	\N	2025-05-12 04:55:38.332863	6_132_20	fixed	\N	\N	\N	\N	\N	\N
+13	2025-05-12	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-05-12 04:55:38.332863	18_132_20	fixed	\N	\N	\N	\N	\N	\N
+14	2025-05-12	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-05-12 04:55:38.332863	7_132_20	fixed	\N	\N	\N	\N	\N	\N
+15	2025-05-12	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-05-12 04:55:38.332863	14_132_20	fixed	\N	\N	\N	\N	\N	\N
+1295	2025-05-05	診所		育德二路	95	\N	診所	28530	\N	2025-05-05 07:31:16.231098	21_125_19	fixed	\N	\N	\N	\N	\N	\N
+1339	2025-05-07	診所		育德二路	95	\N	診所	28530	\N	2025-05-07 07:00:01.282973	21_127_19	fixed	\N	\N	\N	\N	\N	\N
+1360	2025-05-08	安北路	\N	診所	165	\N	診所	533	\N	2025-05-08 08:54:45.45278	T_2553	temp	\N	\N	\N	\N	\N	\N
+1287	2025-05-05	公園路100號	\N	診所	85	\N	診所	533	\N	2025-05-05 03:56:51.086711	T_2524	temp	\N	\N	\N	\N	\N	\N
+16	2025-05-12	診所	\N	安定	500	\N	診所	533	\N	2025-05-12 07:00:01.235335	12_132_20	fixed	\N	\N	\N	\N	\N	\N
+17	2025-05-12	同安路	\N	診所	220	\N	診所	61553	\N	2025-05-12 07:00:01.235335	15_132_20	fixed	\N	\N	\N	\N	\N	\N
+18	2025-05-12	診所	\N	永大路	280	\N	診所	61553	\N	2025-05-12 08:19:58.659948	16_132_20	fixed	\N	\N	\N	\N	\N	\N
+20	2025-05-12	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-05-12 22:35:00.461546	39_132_20	fixed	\N	\N	\N	\N	\N	\N
+21	2025-05-12	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-05-12 22:35:00.461546	43_132_20	fixed	\N	\N	\N	\N	\N	\N
+22	2025-05-13	二井家	\N	東洋後門	1400	\N	東洋	28530	\N	2025-05-12 22:35:00.461546	40_133_20	fixed	\N	\N	\N	\N	\N	\N
+486	2025-06-09	大灣二街	\N	診所	275	\N	診所	533	\N	2025-06-08 21:25:01.251289	1_160_24	fixed	\N	\N	\N	\N	\N	\N
+25	2025-05-13	久保田家	新戶家	東洋後門	360	\N	東洋	61367	\N	2025-05-12 23:15:01.302143	41_133_20	fixed	\N	\N	\N	\N	\N	\N
+3	2025-05-12	中華南路	新建路	診所	220	-30	診所	28530	\N	2025-05-11 23:30:32.367639	17_132_20	fixed	\N	\N	\N	\N	\N	\N
+11	2025-05-12	診所	新建路	中華南路	220	-30	診所	28530	\N	2025-05-12 04:55:38.332863	19_132_20	fixed	\N	\N	\N	\N	\N	\N
+28	2025-05-13	信智	\N	診所	140	\N	診所	61553	\N	2025-05-13 02:35:00.083849	32_133_20	fixed	\N	\N	\N	\N	\N	\N
+29	2025-05-13	診所	\N	忠孝街	85	\N	診所	533	\N	2025-05-13 04:38:52.88673	25_133_20	fixed	\N	\N	\N	\N	\N	\N
+30	2025-05-13	公園南路	海安路	診所	90	\N	診所	533	\N	2025-05-13 04:38:52.88673	26_133_20	fixed	\N	\N	\N	\N	\N	\N
+31	2025-05-13	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-05-13 04:38:52.88673	33_133_20	fixed	\N	\N	\N	\N	\N	\N
+32	2025-05-13	南寧街	\N	診所	120	\N	診所	61553	\N	2025-05-13 04:38:52.88673	35_133_20	fixed	\N	\N	\N	\N	\N	\N
+34	2025-05-13	馬鎮宮	\N	診所	330	\N	診所	533	\N	2025-05-13 04:38:52.88673	29_133_20	fixed	\N	\N	\N	\N	\N	\N
+35	2025-05-13	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-05-13 07:47:37.257686	31_133_20	fixed	\N	\N	\N	\N	\N	\N
+36	2025-05-13	診所	\N	南寧街	120	\N	診所	533	\N	2025-05-13 07:47:37.257686	36_133_20	fixed	\N	\N	\N	\N	\N	\N
+37	2025-05-13	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-05-13 08:05:02.166613	30_133_20	fixed	\N	\N	\N	\N	\N	\N
+6	2025-05-12	東橋十街	\N	東洋後門	350	\N	東洋	61553	\N	2025-05-11 23:30:32.367639	T_4	temp	\N	\N	\N	\N	\N	\N
+23	2025-05-12	東洋後門	\N	東橋十街	365	\N	東洋	61553	\N	2025-05-12 22:35:00.461546	T_5	temp	\N	\N	\N	\N	\N	\N
+27	2025-05-13	東橋十街	\N	東洋後門	355	\N	東洋	61553	\N	2025-05-13 01:13:14.718899	T_8	temp	\N	\N	\N	\N	\N	\N
+38	2025-05-13	東洋後門	\N	東橋十街	360	\N	東洋	61553	\N	2025-05-13 09:08:48.80202	T_9	temp	\N	\N	\N	\N	\N	\N
+26	2025-05-13	同安路	\N	高鐵站	750	\N	東洋	61367	\N	2025-05-13 01:13:14.718899	T_6	temp	\N	\N	\N	\N	\N	\N
+5	2025-05-12	新化山腳里	\N	高鐵站	405	\N	東洋	533	\N	2025-05-11 23:30:32.367639	T_3	temp	\N	\N	\N	\N	\N	\N
+7	2025-05-12	高鐵站	\N	東洋前門	680	\N	東洋	5386	\N	2025-05-12 01:22:02.189569	T_2	temp	\N	\N	\N	\N	\N	\N
+19	2025-05-12	東洋前門	\N	高鐵	680	\N	東洋	5386	\N	2025-05-12 08:19:58.659948	T_14	temp	\N	\N	\N	\N	\N	\N
+39	2025-05-13	高鐵站	\N	安通一街	710	\N	東洋	5386	\N	2025-05-13 09:08:48.80202	T_11	temp	\N	\N	\N	\N	\N	\N
+40	2025-05-13	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-05-13 10:23:54.323308	43_133_20	fixed	\N	\N	\N	\N	\N	\N
+1982	2025-07-15	群創D3哨	\N	東洋	\N	\N	東洋	28530	\N	2025-07-15 02:00:01.957491	T_1903	temp	\N	\N	\N	\N	\N	\N
+41	2025-05-14	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-05-13 22:34:38.007045	17_134_20	fixed	\N	\N	\N	\N	\N	\N
+42	2025-05-14	大灣二街	\N	診所	275	\N	診所	533	\N	2025-05-13 22:34:38.007045	1_134_20	fixed	\N	\N	\N	\N	\N	\N
+43	2025-05-14	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-05-13 22:34:38.007045	38_134_20	fixed	\N	\N	\N	\N	\N	\N
+487	2025-06-09	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-06-08 22:25:00.242168	38_160_24	fixed	\N	\N	\N	\N	\N	\N
+45	2025-05-14	診所	\N	大灣二街	275	\N	診所	533	\N	2025-05-14 02:42:51.086271	5_134_20	fixed	\N	\N	\N	\N	\N	\N
+46	2025-05-14	診所	\N	長溪路	210	\N	診所	61553	\N	2025-05-14 02:42:51.086271	13_134_20	fixed	\N	\N	\N	\N	\N	\N
+47	2025-05-14	仁和路	\N	診所	220	\N	診所	533	\N	2025-05-14 02:42:51.086271	9_134_20	fixed	\N	\N	\N	\N	\N	\N
+48	2025-05-14	安定	\N	診所	500	\N	診所	5386	\N	2025-05-14 02:42:51.086271	11_134_20	fixed	\N	\N	\N	\N	\N	\N
+49	2025-05-14	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-05-14 02:42:51.086271	42_134_20	fixed	\N	\N	\N	\N	\N	\N
+51	2025-05-14	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-05-14 02:55:01.222838	18_134_20	fixed	\N	\N	\N	\N	\N	\N
+52	2025-05-14	育德二路		診所	90	\N	診所	61553	\N	2025-05-14 03:00:00.08338	14_134_20	fixed	\N	\N	\N	\N	\N	\N
+53	2025-05-14	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-05-14 04:39:12.072037	19_134_20	fixed	\N	\N	\N	\N	\N	\N
+54	2025-05-14	永大路	\N	診所	280	\N	診所	533	\N	2025-05-14 04:39:12.072037	6_134_20	fixed	\N	\N	\N	\N	\N	\N
+55	2025-05-14	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-05-14 04:39:12.072037	7_134_20	fixed	\N	\N	\N	\N	\N	\N
+56	2025-05-14	診所	\N	仁和路	220	\N	診所	533	\N	2025-05-14 08:20:52.7019	10_134_20	fixed	\N	\N	\N	\N	\N	\N
+57	2025-05-14	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-05-14 08:20:52.7019	4_134_20	fixed	\N	\N	\N	\N	\N	\N
+58	2025-05-14	診所	\N	安定	500	\N	診所	5386	\N	2025-05-14 08:20:52.7019	12_134_20	fixed	\N	\N	\N	\N	\N	\N
+59	2025-05-14	診所	\N	永大路	280	\N	診所	61553	\N	2025-05-14 08:20:52.7019	16_134_20	fixed	\N	\N	\N	\N	\N	\N
+60	2025-05-14	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-05-14 08:20:52.7019	20_134_20	fixed	\N	\N	\N	\N	\N	\N
+61	2025-05-14	同安路	\N	診所	220	\N	診所	61553	\N	2025-05-14 08:20:52.7019	15_134_20	fixed	\N	\N	\N	\N	\N	\N
+62	2025-05-14	診所		育德二路	95	\N	診所	28530	\N	2025-05-14 08:20:52.7019	21_134_20	fixed	\N	\N	\N	\N	\N	\N
+65	2025-05-14	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-05-14 22:44:20.363864	39_134_20	fixed	\N	\N	\N	\N	\N	\N
+67	2025-05-15	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-05-14 22:44:20.363864	22_135_20	fixed	\N	\N	\N	\N	\N	\N
+68	2025-05-15	二井家	\N	東洋後門	1400	\N	東洋	28530	\N	2025-05-14 22:44:20.363864	40_135_20	fixed	\N	\N	\N	\N	\N	\N
+50	2025-05-14	台南大飯店	\N	東洋前門	300	\N	東洋	533	\N	2025-05-14 02:42:51.086271	T_12	temp	\N	\N	\N	\N	\N	\N
+98	2025-05-16	安定	\N	診所	500	\N	診所	533	\N	2025-05-16 05:10:22.748626	11_136_20	fixed	\N	\N	\N	\N	\N	\N
+66	2025-05-14	東洋後門	新戶家	久保田家	360	\N	東洋	61553	\N	2025-05-14 22:44:20.363864	43_134_20	fixed	\N	\N	\N	\N	\N	\N
+70	2025-05-15	久保田家	新戶家	東洋後門	360	\N	東洋	5386	\N	2025-05-14 23:15:01.221425	41_135_20	fixed	\N	\N	\N	\N	\N	\N
+105	2025-05-16	東橋十街	\N	東洋後門	360	\N	東洋	61553	\N	2025-05-16 08:00:02.21108	T_22	temp	\N	\N	\N	\N	\N	\N
+71	2025-05-15	診所	\N	忠孝街	85	\N	診所	533	\N	2025-05-15 04:23:07.512631	25_135_20	fixed	\N	\N	\N	\N	\N	\N
+72	2025-05-15	公園南路	海安路	診所	90	\N	診所	533	\N	2025-05-15 04:23:07.512631	26_135_20	fixed	\N	\N	\N	\N	\N	\N
+73	2025-05-15	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-05-15 04:23:07.512631	29_135_20	fixed	\N	\N	\N	\N	\N	\N
+74	2025-05-15	信智	\N	診所	140	\N	診所	61553	\N	2025-05-15 04:23:07.512631	32_135_20	fixed	\N	\N	\N	\N	\N	\N
+75	2025-05-15	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-05-15 04:23:07.512631	33_135_20	fixed	\N	\N	\N	\N	\N	\N
+76	2025-05-15	南寧街	\N	診所	120	\N	診所	61553	\N	2025-05-15 04:23:07.512631	35_135_20	fixed	\N	\N	\N	\N	\N	\N
+69	2025-05-15	古堡街	安北路	診所	200	-35	診所	533	\N	2025-05-14 22:44:20.363864	23_135_20	fixed	\N	\N	\N	\N	\N	\N
+80	2025-05-15	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-05-15 11:57:11.152181	30_135_20	fixed	\N	\N	\N	\N	\N	\N
+81	2025-05-15	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-05-15 11:57:11.152181	31_135_20	fixed	\N	\N	\N	\N	\N	\N
+82	2025-05-15	診所	\N	南寧街	120	\N	診所	533	\N	2025-05-15 11:57:11.152181	36_135_20	fixed	\N	\N	\N	\N	\N	\N
+83	2025-05-15	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-05-15 11:57:11.152181	39_135_20	fixed	\N	\N	\N	\N	\N	\N
+84	2025-05-15	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-05-15 11:57:11.152181	43_135_20	fixed	\N	\N	\N	\N	\N	\N
+85	2025-05-16	大灣二街	\N	診所	275	\N	診所	533	\N	2025-05-15 21:32:12.464733	1_136_20	fixed	\N	\N	\N	\N	\N	\N
+86	2025-05-16	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-05-15 22:25:00.086195	17_136_20	fixed	\N	\N	\N	\N	\N	\N
+87	2025-05-16	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-05-15 22:25:01.264307	38_136_20	fixed	\N	\N	\N	\N	\N	\N
+88	2025-05-16	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-05-15 23:17:38.746391	42_136_20	fixed	\N	\N	\N	\N	\N	\N
+89	2025-05-16	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-05-15 23:35:02.220192	2_136_20	fixed	\N	\N	\N	\N	\N	\N
+91	2025-05-16	診所	\N	大灣二街	275	\N	診所	533	\N	2025-05-16 05:10:22.748626	5_136_20	fixed	\N	\N	\N	\N	\N	\N
+92	2025-05-16	診所	\N	長溪路	210	\N	診所	61553	\N	2025-05-16 05:10:22.748626	13_136_20	fixed	\N	\N	\N	\N	\N	\N
+93	2025-05-16	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-05-16 05:10:22.748626	19_136_20	fixed	\N	\N	\N	\N	\N	\N
+94	2025-05-16	永大路	\N	診所	280	\N	診所	533	\N	2025-05-16 05:10:22.748626	6_136_20	fixed	\N	\N	\N	\N	\N	\N
+95	2025-05-16	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-05-16 05:10:22.748626	18_136_20	fixed	\N	\N	\N	\N	\N	\N
+96	2025-05-16	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-05-16 05:10:22.748626	7_136_20	fixed	\N	\N	\N	\N	\N	\N
+97	2025-05-16	育德二路		診所	90	\N	診所	61553	\N	2025-05-16 05:10:22.748626	14_136_20	fixed	\N	\N	\N	\N	\N	\N
+100	2025-05-16	診所	\N	永大路	280	\N	診所	61553	\N	2025-05-16 07:33:25.417606	16_136_20	fixed	\N	\N	\N	\N	\N	\N
+101	2025-05-16	同安路	\N	診所	220	\N	診所	61553	\N	2025-05-16 07:33:25.417606	15_136_20	fixed	\N	\N	\N	\N	\N	\N
+102	2025-05-16	診所		育德二路	95	\N	診所	28530	\N	2025-05-16 07:33:25.417606	21_136_20	fixed	\N	\N	\N	\N	\N	\N
+103	2025-05-16	診所	\N	安定	500	\N	診所	533	\N	2025-05-16 07:33:25.417606	12_136_20	fixed	\N	\N	\N	\N	\N	\N
+77	2025-05-15	診所	安北路+古堡街	怡平路	230	-90	診所	533	\N	2025-05-15 04:23:07.512631	24_135_20	fixed	\N	\N	\N	\N	\N	\N
+33	2025-05-13	診所	安北路+古堡街	怡平路	230	-90	診所	533	\N	2025-05-13 04:38:52.88673	24_133_20	fixed	\N	\N	\N	\N	\N	\N
+106	2025-05-16	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-05-16 08:00:02.21108	20_136_20	fixed	\N	\N	\N	\N	\N	\N
+108	2025-05-16	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-05-16 10:02:25.545931	39_136_20	fixed	\N	\N	\N	\N	\N	\N
+64	2025-05-14	東洋後門	\N	東橋十街	380	\N	東洋	61553	府城980	2025-05-14 22:44:20.363864	T_18	temp	\N	\N	\N	\N	\N	\N
+79	2025-05-15	東洋後門	\N	東橋十街	365	\N	東洋	61553	\N	2025-05-15 11:57:11.152181	T_20	temp	\N	\N	\N	\N	\N	\N
+78	2025-05-15	東橋十街	\N	東洋後門	355	\N	東洋	61553	\N	2025-05-15 04:23:07.512631	T_19	temp	\N	\N	\N	\N	\N	\N
+107	2025-05-16	東洋後門	\N	東橋十街	355	\N	東洋	61553	\N	2025-05-16 10:02:25.545931	T_23	temp	\N	\N	\N	\N	\N	\N
+90	2025-05-16	高鐵	\N	東洋前門	680	\N	東洋	61367	\N	2025-05-16 01:21:00.537817	T_15	temp	\N	\N	\N	\N	\N	\N
+63	2025-05-14	東洋前門	\N	高鐵站	680	0	東洋	533	\N	2025-05-14 08:35:02.203858	T_13	temp	\N	\N	\N	\N	\N	\N
+104	2025-05-16	東洋前門	\N	高鐵	680	\N	東洋	5386	\N	2025-05-16 07:33:25.417606	T_16	temp	\N	\N	\N	\N	\N	\N
+109	2025-05-16	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-05-16 10:02:25.545931	43_136_20	fixed	\N	\N	\N	\N	\N	\N
+110	2025-05-17	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-05-17 01:47:08.653107	22_137_20	fixed	\N	\N	\N	\N	\N	\N
+112	2025-05-17	診所	\N	忠孝街	85	\N	診所	533	\N	2025-05-17 16:07:55.96775	25_137_20	fixed	\N	\N	\N	\N	\N	\N
+113	2025-05-17	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-05-17 16:07:55.96775	30_137_20	fixed	\N	\N	\N	\N	\N	\N
+114	2025-05-17	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-05-17 16:07:55.96775	31_137_20	fixed	\N	\N	\N	\N	\N	\N
+115	2025-05-17	診所	\N	南寧街	120	\N	診所	533	\N	2025-05-17 16:07:55.96775	36_137_20	fixed	\N	\N	\N	\N	\N	\N
+116	2025-05-17	公園南路	海安路	診所	90	\N	診所	533	\N	2025-05-17 16:07:55.96775	26_137_20	fixed	\N	\N	\N	\N	\N	\N
+117	2025-05-17	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-05-17 16:07:55.96775	29_137_20	fixed	\N	\N	\N	\N	\N	\N
+118	2025-05-17	信智	\N	診所	140	\N	診所	61553	\N	2025-05-17 16:07:55.96775	32_137_20	fixed	\N	\N	\N	\N	\N	\N
+119	2025-05-17	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-05-17 16:07:55.96775	33_137_20	fixed	\N	\N	\N	\N	\N	\N
+120	2025-05-17	南寧街	\N	診所	120	\N	診所	61553	\N	2025-05-17 16:07:55.96775	35_137_20	fixed	\N	\N	\N	\N	\N	\N
+121	2025-05-17	診所	安北路+古堡街	怡平路	230	-90	診所	533	\N	2025-05-17 16:07:55.96775	24_137_20	fixed	\N	\N	\N	\N	\N	\N
+111	2025-05-17	安北路	\N	診所	165	0	診所	533	\N	2025-05-17 01:47:08.653107	T_24	temp	\N	\N	\N	\N	\N	\N
+122	2025-05-18	東洋後門	文南71	高鐵站	680	\N	東洋	5386	\N	2025-05-18 13:05:54.011246	44_138_20	fixed	\N	\N	\N	\N	\N	\N
+123	2025-05-18	高鐵站	\N	東洋後門	680	\N	東洋	5386	\N	2025-05-18 13:05:54.011246	45_138_20	fixed	\N	\N	\N	\N	\N	\N
+124	2025-05-19	大灣二街	\N	診所	275	\N	診所	533	\N	2025-05-18 21:35:00.898712	1_139_21	fixed	\N	\N	\N	\N	\N	\N
+125	2025-05-19	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-05-18 22:21:07.159097	17_139_21	fixed	\N	\N	\N	\N	\N	\N
+126	2025-05-19	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-05-18 22:21:07.159097	38_139_21	fixed	\N	\N	\N	\N	\N	\N
+127	2025-05-19	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-05-18 23:15:01.394381	42_139_21	fixed	\N	\N	\N	\N	\N	\N
+128	2025-05-19	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-05-18 23:35:00.237805	2_139_21	fixed	\N	\N	\N	\N	\N	\N
+129	2025-05-19	診所	\N	長溪路	210	\N	診所	61553	\N	2025-05-19 01:55:00.242089	13_139_21	fixed	\N	\N	\N	\N	\N	\N
+130	2025-05-19	安定	\N	診所	500	\N	診所	533	\N	2025-05-19 02:00:00.240578	11_139_21	fixed	\N	\N	\N	\N	\N	\N
+132	2025-05-19	診所	\N	大灣二街	275	\N	診所	533	\N	2025-05-19 02:45:02.284994	5_139_21	fixed	\N	\N	\N	\N	\N	\N
+133	2025-05-19	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-05-19 02:50:00.24117	14_139_21	fixed	\N	\N	\N	\N	\N	\N
+134	2025-05-19	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-05-19 02:55:00.244974	18_139_21	fixed	\N	\N	\N	\N	\N	\N
+135	2025-05-19	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-05-19 03:20:01.224052	19_139_21	fixed	\N	\N	\N	\N	\N	\N
+136	2025-05-19	永大路	\N	診所	280	\N	診所	533	\N	2025-05-19 03:35:00.241179	6_139_21	fixed	\N	\N	\N	\N	\N	\N
+137	2025-05-19	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-05-19 04:15:00.238805	7_139_21	fixed	\N	\N	\N	\N	\N	\N
+138	2025-05-19	診所	\N	仁和路	220	\N	診所	533	\N	2025-05-19 06:45:01.22637	10_139_21	fixed	\N	\N	\N	\N	\N	\N
+139	2025-05-19	同安路	\N	診所	220	\N	診所	61553	\N	2025-05-19 06:55:00.240562	15_139_21	fixed	\N	\N	\N	\N	\N	\N
+140	2025-05-19	診所	\N	安定	500	\N	診所	5386	\N	2025-05-19 07:00:00.240884	12_139_21	fixed	\N	\N	\N	\N	\N	\N
+141	2025-05-19	診所	民德58	育德二路	95	\N	診所	28530	\N	2025-05-19 07:00:00.240884	21_139_21	fixed	\N	\N	\N	\N	\N	\N
+142	2025-05-19	診所	\N	永大路	280	\N	診所	61553	\N	2025-05-19 07:20:02.009346	16_139_21	fixed	\N	\N	\N	\N	\N	\N
+143	2025-05-19	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-05-19 07:30:00.238823	4_139_21	fixed	\N	\N	\N	\N	\N	\N
+144	2025-05-19	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-05-19 07:45:00.240982	20_139_21	fixed	\N	\N	\N	\N	\N	\N
+146	2025-05-19	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-05-19 09:35:00.239082	43_139_21	fixed	\N	\N	\N	\N	\N	\N
+147	2025-05-19	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-05-19 09:35:02.378278	39_139_21	fixed	\N	\N	\N	\N	\N	\N
+131	2025-05-19	高鐵站	\N	東洋前門	680	0	東洋	5386	\N	2025-05-19 02:00:00.240578	T_140	temp	\N	\N	\N	\N	\N	\N
+44	2025-05-14	東橋十街	\N	東洋後門	360	\N	東洋	61553	\N	2025-05-14 02:42:51.086271	T_17	temp	\N	\N	\N	\N	\N	\N
+24	2025-05-13	安通一街	\N	高鐵站	700	\N	東洋	533	\N	2025-05-12 22:58:20.359786	T_10	temp	\N	\N	\N	\N	\N	\N
+99	2025-05-16	小港機場	\N	同安路64巷	1960	\N	東洋	5386	taxi:$150	2025-05-16 05:10:22.748626	T_21	temp	\N	\N	\N	\N	\N	\N
+149	2025-05-20	久保田家	新戶家	東洋後門	360	\N	東洋	533	\N	2025-05-19 23:15:01.223208	41_140_21	fixed	\N	\N	\N	\N	\N	\N
+152	2025-05-20	公園南路	海安路	診所	90	\N	診所	533	\N	2025-05-20 02:25:01.213976	26_140_21	fixed	\N	\N	\N	\N	\N	\N
+153	2025-05-20	信智	\N	診所	140	\N	診所	61553	\N	2025-05-20 02:35:00.239445	32_140_21	fixed	\N	\N	\N	\N	\N	\N
+154	2025-05-20	診所	\N	忠孝街	85	\N	診所	533	\N	2025-05-20 02:55:01.226395	25_140_21	fixed	\N	\N	\N	\N	\N	\N
+155	2025-05-20	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-05-20 02:55:02.186788	33_140_21	fixed	\N	\N	\N	\N	\N	\N
+156	2025-05-20	診所		和緯五	230	-90	診所	533	\N	2025-05-20 03:00:00.239856	24_140_21	fixed	\N	\N	\N	\N	\N	\N
+157	2025-05-20	南寧街	\N	診所	120	\N	診所	61553	\N	2025-05-20 03:15:00.240328	35_140_21	fixed	\N	\N	\N	\N	\N	\N
+148	2025-05-20	安北路	和緯路五段	診所	200	-5	診所	533	\N	2025-05-19 22:35:00.235334	23_140_21	fixed	\N	\N	\N	\N	\N	\N
+158	2025-05-20	馬鎮宮	\N	診所	330	\N	診所	28530	\N	2025-05-20 03:55:02.211406	29_140_21	fixed	\N	\N	\N	\N	\N	\N
+160	2025-05-20	診所	\N	南寧街	120	\N	診所	533	\N	2025-05-20 07:20:01.273293	36_140_21	fixed	\N	\N	\N	\N	\N	\N
+161	2025-05-20	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-05-20 07:35:00.259891	31_140_21	fixed	\N	\N	\N	\N	\N	\N
+162	2025-05-20	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-05-20 08:00:01.247327	30_140_21	fixed	\N	\N	\N	\N	\N	\N
+151	2025-05-20	高鐵站	\N	群創D3哨	1925	0	東洋	5386	\N	2025-05-20 00:00:01.340046	T_141	temp	\N	\N	\N	\N	\N	\N
+159	2025-05-20	小港機場	\N	台南大飯店	1945	0	東洋	5386	\N	2025-05-20 06:35:01.228334	T_142	temp	\N	\N	\N	\N	\N	\N
+164	2025-05-20	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-05-20 11:00:01.23341	39_140_21	fixed	\N	\N	\N	\N	\N	\N
+165	2025-05-21	大灣二街	\N	診所	275	\N	診所	533	\N	2025-05-20 21:25:01.217172	1_141_21	fixed	\N	\N	\N	\N	\N	\N
+166	2025-05-21	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-05-20 22:25:01.226692	17_141_21	fixed	\N	\N	\N	\N	\N	\N
+170	2025-05-21	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-05-20 23:15:00.238162	42_141_21	fixed	\N	\N	\N	\N	\N	\N
+172	2025-05-21	仁和路	\N	診所	220	\N	診所	533	\N	2025-05-21 01:55:00.239765	9_141_21	fixed	\N	\N	\N	\N	\N	\N
+173	2025-05-21	診所	\N	長溪路	210	\N	診所	61553	\N	2025-05-21 01:55:01.420102	13_141_21	fixed	\N	\N	\N	\N	\N	\N
+175	2025-05-21	診所	\N	大灣二街	275	\N	診所	533	\N	2025-05-21 02:45:01.386435	5_141_21	fixed	\N	\N	\N	\N	\N	\N
+167	2025-05-21	協理家	\N	高鐵站	685	\N	東洋	5386	\N	2025-05-20 22:55:00.239956	T_148	temp	\N	\N	\N	\N	\N	\N
+163	2025-05-20	東洋後門	新戶家	久保田家	360	40	東洋	28530	永琳	2025-05-20 09:35:01.332963	43_140_21	fixed	\N	\N	\N	\N	\N	\N
+168	2025-05-21	文南71	\N	東洋後門	290	\N	東洋	61553	\N	2025-05-20 23:00:01.244296	T_152	temp	\N	\N	\N	\N	\N	\N
+169	2025-05-21	長北街	\N	東洋後門	280	\N	東洋	61367	\N	2025-05-20 23:10:00.239972	T_151	temp	\N	\N	\N	\N	\N	\N
+145	2025-05-19	東洋前門	\N	赤崁康橋	290	\N	東洋	533	\N	2025-05-19 09:00:01.528804	T_145	temp	\N	\N	\N	\N	\N	\N
+171	2025-05-21	台南大飯店	\N	東洋前門	300	\N	東洋	533	\N	2025-05-20 23:35:00.238623	T_146	temp	\N	\N	\N	\N	\N	\N
+176	2025-05-21	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-05-21 02:50:00.24066	14_141_21	fixed	\N	\N	\N	\N	\N	\N
+178	2025-05-21	東洋後門	\N	高鐵站	680	\N	東洋	5386	\N	2025-05-21 03:00:00.241419	T_144	temp	\N	\N	\N	\N	\N	\N
+489	2025-06-09	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-06-08 23:15:01.209555	42_160_24	fixed	\N	\N	\N	\N	\N	\N
+490	2025-06-09	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-06-08 23:35:00.239938	2_160_24	fixed	\N	\N	\N	\N	\N	\N
+498	2025-06-09	永大路	\N	診所	280	\N	診所	533	\N	2025-06-09 03:35:00.249272	6_160_24	fixed	\N	\N	\N	\N	\N	\N
+506	2025-06-09	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-06-09 07:45:00.242584	20_160_24	fixed	\N	\N	\N	\N	\N	\N
+509	2025-06-09	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-06-09 09:35:00.251712	43_160_24	fixed	\N	\N	\N	\N	\N	\N
+637	2025-06-14	診所	海安路	公園南路	90	\N	診所	533	\N	2025-06-14 07:00:00.244139	T_360	temp	\N	\N	\N	\N	\N	\N
+513	2025-06-10	古堡街	安北路+和緯五	診所	230	0	診所	61367	\N	2025-06-09 22:35:01.225558	23_161_24	fixed	\N	\N	\N	\N	\N	\N
+516	2025-06-10	公園南路	海安路	診所	90	\N	診所	533	\N	2025-06-10 02:25:01.225939	26_161_24	fixed	\N	\N	\N	\N	\N	\N
+517	2025-06-10	信智	\N	診所	140	\N	診所	61553	\N	2025-06-10 02:35:00.242954	32_161_24	fixed	\N	\N	\N	\N	\N	\N
+522	2025-06-10	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-06-10 03:55:01.24346	29_161_24	fixed	\N	\N	\N	\N	\N	\N
+523	2025-06-10	診所	\N	南寧街	120	\N	診所	533	\N	2025-06-10 07:20:01.245582	36_161_24	fixed	\N	\N	\N	\N	\N	\N
+524	2025-06-10	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-06-10 07:35:00.241778	31_161_24	fixed	\N	\N	\N	\N	\N	\N
+527	2025-06-10	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-06-10 09:35:01.232271	43_161_24	fixed	\N	\N	\N	\N	\N	\N
+532	2025-06-11	大灣二街	\N	診所	275	\N	診所	533	\N	2025-06-10 21:25:02.174926	1_162_24	fixed	\N	\N	\N	\N	\N	\N
+540	2025-06-11	診所	\N	大灣二街	275	\N	診所	533	\N	2025-06-11 02:45:01.216969	5_162_24	fixed	\N	\N	\N	\N	\N	\N
+542	2025-06-11	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-06-11 02:55:00.24248	18_162_24	fixed	\N	\N	\N	\N	\N	\N
+545	2025-06-11	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-06-11 04:15:01.226696	7_162_24	fixed	\N	\N	\N	\N	\N	\N
+555	2025-06-11	診所	\N	永大路	280	\N	診所	61553	\N	2025-06-11 09:00:01.298915	16_162_24	fixed	\N	\N	\N	\N	\N	\N
+556	2025-06-11	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-06-11 09:00:01.298915	4_162_24	fixed	\N	\N	\N	\N	\N	\N
+557	2025-06-11	高鐵站	\N	東洋後門	680	0	東洋	61367	\N	2025-06-11 09:00:01.298915	T_374	temp	\N	U83f001b66dbaeff80f6ad0444521422b	$680	2025-06-11 10:56:09.141779	二井	\N
+562	2025-06-12	怡平路	忠孝街	診所	140	-55	診所	61367	\N	2025-06-11 22:00:01.242705	22_163_24	fixed	\N	\N	\N	\N	\N	怡平路不用載
+576	2025-06-12	公園南路	海安路	診所	90	\N	診所	533	\N	2025-06-12 02:25:01.23557	26_163_24	fixed	\N	\N	\N	\N	\N	\N
+577	2025-06-12	信智	\N	診所	140	\N	診所	61553	\N	2025-06-12 02:35:00.244064	32_163_24	fixed	\N	\N	\N	\N	\N	\N
+583	2025-06-12	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-06-12 03:55:00.238306	29_163_24	fixed	\N	\N	\N	\N	\N	\N
+586	2025-06-12	診所	\N	南寧街	120	\N	診所	533	\N	2025-06-12 07:20:02.186106	36_163_24	fixed	\N	\N	\N	\N	\N	\N
+587	2025-06-12	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-06-12 07:35:00.238705	31_163_24	fixed	\N	\N	\N	\N	\N	\N
+590	2025-06-12	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-06-12 09:35:01.211827	43_163_24	fixed	\N	\N	\N	\N	\N	\N
+563	2025-06-12	七股區十份里	土城	診所	580	\N	診所	533	\N	2025-06-11 22:00:01.242705	T_376	temp	\N	\N	\N	\N	\N	\N
+582	2025-06-12	診所	土城	七股區十份里	580	\N	診所	28530	\N	2025-06-12 03:25:01.288711	T_377	temp	\N	\N	\N	\N	\N	\N
+593	2025-06-12	民族路二段	\N	二井家	1400	\N	東洋	61153	\N	2025-06-12 16:57:08.948542	C_593	temp	\N	\N	\N	\N	二井	\N
+596	2025-06-13	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-06-12 22:25:01.258587	38_164_24	fixed	\N	\N	\N	\N	\N	\N
+600	2025-06-13	仁和路	\N	診所	220	\N	診所	533	\N	2025-06-13 01:55:00.243356	9_164_24	fixed	\N	\N	\N	\N	\N	\N
+602	2025-06-13	安定	\N	診所	500	\N	診所	5386	\N	2025-06-13 02:00:00.242427	11_164_24	fixed	\N	\N	\N	\N	\N	\N
+604	2025-06-13	育德二路		診所	90	\N	診所	61553	\N	2025-06-13 02:50:00.239698	14_164_24	fixed	\N	\N	\N	\N	\N	\N
+609	2025-06-13	診所	測試點	亞航社區	245	0	診所	5386	\N	2025-06-13 06:00:01.379756	T_382	temp	\N	U83f001b66dbaeff80f6ad0444521422b	記賬	2025-06-13 06:45:36.272417	\N	\N
+626	2025-06-14	怡平路	忠孝街	診所	140	-55	診所	28530	\N	2025-06-13 22:05:01.259197	22_165_24	fixed	\N	\N	\N	\N	\N	\N
+627	2025-06-14	古堡街	安北路+和緯五	診所	230	0	診所	28530	\N	2025-06-13 22:35:00.245562	23_165_24	fixed	\N	\N	\N	\N	\N	\N
+632	2025-06-14	診所	和緯路+古堡街	怡平路	270	-70	診所	533	\N	2025-06-14 03:00:01.400456	24_165_24	fixed	\N	\N	\N	\N	\N	怡平路請假
+633	2025-06-14	南寧街	\N	診所	120	\N	診所	61553	\N	2025-06-14 03:15:00.243802	35_165_24	fixed	\N	\N	\N	\N	\N	\N
+177	2025-05-21	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-05-21 02:55:00.240514	18_141_21	fixed	\N	\N	\N	\N	\N	\N
+179	2025-05-21	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-05-21 03:20:01.212126	19_141_21	fixed	\N	\N	\N	\N	\N	\N
+180	2025-05-21	永大路	\N	診所	280	\N	診所	533	\N	2025-05-21 03:35:00.242017	6_141_21	fixed	\N	\N	\N	\N	\N	\N
+182	2025-05-21	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-05-21 04:15:01.229379	7_141_21	fixed	\N	\N	\N	\N	\N	\N
+183	2025-05-21	診所	\N	仁和路	220	\N	診所	533	\N	2025-05-21 06:45:02.183953	10_141_21	fixed	\N	\N	\N	\N	\N	\N
+184	2025-05-21	同安路	\N	診所	220	\N	診所	61553	\N	2025-05-21 06:55:00.238203	15_141_21	fixed	\N	\N	\N	\N	\N	\N
+185	2025-05-21	診所	民德58	育德二路	95	\N	診所	28530	\N	2025-05-21 07:00:00.243047	21_141_21	fixed	\N	\N	\N	\N	\N	\N
+186	2025-05-21	樹林街	\N	市立醫院	\N	\N	東洋	61379	\N	2025-05-21 07:00:00.243047	T_153	temp	\N	\N	\N	\N	\N	\N
+187	2025-05-21	診所	\N	永大路	280	\N	診所	61553	\N	2025-05-21 07:20:01.220181	16_141_21	fixed	\N	\N	\N	\N	\N	\N
+188	2025-05-21	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-05-21 07:30:00.237782	4_141_21	fixed	\N	\N	\N	\N	\N	\N
+189	2025-05-21	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-05-21 07:45:00.245015	20_141_21	fixed	\N	\N	\N	\N	\N	\N
+190	2025-05-21	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-05-21 09:35:00.240073	43_141_21	fixed	\N	\N	\N	\N	\N	\N
+191	2025-05-21	高鐵站	\N	永華路二段	735	0	東洋	5386	\N	2025-05-21 10:00:00.242379	T_156	temp	\N	\N	\N	\N	\N	\N
+193	2025-05-22	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-05-21 22:00:01.297227	22_142_21	fixed	\N	\N	\N	\N	\N	\N
+194	2025-05-22	二井家	\N	東洋後門	1400	\N	東洋	28530	\N	2025-05-21 22:25:00.237662	40_142_21	fixed	\N	\N	\N	\N	\N	\N
+196	2025-05-22	久保田家	新戶家	東洋後門	360	\N	東洋	5386	\N	2025-05-21 23:15:01.358031	41_142_21	fixed	\N	\N	\N	\N	\N	\N
+198	2025-05-22	公園南路	海安路	診所	90	\N	診所	533	\N	2025-05-22 02:25:01.232124	26_142_21	fixed	\N	\N	\N	\N	\N	\N
+199	2025-05-22	信智	\N	診所	140	\N	診所	61553	\N	2025-05-22 02:35:00.243178	32_142_21	fixed	\N	\N	\N	\N	\N	\N
+200	2025-05-22	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-05-22 02:55:01.220356	33_142_21	fixed	\N	\N	\N	\N	\N	\N
+201	2025-05-22	診所	\N	忠孝街	85	\N	診所	533	\N	2025-05-22 02:55:01.221153	25_142_21	fixed	\N	\N	\N	\N	\N	\N
+204	2025-05-22	南寧街	\N	診所	120	\N	診所	61553	\N	2025-05-22 03:15:00.237917	35_142_21	fixed	\N	\N	\N	\N	\N	\N
+205	2025-05-22	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-05-22 03:55:01.211336	29_142_21	fixed	\N	\N	\N	\N	\N	\N
+195	2025-05-22	安北路	和緯路五段	診所	200	-5	診所	533	\N	2025-05-21 22:35:01.209527	23_142_21	fixed	\N	\N	\N	\N	\N	\N
+491	2025-06-09	仁和路	\N	診所	220	\N	診所	533	\N	2025-06-09 01:55:00.265668	9_160_24	fixed	\N	\N	\N	\N	\N	\N
+207	2025-05-22	診所	\N	南寧街	120	\N	診所	533	\N	2025-05-22 07:20:01.494974	36_142_21	fixed	\N	\N	\N	\N	\N	\N
+208	2025-05-22	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-05-22 07:35:00.240631	31_142_21	fixed	\N	\N	\N	\N	\N	\N
+571	2025-06-12	協理家	\N	高鐵站	670	\N	東洋	61553	\N	2025-06-11 23:00:03.335272	T_366	temp	\N	\N	\N	\N	\N	\N
+619	2025-06-13	東洋後門	\N	二井家	1400	\N	東洋	61553	\N	2025-06-13 09:35:01.222083	39_164_24	fixed	\N	\N	\N	\N	\N	\N
+641	2025-06-14	小港機場	BR-147	長北街112號	1730	135	東洋	5386	計程車:135	2025-06-14 15:00:01.247841	T_371	temp	\N	\N	\N	\N	劉宜萱	\N
+209	2025-05-22	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-05-22 08:00:01.273073	30_142_21	fixed	\N	\N	\N	\N	\N	\N
+210	2025-05-22	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-05-22 09:35:00.241394	43_142_21	fixed	\N	\N	\N	\N	\N	\N
+211	2025-05-23	大灣二街	\N	診所	275	\N	診所	533	\N	2025-05-22 21:25:01.405472	1_143_21	fixed	\N	\N	\N	\N	\N	\N
+212	2025-05-23	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-05-22 22:20:43.230367	17_143_21	fixed	\N	\N	\N	\N	\N	\N
+213	2025-05-23	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-05-22 22:20:43.230367	38_143_21	fixed	\N	\N	\N	\N	\N	\N
+214	2025-05-23	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-05-22 23:15:00.242569	42_143_21	fixed	\N	\N	\N	\N	\N	\N
+215	2025-05-23	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-05-22 23:35:01.259911	2_143_21	fixed	\N	\N	\N	\N	\N	\N
+216	2025-05-23	診所	\N	長溪路	210	\N	診所	61553	\N	2025-05-23 01:55:01.236038	13_143_21	fixed	\N	\N	\N	\N	\N	\N
+217	2025-05-23	安定	\N	診所	500	\N	診所	5386	\N	2025-05-23 02:00:00.248166	11_143_21	fixed	\N	\N	\N	\N	\N	\N
+218	2025-05-23	診所	\N	大灣二街	275	\N	診所	533	\N	2025-05-23 02:45:00.244803	5_143_21	fixed	\N	\N	\N	\N	\N	\N
+219	2025-05-23	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-05-23 02:50:00.240887	14_143_21	fixed	\N	\N	\N	\N	\N	\N
+220	2025-05-23	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-05-23 02:55:00.245129	18_143_21	fixed	\N	\N	\N	\N	\N	\N
+222	2025-05-23	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-05-23 03:20:00.247344	19_143_21	fixed	\N	\N	\N	\N	\N	\N
+223	2025-05-23	永大路	\N	診所	280	\N	診所	533	\N	2025-05-23 03:35:00.247025	6_143_21	fixed	\N	\N	\N	\N	\N	\N
+224	2025-05-23	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-05-23 04:15:00.24424	7_143_21	fixed	\N	\N	\N	\N	\N	\N
+225	2025-05-23	同安路	\N	診所	220	\N	診所	61553	\N	2025-05-23 06:55:00.242641	15_143_21	fixed	\N	\N	\N	\N	\N	\N
+226	2025-05-23	診所	\N	安定	500	\N	診所	5386	\N	2025-05-23 07:00:00.245397	12_143_21	fixed	\N	\N	\N	\N	\N	\N
+227	2025-05-23	診所	民德58	育德二路	95	\N	診所	28530	\N	2025-05-23 07:00:00.245397	21_143_21	fixed	\N	\N	\N	\N	\N	\N
+228	2025-05-23	診所	\N	永大路	280	\N	診所	61553	\N	2025-05-23 07:20:00.253603	16_143_21	fixed	\N	\N	\N	\N	\N	\N
+229	2025-05-23	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-05-23 07:45:01.253111	20_143_21	fixed	\N	\N	\N	\N	\N	\N
+230	2025-05-23	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-05-23 09:35:00.246847	43_143_21	fixed	\N	\N	\N	\N	\N	\N
+231	2025-05-23	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-05-23 09:35:01.24932	39_143_21	fixed	\N	\N	\N	\N	\N	\N
+232	2025-05-24	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-05-23 22:00:01.863434	22_144_21	fixed	\N	\N	\N	\N	\N	\N
+234	2025-05-24	公園南路	海安路	診所	90	\N	診所	533	\N	2025-05-24 02:25:01.343896	26_144_21	fixed	\N	\N	\N	\N	\N	\N
+235	2025-05-24	信智	\N	診所	140	\N	診所	61553	\N	2025-05-24 02:35:00.242682	32_144_21	fixed	\N	\N	\N	\N	\N	\N
+236	2025-05-24	診所	\N	忠孝街	85	\N	診所	533	\N	2025-05-24 02:55:01.231097	25_144_21	fixed	\N	\N	\N	\N	\N	\N
+237	2025-05-24	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-05-24 02:55:01.236997	33_144_21	fixed	\N	\N	\N	\N	\N	\N
+239	2025-05-24	南寧街	\N	診所	120	\N	診所	61553	\N	2025-05-24 03:15:00.242198	35_144_21	fixed	\N	\N	\N	\N	\N	\N
+240	2025-05-24	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-05-24 03:55:01.243948	29_144_21	fixed	\N	\N	\N	\N	\N	\N
+233	2025-05-24	安北路	和緯路五段	診所	200	-5	診所	533	\N	2025-05-23 22:35:02.217508	23_144_21	fixed	\N	\N	\N	\N	\N	\N
+241	2025-05-24	診所	\N	南寧街	120	\N	診所	533	\N	2025-05-24 07:20:01.242677	36_144_21	fixed	\N	\N	\N	\N	\N	\N
+242	2025-05-24	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-05-24 07:35:00.246833	31_144_21	fixed	\N	\N	\N	\N	\N	\N
+243	2025-05-24	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-05-24 08:00:01.32048	30_144_21	fixed	\N	\N	\N	\N	\N	\N
+493	2025-06-09	安定	\N	診所	500	\N	診所	5386	\N	2025-06-09 02:00:00.260848	11_160_24	fixed	\N	\N	\N	\N	\N	\N
+499	2025-06-09	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-06-09 04:15:01.227476	7_160_24	fixed	\N	\N	\N	\N	\N	\N
+202	2025-05-22	診所	和緯路五段	怡平路	230	-90	診所	533	\N	2025-05-22 03:00:00.239614	24_142_21	fixed	\N	\N	\N	\N	\N	\N
+238	2025-05-24	診所	和緯路五段	怡平路	230	-90	診所	533	\N	2025-05-24 03:00:00.241524	24_144_21	fixed	\N	\N	\N	\N	\N	\N
+247	2025-05-26	大灣二街	\N	診所	275	\N	診所	533	\N	2025-05-25 22:00:01.249053	1_146_22	fixed	\N	\N	\N	\N	\N	\N
+192	2025-05-21	高鐵站	\N	協理家	700	\N	東洋	61553	\N	2025-05-21 10:22:01.365688	T_149	temp	\N	\N	\N	\N	\N	\N
+203	2025-05-22	和緯二496	\N	東洋後門	250	\N	東洋	61367	\N	2025-05-22 03:00:00.239614	T_157	temp	\N	\N	\N	\N	\N	\N
+181	2025-05-21	東洋後門	\N	慈安路	240	\N	東洋	533	\N	2025-05-21 04:00:00.241821	T_155	temp	\N	\N	\N	\N	\N	\N
+197	2025-05-22	台南大飯店	\N	東洋前門	300	\N	東洋	533	\N	2025-05-21 23:35:00.239592	T_147	temp	\N	\N	\N	\N	\N	\N
+221	2025-05-23	台南大飯店	\N	小港機場	1560	\N	東洋	5386	\N	2025-05-23 03:00:00.244658	T_150	temp	\N	\N	\N	\N	\N	\N
+249	2025-05-26	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-05-25 23:00:01.41171	38_146_22	fixed	\N	\N	\N	\N	\N	\N
+250	2025-05-26	久保田家	新戶家	東洋後門	360	\N	東洋	533	\N	2025-05-26 00:00:01.307936	42_146_22	fixed	\N	\N	\N	\N	\N	\N
+251	2025-05-26	診所	\N	長溪路	210	\N	診所	61553	\N	2025-05-26 02:00:00.239746	13_146_22	fixed	\N	\N	\N	\N	\N	\N
+252	2025-05-26	仁和路	\N	診所	220	\N	診所	533	\N	2025-05-26 02:00:00.239746	9_146_22	fixed	\N	\N	\N	\N	\N	\N
+253	2025-05-26	安定	\N	診所	500	\N	診所	5386	\N	2025-05-26 02:00:00.239746	11_146_22	fixed	\N	\N	\N	\N	\N	\N
+254	2025-05-26	診所	\N	大灣二街	275	\N	診所	533	\N	2025-05-26 03:00:00.241058	5_146_22	fixed	\N	\N	\N	\N	\N	\N
+255	2025-05-26	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-05-26 03:00:00.241058	18_146_22	fixed	\N	\N	\N	\N	\N	\N
+256	2025-05-26	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-05-26 03:00:00.241058	14_146_22	fixed	\N	\N	\N	\N	\N	\N
+257	2025-05-26	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-05-26 04:00:00.23856	19_146_22	fixed	\N	\N	\N	\N	\N	\N
+258	2025-05-26	永大路	\N	診所	280	\N	診所	533	\N	2025-05-26 04:00:00.23856	6_146_22	fixed	\N	\N	\N	\N	\N	\N
+259	2025-05-26	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-05-26 05:00:01.333793	7_146_22	fixed	\N	\N	\N	\N	\N	\N
+260	2025-05-26	診所	\N	仁和路	220	\N	診所	533	\N	2025-05-26 07:00:00.240231	10_146_22	fixed	\N	\N	\N	\N	\N	\N
+261	2025-05-26	診所	\N	安定	500	\N	診所	5386	\N	2025-05-26 07:00:00.240231	12_146_22	fixed	\N	\N	\N	\N	\N	\N
+262	2025-05-26	同安路	\N	診所	220	\N	診所	61553	\N	2025-05-26 07:00:00.240231	15_146_22	fixed	\N	\N	\N	\N	\N	\N
+263	2025-05-26	診所	民德58	育德二路	95	\N	診所	28530	\N	2025-05-26 07:00:00.240231	21_146_22	fixed	\N	\N	\N	\N	\N	\N
+264	2025-05-26	診所	\N	永大路	280	\N	診所	61553	\N	2025-05-26 08:00:01.240184	16_146_22	fixed	\N	\N	\N	\N	\N	\N
+265	2025-05-26	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-05-26 08:00:01.240184	20_146_22	fixed	\N	\N	\N	\N	\N	\N
+266	2025-05-26	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-05-26 08:00:01.240184	4_146_22	fixed	\N	\N	\N	\N	\N	\N
+267	2025-05-26	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-05-26 10:00:00.242817	39_146_22	fixed	\N	\N	\N	\N	\N	\N
+268	2025-05-26	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-05-26 10:00:00.242817	43_146_22	fixed	\N	\N	\N	\N	\N	\N
+269	2025-05-27	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-05-26 22:00:01.350236	22_147_22	fixed	\N	\N	\N	\N	\N	\N
+270	2025-05-27	二井家	\N	東洋後門	1400	\N	東洋	28530	\N	2025-05-26 22:25:00.241961	40_147_22	fixed	\N	\N	\N	\N	\N	\N
+271	2025-05-27	安北路	和緯五	診所	200	-5	診所	533	\N	2025-05-26 22:35:01.351164	23_147_22	fixed	\N	\N	\N	\N	\N	\N
+272	2025-05-27	久保田家	新戶家	東洋後門	360	\N	東洋	5386	\N	2025-05-26 23:15:00.244683	41_147_22	fixed	\N	\N	\N	\N	\N	\N
+273	2025-05-27	公園南路	海安路	診所	90	\N	診所	533	\N	2025-05-27 02:25:00.243062	26_147_22	fixed	\N	\N	\N	\N	\N	\N
+274	2025-05-27	診所	\N	忠孝街	85	\N	診所	533	\N	2025-05-27 02:55:02.204812	25_147_22	fixed	\N	\N	\N	\N	\N	\N
+275	2025-05-27	診所	古堡街	怡平路	230	-90	診所	533	\N	2025-05-27 03:00:00.240274	24_147_22	fixed	\N	\N	\N	\N	\N	\N
+150	2025-05-20	東洋後門	\N	群創D3哨	2125	\N	東洋	61367	來回3.5H	2025-05-20 00:00:01.340046	T_143	temp	\N	\N	\N	\N	\N	\N
+276	2025-05-27	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-05-27 03:55:01.222703	29_147_22	fixed	\N	\N	\N	\N	\N	\N
+492	2025-06-09	診所	\N	長溪路	210	\N	診所	61553	\N	2025-06-09 01:55:02.178527	13_160_24	fixed	\N	\N	\N	\N	\N	\N
+279	2025-05-27	診所	\N	南寧街	120	\N	診所	533	\N	2025-05-27 07:20:01.312853	36_147_22	fixed	\N	\N	\N	\N	\N	\N
+280	2025-05-27	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-05-27 07:35:00.239561	31_147_22	fixed	\N	\N	\N	\N	\N	\N
+281	2025-05-27	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-05-27 08:00:01.717763	30_147_22	fixed	\N	\N	\N	\N	\N	\N
+286	2025-05-28	大灣二街	\N	診所	275	\N	診所	533	\N	2025-05-27 21:25:01.219653	1_148_22	fixed	\N	\N	\N	\N	\N	\N
+287	2025-05-28	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-05-27 22:25:00.247016	38_148_22	fixed	\N	\N	\N	\N	\N	\N
+288	2025-05-28	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-05-27 22:25:02.202638	17_148_22	fixed	\N	\N	\N	\N	\N	\N
+289	2025-05-28	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-05-27 23:15:01.320282	42_148_22	fixed	\N	\N	\N	\N	\N	\N
+290	2025-05-28	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-05-27 23:35:00.247017	2_148_22	fixed	\N	\N	\N	\N	\N	\N
+291	2025-05-28	仁和路	\N	診所	220	\N	診所	533	\N	2025-05-28 01:55:02.212095	9_148_22	fixed	\N	\N	\N	\N	\N	\N
+292	2025-05-28	安定	\N	診所	500	\N	診所	5386	\N	2025-05-28 02:00:01.314421	11_148_22	fixed	\N	\N	\N	\N	\N	\N
+293	2025-05-28	診所	\N	大灣二街	275	\N	診所	533	\N	2025-05-28 02:45:01.37221	5_148_22	fixed	\N	\N	\N	\N	\N	\N
+294	2025-05-28	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-05-28 02:55:00.240154	18_148_22	fixed	\N	\N	\N	\N	\N	\N
+295	2025-05-28	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-05-28 03:20:01.212079	19_148_22	fixed	\N	\N	\N	\N	\N	\N
+296	2025-05-28	永大路	\N	診所	280	\N	診所	533	\N	2025-05-28 03:35:01.214607	6_148_22	fixed	\N	\N	\N	\N	\N	\N
+297	2025-05-28	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-05-28 04:15:01.216288	7_148_22	fixed	\N	\N	\N	\N	\N	\N
+298	2025-05-28	診所	\N	仁和路	220	\N	診所	533	\N	2025-05-28 06:45:02.336694	10_148_22	fixed	\N	\N	\N	\N	\N	\N
+299	2025-05-28	同安路	\N	診所	220	\N	診所	61553	\N	2025-05-28 06:55:00.23916	15_148_22	fixed	\N	\N	\N	\N	\N	\N
+300	2025-05-28	診所	民德58	育德二路	95	\N	診所	28530	\N	2025-05-28 07:00:00.237324	21_148_22	fixed	\N	\N	\N	\N	\N	\N
+301	2025-05-28	診所	\N	安定	500	\N	診所	5386	\N	2025-05-28 07:00:00.237324	12_148_22	fixed	\N	\N	\N	\N	\N	\N
+302	2025-05-28	診所	\N	永大路	280	\N	診所	61553	\N	2025-05-28 07:20:00.253726	16_148_22	fixed	\N	\N	\N	\N	\N	\N
+303	2025-05-28	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-05-28 07:30:02.200231	4_148_22	fixed	\N	\N	\N	\N	\N	\N
+304	2025-05-28	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-05-28 07:45:01.293979	20_148_22	fixed	\N	\N	\N	\N	\N	\N
+305	2025-05-28	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-05-28 09:35:00.242628	43_148_22	fixed	\N	\N	\N	\N	\N	\N
+307	2025-05-28	東洋後門	\N	崑大路155-31	485	0	東洋	5386	\N	2025-05-28 11:00:01.236673	T_394	temp	\N	\N	\N	\N	\N	\N
+306	2025-05-28	高鐵站	\N	群創D3哨	750	0	東洋	5386	\N	2025-05-28 11:00:01.236673	T_392	temp	\N	\N	\N	\N	\N	\N
+308	2025-05-29	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-05-28 22:00:01.391563	22_149_22	fixed	\N	\N	\N	\N	\N	\N
+309	2025-05-29	二井家	\N	東洋後門	1400	\N	東洋	28530	\N	2025-05-28 22:25:00.244178	40_149_22	fixed	\N	\N	\N	\N	\N	\N
+310	2025-05-29	安北路	和緯五	診所	200	-5	診所	533	\N	2025-05-28 22:35:01.233624	23_149_22	fixed	\N	\N	\N	\N	\N	\N
+311	2025-05-29	久保田家	新戶家	東洋後門	360	\N	東洋	5386	\N	2025-05-28 23:15:01.211336	41_149_22	fixed	\N	\N	\N	\N	\N	\N
+312	2025-05-29	公園南路	海安路	診所	90	\N	診所	533	\N	2025-05-29 02:25:01.218519	26_149_22	fixed	\N	\N	\N	\N	\N	\N
+313	2025-05-29	信智	\N	診所	140	\N	診所	61553	\N	2025-05-29 02:35:00.241804	32_149_22	fixed	\N	\N	\N	\N	\N	\N
+314	2025-05-29	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-05-29 02:55:00.248012	33_149_22	fixed	\N	\N	\N	\N	\N	\N
+315	2025-05-29	診所	\N	忠孝街	85	\N	診所	533	\N	2025-05-29 02:55:01.21904	25_149_22	fixed	\N	\N	\N	\N	\N	\N
+316	2025-05-29	診所	古堡街	怡平路	230	-90	診所	533	\N	2025-05-29 03:00:00.24025	24_149_22	fixed	\N	\N	\N	\N	\N	\N
+317	2025-05-29	南寧街	\N	診所	120	\N	診所	61553	\N	2025-05-29 03:15:01.217884	35_149_22	fixed	\N	\N	\N	\N	\N	\N
+318	2025-05-29	馬鎮宮	\N	診所	330	\N	診所	533	\N	2025-05-29 03:55:01.240344	29_149_22	fixed	\N	\N	\N	\N	\N	\N
+248	2025-05-26	裕和二街	\N	小港機場	1690	\N	東洋	28530	\N	2025-05-25 22:00:01.249053	T_387	temp	\N	\N	\N	\N	\N	\N
+285	2025-05-27	東洋前門		西海岸活蝦	280	\N	東洋	28530	\N	2025-05-27 11:00:01.248066	43_147_22	temp	\N	\N	\N	\N	\N	\N
+277	2025-05-27	高鐵站	中正三街118號+桂田	東洋前門	1390	1250	東洋	28530	W5h	2025-05-27 04:00:00.239803	T_388	temp	\N	\N	\N	\N	\N	\N
+319	2025-05-29	診所	\N	南寧街	120	\N	診所	533	\N	2025-05-29 07:20:01.218763	36_149_22	fixed	\N	\N	\N	\N	\N	\N
+320	2025-05-29	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-05-29 07:35:00.240215	31_149_22	fixed	\N	\N	\N	\N	\N	\N
+321	2025-05-29	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-05-29 08:00:01.335309	30_149_22	fixed	\N	\N	\N	\N	\N	\N
+322	2025-05-29	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-05-29 09:35:00.243102	43_149_22	fixed	\N	\N	\N	\N	\N	\N
+323	2025-05-29	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-05-29 09:35:01.324379	39_149_22	fixed	\N	\N	\N	\N	\N	\N
+324	2025-05-30	大灣二街	\N	診所	275	\N	診所	533	\N	2025-05-29 21:25:02.180133	1_150_22	fixed	\N	\N	\N	\N	\N	\N
+326	2025-05-30	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-05-29 22:25:01.224511	17_150_22	fixed	\N	\N	\N	\N	\N	\N
+328	2025-05-30	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-05-29 23:35:00.243954	2_150_22	fixed	\N	\N	\N	\N	\N	\N
+329	2025-05-30	仁和路	\N	診所	220	\N	診所	533	\N	2025-05-30 01:55:00.240015	9_150_22	fixed	\N	\N	\N	\N	\N	\N
+330	2025-05-30	診所	\N	長溪路	210	\N	診所	61553	\N	2025-05-30 01:55:01.237265	13_150_22	fixed	\N	\N	\N	\N	\N	\N
+331	2025-05-30	安定	\N	診所	500	\N	診所	5386	\N	2025-05-30 02:00:00.238905	11_150_22	fixed	\N	\N	\N	\N	\N	\N
+332	2025-05-30	診所	\N	大灣二街	275	\N	診所	533	\N	2025-05-30 02:45:01.208621	5_150_22	fixed	\N	\N	\N	\N	\N	\N
+333	2025-05-30	育德二路	民德58	診所	90	\N	診所	61553	\N	2025-05-30 02:50:00.238148	14_150_22	fixed	\N	\N	\N	\N	\N	\N
+334	2025-05-30	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-05-30 02:55:00.240093	18_150_22	fixed	\N	\N	\N	\N	\N	\N
+335	2025-05-30	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-05-30 03:20:01.325351	19_150_22	fixed	\N	\N	\N	\N	\N	\N
+336	2025-05-30	永大路	\N	診所	280	\N	診所	533	\N	2025-05-30 03:35:01.237004	6_150_22	fixed	\N	\N	\N	\N	\N	\N
+337	2025-05-30	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-05-30 04:15:02.236212	7_150_22	fixed	\N	\N	\N	\N	\N	\N
+338	2025-05-30	診所	\N	仁和路	220	\N	診所	533	\N	2025-05-30 06:45:01.224221	10_150_22	fixed	\N	\N	\N	\N	\N	\N
+339	2025-05-30	同安路	\N	診所	220	\N	診所	61553	\N	2025-05-30 06:55:00.24225	15_150_22	fixed	\N	\N	\N	\N	\N	\N
+340	2025-05-30	診所	\N	安定	500	\N	診所	5386	\N	2025-05-30 07:00:00.243589	12_150_22	fixed	\N	\N	\N	\N	\N	\N
+341	2025-05-30	診所	\N	永大路	280	\N	診所	61553	\N	2025-05-30 07:20:01.431425	16_150_22	fixed	\N	\N	\N	\N	\N	\N
+342	2025-05-30	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-05-30 07:30:00.240311	4_150_22	fixed	\N	\N	\N	\N	\N	\N
+327	2025-05-30	久保田家	新戶家	東洋後門	360	\N	東洋	5386	\N	2025-05-29 23:15:01.215982	42_150_22	fixed	\N	\N	\N	\N	\N	\N
+325	2025-05-30	新戶家	\N	東洋後門	360	\N	東洋	5386	\N	2025-05-29 22:25:00.243987	38_150_22	fixed	\N	\N	\N	\N	\N	\N
+344	2025-05-31	公園南路	海安路	診所	90	\N	診所	533	\N	2025-05-31 02:25:02.188619	26_151_22	fixed	\N	\N	\N	\N	\N	\N
+345	2025-05-31	信智	\N	診所	140	\N	診所	61553	\N	2025-05-31 02:35:00.244056	32_151_22	fixed	\N	\N	\N	\N	\N	\N
+347	2025-05-31	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-05-31 02:55:00.292656	33_151_22	fixed	\N	\N	\N	\N	\N	\N
+348	2025-05-31	診所	\N	忠孝街	85	\N	診所	533	\N	2025-05-31 02:55:01.248199	25_151_22	fixed	\N	\N	\N	\N	\N	\N
+349	2025-05-31	南寧街	\N	診所	120	\N	診所	61553	\N	2025-05-31 03:15:01.223447	35_151_22	fixed	\N	\N	\N	\N	\N	\N
+350	2025-05-31	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-05-31 03:55:01.21596	29_151_22	fixed	\N	\N	\N	\N	\N	\N
+351	2025-05-31	診所	\N	南寧街	120	\N	診所	533	\N	2025-05-31 07:20:01.224669	36_151_22	fixed	\N	\N	\N	\N	\N	\N
+352	2025-05-31	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-05-31 07:35:00.241638	31_151_22	fixed	\N	\N	\N	\N	\N	\N
+353	2025-05-31	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-05-31 08:00:01.286747	30_151_22	fixed	\N	\N	\N	\N	\N	\N
+343	2025-05-31	古堡街	\N	診所	200	0	診所	533	\N	2025-05-30 22:35:01.220981	T_396	temp	\N	\N	\N	\N	\N	\N
+346	2025-05-31	診所	\N	古堡街	200	0	診所	533	\N	2025-05-31 02:45:00.24234	T_397	temp	\N	\N	\N	\N	\N	\N
+355	2025-05-27	東洋後門	\N	南紡夢時代	\N	\N	東洋	61379	\N	2025-05-31 18:00:01.525122	T_393	temp	\N	\N	\N	\N	\N	\N
+284	2025-05-27	東洋前門	\N	西海岸活蝦	\N	\N	東洋	61353	\N	2025-05-27 10:00:01.374397	T_390	temp	\N	\N	\N	\N	\N	\N
+354	2025-05-29	小港機場	\N	裕和二街	1330	170	東洋	5386	\N	2025-05-31 18:00:01.525122	T_391	temp	\N	\N	\N	\N	\N	\N
+357	2025-06-02	大灣二街	\N	診所	275	\N	診所	533	\N	2025-06-01 21:25:01.216806	1_153_23	fixed	\N	\N	\N	\N	\N	\N
+358	2025-06-02	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-06-01 22:25:00.243997	38_153_23	fixed	\N	\N	\N	\N	\N	\N
+359	2025-06-02	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-06-01 22:25:01.233116	17_153_23	fixed	\N	\N	\N	\N	\N	\N
+360	2025-06-02	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-06-01 23:15:01.225857	42_153_23	fixed	\N	\N	\N	\N	\N	\N
+361	2025-06-02	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-06-01 23:35:00.244015	2_153_23	fixed	\N	\N	\N	\N	\N	\N
+362	2025-06-02	診所	\N	長溪路	210	\N	診所	61553	\N	2025-06-02 01:55:01.217764	13_153_23	fixed	\N	\N	\N	\N	\N	\N
+363	2025-06-02	安定	\N	診所	500	\N	診所	5386	\N	2025-06-02 02:00:00.243368	11_153_23	fixed	\N	\N	\N	\N	\N	\N
+365	2025-06-02	育德二路		診所	90	\N	診所	61553	\N	2025-06-02 02:50:00.239577	14_153_23	fixed	\N	\N	\N	\N	\N	\N
+366	2025-06-02	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-06-02 02:55:00.240775	18_153_23	fixed	\N	\N	\N	\N	\N	\N
+367	2025-06-02	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-06-02 03:20:01.607023	19_153_23	fixed	\N	\N	\N	\N	\N	\N
+368	2025-06-02	永大路	\N	診所	280	\N	診所	533	\N	2025-06-02 03:35:00.24047	6_153_23	fixed	\N	\N	\N	\N	\N	\N
+369	2025-06-02	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-06-02 04:15:01.226958	7_153_23	fixed	\N	\N	\N	\N	\N	\N
+364	2025-06-02	診所	\N	大灣二街	275	-145	診所	533	\N	2025-06-02 02:45:01.224045	5_153_23	fixed	\N	\N	\N	\N	\N	\N
+370	2025-06-02	診所	\N	仁和路	220	\N	診所	533	\N	2025-06-02 06:45:01.227422	10_153_23	fixed	\N	\N	\N	\N	\N	\N
+371	2025-06-02	同安路	\N	診所	220	\N	診所	61553	\N	2025-06-02 06:55:00.237596	15_153_23	fixed	\N	\N	\N	\N	\N	\N
+372	2025-06-02	診所	\N	安定	500	\N	診所	5386	\N	2025-06-02 07:00:00.237183	12_153_23	fixed	\N	\N	\N	\N	\N	\N
+373	2025-06-02	診所		育德二路	95	\N	診所	28530	\N	2025-06-02 07:00:00.237183	21_153_23	fixed	\N	\N	\N	\N	\N	\N
+374	2025-06-02	診所	\N	永大路	280	\N	診所	61553	\N	2025-06-02 07:20:01.21029	16_153_23	fixed	\N	\N	\N	\N	\N	\N
+375	2025-06-02	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-06-02 07:30:00.236477	4_153_23	fixed	\N	\N	\N	\N	\N	\N
+376	2025-06-02	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-06-02 07:45:02.245201	20_153_23	fixed	\N	\N	\N	\N	\N	\N
+377	2025-06-02	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-06-02 09:35:00.238087	43_153_23	fixed	\N	\N	\N	\N	\N	\N
+378	2025-06-02	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-06-02 09:35:01.254673	39_153_23	fixed	\N	\N	\N	\N	\N	\N
+379	2025-06-03	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-06-02 22:00:01.516945	22_154_23	fixed	\N	\N	\N	\N	\N	\N
+278	2025-05-27	東洋後門	中正三街118號	高鐵站	950	500	東洋	5386	等候2H，後載eric到高鐵	2025-05-27 06:00:01.340104	T_389	temp	\N	\N	\N	\N	\N	\N
+380	2025-06-03	古堡街	安北路+和緯五	診所	230	0	診所	533	\N	2025-06-02 22:35:00.241215	23_154_23	fixed	\N	\N	\N	\N	\N	\N
+381	2025-06-03	久保田家	新戶家	東洋後門	360	\N	東洋	5386	\N	2025-06-02 23:15:01.226376	41_154_23	fixed	\N	\N	\N	\N	\N	\N
+384	2025-06-03	信智	\N	診所	140	\N	診所	61553	\N	2025-06-03 02:35:00.237091	32_154_23	fixed	\N	\N	\N	\N	\N	\N
+385	2025-06-03	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-06-03 02:55:01.225579	33_154_23	fixed	\N	\N	\N	\N	\N	\N
+386	2025-06-03	南寧街	\N	診所	120	\N	診所	61553	\N	2025-06-03 03:15:00.237705	35_154_23	fixed	\N	\N	\N	\N	\N	\N
+382	2025-06-03	東洋後門	\N	群創D3哨	1100	1000	東洋	5386	\N	2025-06-03 00:00:01.302632	T_115	temp	\N	\N	\N	\N	\N	\N
+387	2025-06-03	馬鎮宮	\N	診所	330	\N	診所	28530	\N	2025-06-03 03:55:01.21325	29_154_23	fixed	\N	\N	\N	\N	\N	\N
+388	2025-06-03	診所	\N	南寧街	120	\N	診所	533	\N	2025-06-03 07:20:01.228063	36_154_23	fixed	\N	\N	\N	\N	\N	\N
+389	2025-06-03	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-06-03 07:35:00.237596	31_154_23	fixed	\N	\N	\N	\N	\N	\N
+390	2025-06-03	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-06-03 08:00:01.325111	30_154_23	fixed	\N	\N	\N	\N	\N	\N
+391	2025-06-03	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-06-03 09:35:00.239533	43_154_23	fixed	\N	\N	\N	\N	\N	\N
+392	2025-06-03	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-06-03 09:35:02.179649	39_154_23	fixed	\N	\N	\N	\N	\N	\N
+383	2025-06-03	群創D3哨	\N	東洋後門	550	500	東洋	533	\N	2025-06-03 02:00:01.252698	T_116	temp	\N	\N	\N	\N	\N	\N
+393	2025-06-04	大灣二街	\N	診所	275	\N	診所	533	\N	2025-06-03 21:25:01.220522	1_155_23	fixed	\N	\N	\N	\N	\N	\N
+394	2025-06-04	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-06-03 22:25:00.246378	38_155_23	fixed	\N	\N	\N	\N	\N	\N
+395	2025-06-04	中華南路		診所	190	\N	診所	28530	\N	2025-06-03 22:25:01.226008	17_155_23	fixed	\N	\N	\N	\N	\N	\N
+396	2025-06-04	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-06-03 23:15:01.247378	42_155_23	fixed	\N	\N	\N	\N	\N	\N
+397	2025-06-04	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-06-03 23:35:00.242403	2_155_23	fixed	\N	\N	\N	\N	\N	\N
+398	2025-06-04	仁和路	\N	診所	220	\N	診所	533	\N	2025-06-04 01:55:00.243157	9_155_23	fixed	\N	\N	\N	\N	\N	\N
+399	2025-06-04	診所	\N	長溪路	210	\N	診所	61553	\N	2025-06-04 01:55:01.239448	13_155_23	fixed	\N	\N	\N	\N	\N	\N
+400	2025-06-04	安定	\N	診所	500	\N	診所	5386	\N	2025-06-04 02:00:00.240946	11_155_23	fixed	\N	\N	\N	\N	\N	\N
+401	2025-06-04	診所	\N	大灣二街	275	\N	診所	533	\N	2025-06-04 02:45:01.238195	5_155_23	fixed	\N	\N	\N	\N	\N	\N
+402	2025-06-04	育德二路		診所	90	\N	診所	61553	\N	2025-06-04 02:50:00.242744	14_155_23	fixed	\N	\N	\N	\N	\N	\N
+403	2025-06-04	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-06-04 02:55:00.241308	18_155_23	fixed	\N	\N	\N	\N	\N	\N
+404	2025-06-04	診所		中華南路	190	\N	診所	28530	\N	2025-06-04 03:20:02.170461	19_155_23	fixed	\N	\N	\N	\N	\N	\N
+405	2025-06-04	永大路	\N	診所	280	\N	診所	533	\N	2025-06-04 03:35:00.24367	6_155_23	fixed	\N	\N	\N	\N	\N	\N
+406	2025-06-04	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-06-04 04:15:01.219284	7_155_23	fixed	\N	\N	\N	\N	\N	\N
+407	2025-06-04	診所	\N	仁和路	220	\N	診所	533	\N	2025-06-04 06:45:02.153924	10_155_23	fixed	\N	\N	\N	\N	\N	\N
+408	2025-06-04	同安路	\N	診所	220	\N	診所	61553	\N	2025-06-04 06:55:00.233592	15_155_23	fixed	\N	\N	\N	\N	\N	\N
+409	2025-06-04	診所	\N	安定	500	\N	診所	5386	\N	2025-06-04 07:00:00.245069	12_155_23	fixed	\N	\N	\N	\N	\N	\N
+410	2025-06-04	診所	\N	永大路	280	\N	診所	61553	\N	2025-06-04 07:20:01.216937	16_155_23	fixed	\N	\N	\N	\N	\N	\N
+411	2025-06-04	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-06-04 07:30:00.246003	4_155_23	fixed	\N	\N	\N	\N	\N	\N
+412	2025-06-04	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-06-04 07:45:02.206806	20_155_23	fixed	\N	\N	\N	\N	\N	\N
+413	2025-06-04	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-06-04 09:35:00.241544	43_155_23	fixed	\N	\N	\N	\N	\N	\N
+414	2025-06-04	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-06-04 09:35:01.245112	39_155_23	fixed	\N	\N	\N	\N	\N	\N
+415	2025-06-05	怡平路	忠孝街	診所	140	\N	診所	533	\N	2025-06-04 22:00:01.280563	22_156_23	fixed	\N	\N	\N	\N	\N	\N
+416	2025-06-05	二井家	\N	東洋後門	1400	\N	東洋	28530	\N	2025-06-04 22:25:00.240094	40_156_23	fixed	\N	\N	\N	\N	\N	\N
+417	2025-06-05	古堡街	安北路+和緯五	診所	230	0	診所	533	\N	2025-06-04 22:35:02.163313	23_156_23	fixed	\N	\N	\N	\N	\N	\N
+418	2025-06-05	久保田家	新戶家	東洋後門	360	\N	東洋	533	\N	2025-06-04 23:15:01.226805	41_156_23	fixed	\N	\N	\N	\N	\N	\N
+441	2025-06-05	高雄科大第一校區	\N	慈安路	1300	0	東洋	5386	\N	2025-06-05 10:00:00.242136	T_125	temp	\N	U83f001b66dbaeff80f6ad0444521422b	$1300 原因：正常	2025-06-08 08:25:04.159117	\N	\N
+435	2025-06-05	東洋前門	\N	高鐵站	680	0	東洋	5386	\N	2025-06-05 08:00:04.057976	T_123	temp	\N	U83f001b66dbaeff80f6ad0444521422b	正常輸入	2025-06-08 08:28:23.547172	\N	\N
+422	2025-06-05	信智	\N	診所	140	\N	診所	61553	\N	2025-06-05 02:35:00.242737	32_156_23	fixed	\N	\N	\N	\N	\N	\N
+423	2025-06-05	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-06-05 02:55:01.22992	33_156_23	fixed	\N	\N	\N	\N	\N	\N
+424	2025-06-05	診所	\N	忠孝街	85	\N	診所	533	\N	2025-06-05 02:55:01.240773	25_156_23	fixed	\N	\N	\N	\N	\N	\N
+426	2025-06-05	公園南路	海安路	診所	90	\N	診所	533	\N	2025-06-05 03:00:00.23993	26_156_23	fixed	\N	\N	\N	\N	\N	\N
+427	2025-06-05	診所	和緯路+古堡街	怡平路	270	0	診所	533	\N	2025-06-05 03:00:00.23993	24_156_23	fixed	\N	\N	\N	\N	\N	\N
+428	2025-06-05	南寧街	\N	診所	120	\N	診所	61553	\N	2025-06-05 03:15:00.238888	35_156_23	fixed	\N	\N	\N	\N	\N	\N
+429	2025-06-05	馬鎮宮	\N	診所	330	\N	診所	533	\N	2025-06-05 03:55:01.263326	29_156_23	fixed	\N	\N	\N	\N	\N	\N
+431	2025-06-05	診所	\N	南寧街	120	\N	診所	533	\N	2025-06-05 07:20:01.217731	36_156_23	fixed	\N	\N	\N	\N	\N	\N
+430	2025-06-05	東洋後門	\N	高雄科大第一校區	1300	0	東洋	5386	\N	2025-06-05 04:00:00.237057	T_120	temp	\N	U83f001b66dbaeff80f6ad0444521422b	正常輸入	2025-06-08 08:29:35.114438	\N	\N
+494	2025-06-09	診所	\N	大灣二街	275	\N	診所	533	\N	2025-06-09 02:45:02.18927	5_160_24	fixed	\N	\N	\N	\N	\N	\N
+434	2025-06-05	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-06-05 08:00:04.057976	31_156_23	fixed	\N	\N	\N	\N	\N	\N
+437	2025-06-05	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-06-05 08:05:00.237903	30_156_23	fixed	\N	\N	\N	\N	\N	\N
+439	2025-06-05	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-06-05 09:35:00.245861	43_156_23	fixed	\N	\N	\N	\N	\N	\N
+440	2025-06-05	東洋後門	\N	二井家	1400	\N	東洋	61553	\N	2025-06-05 09:35:02.290761	39_156_23	fixed	\N	\N	\N	\N	\N	\N
+442	2025-06-06	大灣二街	\N	診所	275	\N	診所	533	\N	2025-06-05 21:25:02.19984	1_157_23	fixed	\N	\N	\N	\N	\N	\N
+443	2025-06-06	二井家	\N	東洋後門	1400	\N	東洋	5386	\N	2025-06-05 22:25:00.24141	38_157_23	fixed	\N	\N	\N	\N	\N	\N
+444	2025-06-06	中華南路		診所	190	\N	診所	28530	\N	2025-06-05 22:25:01.231899	17_157_23	fixed	\N	\N	\N	\N	\N	\N
+445	2025-06-06	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-06-05 23:15:02.164834	42_157_23	fixed	\N	\N	\N	\N	\N	\N
+446	2025-06-06	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-06-05 23:35:00.243555	2_157_23	fixed	\N	\N	\N	\N	\N	\N
+447	2025-06-06	診所	\N	長溪路	210	\N	診所	61553	\N	2025-06-06 01:55:01.256702	13_157_23	fixed	\N	\N	\N	\N	\N	\N
+448	2025-06-06	仁和路	\N	診所	220	\N	診所	533	\N	2025-06-06 01:55:02.209288	9_157_23	fixed	\N	\N	\N	\N	\N	\N
+449	2025-06-06	安定	\N	診所	500	\N	診所	5386	\N	2025-06-06 02:00:00.240684	11_157_23	fixed	\N	\N	\N	\N	\N	\N
+450	2025-06-06	診所	\N	大灣二街	275	\N	診所	533	\N	2025-06-06 02:45:02.197944	5_157_23	fixed	\N	\N	\N	\N	\N	\N
+451	2025-06-06	育德二路		診所	90	\N	診所	61553	\N	2025-06-06 02:50:00.242179	14_157_23	fixed	\N	\N	\N	\N	\N	\N
+452	2025-06-06	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-06-06 02:55:00.241668	18_157_23	fixed	\N	\N	\N	\N	\N	\N
+453	2025-06-06	診所		中華南路	190	\N	診所	28530	\N	2025-06-06 03:20:01.284521	19_157_23	fixed	\N	\N	\N	\N	\N	\N
+454	2025-06-06	永大路	\N	診所	280	\N	診所	533	\N	2025-06-06 03:35:00.239128	6_157_23	fixed	\N	\N	\N	\N	\N	\N
+455	2025-06-06	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-06-06 04:15:01.216447	7_157_23	fixed	\N	\N	\N	\N	\N	\N
+456	2025-06-06	診所	\N	仁和路	220	\N	診所	533	\N	2025-06-06 06:45:01.227573	10_157_23	fixed	\N	\N	\N	\N	\N	\N
+496	2025-06-09	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-06-09 02:55:00.244467	18_160_24	fixed	\N	\N	\N	\N	\N	\N
+436	2025-06-05	東洋前門	\N	高鐵站	680	0	東洋	28530	\N	2025-06-05 08:00:04.057976	T_122	temp	\N	U83f001b66dbaeff80f6ad0444521422b	記賬	2025-06-10 05:18:07.144478	\N	\N
+457	2025-06-06	同安路	\N	診所	220	\N	診所	61553	\N	2025-06-06 06:55:00.239033	15_157_23	fixed	\N	\N	\N	\N	\N	\N
+495	2025-06-09	育德二路		診所	90	\N	診所	61553	\N	2025-06-09 02:50:00.244402	14_160_24	fixed	\N	\N	\N	\N	\N	\N
+488	2025-06-09	中華南路	新建路	診所	220	-30	診所	28530	\N	2025-06-08 22:25:01.208665	17_160_24	fixed	\N	U83f001b66dbaeff80f6ad0444521422b	新建路請假	2025-06-09 05:44:43.35599	\N	\N
+514	2025-06-10	久保田家	新戶家	東洋後門	360	\N	東洋	61367	\N	2025-06-09 23:15:01.208626	41_161_24	fixed	\N	\N	\N	\N	\N	\N
+518	2025-06-10	診所	\N	忠孝街	85	\N	診所	533	\N	2025-06-10 02:55:01.227146	25_161_24	fixed	\N	\N	\N	\N	\N	\N
+520	2025-06-10	診所	和緯路+古堡街	怡平路	270	-70	診所	533	\N	2025-06-10 03:00:00.2448	24_161_24	fixed	\N	\N	\N	\N	\N	怡平路請假
+521	2025-06-10	南寧街	\N	診所	120	\N	診所	61553	\N	2025-06-10 03:15:00.242198	35_161_24	fixed	\N	\N	\N	\N	\N	\N
+438	2025-06-05	東洋後門	\N	新化山腳里	820	0	東洋	61379	\N	2025-06-05 09:00:01.254459	T_124	temp	\N	U83f001b66dbaeff80f6ad0444521422b	正常輸入	2025-06-10 04:42:13.420134	\N	\N
+525	2025-06-10	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-06-10 08:00:01.954134	30_161_24	fixed	\N	\N	\N	\N	\N	\N
+533	2025-06-11	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-06-10 22:25:01.228098	17_162_24	fixed	\N	\N	\N	\N	\N	\N
+537	2025-06-11	仁和路	\N	診所	220	\N	診所	533	\N	2025-06-11 01:55:00.2493	9_162_24	fixed	\N	\N	\N	\N	\N	\N
+539	2025-06-11	安定	\N	診所	500	\N	診所	5386	\N	2025-06-11 02:00:00.247386	11_162_24	fixed	\N	\N	\N	\N	\N	\N
+541	2025-06-11	育德二路		診所	90	\N	診所	61553	\N	2025-06-11 02:50:00.244163	14_162_24	fixed	\N	\N	\N	\N	\N	\N
+546	2025-06-11	診所	\N	仁和路	220	\N	診所	533	\N	2025-06-11 06:45:02.190724	10_162_24	fixed	\N	\N	\N	\N	\N	\N
+548	2025-06-11	診所	\N	安定	500	\N	診所	5386	\N	2025-06-11 07:00:00.242034	12_162_24	fixed	\N	\N	\N	\N	\N	\N
+549	2025-06-11	診所		育德二路	95	\N	診所	28530	\N	2025-06-11 07:00:00.242034	21_162_24	fixed	\N	\N	\N	\N	\N	\N
+552	2025-06-11	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-06-11 07:45:01.223999	20_162_24	fixed	\N	\N	\N	\N	\N	\N
+572	2025-06-12	久保田家	新戶家	東洋後門	360	0	東洋	61367	\N	2025-06-11 23:15:00.242086	41_163_24	fixed	\N	\N	\N	\N	\N	\N
+578	2025-06-12	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-06-12 02:55:01.213609	33_163_24	fixed	\N	\N	\N	\N	\N	\N
+580	2025-06-12	診所	和緯路+古堡街	怡平路	270	-70	診所	533	\N	2025-06-12 03:00:00.240248	24_163_24	fixed	\N	\N	\N	\N	\N	怡平路不用載
+581	2025-06-12	南寧街	\N	診所	120	\N	診所	61553	\N	2025-06-12 03:15:00.238578	35_163_24	fixed	\N	\N	\N	\N	\N	\N
+588	2025-06-12	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-06-12 08:00:00.242852	30_163_24	fixed	\N	\N	\N	\N	\N	\N
+594	2025-06-13	大灣二街	\N	診所	275	\N	診所	533	\N	2025-06-12 21:25:00.242182	1_164_24	fixed	\N	\N	\N	\N	\N	\N
+529	2025-06-10	東洋後門	\N	五期牛五臟	0	\N	東洋	28530	\N	2025-06-10 14:00:01.475957	T_359	temp	\N	\N	\N	\N	新戶+久保田	\N
+591	2025-06-12	高鐵站	\N	協理家	685	\N	東洋	61553	\N	2025-06-12 11:22:01.273789	T_367	temp	\N	\N	\N	\N	\N	\N
+584	2025-06-12	東洋後門	\N	勞工育樂中心	350	\N	東洋	533	\N	2025-06-12 04:00:00.238099	T_373	temp	\N	\N	\N	\N	陳小姐	\N
+510	2025-06-09	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-06-09 09:35:01.238566	39_160_24	fixed	\N	\N	\N	\N	\N	\N
+597	2025-06-13	久保田家	新戶家	東洋後門	360	\N	東洋	61367	\N	2025-06-12 23:15:01.217418	42_164_24	fixed	\N	\N	\N	\N	\N	\N
+598	2025-06-13	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-06-12 23:35:00.239977	2_164_24	fixed	\N	\N	\N	\N	\N	\N
+601	2025-06-13	診所	\N	長溪路	210	\N	診所	61553	\N	2025-06-13 01:55:01.240644	13_164_24	fixed	\N	\N	\N	\N	\N	\N
+606	2025-06-13	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-06-13 03:20:01.225911	19_164_24	fixed	\N	\N	\N	\N	\N	\N
+607	2025-06-13	永大路	\N	診所	280	\N	診所	533	\N	2025-06-13 03:35:00.239561	6_164_24	fixed	\N	\N	\N	\N	\N	\N
+610	2025-06-13	診所	\N	仁和路	220	\N	診所	533	\N	2025-06-13 06:45:02.234689	10_164_24	fixed	\N	\N	\N	\N	\N	\N
+611	2025-06-13	同安路	\N	診所	220	\N	診所	61553	\N	2025-06-13 06:55:00.243549	15_164_24	fixed	\N	\N	\N	\N	\N	\N
+612	2025-06-13	診所	\N	安定	500	\N	診所	5386	\N	2025-06-13 07:00:00.240378	12_164_24	fixed	\N	\N	\N	\N	\N	\N
+613	2025-06-13	診所		育德二路	95	\N	診所	28530	\N	2025-06-13 07:00:00.240378	21_164_24	fixed	\N	\N	\N	\N	\N	\N
+628	2025-06-14	公園南路	海安路	診所	90	\N	診所	533	\N	2025-06-14 02:25:01.2431	26_165_24	fixed	\N	\N	\N	\N	\N	\N
+629	2025-06-14	信智	\N	診所	140	\N	診所	61553	\N	2025-06-14 02:35:00.24036	32_165_24	fixed	\N	\N	\N	\N	\N	\N
+634	2025-06-14	馬鎮宮	\N	診所	330	\N	診所	5386	\N	2025-06-14 03:55:02.161542	29_165_24	fixed	\N	\N	\N	\N	\N	\N
+638	2025-06-14	診所	\N	南寧街	120	\N	診所	533	\N	2025-06-14 07:20:01.231077	36_165_24	fixed	\N	\N	\N	\N	\N	\N
+639	2025-06-14	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-06-14 07:35:00.242353	31_165_24	fixed	\N	\N	\N	\N	\N	\N
+478	2025-06-07	診所	和緯路+古堡街	怡平路	270	-40	診所	533	\N	2025-06-07 03:00:00.240538	24_158_23	fixed	\N	U83f001b66dbaeff80f6ad0444521422b	$270加成-	2025-06-07 10:26:38.139171	\N	\N
+497	2025-06-09	診所	新建路	中華南路	220	-30	診所	28530	\N	2025-06-09 03:20:01.220515	19_160_24	fixed	\N	U83f001b66dbaeff80f6ad0444521422b	新建路請假	2025-06-09 05:43:41.624179	\N	\N
+500	2025-06-09	診所	\N	仁和路	220	\N	診所	533	\N	2025-06-09 06:45:02.225664	10_160_24	fixed	\N	\N	\N	\N	\N	\N
+501	2025-06-09	同安路	\N	診所	220	\N	診所	61553	\N	2025-06-09 06:55:00.259619	15_160_24	fixed	\N	\N	\N	\N	\N	\N
+502	2025-06-09	診所	\N	安定	500	\N	診所	5386	\N	2025-06-09 07:00:00.262397	12_160_24	fixed	\N	\N	\N	\N	\N	\N
+503	2025-06-09	診所		育德二路	95	\N	診所	28530	\N	2025-06-09 07:00:00.262397	21_160_24	fixed	\N	\N	\N	\N	\N	\N
+465	2025-06-06	診所	\N	安定	500	\N	診所	5386	\N	2025-06-06 08:00:01.425529	12_157_23	fixed	\N	\N	\N	\N	\N	\N
+466	2025-06-06	診所	\N	永大路	280	\N	診所	61553	\N	2025-06-06 08:00:01.425529	16_157_23	fixed	\N	\N	\N	\N	\N	\N
+467	2025-06-06	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-06-06 08:00:01.425529	20_157_23	fixed	\N	\N	\N	\N	\N	\N
+468	2025-06-06	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-06-06 08:00:01.425529	4_157_23	fixed	\N	\N	\N	\N	\N	\N
+469	2025-06-06	診所		育德二路	95	\N	診所	28530	\N	2025-06-06 08:00:01.425529	21_157_23	fixed	\N	\N	\N	\N	\N	\N
+470	2025-06-06	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-06-06 09:35:00.241917	43_157_23	fixed	\N	\N	\N	\N	\N	\N
+471	2025-06-06	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-06-06 09:35:01.222655	39_157_23	fixed	\N	\N	\N	\N	\N	\N
+472	2025-06-07	忠孝街	\N	診所	85	\N	診所	533	\N	2025-06-06 22:25:01.220421	T_128	temp	\N	\N	\N	\N	\N	\N
+473	2025-06-07	古堡街	安北路+和緯五	診所	230	0	診所	533	\N	2025-06-06 22:35:00.242783	23_158_23	fixed	\N	\N	\N	\N	\N	\N
+474	2025-06-07	公園南路	海安路	診所	90	\N	診所	533	\N	2025-06-07 02:25:01.223948	26_158_23	fixed	\N	\N	\N	\N	\N	\N
+475	2025-06-07	信智	\N	診所	140	\N	診所	61553	\N	2025-06-07 02:35:00.24314	32_158_23	fixed	\N	\N	\N	\N	\N	\N
+476	2025-06-07	診所	\N	忠孝街	85	\N	診所	533	\N	2025-06-07 02:55:00.239754	25_158_23	fixed	\N	\N	\N	\N	\N	\N
+477	2025-06-07	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-06-07 02:55:01.225294	33_158_23	fixed	\N	\N	\N	\N	\N	\N
+479	2025-06-07	南寧街	\N	診所	120	\N	診所	61553	\N	2025-06-07 03:15:01.22604	35_158_23	fixed	\N	\N	\N	\N	\N	\N
+480	2025-06-07	馬鎮宮	\N	診所	330	\N	診所	533	\N	2025-06-07 03:55:01.23002	29_158_23	fixed	\N	\N	\N	\N	\N	\N
+481	2025-06-07	診所	\N	公園南路	\N	\N	診所	533	\N	2025-06-07 06:45:01.218571	T_117	temp	\N	\N	\N	\N	\N	\N
+482	2025-06-07	診所	\N	南寧街	120	\N	診所	533	\N	2025-06-07 07:20:01.210619	36_158_23	fixed	\N	\N	\N	\N	\N	\N
+483	2025-06-07	診所	文賢路	和緯四	140	\N	診所	533	\N	2025-06-07 07:35:00.235878	31_158_23	fixed	\N	\N	\N	\N	\N	\N
+507	2025-06-09	診所	\N	永大路	280	\N	診所	61553	\N	2025-06-09 08:00:01.907579	16_160_24	fixed	\N	\N	\N	\N	\N	\N
+508	2025-06-09	北門二段	小北路+民德105	診所	165	\N	診所	533	\N	2025-06-09 08:00:01.907579	4_160_24	fixed	\N	\N	\N	\N	\N	\N
+512	2025-06-10	二井家	\N	東洋後門	1400	\N	東洋	28530	\N	2025-06-09 22:25:00.245354	40_161_24	fixed	\N	\N	\N	\N	\N	\N
+511	2025-06-10	怡平路	忠孝街	診所	140	-55	診所	61367	\N	2025-06-09 22:00:01.307952	22_161_24	fixed	\N	\N	\N	\N	\N	怡平路不用接
+515	2025-06-10	高鐵站	\N	東洋前門	680	\N	東洋	5386	\N	2025-06-10 02:00:01.333279	T_357	temp	\N	\N	\N	\N	多多良	\N
+519	2025-06-10	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-06-10 02:55:02.267604	33_161_24	fixed	\N	\N	\N	\N	\N	\N
+419	2025-06-05	新化山腳里	\N	瀚宇彩晶	1280	250	東洋	5386	\N	2025-06-05 01:00:01.249892	T_118	temp	\N	U83f001b66dbaeff80f6ad0444521422b	等候一小時	2025-06-10 05:10:39.673626	\N	\N
+425	2025-06-05	高鐵站	\N	東洋前門	680	0	東洋	28530	\N	2025-06-05 03:00:00.23993	T_119	temp	\N	U83f001b66dbaeff80f6ad0444521422b	記賬	2025-06-10 05:19:19.912796	\N	\N
+356	2025-06-01	東洋後門	\N	新戶家	720	0	東洋	5386	\N	2025-06-01 12:00:00.237029	T_114	temp	\N	U83f001b66dbaeff80f6ad0444521422b	來回趟次	2025-06-10 05:23:04.827517	\N	\N
+526	2025-06-10	東洋後門	\N	二井家	1400	\N	東洋	5386	\N	2025-06-10 09:35:00.243041	39_161_24	fixed	\N	\N	\N	\N	\N	\N
+534	2025-06-11	久保田家	新戶家	東洋後門	360	\N	東洋	28530	\N	2025-06-10 23:15:01.226308	42_162_24	fixed	\N	\N	\N	\N	\N	\N
+535	2025-06-11	中華北路	和緯152	診所	200	\N	診所	533	\N	2025-06-10 23:35:00.242367	2_162_24	fixed	\N	\N	\N	\N	\N	\N
+538	2025-06-11	診所	\N	長溪路	210	\N	診所	61553	\N	2025-06-11 01:55:01.22863	13_162_24	fixed	\N	\N	\N	\N	\N	\N
+543	2025-06-11	診所	新建路	中華南路	220	\N	診所	28530	\N	2025-06-11 03:20:01.280193	19_162_24	fixed	\N	\N	\N	\N	\N	\N
+544	2025-06-11	永大路	\N	診所	280	\N	診所	533	\N	2025-06-11 03:35:00.243793	6_162_24	fixed	\N	\N	\N	\N	\N	\N
+547	2025-06-11	同安路	\N	診所	220	\N	診所	61553	\N	2025-06-11 06:55:00.241804	15_162_24	fixed	\N	\N	\N	\N	\N	\N
+561	2025-06-11	東洋後門	\N	福樓	295	0	東洋	5386	\N	2025-06-11 10:00:00.244517	T_369	temp	\N	U83f001b66dbaeff80f6ad0444521422b	記賬	2025-06-11 10:54:12.29102	二井、新戶、久保田	\N
+573	2025-06-12	古堡街	安北路+和緯五	診所	230	0	診所	61367	\N	2025-06-12 00:00:01.842334	23_163_24	fixed	\N	\N	\N	\N	\N	\N
+579	2025-06-12	診所	\N	忠孝街	85	\N	診所	533	\N	2025-06-12 02:55:01.215563	25_163_24	fixed	\N	\N	\N	\N	\N	\N
+592	2025-06-12	高鐵站	\N	安興街	920	\N	東洋	5386	\N	2025-06-12 13:00:01.478589	T_379	temp	\N	\N	\N	\N	黃筱菁	\N
+575	2025-06-12	台南大飯店	\N	高鐵站	560	\N	東洋	5386	\N	2025-06-12 00:00:01.842334	T_363	temp	\N	\N	\N	\N	多多良+田中+永見	\N
+530	2025-06-10	七股十份	土城	診所	580	\N	診所	533	\N	2025-06-10 15:00:02.05481	T_356	temp	\N	\N	\N	\N	\N	\N
+615	2025-06-13	診所	府前二街	健康三街	250	\N	診所	28530	\N	2025-06-13 07:45:00.238877	20_164_24	fixed	\N	\N	\N	\N	\N	\N
+531	2025-06-10	診所	土城	七股區十份里	580	\N	診所	28530	\N	2025-06-10 15:00:02.05481	T_372	temp	\N	\N	\N	\N	\N	\N
+574	2025-06-12	安興街181-107-02	\N	高鐵站	880	\N	東洋	61379	\N	2025-06-12 00:00:01.842334	T_364	temp	\N	\N	\N	\N	黃筱菁	\N
+589	2025-06-12	勞工育樂中心	慈安路	東洋後門	470	\N	東洋	61379	\N	2025-06-12 09:00:01.955869	T_378	temp	\N	\N	\N	\N	陳怡憬	\N
+585	2025-06-12	太興路7號	\N	小港機場	1340	\N	東洋	5386	\N	2025-06-12 06:25:01.223579	T_365	temp	\N	\N	\N	\N	謝春玲	\N
+595	2025-06-13	中華南路	新建路	診所	220	\N	診所	28530	\N	2025-06-12 22:25:00.24218	17_164_24	fixed	\N	\N	\N	\N	\N	\N
+603	2025-06-13	診所	\N	大灣二街	275	\N	診所	533	\N	2025-06-13 02:45:02.200073	5_164_24	fixed	\N	\N	\N	\N	\N	\N
+605	2025-06-13	健康三街	府前二街	診所	250	\N	診所	28530	\N	2025-06-13 02:55:00.239094	18_164_24	fixed	\N	\N	\N	\N	\N	\N
+608	2025-06-13	診所	和緯152	中華北路	200	\N	診所	533	\N	2025-06-13 04:15:00.248989	7_164_24	fixed	\N	\N	\N	\N	\N	\N
+614	2025-06-13	診所	\N	永大路	280	\N	診所	61553	\N	2025-06-13 07:20:01.232638	16_164_24	fixed	\N	\N	\N	\N	\N	\N
+618	2025-06-13	東洋後門	新戶家	久保田家	360	\N	東洋	28530	\N	2025-06-13 09:35:00.239399	43_164_24	fixed	\N	\N	\N	\N	\N	\N
+630	2025-06-14	診所	\N	忠孝街	85	\N	診所	533	\N	2025-06-14 02:50:56.224173	25_165_24	fixed	\N	\N	\N	\N	\N	\N
+631	2025-06-14	和緯四	文賢路	診所	140	\N	診所	61553	\N	2025-06-14 02:50:56.224173	33_165_24	fixed	\N	\N	\N	\N	\N	\N
+640	2025-06-14	診所	\N	馬鎮宮	330	\N	診所	533	\N	2025-06-14 08:00:01.348631	30_165_24	fixed	\N	\N	\N	\N	\N	\N
+624	2025-06-13	湖美街12巷3號	\N	診所	130	0	診所	28530	\N	2025-06-13 14:00:01.255469	T_375	temp	\N	linyan	記賬	2025-06-16 04:31:26.506138	邱富秋	\N
+1409	2025-06-16	診所	\N	大灣二街	275	0	診所	533	\N	2025-06-16 05:00:01.312752	5_167_25	fixed	\N	\N	\N	\N	\N	\N
+1410	2025-06-16	診所	\N	長溪路	210	0	診所	61553	\N	2025-06-16 05:00:01.312752	13_167_25	fixed	\N	\N	\N	\N	\N	\N
+1411	2025-06-16	永大路	\N	診所	280	0	診所	533	\N	2025-06-16 05:00:01.312752	6_167_25	fixed	\N	\N	\N	\N	\N	\N
+1412	2025-06-16	仁和路	\N	診所	220	0	診所	533	\N	2025-06-16 05:00:01.312752	9_167_25	fixed	\N	\N	\N	\N	\N	\N
+1413	2025-06-16	安定	\N	診所	500	0	診所	5386	\N	2025-06-16 05:00:01.312752	11_167_25	fixed	\N	\N	\N	\N	\N	\N
+1415	2025-06-16	大灣二街	\N	診所	275	0	診所	533	\N	2025-06-16 05:00:01.312752	1_167_25	fixed	\N	\N	\N	\N	\N	\N
+1416	2025-06-16	診所	和緯152	中華北路	200	0	診所	533	\N	2025-06-16 05:00:01.312752	7_167_25	fixed	\N	\N	\N	\N	\N	\N
+1417	2025-06-16	中華北路	和緯152	診所	200	0	診所	533	\N	2025-06-16 05:00:01.312752	2_167_25	fixed	\N	\N	\N	\N	\N	\N
+1419	2025-06-16	久保田家	新戶家	東洋後門	360	0	東洋	28530	\N	2025-06-16 05:00:01.312752	42_167_25	fixed	\N	\N	\N	\N	\N	\N
+1420	2025-06-16	中華南路	新建路	診所	220	0	診所	28530	\N	2025-06-16 05:00:01.312752	17_167_25	fixed	\N	\N	\N	\N	\N	\N
+1421	2025-06-16	診所	新建路	中華南路	220	0	診所	28530	\N	2025-06-16 05:00:01.312752	19_167_25	fixed	\N	\N	\N	\N	\N	\N
+1414	2025-06-16	健康三街	府前二街	診所	250	15	診所	28530	\N	2025-06-16 05:00:01.312752	18_167_25	fixed	\N	linyan	加載育德二路來	2025-06-16 05:05:23.873457	\N	\N
+1422	2025-06-14	七股區十份里	土城	診所	580	\N	診所	533	\N	2025-06-16 05:30:04.48647	C_1422	fixed	\N	\N	\N	\N	\N	\N
+1423	2025-06-14	診所	土城	七股區十份里	580	\N	診所	28530	\N	2025-06-16 05:30:44.340217	C_1423	fixed	\N	\N	\N	\N	\N	\N
+1425	2025-06-16	診所	\N	仁和路	220	0	診所	533	\N	2025-06-16 07:00:01.26485	10_167_25	fixed	\N	\N	\N	\N	\N	\N
+1426	2025-06-16	診所	\N	安定	500	0	診所	5386	\N	2025-06-16 07:00:01.26485	12_167_25	fixed	\N	\N	\N	\N	\N	\N
+1427	2025-06-16	同安路	\N	診所	220	0	診所	61553	\N	2025-06-16 07:00:01.26485	15_167_25	fixed	\N	\N	\N	\N	\N	\N
+1428	2025-06-16	診所		育德二路	95	0	診所	28530	\N	2025-06-16 07:00:01.26485	21_167_25	fixed	\N	\N	\N	\N	\N	\N
+1429	2025-06-16	診所	\N	永大路	280	0	診所	61553	\N	2025-06-16 08:00:01.295571	16_167_25	fixed	\N	\N	\N	\N	\N	\N
+1430	2025-06-16	北門二段	小北路+民德105	診所	165	0	診所	533	\N	2025-06-16 08:00:01.295571	4_167_25	fixed	\N	\N	\N	\N	\N	\N
+1431	2025-06-16	診所	府前二街	健康三街	230	0	診所	28530	\N	2025-06-16 08:00:01.295571	20_167_25	fixed	\N	\N	\N	\N	\N	\N
+1432	2025-06-16	湖美街	\N	診所	130	-130	診所	28530	\N	2025-06-16 09:00:00.238963	47_167_25	fixed	\N	用戶c011	病患自己來	2025-06-16 09:12:46.610389	\N	\N
+1434	2025-06-16	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-06-16 10:00:00.241176	43_167_25	fixed	\N	\N	\N	\N	\N	\N
+560	2025-06-11	東洋前門	\N	福樓	300	\N	東洋	28530	\N	2025-06-11 10:00:00.244517	T_368	temp	\N	\N	\N	\N	多多良、田中、永見	\N
+599	2025-06-13	公園北路	湖內民權路	中正四路215號	1575	\N	東洋	28530	\N	2025-06-13 00:00:01.325646	T_380	temp	\N	\N	\N	\N	蔡宜臻、黃靖雅	\N
+570	2025-06-12	站前CASA	\N	高鐵站	575	\N	東洋	28530	\N	2025-06-11 23:00:03.335272	T_362	temp	\N	\N	\N	\N	久保田&蔡永福	\N
+528	2025-06-10	東洋前門	\N	台南大飯店	300	\N	東洋	28530	\N	2025-06-10 14:00:01.475957	T_358	temp	\N	\N	\N	\N	多多良	\N
+1435	2025-06-16	高鐵站	\N	新化山腳里	\N	\N	東洋	61153	\N	2025-06-16 14:00:01.495287	T_869	temp	\N	\N	\N	\N	張雨珊	\N
+536	2025-06-11	台南大飯店	\N	東洋前門	300	\N	東洋	533	\N	2025-06-11 00:00:01.301901	T_361	temp	\N	\N	\N	\N	多多良+田中+永見	\N
+635	2025-06-14	小港機場	NX-668	太興街7號	1340	170	東洋	5386	計程車:170	2025-06-14 05:55:00.236529	T_370	temp	\N	\N	\N	\N	謝春玲	\N
+485	2025-06-08	長北街132號	\N	小港機場	1730	\N	東洋	5386	\N	2025-06-07 20:00:01.41761	T_121	temp	\N	\N	\N	\N	劉宜萱	\N
+1437	2025-06-13	中正四路	湖內民權路	公園北路	1565	\N	東洋	5386	\N	2025-06-16 14:40:41.210584	C_1437	temp	\N	\N	\N	\N	蔡宜臻	\N
+1439	2025-06-17	怡平路	忠孝街	診所	140	-55	診所	5386	\N	2025-06-16 22:00:01.233091	22_168_25	fixed	\N	\N	\N	\N	\N	怡平路請假
+1440	2025-06-17	安北路	古堡街+和緯五	診所	230	0	診所	5386	\N	2025-06-16 22:35:00.245274	23_168_25	fixed	\N	\N	\N	\N	\N	\N
+1441	2025-06-17	久保田家	新戶家	東洋後門	360	0	東洋	5386	\N	2025-06-16 23:15:01.225287	41_168_25	fixed	\N	\N	\N	\N	\N	\N
+1442	2025-06-17	公園南路	海安路	診所	90	0	診所	533	\N	2025-06-17 02:25:02.202079	26_168_25	fixed	\N	\N	\N	\N	\N	\N
+1443	2025-06-17	信智	\N	診所	140	0	診所	61553	\N	2025-06-17 02:35:00.243315	32_168_25	fixed	\N	\N	\N	\N	\N	\N
+1444	2025-06-17	診所	\N	忠孝街	85	0	診所	533	\N	2025-06-17 02:55:00.242963	25_168_25	fixed	\N	\N	\N	\N	\N	\N
+1445	2025-06-17	和緯四	文賢路	診所	140	0	診所	61553	\N	2025-06-17 02:55:01.218399	33_168_25	fixed	\N	\N	\N	\N	\N	\N
+1446	2025-06-17	診所	和緯路+古堡街	怡平路	270	-70	診所	533	\N	2025-06-17 03:00:00.241352	24_168_25	fixed	\N	\N	\N	\N	\N	怡平路請假
+1448	2025-06-17	南寧街	\N	診所	120	0	診所	61553	\N	2025-06-17 03:15:02.224821	35_168_25	fixed	\N	\N	\N	\N	\N	\N
+1450	2025-06-17	馬鎮宮	\N	診所	330	0	診所	533	\N	2025-06-17 03:55:01.224778	29_168_25	fixed	\N	\N	\N	\N	\N	\N
+1452	2025-06-17	診所	\N	南寧街	120	0	診所	533	\N	2025-06-17 07:20:01.216152	36_168_25	fixed	\N	\N	\N	\N	\N	\N
+1453	2025-06-17	診所	文賢路	和緯四	140	0	診所	533	\N	2025-06-17 07:35:00.237069	31_168_25	fixed	\N	\N	\N	\N	\N	\N
+1454	2025-06-17	診所	\N	馬鎮宮	330	0	診所	533	\N	2025-06-17 08:00:01.731996	30_168_25	fixed	\N	\N	\N	\N	\N	\N
+1455	2025-06-17	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-06-17 09:35:00.246173	43_168_25	fixed	\N	\N	\N	\N	\N	\N
+1456	2025-06-17	東洋後門	\N	二井家	1400	0	東洋	5386	\N	2025-06-17 09:35:01.235642	39_168_25	fixed	\N	\N	\N	\N	\N	\N
+1438	2025-06-17	七股永吉里	土城	診所	480	0	診所	533	\N	2025-06-16 22:00:01.233091	45_168_25	fixed	\N	\N	\N	\N	\N	\N
+1449	2025-06-17	診所	土城	七股安吉里	480	0	診所	61553	\N	2025-06-17 03:25:00.243601	46_168_25	fixed	\N	\N	\N	\N	\N	\N
+1457	2025-06-18	大灣二街	\N	診所	275	0	診所	533	\N	2025-06-17 21:25:01.230533	1_169_25	fixed	\N	\N	\N	\N	\N	\N
+1458	2025-06-18	中華南路	新建路	診所	220	0	診所	28530	\N	2025-06-17 22:25:00.246684	17_169_25	fixed	\N	\N	\N	\N	\N	\N
+1447	2025-06-17	群創D3哨	\N	東洋後門	1250	\N	東洋	28530	\N	2025-06-17 03:00:00.241352	T_871	temp	\N	\N	\N	\N	\N	\N
+1424	2025-06-16	新化山腳里	\N	高鐵站	415	\N	東洋	5386	\N	2025-06-16 06:00:02.180802	T_868	temp	\N	\N	\N	\N	\N	\N
+1459	2025-06-18	二井家	\N	東洋後門	1400	0	東洋	5386	\N	2025-06-17 22:25:01.226603	38_169_25	fixed	\N	\N	\N	\N	\N	\N
+1460	2025-06-18	久保田家	新戶家	東洋後門	360	0	東洋	28530	\N	2025-06-17 23:15:02.193899	42_169_25	fixed	\N	\N	\N	\N	\N	\N
+1461	2025-06-18	中華北路	和緯152	診所	200	0	診所	533	\N	2025-06-17 23:35:00.247103	2_169_25	fixed	\N	\N	\N	\N	\N	\N
+1462	2025-06-18	高鐵站	\N	東洋前門	680	\N	東洋	5386	\N	2025-06-18 01:22:01.226	T_867	temp	\N	\N	\N	\N	\N	\N
+1463	2025-06-18	診所	\N	長溪路	210	0	診所	61553	\N	2025-06-18 01:55:01.246297	13_169_25	fixed	\N	\N	\N	\N	\N	\N
+1464	2025-06-18	仁和路	\N	診所	220	0	診所	28530	\N	2025-06-18 01:55:01.553736	9_169_25	fixed	\N	\N	\N	\N	\N	\N
+1465	2025-06-18	安定	\N	診所	500	0	診所	533	\N	2025-06-18 02:00:00.246717	11_169_25	fixed	\N	\N	\N	\N	\N	\N
+1466	2025-06-18	診所	\N	大灣二街	275	0	診所	533	\N	2025-06-18 02:45:01.39514	5_169_25	fixed	\N	\N	\N	\N	\N	\N
+1467	2025-06-18	育德二路		診所	90	0	診所	61553	\N	2025-06-18 02:50:00.244825	14_169_25	fixed	\N	\N	\N	\N	\N	\N
+1468	2025-06-18	健康三街	府前二街	診所	230	0	診所	28530	\N	2025-06-18 02:55:00.247252	18_169_25	fixed	\N	\N	\N	\N	\N	\N
+1469	2025-06-18	診所	新建路	中華南路	220	0	診所	28530	\N	2025-06-18 03:20:01.213037	19_169_25	fixed	\N	\N	\N	\N	\N	\N
+1470	2025-06-18	永大路	\N	診所	280	0	診所	533	\N	2025-06-18 03:35:00.248228	6_169_25	fixed	\N	\N	\N	\N	\N	\N
+1471	2025-06-18	診所	和緯152	中華北路	200	0	診所	533	\N	2025-06-18 04:15:01.363261	7_169_25	fixed	\N	\N	\N	\N	\N	\N
+1472	2025-06-18	東洋前門	\N	高鐵站	680	\N	東洋	5386	\N	2025-06-18 06:35:01.221629	T_866	temp	\N	\N	\N	\N	\N	\N
+1473	2025-06-18	診所	\N	仁和路	220	0	診所	533	\N	2025-06-18 06:45:00.238862	10_169_25	fixed	\N	\N	\N	\N	\N	\N
+1474	2025-06-18	同安路	\N	診所	220	0	診所	61553	\N	2025-06-18 06:55:00.242253	15_169_25	fixed	\N	\N	\N	\N	\N	\N
+1475	2025-06-18	診所	\N	安定	500	0	診所	61367	\N	2025-06-18 07:00:00.242006	12_169_25	fixed	\N	\N	\N	\N	\N	\N
+1476	2025-06-18	診所		育德二路	95	0	診所	28530	\N	2025-06-18 07:00:00.242006	21_169_25	fixed	\N	\N	\N	\N	\N	\N
+1477	2025-06-18	診所	\N	永大路	280	0	診所	61553	\N	2025-06-18 07:20:00.237148	16_169_25	fixed	\N	\N	\N	\N	\N	\N
+1478	2025-06-18	北門二段	小北路+民德105	診所	165	0	診所	533	\N	2025-06-18 07:30:00.243013	4_169_25	fixed	\N	\N	\N	\N	\N	\N
+1479	2025-06-18	診所	府前二街	健康三街	230	0	診所	28530	\N	2025-06-18 07:45:02.173135	20_169_25	fixed	\N	\N	\N	\N	\N	\N
+1480	2025-06-18	東洋後門	新戶家	久保田家	360	0	東洋	61553	\N	2025-06-18 09:35:00.243426	43_169_25	fixed	\N	\N	\N	\N	\N	\N
+1481	2025-06-18	東洋後門	\N	二井家	1400	0	東洋	5386	\N	2025-06-18 09:35:01.218368	39_169_25	fixed	\N	\N	\N	\N	\N	\N
+1482	2025-06-19	怡平路	忠孝街	診所	140	-55	診所	5386	\N	2025-06-18 22:00:01.308982	22_170_25	fixed	\N	\N	\N	\N	\N	怡平路請假
+1483	2025-06-19	七股永吉里	土城	診所	480	0	診所	533	\N	2025-06-18 22:00:01.308982	45_170_25	fixed	\N	\N	\N	\N	\N	\N
+1484	2025-06-19	安北路	古堡街+和緯五	診所	230	0	診所	5386	\N	2025-06-18 22:35:01.221645	23_170_25	fixed	\N	\N	\N	\N	\N	\N
+1485	2025-06-19	久保田家	新戶家	東洋後門	360	0	東洋	5386	\N	2025-06-18 23:15:01.219751	41_170_25	fixed	\N	\N	\N	\N	\N	\N
+1487	2025-06-19	公園南路	海安路	診所	90	0	診所	533	\N	2025-06-19 02:25:01.439378	26_170_25	fixed	\N	\N	\N	\N	\N	\N
+1488	2025-06-19	信智	\N	診所	140	0	診所	61553	\N	2025-06-19 02:35:00.268925	32_170_25	fixed	\N	\N	\N	\N	\N	\N
+1489	2025-06-19	和緯四	文賢路	診所	140	0	診所	61553	\N	2025-06-19 02:55:00.254646	33_170_25	fixed	\N	\N	\N	\N	\N	\N
+1490	2025-06-19	診所	\N	忠孝街	85	0	診所	533	\N	2025-06-19 02:55:01.219668	25_170_25	fixed	\N	\N	\N	\N	\N	\N
+1491	2025-06-19	診所	和緯路+古堡街	怡平路	270	-70	診所	533	\N	2025-06-19 03:00:02.18957	24_170_25	fixed	\N	\N	\N	\N	\N	怡平路請假
+1492	2025-06-19	南寧街	\N	診所	120	0	診所	61553	\N	2025-06-19 03:15:00.249184	35_170_25	fixed	\N	\N	\N	\N	\N	\N
+1493	2025-06-19	診所	土城	七股永吉里	480	0	診所	28530	\N	2025-06-19 03:25:01.223545	46_170_25	fixed	\N	\N	\N	\N	\N	\N
+1494	2025-06-19	馬鎮宮	\N	診所	330	0	診所	5386	\N	2025-06-19 03:55:00.244832	29_170_25	fixed	\N	\N	\N	\N	\N	\N
+1495	2025-06-19	高鐵站	\N	東洋後門	680	\N	東洋	5386	\N	2025-06-19 07:00:01.464329	T_875	temp	\N	\N	\N	\N	林明煒&新戶	\N
+1496	2025-06-19	診所	\N	南寧街	120	0	診所	533	\N	2025-06-19 07:20:01.243193	36_170_25	fixed	\N	\N	\N	\N	\N	\N
+1497	2025-06-19	診所	文賢路	和緯四	140	0	診所	533	\N	2025-06-19 07:35:00.240442	31_170_25	fixed	\N	\N	\N	\N	\N	\N
+1498	2025-06-19	診所	\N	馬鎮宮	330	0	診所	533	\N	2025-06-19 08:00:01.263797	30_170_25	fixed	\N	\N	\N	\N	\N	\N
+1499	2025-06-19	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-06-19 09:35:00.242134	43_170_25	fixed	\N	\N	\N	\N	\N	\N
+1501	2025-06-20	大灣二街	\N	診所	275	0	診所	533	\N	2025-06-19 21:25:02.203776	1_171_25	fixed	\N	\N	\N	\N	\N	\N
+1502	2025-06-20	中華南路	新建路	診所	220	0	診所	28530	\N	2025-06-19 22:25:00.270012	17_171_25	fixed	\N	\N	\N	\N	\N	\N
+1503	2025-06-20	久保田家	新戶家	東洋後門	360	0	東洋	28530	\N	2025-06-19 23:15:02.198872	42_171_25	fixed	\N	\N	\N	\N	\N	\N
+1504	2025-06-20	中華北路	和緯152	診所	200	0	診所	533	\N	2025-06-19 23:35:00.252726	2_171_25	fixed	\N	\N	\N	\N	\N	\N
+1505	2025-06-20	仁和路	\N	診所	220	0	診所	533	\N	2025-06-20 01:55:00.247841	9_171_25	fixed	\N	\N	\N	\N	\N	\N
+1506	2025-06-20	診所	\N	長溪路	210	0	診所	61553	\N	2025-06-20 01:55:01.244133	13_171_25	fixed	\N	\N	\N	\N	\N	\N
+1507	2025-06-20	安定	\N	診所	500	0	診所	5386	\N	2025-06-20 02:00:00.246916	11_171_25	fixed	\N	\N	\N	\N	\N	\N
+1508	2025-06-20	診所	\N	大灣二街	275	0	診所	533	\N	2025-06-20 02:45:01.248427	5_171_25	fixed	\N	\N	\N	\N	\N	\N
+1509	2025-06-20	育德二路		診所	90	0	診所	61553	\N	2025-06-20 02:50:00.247572	14_171_25	fixed	\N	\N	\N	\N	\N	\N
+1510	2025-06-20	健康三街	府前二街	診所	230	0	診所	28530	\N	2025-06-20 02:55:00.243634	18_171_25	fixed	\N	\N	\N	\N	\N	\N
+1511	2025-06-20	東洋後門	\N	高鐵站	680	\N	東洋	5386	\N	2025-06-20 03:00:00.263982	T_873	temp	\N	\N	\N	\N	新戶&林明煒	\N
+1512	2025-06-20	診所	新建路	中華南路	220	0	診所	28530	\N	2025-06-20 03:20:01.645204	19_171_25	fixed	\N	\N	\N	\N	\N	\N
+1513	2025-06-20	永大路	\N	診所	280	0	診所	533	\N	2025-06-20 03:35:00.267817	6_171_25	fixed	\N	\N	\N	\N	\N	\N
+1514	2025-06-20	診所	和緯152	中華北路	200	0	診所	533	\N	2025-06-20 04:15:01.244565	7_171_25	fixed	\N	\N	\N	\N	\N	\N
+1517	2025-06-20	診所	\N	仁和路	220	0	診所	533	\N	2025-06-20 06:45:02.260924	10_171_25	fixed	\N	\N	\N	\N	\N	\N
+1518	2025-06-20	同安路	\N	診所	220	0	診所	61553	\N	2025-06-20 06:55:00.247277	15_171_25	fixed	\N	\N	\N	\N	\N	\N
+1519	2025-06-20	診所	\N	安定	500	0	診所	5386	\N	2025-06-20 07:00:00.238679	12_171_25	fixed	\N	\N	\N	\N	\N	\N
+1520	2025-06-20	診所		育德二路	95	0	診所	28530	\N	2025-06-20 07:00:00.238679	21_171_25	fixed	\N	\N	\N	\N	\N	\N
+1521	2025-06-20	診所	\N	永大路	280	0	診所	61553	\N	2025-06-20 07:20:01.509852	16_171_25	fixed	\N	\N	\N	\N	\N	\N
+1522	2025-06-20	北門二段	小北路+民德105	診所	165	0	診所	533	\N	2025-06-20 07:30:00.282028	4_171_25	fixed	\N	\N	\N	\N	\N	\N
+1523	2025-06-20	診所	府前二街	健康三街	230	0	診所	28530	\N	2025-06-20 07:45:01.25469	20_171_25	fixed	\N	\N	\N	\N	\N	\N
+1524	2025-06-20	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-06-20 09:35:00.267655	43_171_25	fixed	\N	\N	\N	\N	\N	\N
+1525	2025-06-20	瀚宇彩晶	\N	新化山腳里	380	\N	東洋	5386	\N	2025-06-20 10:00:01.551775	T_882	temp	\N	\N	\N	\N	張雨珊	\N
+1500	2025-06-19	東洋後門	\N	文南71	320	0	東洋	5386	\N	2025-06-19 10:00:00.242654	T_876	temp	\N	闗山月	記賬	2025-06-20 11:53:02.818392	林明煒	\N
+1486	2025-06-19	新戶家	文南路71號	高鐵站	600	\N	東洋	61367	\N	2025-06-18 23:40:00.243605	T_872	temp	\N	\N	\N	\N	\N	\N
+1526	2025-06-20	高鐵站	文南71	新戶家	670	0	東洋	5386	\N	2025-06-20 10:00:01.551775	T_883	temp	\N	闗山月	記賬	2025-06-20 11:44:28.16963	新戶&林明煒	\N
+1516	2025-06-20	文南71	\N	東洋後門	300	0	東洋	5386	\N	2025-06-20 06:00:01.343942	T_879	temp	\N	闗山月	記賬	2025-06-20 11:45:42.820497	林明煒	\N
+1515	2025-06-20	新化山腳里	\N	中正三街118號	320	0	東洋	5386	\N	2025-06-20 06:00:01.343942	T_878	temp	\N	闗山月	原因：記賬	2025-06-20 11:50:14.87625	張雨珊	\N
+1451	2025-06-17	東洋後門	\N	群創D3哨	1100	1000	東洋	5386	\N	2025-06-17 04:00:01.296286	T_870	temp	\N	linyan	原因：wait4H	2025-06-20 14:43:56.459813	久保田、蔡永福、黃筱菁	\N
+1527	2025-06-21	七股永吉里	土城	診所	480	0	診所	533	\N	2025-06-20 22:00:01.457826	45_172_25	fixed	\N	\N	\N	\N	\N	\N
+1528	2025-06-21	怡平路	忠孝街	診所	140	-55	診所	28530	\N	2025-06-20 22:00:01.457826	22_172_25	fixed	\N	\N	\N	\N	\N	怡平路請假
+1529	2025-06-21	安北路	古堡街+和緯五	診所	230	0	診所	28530	\N	2025-06-20 22:35:00.243808	23_172_25	fixed	\N	\N	\N	\N	\N	\N
+1530	2025-06-21	公園南路	海安路	診所	90	0	診所	533	\N	2025-06-21 02:25:01.211898	26_172_25	fixed	\N	\N	\N	\N	\N	\N
+1531	2025-06-21	信智	\N	診所	140	0	診所	61553	\N	2025-06-21 02:35:01.219043	32_172_25	fixed	\N	\N	\N	\N	\N	\N
+1532	2025-06-21	診所	\N	忠孝街	85	0	診所	533	\N	2025-06-21 02:55:00.242569	25_172_25	fixed	\N	\N	\N	\N	\N	\N
+1533	2025-06-21	和緯四	文賢路	診所	140	0	診所	61553	\N	2025-06-21 02:55:00.243584	33_172_25	fixed	\N	\N	\N	\N	\N	\N
+1534	2025-06-21	診所	和緯路+古堡街	怡平路	270	-70	診所	533	\N	2025-06-21 03:00:00.243606	24_172_25	fixed	\N	\N	\N	\N	\N	怡平路請假
+1536	2025-06-21	南寧街	\N	診所	120	0	診所	61553	\N	2025-06-21 03:15:01.24504	35_172_25	fixed	\N	\N	\N	\N	\N	\N
+1537	2025-06-21	診所	土城	七股永吉里	480	0	診所	28530	\N	2025-06-21 03:25:01.203068	46_172_25	fixed	\N	\N	\N	\N	\N	\N
+1538	2025-06-21	馬鎮宮	\N	診所	330	0	診所	5386	\N	2025-06-21 03:55:01.225309	29_172_25	fixed	\N	\N	\N	\N	\N	\N
+1539	2025-06-21	診所	海安路	公園南路	90	0	診所	533	\N	2025-06-21 06:45:01.22224	44_172_25	fixed	\N	\N	\N	\N	\N	\N
+1540	2025-06-21	診所	\N	南寧街	120	0	診所	533	\N	2025-06-21 07:20:02.203705	36_172_25	fixed	\N	\N	\N	\N	\N	\N
+1541	2025-06-21	診所	文賢路	和緯四	140	0	診所	533	\N	2025-06-21 07:35:01.21472	31_172_25	fixed	\N	\N	\N	\N	\N	\N
+1542	2025-06-21	診所	\N	北門路三段	140	\N	診所	5386	\N	2025-06-21 08:00:01.238325	T_884	temp	\N	\N	\N	\N	信智	\N
+1543	2025-06-21	診所	\N	馬鎮宮	330	0	診所	533	\N	2025-06-21 08:00:01.238325	30_172_25	fixed	\N	\N	\N	\N	\N	\N
+1544	2025-06-22	新戶家	\N	東洋後門	360	\N	東洋	61553	\N	2025-06-22 00:35:01.211571	T_880	temp	\N	\N	\N	\N	\N	\N
+1545	2025-06-22	東洋後門	\N	新戶家	360	\N	東洋	5386	\N	2025-06-22 14:00:01.605791	T_1114	temp	\N	\N	\N	\N	新戶	\N
+1546	2025-06-23	大灣二街	\N	診所	275	0	診所	533	\N	2025-06-22 21:25:01.329504	1_174_26	fixed	\N	\N	\N	\N	\N	\N
+1548	2025-06-23	二井家	\N	東洋後門	1400	0	東洋	5386	\N	2025-06-22 22:25:01.246694	38_174_26	fixed	\N	\N	\N	\N	\N	\N
+1549	2025-06-23	久保田家	新戶家	東洋後門	360	0	東洋	28530	\N	2025-06-22 23:15:02.197879	42_174_26	fixed	\N	\N	\N	\N	\N	\N
+1550	2025-06-23	中華北路	和緯152	診所	200	0	診所	533	\N	2025-06-22 23:35:01.22302	2_174_26	fixed	\N	\N	\N	\N	\N	\N
+1551	2025-06-23	仁和路	\N	診所	220	0	診所	533	\N	2025-06-23 01:55:01.793842	9_174_26	fixed	\N	\N	\N	\N	\N	\N
+1552	2025-06-23	診所	\N	長溪路	210	0	診所	61553	\N	2025-06-23 01:55:02.251787	13_174_26	fixed	\N	\N	\N	\N	\N	\N
+1553	2025-06-23	安定	\N	診所	500	0	診所	5386	\N	2025-06-23 02:00:00.245666	11_174_26	fixed	\N	\N	\N	\N	\N	\N
+1554	2025-06-23	診所	\N	大灣二街	275	0	診所	533	\N	2025-06-23 02:45:02.596041	5_174_26	fixed	\N	\N	\N	\N	\N	\N
+1555	2025-06-23	育德二路		診所	90	0	診所	61553	\N	2025-06-23 02:50:01.216114	14_174_26	fixed	\N	\N	\N	\N	\N	\N
+1556	2025-06-23	健康三街	府前二街	診所	230	0	診所	28530	\N	2025-06-23 02:55:00.248122	18_174_26	fixed	\N	\N	\N	\N	\N	\N
+1558	2025-06-23	永大路	\N	診所	280	0	診所	533	\N	2025-06-23 03:35:02.173544	6_174_26	fixed	\N	\N	\N	\N	\N	\N
+1559	2025-06-23	診所	和緯152	中華北路	200	0	診所	533	\N	2025-06-23 04:15:01.222325	7_174_26	fixed	\N	\N	\N	\N	\N	\N
+1561	2025-06-23	東洋後門	\N	新市復興路	730	\N	東洋	5386	\N	2025-06-23 06:00:01.307399	T_1116	temp	\N	\N	\N	\N	送機板	\N
+1562	2025-06-23	診所	\N	仁和路	220	0	診所	533	\N	2025-06-23 06:45:02.169573	10_174_26	fixed	\N	\N	\N	\N	\N	\N
+1563	2025-06-23	同安路	\N	診所	220	0	診所	61553	\N	2025-06-23 06:55:01.219837	15_174_26	fixed	\N	\N	\N	\N	\N	\N
+1564	2025-06-23	診所	\N	安定	500	0	診所	5386	\N	2025-06-23 07:00:00.243254	12_174_26	fixed	\N	\N	\N	\N	\N	\N
+1565	2025-06-23	診所		育德二路	95	0	診所	28530	\N	2025-06-23 07:00:00.243254	21_174_26	fixed	\N	\N	\N	\N	\N	\N
+1566	2025-06-23	診所	\N	永大路	280	0	診所	61553	\N	2025-06-23 07:20:01.976241	16_174_26	fixed	\N	\N	\N	\N	\N	\N
+1567	2025-06-23	北門二段	小北路+民德105	診所	165	0	診所	533	\N	2025-06-23 07:30:02.036915	4_174_26	fixed	\N	\N	\N	\N	\N	\N
+1568	2025-06-23	診所	府前二街	健康三街	230	0	診所	28530	\N	2025-06-23 07:45:00.242686	20_174_26	fixed	\N	\N	\N	\N	\N	\N
+1569	2025-06-23	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-06-23 09:35:01.218142	43_174_26	fixed	\N	\N	\N	\N	\N	\N
+1570	2025-06-23	東洋後門	\N	二井家	1400	0	東洋	5386	\N	2025-06-23 09:35:02.161127	39_174_26	fixed	\N	\N	\N	\N	\N	\N
+1557	2025-06-23	診所	新建路	中華南路	215	0	診所	28530	\N	2025-06-23 03:20:00.247592	19_174_26	fixed	\N	\N	\N	\N	\N	\N
+1547	2025-06-23	中華南路	新建路	診所	215	0	診所	28530	\N	2025-06-22 22:25:01.220375	17_174_26	fixed	\N	\N	\N	\N	\N	\N
+1571	2025-06-24	怡平路	忠孝街	診所	140	0	診所	5386	\N	2025-06-23 22:00:02.202369	22_175_26	fixed	\N	\N	\N	\N	\N	\N
+1572	2025-06-24	七股永吉里	土城	診所	480	0	診所	533	\N	2025-06-23 22:00:02.202369	45_175_26	fixed	\N	\N	\N	\N	\N	\N
+1573	2025-06-24	安北路	古堡街+和緯五	診所	230	-30	診所	5386	\N	2025-06-23 22:35:00.247298	23_175_26	fixed	\N	linyan	安北路請假	2025-06-24 02:31:28.791159	\N	\N
+1535	2025-06-21	新戶家	\N	環河街92號	110	\N	東洋	61367	\N	2025-06-21 03:00:00.243606	T_877	temp	\N	\N	\N	\N	新戶&久保田	\N
+1560	2025-06-23	同安路64巷	\N	高鐵站	790	0	東洋	5386	\N	2025-06-23 06:00:01.307399	T_1115	temp	\N	linyan	記賬	2025-06-27 15:52:22.646415	梁峻榮	\N
+1575	2025-06-24	久保田家	新戶家	東洋後門	360	0	東洋	5386	\N	2025-06-23 23:15:00.243295	41_175_26	fixed	\N	\N	\N	\N	\N	\N
+1576	2025-06-24	公園南路	海安路	診所	90	0	診所	533	\N	2025-06-24 02:25:01.327823	26_175_26	fixed	\N	\N	\N	\N	\N	\N
+1577	2025-06-24	北門路三段	\N	診所	140	0	診所	61553	\N	2025-06-24 02:35:00.250156	32_175_26	fixed	\N	\N	\N	\N	\N	\N
+1578	2025-06-24	診所	\N	忠孝街	85	0	診所	533	\N	2025-06-24 02:55:00.248154	25_175_26	fixed	\N	\N	\N	\N	\N	\N
+1579	2025-06-24	和緯四	文賢路	診所	140	0	診所	61553	\N	2025-06-24 02:55:01.228701	33_175_26	fixed	\N	\N	\N	\N	\N	\N
+1580	2025-06-24	診所	和緯路+古堡街	怡平路	270	0	診所	533	\N	2025-06-24 03:00:00.243532	24_175_26	fixed	\N	\N	\N	\N	\N	\N
+1581	2025-06-24	南寧街	\N	診所	120	0	診所	61553	\N	2025-06-24 03:15:01.214217	35_175_26	fixed	\N	\N	\N	\N	\N	\N
+1582	2025-06-24	診所	土城	七股永吉里	480	0	診所	28530	\N	2025-06-24 03:25:01.350302	46_175_26	fixed	\N	\N	\N	\N	\N	\N
+1583	2025-06-24	馬鎮宮	\N	診所	330	0	診所	5386	\N	2025-06-24 03:55:00.238568	29_175_26	fixed	\N	\N	\N	\N	\N	\N
+1584	2025-06-24	診所	海安路	公園南路	90	0	診所	61553	\N	2025-06-24 06:45:01.255914	48_175_26	fixed	\N	\N	\N	\N	\N	\N
+1585	2025-06-24	診所	\N	安北路	160	\N	診所	5386	\N	2025-06-24 07:00:01.935485	T_1118	temp	\N	\N	\N	\N	\N	\N
+1586	2025-06-24	診所	\N	南寧街	120	0	診所	533	\N	2025-06-24 07:20:01.240133	36_175_26	fixed	\N	\N	\N	\N	\N	\N
+1587	2025-06-24	診所	\N	北門路三段	140	0	診所	61553	\N	2025-06-24 07:35:00.245387	49_175_26	fixed	\N	\N	\N	\N	\N	\N
+1588	2025-06-24	診所	文賢路	和緯四	140	0	診所	533	\N	2025-06-24 07:35:01.225758	31_175_26	fixed	\N	\N	\N	\N	\N	\N
+1589	2025-06-24	診所	\N	馬鎮宮	330	0	診所	533	\N	2025-06-24 08:00:01.679578	30_175_26	fixed	\N	\N	\N	\N	\N	\N
+1590	2025-06-24	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-06-24 09:35:01.274665	43_175_26	fixed	\N	\N	\N	\N	\N	\N
+1591	2025-06-25	大灣二街	\N	診所	275	0	診所	533	\N	2025-06-24 21:25:01.239834	1_176_26	fixed	\N	\N	\N	\N	\N	\N
+1592	2025-06-25	中華南路	新建路	診所	215	-30	診所	28530	\N	2025-06-24 22:25:01.229656	17_176_26	fixed	\N	\N	\N	\N	\N	\N
+1593	2025-06-25	久保田家	新戶家	東洋後門	360	0	東洋	28530	\N	2025-06-24 23:15:01.219589	42_176_26	fixed	\N	\N	\N	\N	\N	\N
+1594	2025-06-25	中華北路	和緯152	診所	200	0	診所	533	\N	2025-06-24 23:35:00.247064	2_176_26	fixed	\N	\N	\N	\N	\N	\N
+1595	2025-06-25	仁和路	\N	診所	220	0	診所	533	\N	2025-06-25 01:55:00.245966	9_176_26	fixed	\N	\N	\N	\N	\N	\N
+1596	2025-06-25	診所	\N	長溪路	210	0	診所	61553	\N	2025-06-25 01:55:01.23789	13_176_26	fixed	\N	\N	\N	\N	\N	\N
+1597	2025-06-25	安定	\N	診所	500	0	診所	5386	\N	2025-06-25 02:00:01.240672	11_176_26	fixed	\N	\N	\N	\N	\N	\N
+1598	2025-06-25	診所	\N	大灣二街	275	0	診所	533	\N	2025-06-25 02:45:02.177139	5_176_26	fixed	\N	\N	\N	\N	\N	\N
+1599	2025-06-25	育德二路		診所	90	0	診所	61553	\N	2025-06-25 02:50:01.389238	14_176_26	fixed	\N	\N	\N	\N	\N	\N
+1600	2025-06-25	健康三街	府前二街	診所	230	0	診所	28530	\N	2025-06-25 02:55:00.242875	18_176_26	fixed	\N	\N	\N	\N	\N	\N
+1601	2025-06-25	診所	新建路	中華南路	215	-30	診所	28530	\N	2025-06-25 03:20:01.22409	19_176_26	fixed	\N	\N	\N	\N	\N	\N
+1602	2025-06-25	永大路	\N	診所	280	0	診所	533	\N	2025-06-25 03:35:00.244448	6_176_26	fixed	\N	\N	\N	\N	\N	\N
+1603	2025-06-25	診所	和緯152	中華北路	200	0	診所	533	\N	2025-06-25 04:15:01.359649	7_176_26	fixed	\N	\N	\N	\N	\N	\N
+1604	2025-06-25	診所	\N	仁和路	220	0	診所	533	\N	2025-06-25 06:45:01.554801	10_176_26	fixed	\N	\N	\N	\N	\N	\N
+1605	2025-06-25	同安路	\N	診所	220	0	診所	61553	\N	2025-06-25 06:55:00.248102	15_176_26	fixed	\N	\N	\N	\N	\N	\N
+1606	2025-06-25	診所	\N	安定	500	0	診所	5386	\N	2025-06-25 07:00:00.241544	12_176_26	fixed	\N	\N	\N	\N	\N	\N
+1607	2025-06-25	診所		育德二路	95	0	診所	28530	\N	2025-06-25 07:00:00.241544	21_176_26	fixed	\N	\N	\N	\N	\N	\N
+1608	2025-06-25	診所	\N	永大路	280	0	診所	61553	\N	2025-06-25 07:20:01.234991	16_176_26	fixed	\N	\N	\N	\N	\N	\N
+1609	2025-06-25	北門二段	小北路+民德105	診所	165	0	診所	533	\N	2025-06-25 07:30:00.242975	4_176_26	fixed	\N	\N	\N	\N	\N	\N
+1610	2025-06-25	診所	府前二街	健康三街	230	0	診所	28530	\N	2025-06-25 07:45:01.290855	20_176_26	fixed	\N	\N	\N	\N	\N	\N
+1611	2025-06-25	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-06-25 09:35:01.220543	43_176_26	fixed	\N	\N	\N	\N	\N	\N
+1613	2025-06-26	七股永吉里	土城	診所	480	0	診所	533	\N	2025-06-25 22:00:01.976348	45_177_26	fixed	\N	\N	\N	\N	\N	\N
+1614	2025-06-26	安北路	古堡街+和緯五	診所	230	0	診所	5386	\N	2025-06-25 22:35:00.243755	23_177_26	fixed	\N	\N	\N	\N	\N	\N
+1615	2025-06-26	久保田家	新戶家	東洋後門	360	0	東洋	5386	\N	2025-06-25 23:15:02.171436	41_177_26	fixed	\N	\N	\N	\N	\N	\N
+1616	2025-06-26	公園南路	海安路	診所	90	0	診所	5386	\N	2025-06-26 02:25:01.231385	26_177_26	fixed	\N	\N	\N	\N	\N	\N
+1617	2025-06-26	北門路三段	\N	診所	140	0	診所	61553	\N	2025-06-26 02:35:00.244649	32_177_26	fixed	\N	\N	\N	\N	\N	\N
+1618	2025-06-26	和緯四	文賢路	診所	140	0	診所	61553	\N	2025-06-26 02:55:01.208214	33_177_26	fixed	\N	\N	\N	\N	\N	\N
+1619	2025-06-26	診所	\N	忠孝街	85	0	診所	5386	\N	2025-06-26 02:55:01.214911	25_177_26	fixed	\N	\N	\N	\N	\N	\N
+1620	2025-06-26	診所	和緯路+古堡街	怡平路	270	0	診所	5386	\N	2025-06-26 03:00:00.239721	24_177_26	fixed	\N	\N	\N	\N	\N	\N
+1621	2025-06-26	南寧街	\N	診所	120	0	診所	61553	\N	2025-06-26 03:15:00.239913	35_177_26	fixed	\N	\N	\N	\N	\N	\N
+1622	2025-06-26	診所	土城	七股永吉里	480	0	診所	28530	\N	2025-06-26 03:25:00.241586	46_177_26	fixed	\N	\N	\N	\N	\N	\N
+1623	2025-06-26	馬鎮宮	\N	診所	330	0	診所	5386	\N	2025-06-26 03:55:01.226676	29_177_26	fixed	\N	\N	\N	\N	\N	\N
+1624	2025-06-26	診所	海安路	公園南路	90	0	診所	61553	\N	2025-06-26 06:45:01.226598	48_177_26	fixed	\N	\N	\N	\N	\N	\N
+1625	2025-06-26	診所	\N	南寧街	120	0	診所	533	\N	2025-06-26 07:20:02.241639	36_177_26	fixed	\N	\N	\N	\N	\N	\N
+1626	2025-06-26	診所	文賢路	和緯四	140	0	診所	533	\N	2025-06-26 07:35:00.239309	31_177_26	fixed	\N	\N	\N	\N	\N	\N
+1627	2025-06-26	診所	\N	北門路三段	140	0	診所	61553	\N	2025-06-26 07:35:01.233138	49_177_26	fixed	\N	\N	\N	\N	\N	\N
+1628	2025-06-26	診所	\N	馬鎮宮	330	0	診所	533	\N	2025-06-26 08:00:02.340868	30_177_26	fixed	\N	\N	\N	\N	\N	\N
+1629	2025-06-26	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-06-26 09:35:01.228646	43_177_26	fixed	\N	\N	\N	\N	\N	\N
+1630	2025-06-27	大灣二街	\N	診所	275	0	診所	533	\N	2025-06-26 21:25:01.625283	1_178_26	fixed	\N	\N	\N	\N	\N	\N
+1631	2025-06-27	中華南路	新建路	診所	215	0	診所	28530	\N	2025-06-26 22:25:01.23957	17_178_26	fixed	\N	\N	\N	\N	\N	\N
+1632	2025-06-27	久保田家	新戶家	東洋後門	360	0	東洋	28530	\N	2025-06-26 23:15:01.227253	42_178_26	fixed	\N	\N	\N	\N	\N	\N
+1633	2025-06-27	中華北路	和緯152	診所	200	0	診所	533	\N	2025-06-26 23:35:00.245492	2_178_26	fixed	\N	\N	\N	\N	\N	\N
+1634	2025-06-27	診所	\N	長溪路	210	0	診所	61553	\N	2025-06-27 01:55:00.244723	13_178_26	fixed	\N	\N	\N	\N	\N	\N
+1635	2025-06-27	仁和路	\N	診所	220	0	診所	533	\N	2025-06-27 01:55:01.243353	9_178_26	fixed	\N	\N	\N	\N	\N	\N
+1636	2025-06-27	安定	\N	診所	500	0	診所	5386	\N	2025-06-27 02:00:01.241946	11_178_26	fixed	\N	\N	\N	\N	\N	\N
+1637	2025-06-27	診所	\N	大灣二街	275	0	診所	533	\N	2025-06-27 02:45:01.202805	5_178_26	fixed	\N	\N	\N	\N	\N	\N
+1638	2025-06-27	育德二路		診所	90	0	診所	61553	\N	2025-06-27 02:50:00.23065	14_178_26	fixed	\N	\N	\N	\N	\N	\N
+1639	2025-06-27	健康三街	府前二街	診所	230	0	診所	28530	\N	2025-06-27 02:55:00.237565	18_178_26	fixed	\N	\N	\N	\N	\N	\N
+1640	2025-06-27	診所	新建路	中華南路	215	0	診所	28530	\N	2025-06-27 03:20:01.628154	19_178_26	fixed	\N	\N	\N	\N	\N	\N
+1641	2025-06-27	永大路	\N	診所	280	0	診所	533	\N	2025-06-27 03:35:00.23905	6_178_26	fixed	\N	\N	\N	\N	\N	\N
+1642	2025-06-27	診所	和緯152	中華北路	200	0	診所	533	\N	2025-06-27 04:15:01.221141	7_178_26	fixed	\N	\N	\N	\N	\N	\N
+1643	2025-06-27	診所	\N	仁和路	220	0	診所	28530	\N	2025-06-27 06:45:01.253066	10_178_26	fixed	\N	\N	\N	\N	\N	\N
+1644	2025-06-27	同安路	\N	診所	220	0	診所	61553	\N	2025-06-27 06:55:00.27448	15_178_26	fixed	\N	\N	\N	\N	\N	\N
+1645	2025-06-27	診所	\N	安定	500	0	診所	61367	\N	2025-06-27 07:00:00.314667	12_178_26	fixed	\N	\N	\N	\N	\N	\N
+1646	2025-06-27	診所		育德二路	95	-95	診所	28530	\N	2025-06-27 07:00:00.314667	21_178_26	fixed	\N	\N	\N	\N	\N	跟阿霞併車
+1647	2025-06-27	診所	\N	永大路	280	0	診所	61553	\N	2025-06-27 07:20:01.95244	16_178_26	fixed	\N	\N	\N	\N	\N	\N
+1648	2025-06-27	北門二段	小北路+民德105	診所	165	0	診所	28530	\N	2025-06-27 07:30:00.242361	4_178_26	fixed	\N	\N	\N	\N	\N	\N
+1649	2025-06-27	診所	府前二街	健康三街	230	0	診所	28530	\N	2025-06-27 07:45:00.276458	20_178_26	fixed	\N	\N	\N	\N	\N	\N
+1651	2025-06-27	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-06-27 09:35:02.198892	43_178_26	fixed	\N	\N	\N	\N	\N	\N
+1652	2025-06-27	高鐵站	\N	新戶家	575	0	東洋	5386	\N	2025-06-27 10:00:01.950786	T_1120	temp	\N	linyan	記賬	2025-06-27 14:44:09.744091	新戶	\N
+1650	2025-06-27	東洋後門	\N	瀚宇彩晶	1100	375	東洋	5386	\N	2025-06-27 08:00:01.314389	T_1119	temp	\N	linyan	等候1.5小時	2025-06-27 14:45:51.173885	張雨珊	\N
+1653	2025-06-26	高鐵站	\N	同安路64巷	790	\N	東洋	5386	\N	2025-06-27 17:38:12.254648	C_1653	temp	已完成	\N	\N	\N	\N	\N
+1654	2025-06-28	怡平路	忠孝街	診所	140	0	診所	28530	\N	2025-06-27 22:00:01.557972	22_179_26	fixed	\N	\N	\N	\N	\N	\N
+1655	2025-06-28	七股永吉里	土城	診所	480	0	診所	533	\N	2025-06-27 22:00:01.557972	45_179_26	fixed	\N	\N	\N	\N	\N	\N
+1656	2025-06-28	安北路	古堡街+和緯五	診所	230	0	診所	28530	\N	2025-06-27 22:35:00.24745	23_179_26	fixed	\N	\N	\N	\N	\N	\N
+1657	2025-06-28	公園南路	海安路	診所	90	0	診所	533	\N	2025-06-28 02:25:01.307322	26_179_26	fixed	\N	\N	\N	\N	\N	\N
+1658	2025-06-28	北門路三段	\N	診所	140	0	診所	61553	\N	2025-06-28 02:35:00.242758	32_179_26	fixed	\N	\N	\N	\N	\N	\N
+1659	2025-06-28	診所	\N	忠孝街	85	0	診所	533	\N	2025-06-28 02:55:00.244116	25_179_26	fixed	\N	\N	\N	\N	\N	\N
+1660	2025-06-28	和緯四	文賢路	診所	140	0	診所	61553	\N	2025-06-28 02:55:00.247573	33_179_26	fixed	\N	\N	\N	\N	\N	\N
+1661	2025-06-28	診所	和緯路+古堡街	怡平路	270	0	診所	533	\N	2025-06-28 03:00:02.252056	24_179_26	fixed	\N	\N	\N	\N	\N	\N
+1662	2025-06-28	南寧街	\N	診所	120	0	診所	61553	\N	2025-06-28 03:15:00.2418	35_179_26	fixed	\N	\N	\N	\N	\N	\N
+1663	2025-06-28	診所	土城	七股永吉里	480	0	診所	28530	\N	2025-06-28 03:25:00.246731	46_179_26	fixed	\N	\N	\N	\N	\N	\N
+1664	2025-06-28	馬鎮宮	\N	診所	330	0	診所	5386	\N	2025-06-28 03:55:01.216884	29_179_26	fixed	\N	\N	\N	\N	\N	\N
+1665	2025-06-28	診所	海安路	公園南路	90	0	診所	533	\N	2025-06-28 06:45:01.225368	44_179_26	fixed	\N	\N	\N	\N	\N	\N
+1666	2025-06-28	診所	\N	南寧街	120	0	診所	533	\N	2025-06-28 07:20:01.215346	36_179_26	fixed	\N	\N	\N	\N	\N	\N
+1667	2025-06-28	診所	文賢路	和緯四	140	0	診所	533	\N	2025-06-28 07:35:00.242139	31_179_26	fixed	\N	\N	\N	\N	\N	\N
+1668	2025-06-28	診所	\N	北門路三段	140	\N	診所	5386	\N	2025-06-28 08:00:01.958516	T_1121	temp	\N	\N	\N	\N	信智	\N
+1669	2025-06-28	診所	\N	馬鎮宮	330	0	診所	533	\N	2025-06-28 08:00:01.958516	30_179_26	fixed	\N	\N	\N	\N	\N	\N
+1612	2025-06-26	怡平路	忠孝街	診所	140	0	診所	5386	\N	2025-06-25 22:00:01.976348	22_177_26	fixed	\N	linyan	未及時註銷請假	2025-06-29 06:42:36.210545	\N	怡平路請假
+1670	2025-06-30	大灣二街	\N	診所	275	0	診所	533	\N	2025-06-29 21:25:01.212987	1_181_27	fixed	\N	\N	\N	\N	\N	\N
+1671	2025-06-30	中華南路	新建路	診所	215	0	診所	28530	\N	2025-06-29 22:25:00.239129	17_181_27	fixed	\N	\N	\N	\N	\N	\N
+1672	2025-06-30	二井家	\N	東洋後門	1400	0	東洋	5386	\N	2025-06-29 22:25:01.215448	38_181_27	fixed	\N	\N	\N	\N	\N	\N
+1673	2025-06-30	北門路二段	\N	診所	125	0	診所	533	\N	2025-06-29 22:55:00.237492	50_181_27	fixed	\N	\N	\N	\N	\N	\N
+1674	2025-06-30	久保田家	新戶家	東洋後門	360	0	東洋	28530	\N	2025-06-29 23:15:02.091592	42_181_27	fixed	\N	\N	\N	\N	\N	\N
+1675	2025-06-30	中華北路	和緯152	診所	200	0	診所	533	\N	2025-06-29 23:35:00.237446	2_181_27	fixed	\N	\N	\N	\N	\N	\N
+1676	2025-06-30	仁和路	\N	診所	220	0	診所	533	\N	2025-06-30 01:55:00.241715	9_181_27	fixed	\N	\N	\N	\N	\N	\N
+1677	2025-06-30	診所	\N	長溪路	210	0	診所	61553	\N	2025-06-30 01:55:01.218207	13_181_27	fixed	\N	\N	\N	\N	\N	\N
+1678	2025-06-30	安定	\N	診所	500	0	診所	5386	\N	2025-06-30 02:00:00.241095	11_181_27	fixed	\N	\N	\N	\N	\N	\N
+1679	2025-06-30	診所	\N	大灣二街	275	0	診所	533	\N	2025-06-30 02:45:01.235999	5_181_27	fixed	\N	\N	\N	\N	\N	\N
+1680	2025-06-30	育德二路		診所	90	0	診所	61553	\N	2025-06-30 02:50:00.241564	14_181_27	fixed	\N	\N	\N	\N	\N	\N
+1681	2025-06-30	健康三街	府前二街	診所	230	0	診所	28530	\N	2025-06-30 02:55:00.242555	18_181_27	fixed	\N	\N	\N	\N	\N	\N
+1682	2025-06-30	診所	\N	北門路二段	125	0	診所	61553	\N	2025-06-30 03:00:01.295024	51_181_27	fixed	\N	\N	\N	\N	\N	\N
+1683	2025-06-30	診所	新建路	中華南路	215	0	診所	28530	\N	2025-06-30 03:20:00.244574	19_181_27	fixed	\N	\N	\N	\N	\N	\N
+1684	2025-06-30	永大路	\N	診所	280	0	診所	533	\N	2025-06-30 03:35:01.222525	6_181_27	fixed	\N	\N	\N	\N	\N	\N
+1685	2025-06-30	診所	和緯152	中華北路	200	0	診所	533	\N	2025-06-30 04:15:01.21789	7_181_27	fixed	\N	\N	\N	\N	\N	\N
+1686	2025-06-30	診所	\N	仁和路	220	0	診所	533	\N	2025-06-30 06:45:01.213936	10_181_27	fixed	\N	\N	\N	\N	\N	\N
+1687	2025-06-30	同安路	\N	診所	220	0	診所	61553	\N	2025-06-30 06:55:00.239877	15_181_27	fixed	\N	\N	\N	\N	\N	\N
+1688	2025-06-30	診所	\N	安定	500	0	診所	5386	\N	2025-06-30 07:00:00.238906	12_181_27	fixed	\N	\N	\N	\N	\N	\N
+1689	2025-06-30	診所		育德二路	95	0	診所	28530	\N	2025-06-30 07:00:00.238906	21_181_27	fixed	\N	\N	\N	\N	\N	\N
+1690	2025-06-30	診所	\N	永大路	280	0	診所	61553	\N	2025-06-30 07:20:01.923295	16_181_27	fixed	\N	\N	\N	\N	\N	\N
+1691	2025-06-30	小北路	民德105	診所	120	0	診所	533	\N	2025-06-30 07:30:00.23845	4_181_27	fixed	\N	\N	\N	\N	\N	\N
+1692	2025-06-30	診所	府前二街	健康三街	230	0	診所	28530	\N	2025-06-30 07:45:00.238511	20_181_27	fixed	\N	\N	\N	\N	\N	\N
+1693	2025-06-30	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-06-30 09:35:00.238486	43_181_27	fixed	\N	\N	\N	\N	\N	\N
+1694	2025-06-30	東洋後門	\N	二井家	1400	0	東洋	5386	\N	2025-06-30 09:35:01.215511	39_181_27	fixed	\N	\N	\N	\N	\N	\N
+1695	2025-07-01	怡平路	湖美街+忠孝街	診所	190	0	診所	5386	\N	2025-06-30 22:15:01.22951	22_182_27	fixed	\N	\N	\N	\N	\N	\N
+1696	2025-07-01	二井家	\N	東洋後門	1400	0	東洋	28530	\N	2025-06-30 22:25:00.24531	40_182_27	fixed	\N	\N	\N	\N	\N	\N
+1697	2025-07-01	土城		診所	345	0	診所	533	\N	2025-06-30 22:35:00.245657	45_182_27	fixed	\N	\N	\N	\N	\N	\N
+1698	2025-07-01	安北路	古堡街+和緯五	診所	230	0	診所	5386	\N	2025-06-30 22:35:01.230087	23_182_27	fixed	\N	\N	\N	\N	\N	\N
+1699	2025-07-01	久保田家	新戶家	東洋後門	360	0	東洋	5386	\N	2025-06-30 23:15:01.229069	41_182_27	fixed	\N	\N	\N	\N	\N	\N
+1574	2025-06-24	新戶家	\N	高鐵站	575	0	東洋	28530	\N	2025-06-23 22:45:01.62053	T_1117	temp	\N	linyan	（記賬）	2025-07-01 02:19:42.573587	\N	\N
+1700	2025-07-01	公園南路	海安路	診所	90	0	診所	533	\N	2025-07-01 02:25:01.334497	26_182_27	fixed	\N	\N	\N	\N	\N	\N
+1701	2025-07-01	北門路三段	\N	診所	140	0	診所	61553	\N	2025-07-01 02:35:00.242575	32_182_27	fixed	\N	\N	\N	\N	\N	\N
+1703	2025-07-01	和緯四	文賢路	診所	140	0	診所	61553	\N	2025-07-01 02:55:01.24868	33_182_27	fixed	\N	\N	\N	\N	\N	\N
+1704	2025-07-01	診所	和緯路+古堡街	怡平路	270	0	診所	533	\N	2025-07-01 03:00:00.244927	24_182_27	fixed	\N	\N	\N	\N	\N	\N
+1705	2025-07-01	南寧街	\N	診所	120	0	診所	61553	\N	2025-07-01 03:15:00.243198	35_182_27	fixed	\N	\N	\N	\N	\N	\N
+1706	2025-07-01	診所		土城	345	0	診所	28530	\N	2025-07-01 03:35:01.232284	46_182_27	fixed	\N	\N	\N	\N	\N	\N
+1707	2025-07-01	馬鎮宮	\N	診所	330	0	診所	533	\N	2025-07-01 03:55:00.244866	29_182_27	fixed	\N	\N	\N	\N	\N	\N
+1708	2025-07-01	診所	海安路	公園南路	90	0	診所	61553	\N	2025-07-01 06:45:02.130687	48_182_27	fixed	\N	\N	\N	\N	\N	\N
+1709	2025-07-01	診所	\N	南寧街	120	0	診所	533	\N	2025-07-01 07:20:01.245009	36_182_27	fixed	\N	\N	\N	\N	\N	\N
+1710	2025-07-01	診所	文賢路	和緯四	140	0	診所	533	\N	2025-07-01 07:35:00.239925	31_182_27	fixed	\N	\N	\N	\N	\N	\N
+1711	2025-07-01	診所	\N	北門路三段	140	0	診所	61553	\N	2025-07-01 07:35:01.234342	49_182_27	fixed	\N	\N	\N	\N	\N	\N
+1712	2025-07-01	診所	\N	馬鎮宮	330	0	診所	533	\N	2025-07-01 08:00:01.318036	30_182_27	fixed	\N	\N	\N	\N	\N	\N
+1713	2025-07-01	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-07-01 09:35:00.23838	43_182_27	fixed	\N	\N	\N	\N	\N	\N
+1714	2025-07-01	東洋後門	\N	二井家	1400	0	東洋	5386	\N	2025-07-01 09:35:01.969703	39_182_27	fixed	\N	\N	\N	\N	\N	\N
+1715	2025-07-01	東洋後門	群創D3哨	東洋後門	1100	1000	東洋	5386	\N	2025-07-01 14:00:02.186326	T_1430	temp	\N	linyan	等候4h	2025-07-01 14:46:17.982402	\N	\N
+1716	2025-07-02	大灣二街	\N	診所	275	0	診所	533	\N	2025-07-01 21:25:01.239965	1_183_27	fixed	\N	\N	\N	\N	\N	\N
+1717	2025-07-02	中華南路	新建路	診所	215	0	診所	28530	\N	2025-07-01 22:25:01.224841	17_183_27	fixed	\N	\N	\N	\N	\N	\N
+1718	2025-07-02	北門路二段	\N	診所	125	0	診所	533	\N	2025-07-01 22:55:00.245596	50_183_27	fixed	\N	\N	\N	\N	\N	\N
+1719	2025-07-02	久保田家	新戶家	東洋後門	360	0	東洋	5386	\N	2025-07-01 23:15:01.223906	42_183_27	fixed	\N	\N	\N	\N	\N	\N
+1720	2025-07-02	中華北路	和緯152	診所	200	0	診所	533	\N	2025-07-01 23:35:00.244686	2_183_27	fixed	\N	\N	\N	\N	\N	\N
+1722	2025-07-02	仁和路	\N	診所	220	0	診所	28530	\N	2025-07-02 01:55:00.239224	9_183_27	fixed	\N	\N	\N	\N	\N	\N
+1724	2025-07-02	診所	\N	長溪路	210	0	診所	61553	\N	2025-07-02 01:55:01.933657	13_183_27	fixed	\N	\N	\N	\N	\N	\N
+1725	2025-07-02	安定	\N	診所	500	0	診所	533	\N	2025-07-02 02:00:00.239748	11_183_27	fixed	\N	\N	\N	\N	\N	\N
+1723	2025-07-02	新化山腳里	\N	瀚宇彩晶	480	0	東洋	5386	\N	2025-07-02 01:55:01.22283	T_1434	temp	\N	linyan	（記賬）	2025-07-02 02:40:41.993533	\N	\N
+1728	2025-07-02	診所	\N	大灣二街	275	0	診所	533	\N	2025-07-02 02:45:01.223834	5_183_27	fixed	\N	\N	\N	\N	\N	\N
+1729	2025-07-02	育德二路		診所	90	0	診所	61553	\N	2025-07-02 02:50:01.405204	14_183_27	fixed	\N	\N	\N	\N	\N	\N
+1730	2025-07-02	健康三街	府前二街	診所	230	0	診所	28530	\N	2025-07-02 02:55:00.240565	18_183_27	fixed	\N	\N	\N	\N	\N	\N
+1731	2025-07-02	診所	\N	北門路二段	125	0	診所	61553	\N	2025-07-02 03:00:00.244172	51_183_27	fixed	\N	\N	\N	\N	\N	\N
+1732	2025-07-02	診所	新建路	中華南路	215	0	診所	28530	\N	2025-07-02 03:20:01.218547	19_183_27	fixed	\N	\N	\N	\N	\N	\N
+1733	2025-07-02	診所	和緯152	中華北路	200	0	診所	533	\N	2025-07-02 04:15:01.304499	7_183_27	fixed	\N	\N	\N	\N	\N	\N
+1734	2025-07-02	診所	\N	仁和路	220	0	診所	533	\N	2025-07-02 06:45:01.223235	10_183_27	fixed	\N	\N	\N	\N	\N	\N
+1735	2025-07-02	同安路	\N	診所	220	0	診所	61553	\N	2025-07-02 06:55:01.223447	15_183_27	fixed	\N	\N	\N	\N	\N	\N
+1736	2025-07-02	診所	\N	安定	500	0	診所	5386	\N	2025-07-02 07:00:00.240547	12_183_27	fixed	\N	\N	\N	\N	\N	\N
+1737	2025-07-02	診所		育德二路	95	0	診所	28530	\N	2025-07-02 07:00:00.240547	21_183_27	fixed	\N	\N	\N	\N	\N	\N
+1738	2025-07-02	診所	\N	永大路	280	0	診所	61553	\N	2025-07-02 07:20:01.221792	16_183_27	fixed	\N	\N	\N	\N	\N	\N
+1739	2025-07-02	小北路	民德105	診所	120	0	診所	28530	\N	2025-07-02 07:30:01.722821	4_183_27	fixed	\N	\N	\N	\N	\N	\N
+1740	2025-07-02	診所	府前二街	健康三街	230	0	診所	28530	\N	2025-07-02 07:45:00.242943	20_183_27	fixed	\N	\N	\N	\N	\N	\N
+1741	2025-07-02	東洋前門	\N	高鐵站	680	\N	東洋	533	\N	2025-07-02 08:00:00.244927	T_1441	temp	\N	\N	\N	\N	\N	\N
+1755	2025-07-03	診所	和緯路+古堡街	怡平路	270	-70	診所	533	\N	2025-07-03 03:00:00.243743	24_184_27	fixed	\N	\N	\N	\N	\N	怡平路請假
+1756	2025-07-03	南寧街	\N	診所	120	0	診所	61553	\N	2025-07-03 03:15:00.240966	35_184_27	fixed	\N	\N	\N	\N	\N	\N
+1757	2025-07-03	診所		土城	345	0	診所	28530	\N	2025-07-03 03:35:00.24583	46_184_27	fixed	\N	\N	\N	\N	\N	\N
+1721	2025-07-02	東洋後門	群創D3哨	東洋後門	1450	875	東洋	5386	\N	2025-07-02 00:00:02.209357	T_1431	temp	\N	linyan	（記賬）等候3.5h	2025-07-02 08:58:32.858922	\N	\N
+1726	2025-07-02	群創D3哨	善化大同路	東洋後門	900	500	東洋	61379	\N	2025-07-02 02:00:00.239748	T_1432	temp	\N	linyan	（記賬）等候2h	2025-07-02 09:11:26.304502	\N	\N
+1742	2025-07-02	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-07-02 09:35:01.227147	43_183_27	fixed	\N	\N	\N	\N	\N	\N
+1743	2025-07-02	東洋後門	\N	二井家	1400	0	東洋	5386	\N	2025-07-02 09:35:01.30598	39_183_27	fixed	\N	\N	\N	\N	\N	\N
+1745	2025-07-03	怡平路	湖美街+忠孝街	診所	190	0	診所	5386	\N	2025-07-02 22:15:01.229395	22_184_27	fixed	\N	\N	\N	\N	\N	\N
+1747	2025-07-03	安北路	古堡街+和緯五	診所	230	0	診所	5386	\N	2025-07-02 22:35:00.241735	23_184_27	fixed	\N	\N	\N	\N	\N	\N
+1748	2025-07-03	土城		診所	345	0	診所	533	\N	2025-07-02 22:35:00.243239	45_184_27	fixed	\N	\N	\N	\N	\N	\N
+1746	2025-07-03	二井家	\N	東洋後門	1400	-1400	東洋	28530	\N	2025-07-02 22:25:01.226598	40_184_27	fixed	\N	linyan	派班有誤	2025-07-03 01:31:07.153443	\N	\N
+1750	2025-07-03	久保田家	新戶家	東洋後門	360	0	東洋	61367	\N	2025-07-03 02:00:01.434633	41_184_27	fixed	\N	\N	\N	\N	\N	新戶出差另派
+1751	2025-07-03	公園南路	海安路	診所	90	0	診所	533	\N	2025-07-03 02:25:01.343055	26_184_27	fixed	\N	\N	\N	\N	\N	\N
+1752	2025-07-03	北門路三段	\N	診所	140	0	診所	61553	\N	2025-07-03 02:35:01.375134	32_184_27	fixed	\N	\N	\N	\N	\N	\N
+1754	2025-07-03	和緯四	文賢路	診所	140	0	診所	61553	\N	2025-07-03 02:55:01.237878	33_184_27	fixed	\N	\N	\N	\N	\N	\N
+1758	2025-07-03	馬鎮宮	\N	診所	330	0	診所	5386	\N	2025-07-03 03:55:01.233991	29_184_27	fixed	\N	\N	\N	\N	\N	\N
+1760	2025-07-03	診所	海安路	公園南路	90	0	診所	61553	\N	2025-07-03 06:45:02.172775	48_184_27	fixed	\N	\N	\N	\N	\N	\N
+1761	2025-07-03	高鐵站	文南71	新戶家	690	\N	東洋	5386	\N	2025-07-03 07:00:01.941502	T_1443	temp	\N	\N	\N	\N	新戶&林明煒	\N
+1762	2025-07-03	診所	\N	南寧街	120	0	診所	533	\N	2025-07-03 07:20:01.928042	36_184_27	fixed	\N	\N	\N	\N	\N	\N
+1749	2025-07-03	新戶家	文南71	高鐵站	690	0	東洋	5386	\N	2025-07-02 23:35:01.6725	T_1437	temp	\N	linyan	（記賬）	2025-07-03 07:20:25.680279	\N	\N
+1759	2025-07-03	診所	湖美街	安北路	180	0	診所	5386	\N	2025-07-03 04:00:00.240868	T_1442	temp	\N	linyan	（臨時班次記賬）	2025-07-03 07:22:15.476486	\N	\N
+1763	2025-07-03	診所	\N	北門路三段	140	0	診所	61553	\N	2025-07-03 07:35:00.239487	49_184_27	fixed	\N	\N	\N	\N	\N	\N
+1764	2025-07-03	診所	文賢路	和緯四	140	0	診所	533	\N	2025-07-03 07:35:01.240538	31_184_27	fixed	\N	\N	\N	\N	\N	\N
+1765	2025-07-03	診所	\N	馬鎮宮	330	0	診所	533	\N	2025-07-03 08:00:00.239457	30_184_27	fixed	\N	\N	\N	\N	\N	\N
+1766	2025-07-03	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-07-03 09:35:01.276673	43_184_27	fixed	\N	\N	\N	\N	\N	\N
+1753	2025-07-03	診所	忠孝街	湖美街	140	-55	診所	533	\N	2025-07-03 02:55:00.240616	25_184_27	fixed	\N	linyan	（湖美街拆開與安北路同車）	2025-07-03 15:24:56.884301	\N	\N
+1702	2025-07-01	診所	忠孝街	湖美街	140	-55	診所	533	\N	2025-07-01 02:55:01.22382	25_182_27	fixed	\N	linyan	（湖美街拆開與安北路同車）	2025-07-03 15:26:48.195702	\N	\N
+1767	2025-07-04	大灣二街	\N	診所	275	0	診所	533	\N	2025-07-03 21:25:01.228057	1_185_27	fixed	\N	\N	\N	\N	\N	\N
+1768	2025-07-04	中華南路	新建路	診所	215	0	診所	28530	\N	2025-07-03 22:25:02.139525	17_185_27	fixed	\N	\N	\N	\N	\N	\N
+1769	2025-07-04	二井家	\N	東洋後門	1400	0	東洋	5386	\N	2025-07-03 22:25:02.175267	38_185_27	fixed	\N	\N	\N	\N	\N	\N
+1770	2025-07-04	北門路二段	\N	診所	125	0	診所	533	\N	2025-07-03 22:55:00.239632	50_185_27	fixed	\N	\N	\N	\N	\N	\N
+1771	2025-07-04	久保田家	新戶家	東洋後門	360	0	東洋	28530	\N	2025-07-03 23:15:01.209821	42_185_27	fixed	\N	\N	\N	\N	\N	\N
+1773	2025-07-04	中華北路	和緯152	診所	200	0	診所	533	\N	2025-07-03 23:35:01.270898	2_185_27	fixed	\N	\N	\N	\N	\N	\N
+1774	2025-07-04	高鐵站	\N	東洋前門	680	\N	東洋	28530	\N	2025-07-04 01:25:01.226321	T_1435	temp	\N	\N	\N	\N	\N	\N
+1775	2025-07-04	診所	\N	長溪路	210	0	診所	533	\N	2025-07-04 01:55:02.14256	13_185_27	fixed	\N	\N	\N	\N	\N	\N
+1776	2025-07-04	仁和路	\N	診所	220	0	診所	533	\N	2025-07-04 01:55:02.150251	9_185_27	fixed	\N	\N	\N	\N	\N	\N
+1777	2025-07-04	安定	\N	診所	500	0	診所	5386	\N	2025-07-04 02:00:00.24145	11_185_27	fixed	\N	\N	\N	\N	\N	\N
+1778	2025-07-04	診所	\N	大灣二街	275	0	診所	533	\N	2025-07-04 02:45:01.222133	5_185_27	fixed	\N	\N	\N	\N	\N	\N
+1779	2025-07-04	育德二路		診所	90	0	診所	61553	\N	2025-07-04 02:50:01.214289	14_185_27	fixed	\N	\N	\N	\N	\N	\N
+1780	2025-07-04	健康三街	府前二街	診所	230	0	診所	28530	\N	2025-07-04 02:55:00.242036	18_185_27	fixed	\N	\N	\N	\N	\N	\N
+1781	2025-07-04	診所	\N	北門路二段	125	0	診所	61553	\N	2025-07-04 03:00:00.241455	51_185_27	fixed	\N	\N	\N	\N	\N	\N
+1782	2025-07-04	診所	新建路	中華南路	215	0	診所	28530	\N	2025-07-04 03:20:02.163727	19_185_27	fixed	\N	\N	\N	\N	\N	\N
+1783	2025-07-04	永大路	\N	診所	280	0	診所	533	\N	2025-07-04 03:35:01.225518	6_185_27	fixed	\N	\N	\N	\N	\N	\N
+1784	2025-07-04	診所	和緯152	中華北路	200	0	診所	533	\N	2025-07-04 04:15:01.208746	7_185_27	fixed	\N	\N	\N	\N	\N	\N
+1785	2025-07-04	診所	\N	仁和路	220	0	診所	533	\N	2025-07-04 06:45:01.391893	10_185_27	fixed	\N	\N	\N	\N	\N	\N
+1786	2025-07-04	同安路	\N	診所	220	0	診所	61553	\N	2025-07-04 06:55:01.216657	15_185_27	fixed	\N	\N	\N	\N	\N	\N
+1787	2025-07-04	診所	\N	安定	500	0	診所	5386	\N	2025-07-04 07:00:00.24028	12_185_27	fixed	\N	\N	\N	\N	\N	\N
+1788	2025-07-04	診所		育德二路	95	0	診所	28530	\N	2025-07-04 07:00:00.24028	21_185_27	fixed	\N	\N	\N	\N	\N	\N
+1789	2025-07-04	診所	\N	永大路	280	0	診所	61553	\N	2025-07-04 07:20:01.382163	16_185_27	fixed	\N	\N	\N	\N	\N	\N
+1790	2025-07-04	小北路	民德105	診所	120	0	診所	533	\N	2025-07-04 07:30:02.198909	4_185_27	fixed	\N	\N	\N	\N	\N	\N
+1791	2025-07-04	東洋前門	\N	高鐵站	680	\N	東洋	61367	\N	2025-07-04 07:35:00.243906	T_1436	temp	\N	\N	\N	\N	\N	\N
+1792	2025-07-04	診所	府前二街	健康三街	230	0	診所	28530	\N	2025-07-04 07:45:00.239019	20_185_27	fixed	\N	\N	\N	\N	\N	\N
+1794	2025-07-04	東洋後門	\N	二井家	1400	0	東洋	61553	\N	2025-07-04 09:35:01.210079	39_185_27	fixed	\N	\N	\N	\N	\N	\N
+1795	2025-07-04	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-07-04 09:35:02.166441	43_185_27	fixed	\N	\N	\N	\N	\N	\N
+1796	2025-07-05	怡平路	湖美街+忠孝街	診所	190	0	診所	28530	\N	2025-07-04 22:15:01.22088	22_186_27	fixed	\N	\N	\N	\N	\N	\N
+1797	2025-07-05	安北路	古堡街+和緯五	診所	230	0	診所	28530	\N	2025-07-04 22:35:00.243427	23_186_27	fixed	\N	\N	\N	\N	\N	\N
+1798	2025-07-05	土城		診所	345	0	診所	533	\N	2025-07-04 22:35:01.213432	45_186_27	fixed	\N	\N	\N	\N	\N	\N
+1799	2025-07-05	公園南路	海安路	診所	90	0	診所	533	\N	2025-07-05 02:25:02.200453	26_186_27	fixed	\N	\N	\N	\N	\N	\N
+1800	2025-07-05	北門路三段	\N	診所	140	0	診所	61553	\N	2025-07-05 02:35:02.204185	32_186_27	fixed	\N	\N	\N	\N	\N	\N
+1801	2025-07-05	診所	忠孝街	湖美街	140	-55	診所	533	\N	2025-07-05 02:55:00.24248	25_186_27	fixed	\N	\N	\N	\N	\N	\N
+1802	2025-07-05	和緯四	文賢路	診所	140	0	診所	61553	\N	2025-07-05 02:55:01.260227	33_186_27	fixed	\N	\N	\N	\N	\N	\N
+1803	2025-07-05	南寧街	\N	診所	120	0	診所	61553	\N	2025-07-05 03:15:00.241886	35_186_27	fixed	\N	\N	\N	\N	\N	\N
+1804	2025-07-05	診所		土城	345	0	診所	28530	\N	2025-07-05 03:35:00.240758	46_186_27	fixed	\N	\N	\N	\N	\N	\N
+1805	2025-07-05	馬鎮宮	\N	診所	330	0	診所	5386	\N	2025-07-05 03:55:02.173911	29_186_27	fixed	\N	\N	\N	\N	\N	\N
+1806	2025-07-05	診所	海安路	公園南路	90	0	診所	533	\N	2025-07-05 06:45:01.214222	44_186_27	fixed	\N	\N	\N	\N	\N	\N
+1807	2025-07-05	診所	湖美街	怡平路	200	\N	診所	5386	\N	2025-07-05 07:00:02.166987	T_1445	temp	\N	\N	\N	\N	\N	\N
+1808	2025-07-05	診所	和緯五+安北路	古堡街	220	\N	診所	533	\N	2025-07-05 07:00:02.166987	T_1446	temp	\N	\N	\N	\N	\N	\N
+1809	2025-07-05	診所	\N	南寧街	120	0	診所	533	\N	2025-07-05 07:20:01.218304	36_186_27	fixed	\N	\N	\N	\N	\N	\N
+1810	2025-07-05	診所	文賢路	和緯四	140	0	診所	533	\N	2025-07-05 07:35:01.238442	31_186_27	fixed	\N	\N	\N	\N	\N	\N
+1811	2025-07-05	診所	\N	馬鎮宮	330	0	診所	533	\N	2025-07-05 08:00:01.571172	30_186_27	fixed	\N	\N	\N	\N	\N	\N
+1772	2025-07-04	公園北路	湖內民權路	中正四路	1495	0	東洋	61553	\N	2025-07-03 23:35:00.24382	T_1438	temp	\N	闗山月	（記賬）	2025-07-07 08:50:47.891801	\N	\N
+1727	2025-07-02	高鐵站	瀚宇彩晶	東洋後門	1300	625	東洋	61367	\N	2025-07-02 02:11:01.22028	T_1433	temp	\N	闗山月	（記賬）	2025-07-07 08:55:03.895874	\N	\N
+1812	2025-07-07	大灣二街	\N	診所	275	50	診所	533	\N	2025-07-07 00:00:01.336721	1_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1744	2025-07-02	東洋後門	\N	新化山腳里	830	0	東洋	61379	\N	2025-07-02 10:00:00.239255	T_1440	temp	\N	闗山月	（記賬）	2025-07-07 08:58:05.382662	張雨珊	\N
+1793	2025-07-04	中正四路	湖內民權路	公園北路	1560	0	東洋	5386	\N	2025-07-04 09:35:00.241726	T_1439	temp	\N	闗山月	（記賬）	2025-07-07 09:02:39.648063	\N	\N
+1813	2025-07-07	中華北路	和緯152	診所	200	50	診所	533	\N	2025-07-07 00:00:01.336721	2_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1814	2025-07-07	中華南路	新建路	診所	215	50	診所	28530	\N	2025-07-07 00:00:01.336721	17_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1815	2025-07-07	北門路二段	\N	診所	125	50	診所	533	\N	2025-07-07 00:00:01.336721	50_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1816	2025-07-07	診所	\N	長溪路	210	50	診所	61553	\N	2025-07-07 02:00:01.217704	13_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1817	2025-07-07	安定	\N	診所	500	50	診所	5386	\N	2025-07-07 02:00:01.217704	11_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1818	2025-07-07	仁和路	\N	診所	220	50	診所	533	\N	2025-07-07 02:00:01.217704	9_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1819	2025-07-07	診所	\N	大灣二街	275	50	診所	533	\N	2025-07-07 03:00:01.225058	5_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1820	2025-07-07	育德二路		診所	90	50	診所	61553	\N	2025-07-07 03:00:01.225058	14_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1821	2025-07-07	健康三街	府前二街	診所	230	50	診所	28530	\N	2025-07-07 03:00:01.225058	18_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1822	2025-07-07	診所	\N	北門路二段	125	50	診所	61553	\N	2025-07-07 03:00:01.225058	51_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1823	2025-07-07	診所	\N	亞航社區	245	50	診所	5386	\N	2025-07-07 04:00:02.464131	T_1577	temp	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1824	2025-07-07	永大路	\N	診所	280	50	診所	533	\N	2025-07-07 04:00:02.464131	6_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1825	2025-07-07	診所	新建路	中華南路	215	50	診所	28530	\N	2025-07-07 04:00:02.464131	19_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1826	2025-07-07	診所	和緯152	中華北路	200	50	診所	533	\N	2025-07-07 05:00:02.17846	7_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1827	2025-07-07	診所	\N	仁和路	220	50	診所	533	\N	2025-07-07 07:00:02.206143	10_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1828	2025-07-07	診所	\N	安定	500	50	診所	5386	\N	2025-07-07 07:00:02.206143	12_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1829	2025-07-07	同安路	\N	診所	220	50	診所	61553	\N	2025-07-07 07:00:02.206143	15_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1830	2025-07-07	診所		育德二路	95	50	診所	28530	\N	2025-07-07 07:00:02.206143	21_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1831	2025-07-07	診所	\N	永大路	280	50	診所	61553	\N	2025-07-07 08:00:02.171513	16_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1832	2025-07-07	診所	府前二街	健康三街	230	50	診所	28530	\N	2025-07-07 08:00:02.171513	20_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1833	2025-07-07	小北路	民德105	診所	120	50	診所	533	\N	2025-07-07 08:00:02.171513	4_188_28	fixed	\N	System	颱風假加成	2025-07-07 14:50:59.911269	\N	\N
+1834	2025-07-08	怡平路	湖美街+忠孝街	診所	190	0	診所	5386	\N	2025-07-07 22:15:01.223602	22_189_28	fixed	\N	\N	\N	\N	\N	\N
+1835	2025-07-08	二井家	\N	東洋後門	1400	0	東洋	28530	\N	2025-07-07 22:25:01.301594	40_189_28	fixed	\N	\N	\N	\N	\N	\N
+1836	2025-07-08	安北路	古堡街+和緯五	診所	230	0	診所	5386	\N	2025-07-07 22:35:00.242985	23_189_28	fixed	\N	\N	\N	\N	\N	\N
+1837	2025-07-08	土城		診所	345	0	診所	533	\N	2025-07-07 22:35:00.254905	45_189_28	fixed	\N	\N	\N	\N	\N	\N
+1838	2025-07-08	久保田家	新戶家	東洋後門	360	0	東洋	5386	\N	2025-07-07 23:15:01.219472	41_189_28	fixed	\N	\N	\N	\N	\N	\N
+1839	2025-07-08	公園南路	海安路	診所	90	0	診所	533	\N	2025-07-08 02:25:01.215607	26_189_28	fixed	\N	\N	\N	\N	\N	\N
+1840	2025-07-08	診所	\N	忠孝街	85	0	診所	533	\N	2025-07-08 02:35:00.239817	54_189_28	fixed	\N	\N	\N	\N	\N	\N
+1841	2025-07-08	北門路三段	\N	診所	140	0	診所	61553	\N	2025-07-08 02:35:02.200804	32_189_28	fixed	\N	\N	\N	\N	\N	\N
+1842	2025-07-08	和緯四	文賢路	診所	140	0	診所	61553	\N	2025-07-08 02:55:00.24254	33_189_28	fixed	\N	\N	\N	\N	\N	\N
+1844	2025-07-08	診所	和緯路+安北路	古堡街	220	0	診所	533	\N	2025-07-08 02:55:01.299882	24_189_28	fixed	\N	\N	\N	\N	\N	\N
+1845	2025-07-08	南寧街	\N	診所	120	0	診所	61553	\N	2025-07-08 03:15:01.239917	35_189_28	fixed	\N	\N	\N	\N	\N	\N
+1846	2025-07-08	診所		土城	345	0	診所	28530	\N	2025-07-08 03:35:02.161967	46_189_28	fixed	\N	\N	\N	\N	\N	\N
+1847	2025-07-08	馬鎮宮	\N	診所	330	0	診所	5386	\N	2025-07-08 03:55:02.173575	29_189_28	fixed	\N	\N	\N	\N	\N	\N
+1843	2025-07-08	診所	湖美街	怡平路	200	-70	診所	5386	\N	2025-07-08 02:55:00.244608	25_189_28	fixed	\N	linyan	怡平路回程沒坐車	2025-07-08 04:54:12.032286	\N	\N
+1848	2025-07-08	診所	海安路	公園南路	90	0	診所	61553	\N	2025-07-08 06:45:01.219987	48_189_28	fixed	\N	\N	\N	\N	\N	\N
+1850	2025-07-08	診所	\N	北門路三段	140	0	診所	61553	\N	2025-07-08 07:35:00.239285	49_189_28	fixed	\N	\N	\N	\N	\N	\N
+1852	2025-07-08	診所	\N	馬鎮宮	330	0	診所	533	\N	2025-07-08 08:00:00.238739	30_189_28	fixed	\N	\N	\N	\N	\N	\N
+1853	2025-07-08	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-07-08 09:35:01.220551	43_189_28	fixed	\N	\N	\N	\N	\N	\N
+1854	2025-07-08	東洋後門	\N	二井家	1400	0	東洋	5386	\N	2025-07-08 09:35:02.152921	39_189_28	fixed	\N	\N	\N	\N	\N	\N
+1860	2025-07-09	中華北路	和緯152	診所	200	0	診所	533	\N	2025-07-08 23:35:01.218738	2_190_28	fixed	\N	\N	\N	\N	\N	\N
+1851	2025-07-08	診所	文賢路	和緯四	140	-140	診所	533	\N	2025-07-08 07:35:01.424783	31_189_28	fixed	\N	linyan	止血不易導致誤點，另外叫車	2025-07-08 13:06:49.287389	\N	\N
+1849	2025-07-08	診所	\N	南寧街	120	-120	診所	533	\N	2025-07-08 07:20:01.228993	36_189_28	fixed	\N	linyan	忙止血延誤回程時間，與馬鎮宮併車回	2025-07-08 13:40:17.236563	\N	\N
+1855	2025-07-09	大灣二街	\N	診所	275	0	診所	533	\N	2025-07-08 21:25:01.259131	1_190_28	fixed	\N	\N	\N	\N	\N	\N
+1856	2025-07-09	中華南路	新建路	診所	215	0	診所	28530	\N	2025-07-08 22:25:01.22819	17_190_28	fixed	\N	\N	\N	\N	\N	\N
+1857	2025-07-09	二井家	\N	東洋後門	1400	0	東洋	5386	\N	2025-07-08 22:25:01.228197	38_190_28	fixed	\N	\N	\N	\N	\N	\N
+1858	2025-07-09	北門路二段	\N	診所	125	0	診所	533	\N	2025-07-08 22:55:00.243432	50_190_28	fixed	\N	\N	\N	\N	\N	\N
+1859	2025-07-09	久保田家	新戶家	東洋後門	360	0	東洋	28530	\N	2025-07-08 23:15:01.313772	42_190_28	fixed	\N	\N	\N	\N	\N	\N
+1861	2025-07-09	仁和路	\N	診所	220	0	診所	533	\N	2025-07-09 01:35:01.22446	9_190_28	fixed	\N	\N	\N	\N	\N	\N
+1862	2025-07-09	診所	\N	長溪路	210	0	診所	61553	\N	2025-07-09 01:55:01.215683	13_190_28	fixed	\N	\N	\N	\N	\N	\N
+1863	2025-07-09	安定	\N	診所	500	0	診所	5386	\N	2025-07-09 02:00:00.243859	11_190_28	fixed	\N	\N	\N	\N	\N	\N
+1864	2025-07-09	診所	\N	大灣二街	275	0	診所	533	\N	2025-07-09 02:45:01.216121	5_190_28	fixed	\N	\N	\N	\N	\N	\N
+1865	2025-07-09	育德二路		診所	90	0	診所	61553	\N	2025-07-09 02:50:01.306877	14_190_28	fixed	\N	\N	\N	\N	\N	\N
+1866	2025-07-09	健康三街	府前二街	診所	230	0	診所	28530	\N	2025-07-09 02:55:00.244806	18_190_28	fixed	\N	\N	\N	\N	\N	\N
+1867	2025-07-09	診所	\N	北門路二段	125	0	診所	61553	\N	2025-07-09 03:00:00.241617	51_190_28	fixed	\N	\N	\N	\N	\N	\N
+1868	2025-07-09	診所	新建路	中華南路	215	0	診所	28530	\N	2025-07-09 03:20:01.220523	19_190_28	fixed	\N	\N	\N	\N	\N	\N
+1869	2025-07-09	永大路	\N	診所	280	0	診所	533	\N	2025-07-09 03:35:01.218842	6_190_28	fixed	\N	\N	\N	\N	\N	\N
+1870	2025-07-09	診所	和緯152	中華北路	200	0	診所	533	\N	2025-07-09 04:15:01.352292	7_190_28	fixed	\N	\N	\N	\N	\N	\N
+1871	2025-07-09	診所	\N	仁和路	220	0	診所	533	\N	2025-07-09 06:45:01.650502	10_190_28	fixed	\N	\N	\N	\N	\N	\N
+1872	2025-07-09	同安路	\N	診所	220	0	診所	61553	\N	2025-07-09 06:55:02.173453	15_190_28	fixed	\N	\N	\N	\N	\N	\N
+1873	2025-07-09	診所	\N	安定	500	0	診所	5386	\N	2025-07-09 07:00:00.245955	12_190_28	fixed	\N	\N	\N	\N	\N	\N
+1874	2025-07-09	診所		育德二路	95	0	診所	28530	\N	2025-07-09 07:00:00.245955	21_190_28	fixed	\N	\N	\N	\N	\N	\N
+1875	2025-07-09	診所	\N	永大路	280	0	診所	61553	\N	2025-07-09 07:20:01.229325	16_190_28	fixed	\N	\N	\N	\N	\N	\N
+1876	2025-07-09	小北路	民德105	診所	120	0	診所	533	\N	2025-07-09 07:30:01.228237	4_190_28	fixed	\N	\N	\N	\N	\N	\N
+1877	2025-07-09	診所	府前二街	健康三街	230	0	診所	28530	\N	2025-07-09 07:45:00.245774	20_190_28	fixed	\N	\N	\N	\N	\N	\N
+1878	2025-07-09	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-07-09 09:35:01.216371	43_190_28	fixed	\N	\N	\N	\N	\N	\N
+1879	2025-07-09	東洋後門	\N	二井家	1400	0	東洋	5386	\N	2025-07-09 09:35:01.216919	39_190_28	fixed	\N	\N	\N	\N	\N	\N
+1880	2025-07-10	怡平路	湖美街+忠孝街	診所	190	0	診所	5386	\N	2025-07-09 22:15:01.218602	22_191_28	fixed	\N	\N	\N	\N	\N	\N
+1881	2025-07-10	二井家	\N	東洋後門	1400	0	東洋	28530	\N	2025-07-09 22:25:02.203971	40_191_28	fixed	\N	\N	\N	\N	\N	\N
+1882	2025-07-10	土城		診所	345	0	診所	533	\N	2025-07-09 22:35:00.242099	45_191_28	fixed	\N	\N	\N	\N	\N	\N
+1883	2025-07-10	安北路	古堡街+和緯五	診所	230	0	診所	5386	\N	2025-07-09 22:35:00.246305	23_191_28	fixed	\N	\N	\N	\N	\N	\N
+1884	2025-07-10	久保田家	新戶家	東洋後門	360	0	東洋	5386	\N	2025-07-09 23:15:01.220612	41_191_28	fixed	\N	\N	\N	\N	\N	\N
+1885	2025-07-10	公園南路	海安路	診所	90	0	診所	533	\N	2025-07-10 02:25:01.227674	26_191_28	fixed	\N	\N	\N	\N	\N	\N
+1886	2025-07-10	診所	\N	忠孝街	85	0	診所	533	\N	2025-07-10 02:35:00.242237	54_191_28	fixed	\N	\N	\N	\N	\N	\N
+1887	2025-07-10	北門路三段	\N	診所	140	0	診所	61553	\N	2025-07-10 02:35:01.221877	32_191_28	fixed	\N	\N	\N	\N	\N	\N
+1888	2025-07-10	和緯四	文賢路	診所	140	0	診所	61553	\N	2025-07-10 02:55:00.241074	33_191_28	fixed	\N	\N	\N	\N	\N	\N
+1889	2025-07-10	診所	湖美街	怡平路	200	0	診所	5386	\N	2025-07-10 02:55:00.24551	25_191_28	fixed	\N	\N	\N	\N	\N	\N
+1890	2025-07-10	診所	和緯路+安北路	古堡街	220	0	診所	533	\N	2025-07-10 02:55:02.157357	24_191_28	fixed	\N	\N	\N	\N	\N	\N
+1891	2025-07-10	南寧街	\N	診所	120	0	診所	61553	\N	2025-07-10 03:15:01.22616	35_191_28	fixed	\N	\N	\N	\N	\N	\N
+1892	2025-07-10	診所		土城	345	0	診所	28530	\N	2025-07-10 03:35:01.22366	46_191_28	fixed	\N	\N	\N	\N	\N	\N
+1893	2025-07-10	馬鎮宮	\N	診所	330	0	診所	5386	\N	2025-07-10 03:55:02.176365	29_191_28	fixed	\N	\N	\N	\N	\N	\N
+1894	2025-07-10	診所	海安路	公園南路	90	0	診所	61553	\N	2025-07-10 06:45:01.231526	48_191_28	fixed	\N	\N	\N	\N	\N	\N
+1896	2025-07-10	診所	\N	北門路三段	140	0	診所	61553	\N	2025-07-10 07:35:00.239528	49_191_28	fixed	\N	\N	\N	\N	\N	\N
+1897	2025-07-10	診所	文賢路	和緯四	140	0	診所	533	\N	2025-07-10 07:35:01.212059	31_191_28	fixed	\N	\N	\N	\N	\N	\N
+1898	2025-07-10	診所	\N	馬鎮宮	330	0	診所	533	\N	2025-07-10 08:00:00.242348	30_191_28	fixed	\N	\N	\N	\N	\N	\N
+1899	2025-07-10	東洋後門	\N	二井家	1400	0	東洋	5386	\N	2025-07-10 09:35:01.214982	39_191_28	fixed	\N	\N	\N	\N	\N	\N
+1900	2025-07-10	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-07-10 09:35:02.169057	43_191_28	fixed	\N	\N	\N	\N	\N	\N
+1895	2025-07-10	診所	\N	南寧街	120	-120	診所	533	\N	2025-07-10 07:20:02.179786	36_191_28	fixed	\N	用戶59c6	改和馬鎮宮併回	2025-07-10 09:46:53.394774	\N	\N
+1901	2025-07-11	大灣二街	\N	診所	275	0	診所	533	\N	2025-07-10 21:25:01.223024	1_192_28	fixed	\N	\N	\N	\N	\N	\N
+1902	2025-07-11	中華南路	新建路	診所	215	0	診所	28530	\N	2025-07-10 22:25:02.164732	17_192_28	fixed	\N	\N	\N	\N	\N	\N
+1903	2025-07-11	北門路二段	\N	診所	125	0	診所	533	\N	2025-07-10 22:55:00.240559	50_192_28	fixed	\N	\N	\N	\N	\N	\N
+1905	2025-07-11	久保田家	新戶家	東洋後門	360	0	東洋	28530	\N	2025-07-10 23:15:01.303056	42_192_28	fixed	\N	\N	\N	\N	\N	\N
+1906	2025-07-11	中華北路	和緯152	診所	200	0	診所	533	\N	2025-07-10 23:35:02.161455	2_192_28	fixed	\N	\N	\N	\N	\N	\N
+1908	2025-07-11	仁和路	\N	診所	220	0	診所	28530	\N	2025-07-11 01:35:01.2127	9_192_28	fixed	\N	\N	\N	\N	\N	\N
+1909	2025-07-11	診所	\N	長溪路	210	0	診所	61553	\N	2025-07-11 01:55:01.2073	13_192_28	fixed	\N	\N	\N	\N	\N	\N
+1910	2025-07-11	安定	\N	診所	500	0	診所	533	\N	2025-07-11 02:00:00.24154	11_192_28	fixed	\N	\N	\N	\N	\N	\N
+1907	2025-07-11	高鐵	\N	東洋	680	0	東洋	5386	\N	2025-07-11 01:22:01.304695	T_1581	temp	\N	linyan	（記賬）	2025-07-11 02:30:58.927867	\N	\N
+1904	2025-07-11	協理家	\N	高鐵站	690	0	東洋	5386	\N	2025-07-10 22:55:00.243716	T_1582	temp	\N	linyan	（記賬）	2025-07-11 02:31:49.335147	\N	\N
+1911	2025-07-11	診所	\N	大灣二街	275	0	診所	533	\N	2025-07-11 02:45:01.211742	5_192_28	fixed	\N	\N	\N	\N	\N	\N
+1912	2025-07-11	育德二路		診所	90	0	診所	61553	\N	2025-07-11 02:50:02.189085	14_192_28	fixed	\N	\N	\N	\N	\N	\N
+1913	2025-07-11	健康三街	府前二街	診所	230	0	診所	28530	\N	2025-07-11 02:55:00.241234	18_192_28	fixed	\N	\N	\N	\N	\N	\N
+1914	2025-07-11	診所	\N	北門路二段	125	0	診所	61553	\N	2025-07-11 03:00:00.239659	51_192_28	fixed	\N	\N	\N	\N	\N	\N
+1915	2025-07-11	診所	新建路	中華南路	215	0	診所	28530	\N	2025-07-11 03:20:01.227245	19_192_28	fixed	\N	\N	\N	\N	\N	\N
+1916	2025-07-11	永大路	\N	診所	280	0	診所	533	\N	2025-07-11 03:35:02.383782	6_192_28	fixed	\N	\N	\N	\N	\N	\N
+1917	2025-07-11	診所	和緯152	中華北路	200	0	診所	533	\N	2025-07-11 04:15:02.161174	7_192_28	fixed	\N	\N	\N	\N	\N	\N
+1918	2025-07-11	診所	\N	仁和路	220	0	診所	533	\N	2025-07-11 06:45:01.691326	10_192_28	fixed	\N	\N	\N	\N	\N	\N
+1919	2025-07-11	同安路	\N	診所	220	0	診所	61553	\N	2025-07-11 06:55:01.206854	15_192_28	fixed	\N	\N	\N	\N	\N	\N
+1920	2025-07-11	東洋前門	\N	高鐵站	680	\N	東洋	5386	\N	2025-07-11 07:00:00.240592	T_1584	temp	\N	\N	\N	\N	林秋慧	\N
+1921	2025-07-11	診所	\N	安定	500	0	診所	61367	\N	2025-07-11 07:00:00.240592	12_192_28	fixed	\N	\N	\N	\N	\N	\N
+1922	2025-07-11	診所		育德二路	95	0	診所	28530	\N	2025-07-11 07:00:00.240592	21_192_28	fixed	\N	\N	\N	\N	\N	\N
+1923	2025-07-11	診所	\N	永大路	280	0	診所	61553	\N	2025-07-11 07:20:02.156601	16_192_28	fixed	\N	\N	\N	\N	\N	\N
+1924	2025-07-11	小北路	民德105	診所	120	0	診所	533	\N	2025-07-11 07:30:02.259886	4_192_28	fixed	\N	\N	\N	\N	\N	\N
+1925	2025-07-11	診所	府前二街	健康三街	230	0	診所	28530	\N	2025-07-11 07:45:00.239903	20_192_28	fixed	\N	\N	\N	\N	\N	\N
+1926	2025-07-11	高鐵站	\N	協理家	705	0	東洋	5386	\N	2025-07-11 08:22:01.226579	T_1583	temp	\N	linyan	（記賬）	2025-07-11 09:24:06.218847	\N	\N
+1927	2025-07-11	東洋後門	新戶家	久保田家	360	0	東洋	28530	\N	2025-07-11 09:35:02.184682	43_192_28	fixed	\N	\N	\N	\N	\N	\N
+1928	2025-07-12	怡平路	湖美街+忠孝街	診所	190	0	診所	28530	\N	2025-07-11 22:15:01.961739	53_193_28	fixed	\N	\N	\N	\N	\N	\N
+1929	2025-07-12	安北路	古堡街+和緯五	診所	230	0	診所	28530	\N	2025-07-11 22:35:00.245759	52_193_28	fixed	\N	\N	\N	\N	\N	\N
+1930	2025-07-12	土城		診所	345	0	診所	533	\N	2025-07-11 22:35:01.233801	45_193_28	fixed	\N	\N	\N	\N	\N	\N
+1931	2025-07-12	公園南路	海安路	診所	90	0	診所	533	\N	2025-07-12 02:25:01.35065	26_193_28	fixed	\N	\N	\N	\N	\N	\N
+1932	2025-07-12	診所	\N	忠孝街	85	0	診所	533	\N	2025-07-12 02:35:00.253087	54_193_28	fixed	\N	\N	\N	\N	\N	\N
+1933	2025-07-12	北門路三段	\N	診所	140	0	診所	61553	\N	2025-07-12 02:35:01.245843	32_193_28	fixed	\N	\N	\N	\N	\N	\N
+1934	2025-07-12	和緯四	文賢路	診所	140	0	診所	61553	\N	2025-07-12 02:55:00.249475	33_193_28	fixed	\N	\N	\N	\N	\N	\N
+1935	2025-07-12	診所	湖美街	怡平路	200	0	診所	5386	\N	2025-07-12 02:55:00.2542	25_193_28	fixed	\N	\N	\N	\N	\N	\N
+1936	2025-07-12	診所	和緯路+安北路	古堡街	220	0	診所	533	\N	2025-07-12 02:55:01.217558	24_193_28	fixed	\N	\N	\N	\N	\N	\N
+1937	2025-07-12	南寧街	\N	診所	120	0	診所	61553	\N	2025-07-12 03:15:01.227702	35_193_28	fixed	\N	\N	\N	\N	\N	\N
+1938	2025-07-12	診所		土城	345	0	診所	28530	\N	2025-07-12 03:35:01.228354	46_193_28	fixed	\N	\N	\N	\N	\N	\N
+1939	2025-07-12	馬鎮宮	\N	診所	330	0	診所	5386	\N	2025-07-12 03:55:01.708231	29_193_28	fixed	\N	\N	\N	\N	\N	\N
+1940	2025-07-12	診所	海安路	公園南路	90	0	診所	5386	\N	2025-07-12 06:45:01.206624	44_193_28	fixed	\N	\N	\N	\N	\N	\N
+1941	2025-07-12	診所	\N	南寧街	120	0	診所	533	\N	2025-07-12 07:20:01.324556	36_193_28	fixed	\N	\N	\N	\N	\N	\N
+1942	2025-07-12	診所	文賢路	和緯四	140	0	診所	533	\N	2025-07-12 07:35:01.206677	31_193_28	fixed	\N	\N	\N	\N	\N	\N
+1943	2025-07-12	診所	\N	馬鎮宮	330	0	診所	533	\N	2025-07-12 08:00:01.931789	30_193_28	fixed	\N	\N	\N	\N	\N	\N
+1944	2025-07-12	診所	\N	北門路三段	140	0	診所	5386	\N	2025-07-12 14:00:02.193775	T_1585	temp	\N	\N	\N	\N	信智	
+1945	2025-07-14	大灣二街	\N	診所	275	0	診所	533	\N	2025-07-13 21:25:01.242287	1_195_29	fixed	\N	\N	\N	\N	\N	\N
+1946	2025-07-14	中華南路	新建路	診所	215	0	診所	28530	\N	2025-07-13 22:25:00.234666	17_195_29	fixed	\N	\N	\N	\N	\N	\N
+1947	2025-07-14	二井家	\N	東洋後門	1400	0	東洋	5386	\N	2025-07-13 22:25:01.243496	38_195_29	fixed	\N	\N	\N	\N	\N	\N
+1948	2025-07-14	北門路二段	\N	診所	125	0	診所	61379	\N	2025-07-13 22:55:00.236848	50_195_29	fixed	\N	\N	\N	\N	\N	\N
+1950	2025-07-14	久保田家	新戶家	東洋後門	360	0	東洋	28530	\N	2025-07-13 23:15:01.220926	42_195_29	fixed	\N	\N	\N	\N	\N	\N
+1951	2025-07-14	中華北路	和緯152	診所	200	0	診所	61379	\N	2025-07-13 23:35:00.244194	2_195_29	fixed	\N	\N	\N	\N	\N	\N
+1952	2025-07-14	仁和路	\N	診所	220	0	診所	533	\N	2025-07-14 01:35:01.232989	9_195_29	fixed	\N	\N	\N	\N	\N	\N
+1953	2025-07-14	診所	\N	長溪路	210	0	診所	61553	\N	2025-07-14 01:55:00.247594	13_195_29	fixed	\N	\N	\N	\N	\N	\N
+1954	2025-07-14	安定	\N	診所	500	0	診所	5386	\N	2025-07-14 02:00:00.249397	11_195_29	fixed	\N	\N	\N	\N	\N	\N
+1955	2025-07-14	診所	\N	大灣二街	275	0	診所	533	\N	2025-07-14 02:45:01.24402	5_195_29	fixed	\N	\N	\N	\N	\N	\N
+1956	2025-07-14	育德二路		診所	90	0	診所	61553	\N	2025-07-14 02:50:00.249174	14_195_29	fixed	\N	\N	\N	\N	\N	\N
+1957	2025-07-14	健康三街	府前二街	診所	230	0	診所	28530	\N	2025-07-14 02:55:00.243203	18_195_29	fixed	\N	\N	\N	\N	\N	\N
+1958	2025-07-14	診所	\N	北門路二段	125	0	診所	61553	\N	2025-07-14 03:00:00.249311	51_195_29	fixed	\N	\N	\N	\N	\N	\N
+1959	2025-07-14	診所	新建路	中華南路	215	0	診所	28530	\N	2025-07-14 03:20:01.567033	19_195_29	fixed	\N	\N	\N	\N	\N	\N
+1961	2025-07-14	診所	和緯152	中華北路	200	0	診所	533	\N	2025-07-14 04:15:02.189177	7_195_29	fixed	\N	\N	\N	\N	\N	\N
+1963	2025-07-14	診所	\N	仁和路	220	0	診所	533	\N	2025-07-14 06:45:00.240827	10_195_29	fixed	\N	\N	\N	\N	\N	\N
+1964	2025-07-14	同安路	\N	診所	220	0	診所	61553	\N	2025-07-14 06:55:00.241184	15_195_29	fixed	\N	\N	\N	\N	\N	\N
+1965	2025-07-14	診所		育德二路	95	0	診所	28530	\N	2025-07-14 07:00:00.241537	21_195_29	fixed	\N	\N	\N	\N	\N	\N
+1966	2025-07-14	診所	\N	安定	500	0	診所	61367	\N	2025-07-14 07:00:00.241537	12_195_29	fixed	\N	\N	\N	\N	\N	\N
+1967	2025-07-14	診所	\N	永大路	280	0	診所	61553	\N	2025-07-14 07:20:00.241084	16_195_29	fixed	\N	\N	\N	\N	\N	\N
+1968	2025-07-14	小北路	民德105	診所	120	0	診所	533	\N	2025-07-14 07:30:00.246798	4_195_29	fixed	\N	\N	\N	\N	\N	\N
+1969	2025-07-14	診所	府前二街	健康三街	230	0	診所	28530	\N	2025-07-14 07:45:02.162455	20_195_29	fixed	\N	\N	\N	\N	\N	\N
+1970	2025-07-14	東洋後門	台南大飯店	上海好味道	\N	\N	東洋	28530	\N	2025-07-14 09:35:00.243393	T_1905	temp	\N	\N	\N	\N	\N	\N
+1971	2025-07-14	東洋後門	\N	二井家	1400	0	東洋	5386	\N	2025-07-14 09:35:01.235405	39_195_29	fixed	\N	\N	\N	\N	\N	\N
+1973	2025-07-15	安中路四段	太子龍	小港機場	\N	\N	東洋	28530	\N	2025-07-14 20:20:02.159513	T_1897	temp	\N	\N	\N	\N	\N	\N
+1974	2025-07-15	新化山腳里	\N	小港機場	\N	\N	東洋	5386	\N	2025-07-14 20:35:00.241954	T_1898	temp	\N	\N	\N	\N	\N	\N
+1975	2025-07-15	怡平路	湖美街+忠孝街	診所	190	0	診所	533	\N	2025-07-14 22:15:01.207749	22_196_29	fixed	\N	\N	\N	\N	\N	\N
+1976	2025-07-15	土城		診所	345	0	診所	61367	\N	2025-07-14 22:35:00.23963	45_196_29	fixed	\N	\N	\N	\N	\N	\N
+1977	2025-07-15	安北路	古堡街+和緯五	診所	230	0	診所	533	\N	2025-07-14 22:35:01.215837	23_196_29	fixed	\N	\N	\N	\N	\N	\N
+1978	2025-07-15	久保田家	新戶家	東洋後門	360	0	東洋	5386	\N	2025-07-14 23:15:01.223573	41_196_29	fixed	\N	\N	\N	\N	\N	\N
+1962	2025-07-14	小港機場	\N	台南大飯店	1560	400	東洋	5386	\N	2025-07-14 06:35:00.240925	T_1896	temp	\N	linyan	[1] （taxi=150	2025-07-14 23:20:41.092242	\N	\N
+1979	2025-07-15	新戶家	台南大飯店	高鐵站	\N	\N	東洋	533	\N	2025-07-14 23:35:00.242563	T_1899	temp	\N	\N	\N	\N	\N	\N
+1960	2025-07-14	永大路		診所	275	0	診所	533	\N	2025-07-14 03:35:00.2446	6_195_29	fixed	\N	linyan		2025-07-14 23:18:23.478552	\N	\N
+1972	2025-07-14	高鐵站	\N	新化山腳里	400	0	東洋	5386	\N	2025-07-14 14:00:01.969954	T_1911	temp	\N	linyan	[1] （記賬）;	2025-07-14 23:16:45.039893	張雨珊	\N
+1981	2025-07-15	高鐵站	\N	東洋前門	680	\N	東洋	61367	\N	2025-07-15 01:25:01.204717	T_1906	temp	\N	\N	\N	\N	\N	\N
+1949	2025-07-14	新化山腳里	\N	高鐵站	400	0	東洋	533	\N	2025-07-13 22:55:00.241199	T_1895	temp	\N	linyan	[1] （記賬）	2025-07-15 03:52:02.295089	\N	\N
+1980	2025-07-15	東洋後門	群創D3哨	東洋後門	1100	875	東洋	5386	\N	2025-07-15 00:00:02.172726	T_1904	temp	\N	linyan	[1] （記賬）	2025-07-15 07:47:52.041059	蔡永福、黃筱菁、久保田	\N
+1983	2025-07-15	公園南路	海安路	診所	90	0	診所	533	\N	2025-07-15 02:25:00.236224	26_196_29	fixed	\N	\N	\N	\N	\N	\N
+1984	2025-07-15	診所	\N	忠孝街	85	0	診所	533	\N	2025-07-15 02:35:01.201131	54_196_29	fixed	\N	\N	\N	\N	\N	\N
+1985	2025-07-15	北門路三段	\N	診所	140	0	診所	61553	\N	2025-07-15 02:35:01.204794	32_196_29	fixed	\N	\N	\N	\N	\N	\N
+1986	2025-07-15	和緯四	文賢路	診所	140	0	診所	61553	\N	2025-07-15 02:55:00.240821	33_196_29	fixed	\N	\N	\N	\N	\N	\N
+1987	2025-07-15	診所	湖美街	怡平路	200	-70	診所	533	\N	2025-07-15 02:55:00.241641	25_196_29	fixed	\N	\N	\N	\N	\N	\N
+1988	2025-07-15	診所	和緯路+安北路	古堡街	220	0	診所	61367	\N	2025-07-15 02:55:01.22624	24_196_29	fixed	\N	\N	\N	\N	\N	\N
+1989	2025-07-15	南寧街	\N	診所	120	0	診所	61553	\N	2025-07-15 03:15:01.255756	35_196_29	fixed	\N	\N	\N	\N	\N	\N
+1990	2025-07-15	診所		土城	345	0	診所	61367	\N	2025-07-15 03:35:01.215712	46_196_29	fixed	\N	\N	\N	\N	\N	\N
+1991	2025-07-15	馬鎮宮	\N	診所	330	0	診所	533	\N	2025-07-15 03:55:02.169384	29_196_29	fixed	\N	\N	\N	\N	\N	\N
+1992	2025-07-15	診所	海安路	公園南路	90	0	診所	61553	\N	2025-07-15 06:45:01.227173	48_196_29	fixed	\N	\N	\N	\N	\N	\N
+1993	2025-07-15	診所	\N	南寧街	120	0	診所	533	\N	2025-07-15 07:20:01.23659	36_196_29	fixed	\N	\N	\N	\N	\N	\N
+1994	2025-07-15	診所	\N	北門路三段	140	0	診所	61553	\N	2025-07-15 07:35:00.244703	49_196_29	fixed	\N	\N	\N	\N	\N	\N
+1995	2025-07-15	診所	文賢路	和緯四	140	0	診所	533	\N	2025-07-15 07:35:01.227388	31_196_29	fixed	\N	\N	\N	\N	\N	\N
+1996	2025-07-15	診所	\N	馬鎮宮	330	0	診所	533	\N	2025-07-15 08:00:01.223759	30_196_29	fixed	\N	\N	\N	\N	\N	\N
+1997	2025-07-15	高鐵站	\N	愛買台南店	570	0	東洋	5386	\N	2025-07-15 08:00:01.223759	T_1912	temp	\N	linyan	[1] （記賬）	2025-07-15 08:30:25.499541	新戶、常川、泉川	\N
+1998	2025-07-15	東洋後門	東洋前門	老廣粵花雕雞	\N	\N	東洋	28530	\N	2025-07-15 09:15:01.286296	T_1907	temp	\N	\N	\N	\N	\N	\N
+\.
+
+
+--
+-- Data for Name: customers; Type: TABLE DATA; Schema: public; Owner: dispatch_system_db_user
+--
+
+COPY public.customers (id, name, address, short_name, category, remarks, contact_phone) FROM stdin;
+2	謝智超達恩診所	台南市中西區西門路二段375號3樓	診所	診所	\N	\N
+3	台南高鐵站	台南市歸仁區歸仁大道	高鐵站	東洋	\N	\N
+5	胡昌吉	台南市永康區大灣二街	大灣二街	診所	\N	\N
+7	和緯路二段	台南市北區和緯路二段152號	和緯152	診所	\N	\N
+9	小北路	台南市北區小北路16號	小北路	診所	\N	\N
+10	民德路	台南市北區民德路105巷	民德105	診所	\N	\N
+11	永大路三段	台南市永康區永大路三段	永大路	診所	\N	\N
+12	中華南路	台南市南區中華南路二段	中華南路	診所	\N	\N
+13	新建路	台南市南區新建路	新建路	診所	\N	\N
+15	俊文	台南市中西區府前二街48號	府前二街	診所	\N	\N
+16	育德二路	台南市北區育德二路	育德二路	診所	\N	\N
+17	民德路58	台南市北區民德路58巷	民德58	診所	\N	\N
+18	怡平路	台南市安平區怡平路	怡平路	診所	\N	\N
+19	忠孝街	台南市中西區忠孝街	忠孝街	診所	\N	\N
+21	古堡街	台南市安平區古堡街	古堡街	診所	\N	\N
+22	和緯路五段	台南市安平區和緯路五段	和緯五	診所	\N	\N
+23	公園南路	台南市北區公園南路	公園南路	診所	\N	\N
+24	海安路二段	台南市中西區海安路二段	海安路	診所	\N	\N
+25	金華路二段	台南市南區金華路二段283號	金華路	診所	\N	\N
+26	灣裡馬鎮宮	台南市南區灣裡路	馬鎮宮	診所	\N	\N
+28	和緯路四段	台南市北區和緯路四段105巷	和緯四	診所	\N	\N
+29	文賢路	台南市北區文賢路	文賢路	診所	\N	\N
+31	南寧街	台南市中西區南寧街	南寧街	診所	\N	\N
+32	仁和路	台南市東區仁和路111巷24號	仁和路	診所	\N	\N
+33	錦霞	台南市安定區安定里	安定	診所	\N	\N
+34	長溪路一段	台南市安南區長溪路一段	長溪路	診所	\N	\N
+35	同安路	台南市安南區同安路	同安路	診所	\N	\N
+14	健康三街	台南市安平區健康三街12巷	健康三街	診所	\N	\N
+39	海東六街	海東六街38號	海東六街	診所	\N	\N
+4	林明煒	台南市南區文南路71號	文南71	東洋	\N	\N
+40	東洋員工出入口	台南市安南區工業三路50號	東洋後門	東洋	\N	\N
+38	新戶	台南市北區公園南路站前CASA	新戶家	東洋	\N	\N
+36	二井	高雄市前鎮區中山二路198號	二井家	東洋	\N	\N
+37	久保田	台南市北區公園南路站前CASA	久保田家	東洋	\N	\N
+1	東洋先端科技	台南市安南區工業三路50號	東洋前門	東洋	\N	\N
+42	群創D3哨口	台南市新市區環西路一段群創D3哨口	群創D3哨	東洋	\N	\N
+41	澣宇彩晶股份有限公司	台南市新市區南科二路35號	HANNSTAR	東洋	\N	\N
+43	張慶輝	台南市安南區安通一街80號	協理家	東洋	\N	\N
+45	群創T6廠	高雄市路竹區路科十路11號	群創路科廠	東洋	\N	\N
+49	Park17	台南市新市區南科三路17號	Park17	東洋	\N	\N
+50	小港機場	高雄市小港區中山四路2號	小港機場	東洋	\N	\N
+51	陳漢隆	台南市安南區安中路四段320巷118號	立興大學城	東洋	\N	\N
+52	蔡永福	台南市北區公園南路太子龍	太子龍	東洋	\N	\N
+53	閎康科技	台南市新市區南科三路9號	南科三路	東洋	\N	\N
+54	楊智凱	台南市東區裕和二街96號5樓	裕和二街	東洋	\N	\N
+20	洪陳秀月	台南市安平區安北路16巷17弄6號	安北路	診所	\N	\N
+55	多多良	預約時未提供地址	多多良	東洋	\N	\N
+59	黃筱菁	台南市安南區安興街181巷107弄2號	黃筱菁	東洋	\N	0919633466
+65	陳怡憬	預約時未提供地址	陳怡憬	東洋	\N	\N
+46	蔡宜臻	台南市北區公園北路156號	公園北	東洋	\N	\N
+47	黃靖雅	高雄市湖內區民權路156巷口	湖內民權路	東洋	\N	\N
+48	高雄上課	高雄市前金區中正四路215號	中正四路	東洋	\N	\N
+56	金卻	台南市七股區永吉里22-5號	七股永吉里	診所	\N	0978083566
+62	劉宜萱	台南市北區長北街112號	劉宜萱	東洋	\N	\N
+30	信智	台南市北區北門路三段	北門路三段	診所	\N	\N
+8	北門路二段	台南市北區北門路二段527巷口	北門路二段	診所	\N	\N
+64	邱富秋	台南市安平區湖美街12巷3號	湖美富秋	診所	\N	\N
+57	如卿	台南市安南區安中路六段	土城	診所	\N	\N
+73	常川	預約時未提供地址	常川	東洋	\N	\N
+66	未設置	未設置	臨時地點	臨時	\N	\N
+67	金卻	台南市中西區湖美街60巷26號	湖美街	診所	\N	\N
+68	高橋	預約時未提供地址	高橋	東洋	\N	\N
+69	Allen	預約時未提供地址	Allen	東洋	\N	\N
+70	Andy	預約時未提供地址	Andy	東洋	\N	\N
+71	張雨珊	台南市新化區山腳里	張雨珊	東洋	\N	\N
+72	林秋慧	預約時未提供地址	林秋慧	東洋	\N	\N
+6	中華北路	台南市北區台南市北區中華北路一段105巷53號	中華北路	診所	\N	\N
+74	泉川	預約時未提供地址	泉川	東洋	\N	\N
+\.
+
+
+--
+-- Data for Name: drivers; Type: TABLE DATA; Schema: public; Owner: dispatch_system_db_user
+--
+
+COPY public.drivers (id, name, plate_number, car_brand, car_model) FROM stdin;
+5386	崔林彥	TDE-5386	Toyota	RAV4
+28530	涂文峰	留空後補	Toyota	RAV4
+533	黃清池	留空後補	Toyota	Camry
+61553	蘇木山	留空後補	Toyota	Camry
+61367	王華南	留空後補	Toyota	Cross
+61379	黃榮章	留空後補	Toyota	Camry
+9999	其他	其他	其他	其他
+61153	鍾德忠		Toyota	RAV4
+61353	老芋仔	留空後補	Toyota	\N
+\.
+
+
+--
+-- Data for Name: fixed_schedules; Type: TABLE DATA; Schema: public; Owner: dispatch_system_db_user
+--
+
+COPY public.fixed_schedules (id, route_number, departure_time, start_point, via_point, end_point, base_fare, surcharge, category, driver_id, direction, status, note, modified_by, modification_time) FROM stdin;
+5	135	10:40:00	診所	\N	大灣二街	275	\N	診所	533	回	準備	\N	\N	\N
+10	135	14:40:00	診所	\N	仁和路	220	\N	診所	533	回	準備	\N	\N	\N
+12	135	15:00:00	診所	\N	安定	500	\N	診所	5386	回	準備	\N	\N	\N
+13	135	09:50:00	診所	\N	長溪路	210	\N	診所	61553	回	準備	\N	\N	\N
+16	135	15:15:00	診所	\N	永大路	280	\N	診所	61553	回	準備	\N	\N	\N
+30	246	16:00:00	診所	\N	馬鎮宮	330	\N	診所	533	回	準備	\N	\N	\N
+31	246	15:30:00	診所	文賢路	和緯四	140	\N	診所	533	回	準備	\N	\N	\N
+36	246	15:15:00	診所	\N	南寧街	120	\N	診所	533	回	準備	\N	\N	\N
+6	135	11:30:00	永大路	\N	診所	280	\N	診所	533	來	準備	\N	\N	\N
+11	135	10:00:00	安定	\N	診所	500	\N	診所	5386	來	準備	\N	\N	\N
+15	135	14:50:00	同安路	\N	診所	220	\N	診所	61553	來	準備	\N	\N	\N
+26	246	10:20:00	公園南路	海安路	診所	90	\N	診所	533	來	準備	\N	\N	\N
+29	246	11:50:00	馬鎮宮	\N	診所	330	\N	診所	5386	來	準備	\N	\N	\N
+33	246	10:50:00	和緯四	文賢路	診所	140	\N	診所	61553	來	準備	\N	\N	\N
+35	246	11:10:00	南寧街	\N	診所	120	\N	診所	61553	來	準備	\N	\N	\N
+1	135	05:20:00	大灣二街	\N	診所	275	\N	診所	533	來	準備	\N	\N	\N
+7	135	12:10:00	診所	和緯152	中華北路	200	\N	診所	533	回	準備	\N	\N	\N
+2	135	07:30:00	中華北路	和緯152	診所	200	\N	診所	533	來	準備	\N	\N	\N
+38	135	06:20:00	二井家	\N	東洋後門	1400	\N	東洋	5386	來	準備	\N	\N	\N
+40	24	06:20:00	二井家	\N	東洋後門	1400	\N	東洋	28530	來	準備	\N	\N	\N
+39	12345	17:30:00	東洋後門	\N	二井家	1400	\N	東洋	5386	回	準備	\N	\N	\N
+41	24	07:10:00	久保田家	新戶家	東洋後門	360	\N	東洋	5386	來	準備	\N	\N	\N
+42	135	07:10:00	久保田家	新戶家	東洋後門	360	\N	東洋	28530	來	準備	\N	\N	\N
+43	12345	17:30:00	東洋後門	新戶家	久保田家	360	\N	東洋	28530	回	準備	\N	\N	\N
+14	135	10:45:00	育德二路		診所	90	\N	診所	61553	來	準備	\N	\N	\N
+21	135	15:00:00	診所		育德二路	95	\N	診所	28530	回	準備	\N	\N	\N
+44	6	14:40:00	診所	海安路	公園南路	90	\N	診所	533	回	準備	\N	\N	\N
+9	135	09:30:00	仁和路	\N	診所	220	\N	診所	533	來	準備	\N	\N	\N
+54	246	10:30:00	診所	\N	忠孝街	85	\N	診所	533	回	準備	\N	\N	\N
+17	135	06:20:00	中華南路	新建路	診所	215	0	診所	28530	來	準備	\N	用戶c011	2025-06-26 09:44:15.486015
+19	135	11:15:00	診所	新建路	中華南路	215	0	診所	28530	回	準備	\N	用戶c011	2025-06-26 09:45:19.321382
+45	246	06:30:00	土城		診所	345	\N	診所	533	來	準備	\N	\N	\N
+25	246	10:50:00	診所	湖美街	怡平路	200	\N	診所	533	回	準備	\N	\N	\N
+18	135	10:50:00	健康三街	府前二街	診所	230	\N	診所	28530	來	準備	\N	\N	\N
+20	135	15:40:00	診所	府前二街	健康三街	230	\N	診所	28530	回	準備	\N	\N	\N
+24	246	10:50:00	診所	和緯路+安北路	古堡街	220	0	診所	5386	回	準備	\N	linyan	2025-06-24 01:06:03.869673
+46	246	11:30:00	診所		土城	345	\N	診所	28530	回	準備	\N	\N	\N
+4	135	15:25:00	小北路	民德105	診所	120	\N	診所	533	來	準備	\N	\N	\N
+48	24	14:40:00	診所	海安路	公園南路	90	\N	診所	61553	回	準備	\N	\N	\N
+49	24	15:30:00	診所	\N	北門路三段	140	\N	診所	61553	回	準備	\N	\N	\N
+32	246	10:30:00	北門路三段	\N	診所	140	\N	診所	61553	來	準備	\N	\N	\N
+50	135	06:50:00	北門路二段	\N	診所	125	\N	診所	533	來	準備	\N	\N	\N
+51	135	11:00:00	診所	\N	北門路二段	125	\N	診所	61553	回	準備	\N	\N	\N
+23	24	06:30:00	安北路	古堡街+和緯五	診所	230	0	診所	5386	來	準備	\N	\N	\N
+52	6	06:30:00	安北路	古堡街+和緯五	診所	230	\N	診所	28530	來	準備	\N	\N	\N
+22	24	06:10:00	怡平路	湖美街+忠孝街	診所	190	0	診所	5386	來	準備	\N	linyan	2025-06-24 01:05:34.169757
+53	6	06:10:00	怡平路	湖美街+忠孝街	診所	190	\N	診所	28530	來	準備	\N	\N	\N
+\.
+
+
+--
+-- Data for Name: persons; Type: TABLE DATA; Schema: public; Owner: dispatch_system_db_user
+--
+
+COPY public.persons (id, name, contact, email, role, remarks) FROM stdin;
+\.
+
+
+--
+-- Data for Name: trips; Type: TABLE DATA; Schema: public; Owner: dispatch_system_db_user
+--
+
+COPY public.trips (trip_id, fixed_trip_id, week_number, date, "time", start_point, via_point, end_point, meter_fare, extra_fare, category, driver_id, status, unique_code, trip_type, custom_start_point, custom_via_point, custom_end_point, modified_by, modification_reason, modification_time, passenger_name, passenger_leave_reason) FROM stdin;
+1585	\N	28	2025-07-12	15:30:00	臨時地點	\N	臨時地點	140	0	診所	5386	已完成	T_1585	temp	診所	\N	北門路三段	linyan	\N	2025-07-12 21:30:10.502486	信智	
+1577	\N	28	2025-07-07	10:30:00	臨時地點	\N	臨時地點	245	\N	診所	5386	已完成	T_1577	temp	診所	\N	亞航社區	\N	\N	\N	\N	\N
+1582	\N	28	2025-07-11	06:50:00	臨時地點	\N	臨時地點	\N	\N	東洋	5386	已完成	T_1582	temp	協理家	\N	高鐵站	\N	\N	\N	張慶輝	\N
+1583	\N	28	2025-07-11	16:17:00	臨時地點	\N	臨時地點	\N	\N	東洋	5386	已完成	T_1583	temp	高鐵站	\N	協理家	\N	\N	\N	張慶輝	\N
+1808	5	29	2025-07-16	10:40:00	診所	\N	大灣二街	275	0	診所	533	準備	5_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1809	10	29	2025-07-16	14:40:00	診所	\N	仁和路	220	0	診所	533	準備	10_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1811	13	29	2025-07-16	09:50:00	診所	\N	長溪路	210	0	診所	61553	準備	13_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1812	16	29	2025-07-16	15:15:00	診所	\N	永大路	280	0	診所	61553	準備	16_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1813	6	29	2025-07-16	11:30:00	永大路	\N	診所	280	0	診所	533	準備	6_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1814	11	29	2025-07-16	10:00:00	安定	\N	診所	500	0	診所	5386	準備	11_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1815	15	29	2025-07-16	14:50:00	同安路	\N	診所	220	0	診所	61553	準備	15_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1816	1	29	2025-07-16	05:20:00	大灣二街	\N	診所	275	0	診所	533	準備	1_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1776	43	29	2025-07-14	17:30:00	東洋後門	新戶家	久保田家	360	0	東洋	28530	取消	43_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1794	40	29	2025-07-15	06:20:00	二井家	\N	東洋後門	1400	0	東洋	28530	取消	40_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1795	39	29	2025-07-15	17:30:00	東洋後門	\N	二井家	1400	0	東洋	5386	取消	39_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1797	43	29	2025-07-15	17:30:00	東洋後門	新戶家	久保田家	360	0	東洋	28530	取消	43_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1790	26	29	2025-07-15	10:20:00	公園南路	海安路	診所	90	0	診所	533	已完成	26_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1770	1	29	2025-07-14	05:20:00	大灣二街	\N	診所	275	0	診所	533	已完成	1_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1780	17	29	2025-07-14	06:20:00	中華南路	新建路	診所	215	0	診所	28530	已完成	17_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1773	38	29	2025-07-14	06:20:00	二井家	\N	東洋後門	1400	0	東洋	5386	已完成	38_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1775	42	29	2025-07-14	07:10:00	久保田家	新戶家	東洋後門	360	0	東洋	28530	已完成	42_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1772	2	29	2025-07-14	07:30:00	中華北路	和緯152	診所	200	0	診所	61379	已完成	2_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1801	24	29	2025-07-15	10:50:00	診所	和緯路+安北路	古堡街	220	0	診所	61367	已完成	24_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1779	9	29	2025-07-14	09:30:00	仁和路	\N	診所	220	0	診所	533	已完成	9_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1765	13	29	2025-07-14	09:50:00	診所	\N	長溪路	210	0	診所	61553	已完成	13_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1768	11	29	2025-07-14	10:00:00	安定	\N	診所	500	0	診所	5386	已完成	11_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1762	5	29	2025-07-14	10:40:00	診所	\N	大灣二街	275	0	診所	533	已完成	5_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1777	14	29	2025-07-14	10:45:00	育德二路		診所	90	0	診所	61553	已完成	14_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1782	18	29	2025-07-14	10:50:00	健康三街	府前二街	診所	230	0	診所	28530	已完成	18_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1786	51	29	2025-07-14	11:00:00	診所	\N	北門路二段	125	0	診所	61553	已完成	51_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1767	6	29	2025-07-14	11:30:00	永大路	\N	診所	280	0	診所	533	已完成	6_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1771	7	29	2025-07-14	12:10:00	診所	和緯152	中華北路	200	0	診所	533	已完成	7_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1810	12	29	2025-07-16	15:00:00	診所	\N	安定	500	0	診所	61367	準備	12_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1763	10	29	2025-07-14	14:40:00	診所	\N	仁和路	220	0	診所	533	已完成	10_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1769	15	29	2025-07-14	14:50:00	同安路	\N	診所	220	0	診所	61553	已完成	15_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1778	21	29	2025-07-14	15:00:00	診所		育德二路	95	0	診所	28530	已完成	21_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1766	16	29	2025-07-14	15:15:00	診所	\N	永大路	280	0	診所	61553	已完成	16_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1784	4	29	2025-07-14	15:25:00	小北路	民德105	診所	120	0	診所	533	已完成	4_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1783	20	29	2025-07-14	15:40:00	診所	府前二街	健康三街	230	0	診所	28530	已完成	20_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1774	39	29	2025-07-14	17:30:00	東洋後門	\N	二井家	1400	0	東洋	5386	已完成	39_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1799	45	29	2025-07-15	06:30:00	土城		診所	345	0	診所	61367	已完成	45_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1806	23	29	2025-07-15	06:30:00	安北路	古堡街+和緯五	診所	230	0	診所	533	已完成	23_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1796	41	29	2025-07-15	07:10:00	久保田家	新戶家	東洋後門	360	0	東洋	5386	已完成	41_196_29	fixed	\N	\N	\N	linyan	\N	2025-07-13 21:28:57.703743	\N	新戶出差另派
+1798	54	29	2025-07-15	10:30:00	診所	\N	忠孝街	85	0	診所	533	已完成	54_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1805	32	29	2025-07-15	10:30:00	北門路三段	\N	診所	140	0	診所	61553	已完成	32_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1792	33	29	2025-07-15	10:50:00	和緯四	文賢路	診所	140	0	診所	61553	已完成	33_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1793	35	29	2025-07-15	11:10:00	南寧街	\N	診所	120	0	診所	61553	已完成	35_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1802	46	29	2025-07-15	11:30:00	診所		土城	345	0	診所	61367	已完成	46_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1791	29	29	2025-07-15	11:50:00	馬鎮宮	\N	診所	330	0	診所	533	已完成	29_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1803	48	29	2025-07-15	14:40:00	診所	海安路	公園南路	90	0	診所	61553	已完成	48_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1789	36	29	2025-07-15	15:15:00	診所	\N	南寧街	120	0	診所	533	已完成	36_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1804	49	29	2025-07-15	15:30:00	診所	\N	北門路三段	140	0	診所	61553	已完成	49_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1788	31	29	2025-07-15	15:30:00	診所	文賢路	和緯四	140	0	診所	533	已完成	31_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1787	30	29	2025-07-15	16:00:00	診所	\N	馬鎮宮	330	0	診所	533	已完成	30_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1579	54	28	2025-07-10	10:30:00	診所	\N	忠孝街	85	0	診所	533	已完成	54_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1817	7	29	2025-07-16	12:10:00	診所	和緯152	中華北路	200	0	診所	533	準備	7_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1818	2	29	2025-07-16	07:30:00	中華北路	和緯152	診所	200	0	診所	533	準備	2_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1578	54	28	2025-07-08	10:30:00	診所	\N	忠孝街	85	0	診所	533	已完成	54_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1584	\N	28	2025-07-11	14:30:00	臨時地點	\N	臨時地點	680	\N	東洋	5386	已完成	T_1584	temp	東洋前門	\N	高鐵站	\N	\N	\N	林秋慧	\N
+1580	54	28	2025-07-12	10:30:00	診所	\N	忠孝街	85	0	診所	533	已完成	54_193_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1823	14	29	2025-07-16	10:45:00	育德二路		診所	90	0	診所	61553	準備	14_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1824	21	29	2025-07-16	15:00:00	診所		育德二路	95	0	診所	28530	準備	21_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1825	9	29	2025-07-16	09:30:00	仁和路	\N	診所	220	0	診所	533	準備	9_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1828	18	29	2025-07-16	10:50:00	健康三街	府前二街	診所	230	0	診所	28530	準備	18_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1829	20	29	2025-07-16	15:40:00	診所	府前二街	健康三街	230	0	診所	28530	準備	20_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1830	4	29	2025-07-16	15:25:00	小北路	民德105	診所	120	0	診所	533	準備	4_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1831	50	29	2025-07-16	06:50:00	北門路二段	\N	診所	125	0	診所	533	準備	50_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1832	51	29	2025-07-16	11:00:00	診所	\N	北門路二段	125	0	診所	61553	準備	51_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1833	30	29	2025-07-17	16:00:00	診所	\N	馬鎮宮	330	0	診所	533	準備	30_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1834	31	29	2025-07-17	15:30:00	診所	文賢路	和緯四	140	0	診所	533	準備	31_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1835	36	29	2025-07-17	15:15:00	診所	\N	南寧街	120	0	診所	533	準備	36_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1836	26	29	2025-07-17	10:20:00	公園南路	海安路	診所	90	0	診所	533	準備	26_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1837	29	29	2025-07-17	11:50:00	馬鎮宮	\N	診所	330	0	診所	5386	準備	29_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1838	33	29	2025-07-17	10:50:00	和緯四	文賢路	診所	140	0	診所	61553	準備	33_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1839	35	29	2025-07-17	11:10:00	南寧街	\N	診所	120	0	診所	61553	準備	35_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1840	40	29	2025-07-17	06:20:00	二井家	\N	東洋後門	1400	0	東洋	28530	準備	40_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1842	41	29	2025-07-17	07:10:00	久保田家	新戶家	東洋後門	360	0	東洋	5386	準備	41_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1844	54	29	2025-07-17	10:30:00	診所	\N	忠孝街	85	0	診所	533	準備	54_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1845	45	29	2025-07-17	06:30:00	土城		診所	345	0	診所	533	準備	45_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1846	25	29	2025-07-17	10:50:00	診所	湖美街	怡平路	200	0	診所	533	準備	25_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1847	24	29	2025-07-17	10:50:00	診所	和緯路+安北路	古堡街	220	0	診所	5386	準備	24_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1848	46	29	2025-07-17	11:30:00	診所		土城	345	0	診所	28530	準備	46_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1849	48	29	2025-07-17	14:40:00	診所	海安路	公園南路	90	0	診所	61553	準備	48_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1850	49	29	2025-07-17	15:30:00	診所	\N	北門路三段	140	0	診所	61553	準備	49_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1851	32	29	2025-07-17	10:30:00	北門路三段	\N	診所	140	0	診所	61553	準備	32_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1852	23	29	2025-07-17	06:30:00	安北路	古堡街+和緯五	診所	230	0	診所	5386	準備	23_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1853	22	29	2025-07-17	06:10:00	怡平路	湖美街+忠孝街	診所	190	0	診所	5386	準備	22_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1854	5	29	2025-07-18	10:40:00	診所	\N	大灣二街	275	0	診所	533	準備	5_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1855	10	29	2025-07-18	14:40:00	診所	\N	仁和路	220	0	診所	533	準備	10_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1856	12	29	2025-07-18	15:00:00	診所	\N	安定	500	0	診所	5386	準備	12_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1857	13	29	2025-07-18	09:50:00	診所	\N	長溪路	210	0	診所	61553	準備	13_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1858	16	29	2025-07-18	15:15:00	診所	\N	永大路	280	0	診所	61553	準備	16_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1859	6	29	2025-07-18	11:30:00	永大路	\N	診所	280	0	診所	533	準備	6_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1860	11	29	2025-07-18	10:00:00	安定	\N	診所	500	0	診所	5386	準備	11_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1861	15	29	2025-07-18	14:50:00	同安路	\N	診所	220	0	診所	61553	準備	15_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1862	1	29	2025-07-18	05:20:00	大灣二街	\N	診所	275	0	診所	533	準備	1_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1863	7	29	2025-07-18	12:10:00	診所	和緯152	中華北路	200	0	診所	533	準備	7_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1864	2	29	2025-07-18	07:30:00	中華北路	和緯152	診所	200	0	診所	533	準備	2_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1865	38	29	2025-07-18	06:20:00	二井家	\N	東洋後門	1400	0	東洋	5386	準備	38_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1866	39	29	2025-07-18	17:30:00	東洋後門	\N	二井家	1400	0	東洋	5386	準備	39_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1867	42	29	2025-07-18	07:10:00	久保田家	新戶家	東洋後門	360	0	東洋	28530	準備	42_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1868	43	29	2025-07-18	17:30:00	東洋後門	新戶家	久保田家	360	0	東洋	28530	準備	43_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1869	14	29	2025-07-18	10:45:00	育德二路		診所	90	0	診所	61553	準備	14_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1870	21	29	2025-07-18	15:00:00	診所		育德二路	95	0	診所	28530	準備	21_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1871	9	29	2025-07-18	09:30:00	仁和路	\N	診所	220	0	診所	533	準備	9_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1843	43	29	2025-07-17	17:30:00	東洋後門	新戶家	久保田家	360	0	東洋	28530	取消	43_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1819	38	29	2025-07-16	06:20:00	二井家	\N	東洋後門	1400	0	東洋	5386	取消	38_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1820	39	29	2025-07-16	17:30:00	東洋後門	\N	二井家	1400	0	東洋	5386	取消	39_197_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1821	42	29	2025-07-16	07:10:00	久保田家	新戶家	東洋後門	360	0	東洋	28530	準備	42_197_29	fixed	\N	\N	\N	闗山月	\N	2025-07-13 22:20:40.318669	\N	新戶出差另派
+1826	17	29	2025-07-16	06:20:00	中華南路	新建路	診所	215	-30	診所	28530	準備	17_197_29	fixed	\N	\N	\N	用戶59c6	\N	2025-07-15 18:19:12.144992	\N	新建路化療住院
+1827	19	29	2025-07-16	11:15:00	診所	新建路	中華南路	215	-30	診所	28530	準備	19_197_29	fixed	\N	\N	\N	用戶59c6	\N	2025-07-15 18:22:55.177972	\N	新建路化療住院
+1581	\N	28	2025-07-11	09:17:00	臨時地點	\N	臨時地點	\N	\N	東洋	5386	已完成	T_1581	temp	高鐵	\N	東洋	\N	\N	\N	\N	\N
+1872	17	29	2025-07-18	06:20:00	中華南路	新建路	診所	215	0	診所	28530	準備	17_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1873	19	29	2025-07-18	11:15:00	診所	新建路	中華南路	215	0	診所	28530	準備	19_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1874	18	29	2025-07-18	10:50:00	健康三街	府前二街	診所	230	0	診所	28530	準備	18_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1875	20	29	2025-07-18	15:40:00	診所	府前二街	健康三街	230	0	診所	28530	準備	20_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1876	4	29	2025-07-18	15:25:00	小北路	民德105	診所	120	0	診所	533	準備	4_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1877	50	29	2025-07-18	06:50:00	北門路二段	\N	診所	125	0	診所	533	準備	50_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1878	51	29	2025-07-18	11:00:00	診所	\N	北門路二段	125	0	診所	61553	準備	51_199_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1879	30	29	2025-07-19	16:00:00	診所	\N	馬鎮宮	330	0	診所	533	準備	30_200_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1880	31	29	2025-07-19	15:30:00	診所	文賢路	和緯四	140	0	診所	533	準備	31_200_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1881	36	29	2025-07-19	15:15:00	診所	\N	南寧街	120	0	診所	533	準備	36_200_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1882	26	29	2025-07-19	10:20:00	公園南路	海安路	診所	90	0	診所	533	準備	26_200_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1883	29	29	2025-07-19	11:50:00	馬鎮宮	\N	診所	330	0	診所	5386	準備	29_200_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1884	33	29	2025-07-19	10:50:00	和緯四	文賢路	診所	140	0	診所	61553	準備	33_200_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1885	35	29	2025-07-19	11:10:00	南寧街	\N	診所	120	0	診所	61553	準備	35_200_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1886	44	29	2025-07-19	14:40:00	診所	海安路	公園南路	90	0	診所	533	準備	44_200_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1888	45	29	2025-07-19	06:30:00	土城		診所	345	0	診所	533	準備	45_200_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1889	25	29	2025-07-19	10:50:00	診所	湖美街	怡平路	200	0	診所	533	準備	25_200_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1890	24	29	2025-07-19	10:50:00	診所	和緯路+安北路	古堡街	220	0	診所	5386	準備	24_200_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1891	46	29	2025-07-19	11:30:00	診所		土城	345	0	診所	28530	準備	46_200_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1892	32	29	2025-07-19	10:30:00	北門路三段	\N	診所	140	0	診所	61553	準備	32_200_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1893	52	29	2025-07-19	06:30:00	安北路	古堡街+和緯五	診所	230	0	診所	28530	準備	52_200_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1894	53	29	2025-07-19	06:10:00	怡平路	湖美街+忠孝街	診所	190	0	診所	28530	準備	53_200_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1887	54	29	2025-07-19	10:30:00	診所	\N	忠孝街	85	0	診所	28530	準備	54_200_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1764	12	29	2025-07-14	15:00:00	診所	\N	安定	500	0	診所	61367	已完成	12_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1905	\N	29	2025-07-14	17:30:00	臨時地點	\N	臨時地點	\N	\N	東洋	28530	已完成	T_1905	temp	東洋後門	台南大飯店	上海好味道	\N	\N	\N	新戶、久保田、常川、泉川	\N
+1911	\N	29	2025-07-14	21:32:00	臨時地點	\N	臨時地點	\N	\N	東洋	5386	已完成	T_1911	temp	高鐵站	\N	新化山腳里	\N	\N	\N	張雨珊	\N
+1906	\N	29	2025-07-15	09:20:00	臨時地點	\N	臨時地點	680	\N	東洋	61367	已完成	T_1906	temp	高鐵站	\N	東洋前門	\N	\N	\N	多多良、高橋	\N
+1800	25	29	2025-07-15	10:50:00	診所	湖美街	怡平路	200	-70	診所	533	已完成	25_196_29	fixed	\N	\N	\N	linyan	\N	2025-07-14 07:55:13.051871	\N	怡平路請假
+1907	\N	29	2025-07-15	17:10:00	臨時地點	\N	臨時地點	\N	\N	東洋	28530	已完成	T_1907	temp	東洋後門	東洋前門	老廣粵花雕雞	\N	\N	\N	新戶、久保田、多多良、高橋	\N
+1785	50	29	2025-07-14	06:50:00	北門路二段	\N	診所	125	0	診所	61379	已完成	50_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1458	38	28	2025-07-07	06:20:00	二井家	\N	東洋後門	1400	0	東洋	5386	取消	38_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1459	39	28	2025-07-07	17:30:00	東洋後門	\N	二井家	1400	0	東洋	5386	取消	39_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1460	42	28	2025-07-07	07:10:00	久保田家	新戶家	東洋後門	360	0	東洋	28530	取消	42_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1895	\N	29	2025-07-14	06:50:00	臨時地點	\N	臨時地點	\N	\N	東洋	533	已完成	T_1895	temp	新化山腳里	\N	高鐵站	\N	\N	\N	張雨珊	\N
+1461	43	28	2025-07-07	17:30:00	東洋後門	新戶家	久保田家	360	0	東洋	28530	取消	43_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1781	19	29	2025-07-14	11:15:00	診所	新建路	中華南路	215	0	診所	28530	已完成	19_195_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1455	1	28	2025-07-07	05:20:00	大灣二街	\N	診所	275	0	診所	533	已完成	1_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1457	2	28	2025-07-07	07:30:00	中華北路	和緯152	診所	200	0	診所	533	已完成	2_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1465	17	28	2025-07-07	06:20:00	中華南路	新建路	診所	215	0	診所	28530	已完成	17_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1470	50	28	2025-07-07	06:50:00	北門路二段	\N	診所	125	0	診所	533	已完成	50_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1450	13	28	2025-07-07	09:50:00	診所	\N	長溪路	210	0	診所	61553	已完成	13_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1453	11	28	2025-07-07	10:00:00	安定	\N	診所	500	0	診所	5386	已完成	11_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1464	9	28	2025-07-07	09:30:00	仁和路	\N	診所	220	0	診所	533	已完成	9_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1447	5	28	2025-07-07	10:40:00	診所	\N	大灣二街	275	0	診所	533	已完成	5_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1462	14	28	2025-07-07	10:45:00	育德二路		診所	90	0	診所	61553	已完成	14_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1467	18	28	2025-07-07	10:50:00	健康三街	府前二街	診所	230	0	診所	28530	已完成	18_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1471	51	28	2025-07-07	11:00:00	診所	\N	北門路二段	125	0	診所	61553	已完成	51_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1452	6	28	2025-07-07	11:30:00	永大路	\N	診所	280	0	診所	533	已完成	6_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1466	19	28	2025-07-07	11:15:00	診所	新建路	中華南路	215	0	診所	28530	已完成	19_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1456	7	28	2025-07-07	12:10:00	診所	和緯152	中華北路	200	0	診所	533	已完成	7_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1448	10	28	2025-07-07	14:40:00	診所	\N	仁和路	220	0	診所	533	已完成	10_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1449	12	28	2025-07-07	15:00:00	診所	\N	安定	500	0	診所	5386	已完成	12_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1454	15	28	2025-07-07	14:50:00	同安路	\N	診所	220	0	診所	61553	已完成	15_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1463	21	28	2025-07-07	15:00:00	診所		育德二路	95	0	診所	28530	已完成	21_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1451	16	28	2025-07-07	15:15:00	診所	\N	永大路	280	0	診所	61553	已完成	16_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1468	20	28	2025-07-07	15:40:00	診所	府前二街	健康三街	230	0	診所	28530	已完成	20_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1469	4	28	2025-07-07	15:25:00	小北路	民德105	診所	120	0	診所	533	已完成	4_188_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1490	22	28	2025-07-08	06:10:00	怡平路	湖美街+忠孝街	診所	190	0	診所	5386	已完成	22_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1479	40	28	2025-07-08	06:20:00	二井家	\N	東洋後門	1400	0	東洋	28530	已完成	40_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1489	23	28	2025-07-08	06:30:00	安北路	古堡街+和緯五	診所	230	0	診所	5386	已完成	23_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1484	45	28	2025-07-08	06:30:00	土城		診所	345	0	診所	533	已完成	45_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1481	41	28	2025-07-08	07:10:00	久保田家	新戶家	東洋後門	360	0	東洋	5386	已完成	41_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1475	26	28	2025-07-08	10:20:00	公園南路	海安路	診所	90	0	診所	533	已完成	26_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1488	32	28	2025-07-08	10:30:00	北門路三段	\N	診所	140	0	診所	61553	已完成	32_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1477	33	28	2025-07-08	10:50:00	和緯四	文賢路	診所	140	0	診所	61553	已完成	33_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1491	25	28	2025-07-08	10:50:00	診所	湖美街	怡平路	200	0	診所	5386	已完成	25_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1483	24	28	2025-07-08	10:50:00	診所	和緯路+安北路	古堡街	220	0	診所	533	已完成	24_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1478	35	28	2025-07-08	11:10:00	南寧街	\N	診所	120	0	診所	61553	已完成	35_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1485	46	28	2025-07-08	11:30:00	診所		土城	345	0	診所	28530	已完成	46_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1476	29	28	2025-07-08	11:50:00	馬鎮宮	\N	診所	330	0	診所	5386	已完成	29_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1486	48	28	2025-07-08	14:40:00	診所	海安路	公園南路	90	0	診所	61553	已完成	48_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1474	36	28	2025-07-08	15:15:00	診所	\N	南寧街	120	0	診所	533	已完成	36_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1487	49	28	2025-07-08	15:30:00	診所	\N	北門路三段	140	0	診所	61553	已完成	49_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1473	31	28	2025-07-08	15:30:00	診所	文賢路	和緯四	140	0	診所	533	已完成	31_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1472	30	28	2025-07-08	16:00:00	診所	\N	馬鎮宮	330	0	診所	533	已完成	30_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1482	43	28	2025-07-08	17:30:00	東洋後門	新戶家	久保田家	360	0	東洋	28530	已完成	43_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1480	39	28	2025-07-08	17:30:00	東洋後門	\N	二井家	1400	0	東洋	5386	已完成	39_189_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1495	13	28	2025-07-09	09:50:00	診所	\N	長溪路	210	0	診所	61553	已完成	13_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1498	11	28	2025-07-09	10:00:00	安定	\N	診所	500	0	診所	5386	已完成	11_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1492	5	28	2025-07-09	10:40:00	診所	\N	大灣二街	275	0	診所	533	已完成	5_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1497	6	28	2025-07-09	11:30:00	永大路	\N	診所	280	0	診所	533	已完成	6_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1493	10	28	2025-07-09	14:40:00	診所	\N	仁和路	220	0	診所	533	已完成	10_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1499	15	28	2025-07-09	14:50:00	同安路	\N	診所	220	0	診所	61553	已完成	15_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1494	12	28	2025-07-09	15:00:00	診所	\N	安定	500	0	診所	5386	已完成	12_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1496	16	28	2025-07-09	15:15:00	診所	\N	永大路	280	0	診所	61553	已完成	16_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1548	38	28	2025-07-11	06:20:00	二井家	\N	東洋後門	1400	0	東洋	5386	取消	38_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1500	1	28	2025-07-09	05:20:00	大灣二街	\N	診所	275	0	診所	533	已完成	1_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1510	17	28	2025-07-09	06:20:00	中華南路	新建路	診所	215	0	診所	28530	已完成	17_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1503	38	28	2025-07-09	06:20:00	二井家	\N	東洋後門	1400	0	東洋	5386	已完成	38_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1515	50	28	2025-07-09	06:50:00	北門路二段	\N	診所	125	0	診所	533	已完成	50_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1505	42	28	2025-07-09	07:10:00	久保田家	新戶家	東洋後門	360	0	東洋	28530	已完成	42_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1502	2	28	2025-07-09	07:30:00	中華北路	和緯152	診所	200	0	診所	533	已完成	2_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1535	22	28	2025-07-10	06:10:00	怡平路	湖美街+忠孝街	診所	190	0	診所	5386	已完成	22_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1524	40	28	2025-07-10	06:20:00	二井家	\N	東洋後門	1400	0	東洋	28530	已完成	40_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1529	45	28	2025-07-10	06:30:00	土城		診所	345	0	診所	533	已完成	45_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1534	23	28	2025-07-10	06:30:00	安北路	古堡街+和緯五	診所	230	0	診所	5386	已完成	23_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1509	9	28	2025-07-09	09:30:00	仁和路	\N	診所	220	0	診所	533	已完成	9_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1507	14	28	2025-07-09	10:45:00	育德二路		診所	90	0	診所	61553	已完成	14_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1526	41	28	2025-07-10	07:10:00	久保田家	新戶家	東洋後門	360	0	東洋	5386	已完成	41_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1520	26	28	2025-07-10	10:20:00	公園南路	海安路	診所	90	0	診所	533	已完成	26_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1533	32	28	2025-07-10	10:30:00	北門路三段	\N	診所	140	0	診所	61553	已完成	32_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1522	33	28	2025-07-10	10:50:00	和緯四	文賢路	診所	140	0	診所	61553	已完成	33_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1536	25	28	2025-07-10	10:50:00	診所	湖美街	怡平路	200	0	診所	5386	已完成	25_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1528	24	28	2025-07-10	10:50:00	診所	和緯路+安北路	古堡街	220	0	診所	533	已完成	24_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1523	35	28	2025-07-10	11:10:00	南寧街	\N	診所	120	0	診所	61553	已完成	35_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1530	46	28	2025-07-10	11:30:00	診所		土城	345	0	診所	28530	已完成	46_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1521	29	28	2025-07-10	11:50:00	馬鎮宮	\N	診所	330	0	診所	5386	已完成	29_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1531	48	28	2025-07-10	14:40:00	診所	海安路	公園南路	90	0	診所	61553	已完成	48_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1519	36	28	2025-07-10	15:15:00	診所	\N	南寧街	120	0	診所	533	已完成	36_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1900	\N	29	2025-07-16	07:30:00	臨時地點	\N	臨時地點	\N	\N	東洋	5386	準備	T_1900	temp	新戶家	台南大飯店	高鐵站	\N	\N	\N	新戶、常川、泉川	\N
+1896	\N	29	2025-07-14	14:30:00	臨時地點	\N	臨時地點	\N	\N	東洋	5386	已完成	T_1896	temp	小港機場	\N	台南大飯店	\N	\N	\N	常川、泉川	\N
+1897	\N	29	2025-07-15	04:15:00	臨時地點	\N	臨時地點	\N	\N	東洋	28530	已完成	T_1897	temp	安中路四段	太子龍	小港機場	\N	\N	\N	\N	\N
+1898	\N	29	2025-07-15	04:30:00	臨時地點	\N	臨時地點	\N	\N	東洋	5386	已完成	T_1898	temp	新化山腳里	\N	小港機場	\N	\N	\N	張雨珊	\N
+1807	22	29	2025-07-15	06:10:00	怡平路	湖美街+忠孝街	診所	190	0	診所	533	已完成	22_196_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1532	49	28	2025-07-10	15:30:00	診所	\N	北門路三段	140	0	診所	61553	已完成	49_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1512	18	28	2025-07-09	10:50:00	健康三街	府前二街	診所	230	0	診所	28530	已完成	18_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1516	51	28	2025-07-09	11:00:00	診所	\N	北門路二段	125	0	診所	61553	已完成	51_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1511	19	28	2025-07-09	11:15:00	診所	新建路	中華南路	215	0	診所	28530	已完成	19_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1501	7	28	2025-07-09	12:10:00	診所	和緯152	中華北路	200	0	診所	533	已完成	7_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1508	21	28	2025-07-09	15:00:00	診所		育德二路	95	0	診所	28530	已完成	21_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1514	4	28	2025-07-09	15:25:00	小北路	民德105	診所	120	0	診所	533	已完成	4_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1513	20	28	2025-07-09	15:40:00	診所	府前二街	健康三街	230	0	診所	28530	已完成	20_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1506	43	28	2025-07-09	17:30:00	東洋後門	新戶家	久保田家	360	0	東洋	28530	已完成	43_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1504	39	28	2025-07-09	17:30:00	東洋後門	\N	二井家	1400	0	東洋	5386	已完成	39_190_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1518	31	28	2025-07-10	15:30:00	診所	文賢路	和緯四	140	0	診所	533	已完成	31_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1517	30	28	2025-07-10	16:00:00	診所	\N	馬鎮宮	330	0	診所	533	已完成	30_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1525	39	28	2025-07-10	17:30:00	東洋後門	\N	二井家	1400	0	東洋	5386	已完成	39_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1527	43	28	2025-07-10	17:30:00	東洋後門	新戶家	久保田家	360	0	東洋	28530	已完成	43_191_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1545	1	28	2025-07-11	05:20:00	大灣二街	\N	診所	275	0	診所	533	已完成	1_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1547	2	28	2025-07-11	07:30:00	中華北路	和緯152	診所	200	0	診所	533	已完成	2_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1540	13	28	2025-07-11	09:50:00	診所	\N	長溪路	210	0	診所	61553	已完成	13_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1543	11	28	2025-07-11	10:00:00	安定	\N	診所	500	0	診所	533	已完成	11_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1537	5	28	2025-07-11	10:40:00	診所	\N	大灣二街	275	0	診所	533	已完成	5_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1542	6	28	2025-07-11	11:30:00	永大路	\N	診所	280	0	診所	533	已完成	6_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1546	7	28	2025-07-11	12:10:00	診所	和緯152	中華北路	200	0	診所	533	已完成	7_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1538	10	28	2025-07-11	14:40:00	診所	\N	仁和路	220	0	診所	533	已完成	10_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1544	15	28	2025-07-11	14:50:00	同安路	\N	診所	220	0	診所	61553	已完成	15_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1539	12	28	2025-07-11	15:00:00	診所	\N	安定	500	0	診所	61367	已完成	12_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1541	16	28	2025-07-11	15:15:00	診所	\N	永大路	280	0	診所	61553	已完成	16_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1549	39	28	2025-07-11	17:30:00	東洋後門	\N	二井家	1400	0	東洋	5386	取消	39_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1555	17	28	2025-07-11	06:20:00	中華南路	新建路	診所	215	0	診所	28530	已完成	17_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1904	\N	29	2025-07-15	08:00:00	臨時地點	\N	臨時地點	\N	\N	東洋	5386	已完成	T_1904	temp	東洋後門	群創D3哨	東洋後門	\N	\N	\N	蔡永福、黃筱菁、久保田	\N
+1901	\N	29	2025-07-17	07:05:00	臨時地點	\N	臨時地點	360	\N	東洋	5386	準備	T_1901	temp	台南大飯店	新戶家	東洋後門	\N	\N	\N	常川、泉川	\N
+1903	\N	29	2025-07-15	10:00:00	臨時地點	\N	臨時地點	\N	\N	東洋	28530	已完成	T_1903	temp	群創D3哨	\N	東洋	\N	\N	\N	\N	\N
+1902	\N	29	2025-07-18	04:30:00	臨時地點	\N	臨時地點	\N	\N	東洋	5386	準備	T_1902	temp	台南大飯店	\N	小港機場	\N	\N	\N	常川、泉川	\N
+1841	39	29	2025-07-17	17:30:00	東洋後門	\N	二井家	1400	0	東洋	5386	取消	39_198_29	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1560	50	28	2025-07-11	06:50:00	北門路二段	\N	診所	125	0	診所	533	已完成	50_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1550	42	28	2025-07-11	07:10:00	久保田家	新戶家	東洋後門	360	0	東洋	28530	已完成	42_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1554	9	28	2025-07-11	09:30:00	仁和路	\N	診所	220	0	診所	28530	已完成	9_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1822	43	29	2025-07-16	17:30:00	東洋後門	新戶家	久保田家	360	0	東洋	28530	準備	43_197_29	fixed	\N	\N	\N	闗山月	\N	2025-07-13 22:21:28.679263	\N	新戶出差另派
+1908	\N	29	2025-07-16	12:50:00	臨時地點	\N	臨時地點	550	\N	東洋	5386	準備	T_1908	temp	瀚宇彩晶	\N	東洋前門	\N	\N	\N	\N	\N
+1909	\N	29	2025-07-16	06:50:00	臨時地點	\N	臨時地點	\N	\N	東洋	61553	準備	T_1909	temp	協理家	\N	高鐵站	\N	\N	\N	張慶輝	\N
+1910	\N	29	2025-07-16	16:32:00	臨時地點	\N	臨時地點	\N	\N	東洋	61553	準備	T_1910	temp	高鐵站	\N	協理家	\N	\N	\N	張慶輝	\N
+1899	\N	29	2025-07-15	07:30:00	臨時地點	\N	臨時地點	\N	\N	東洋	533	已完成	T_1899	temp	新戶家	台南大飯店	高鐵站	\N	\N	\N	新戶、常川、泉川	\N
+1912	\N	29	2025-07-15	15:15:00	臨時地點	\N	臨時地點	\N	\N	東洋	5386	已完成	T_1912	temp	高鐵站	\N	愛買台南店	\N	\N	\N	新戶、常川、泉川	\N
+1552	14	28	2025-07-11	10:45:00	育德二路		診所	90	0	診所	61553	已完成	14_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1557	18	28	2025-07-11	10:50:00	健康三街	府前二街	診所	230	0	診所	28530	已完成	18_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1561	51	28	2025-07-11	11:00:00	診所	\N	北門路二段	125	0	診所	61553	已完成	51_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1556	19	28	2025-07-11	11:15:00	診所	新建路	中華南路	215	0	診所	28530	已完成	19_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1553	21	28	2025-07-11	15:00:00	診所		育德二路	95	0	診所	28530	已完成	21_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1559	4	28	2025-07-11	15:25:00	小北路	民德105	診所	120	0	診所	533	已完成	4_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1558	20	28	2025-07-11	15:40:00	診所	府前二街	健康三街	230	0	診所	28530	已完成	20_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1551	43	28	2025-07-11	17:30:00	東洋後門	新戶家	久保田家	360	0	東洋	28530	已完成	43_192_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1575	53	28	2025-07-12	06:10:00	怡平路	湖美街+忠孝街	診所	190	0	診所	28530	已完成	53_193_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1574	52	28	2025-07-12	06:30:00	安北路	古堡街+和緯五	診所	230	0	診所	28530	已完成	52_193_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1571	45	28	2025-07-12	06:30:00	土城		診所	345	0	診所	533	已完成	45_193_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1565	26	28	2025-07-12	10:20:00	公園南路	海安路	診所	90	0	診所	533	已完成	26_193_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1573	32	28	2025-07-12	10:30:00	北門路三段	\N	診所	140	0	診所	61553	已完成	32_193_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1567	33	28	2025-07-12	10:50:00	和緯四	文賢路	診所	140	0	診所	61553	已完成	33_193_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1576	25	28	2025-07-12	10:50:00	診所	湖美街	怡平路	200	0	診所	5386	已完成	25_193_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1570	24	28	2025-07-12	10:50:00	診所	和緯路+安北路	古堡街	220	0	診所	533	已完成	24_193_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1568	35	28	2025-07-12	11:10:00	南寧街	\N	診所	120	0	診所	61553	已完成	35_193_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1572	46	28	2025-07-12	11:30:00	診所		土城	345	0	診所	28530	已完成	46_193_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1566	29	28	2025-07-12	11:50:00	馬鎮宮	\N	診所	330	0	診所	5386	已完成	29_193_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1569	44	28	2025-07-12	14:40:00	診所	海安路	公園南路	90	0	診所	5386	已完成	44_193_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1564	36	28	2025-07-12	15:15:00	診所	\N	南寧街	120	0	診所	533	已完成	36_193_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1563	31	28	2025-07-12	15:30:00	診所	文賢路	和緯四	140	0	診所	533	已完成	31_193_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+1562	30	28	2025-07-12	16:00:00	診所	\N	馬鎮宮	330	0	診所	533	已完成	30_193_28	fixed	\N	\N	\N	\N	\N	\N	\N	\N
+\.
+
+
+--
+-- Name: completed_trips_id_seq; Type: SEQUENCE SET; Schema: public; Owner: dispatch_system_db_user
+--
+
+SELECT pg_catalog.setval('public.completed_trips_id_seq', 1998, true);
+
+
+--
+-- Name: customers_id_seq; Type: SEQUENCE SET; Schema: public; Owner: dispatch_system_db_user
+--
+
+SELECT pg_catalog.setval('public.customers_id_seq', 535, false);
+
+
+--
+-- Name: customers_id_seq1; Type: SEQUENCE SET; Schema: public; Owner: dispatch_system_db_user
+--
+
+SELECT pg_catalog.setval('public.customers_id_seq1', 74, true);
+
+
+--
+-- Name: persons_id_seq; Type: SEQUENCE SET; Schema: public; Owner: dispatch_system_db_user
+--
+
+SELECT pg_catalog.setval('public.persons_id_seq', 1, false);
+
+
+--
+-- Name: trips_trip_id_seq; Type: SEQUENCE SET; Schema: public; Owner: dispatch_system_db_user
+--
+
+SELECT pg_catalog.setval('public.trips_trip_id_seq', 1912, true);
+
+
+--
+-- Name: completed_trips completed_trips_pkey; Type: CONSTRAINT; Schema: public; Owner: dispatch_system_db_user
+--
+
+ALTER TABLE ONLY public.completed_trips
+    ADD CONSTRAINT completed_trips_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customers customers_pkey; Type: CONSTRAINT; Schema: public; Owner: dispatch_system_db_user
+--
+
+ALTER TABLE ONLY public.customers
+    ADD CONSTRAINT customers_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: drivers drivers_pkey; Type: CONSTRAINT; Schema: public; Owner: dispatch_system_db_user
+--
+
+ALTER TABLE ONLY public.drivers
+    ADD CONSTRAINT drivers_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: fixed_schedules fixed_schedules_pkey; Type: CONSTRAINT; Schema: public; Owner: dispatch_system_db_user
+--
+
+ALTER TABLE ONLY public.fixed_schedules
+    ADD CONSTRAINT fixed_schedules_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: persons persons_pkey; Type: CONSTRAINT; Schema: public; Owner: dispatch_system_db_user
+--
+
+ALTER TABLE ONLY public.persons
+    ADD CONSTRAINT persons_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: trips trips_pkey; Type: CONSTRAINT; Schema: public; Owner: dispatch_system_db_user
+--
+
+ALTER TABLE ONLY public.trips
+    ADD CONSTRAINT trips_pkey PRIMARY KEY (trip_id);
+
+
+--
+-- Name: customers_short_name_key; Type: INDEX; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE UNIQUE INDEX customers_short_name_key ON public.customers USING btree (short_name);
+
+
+--
+-- Name: idx_completed_trips_date; Type: INDEX; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE INDEX idx_completed_trips_date ON public.completed_trips USING btree (date);
+
+
+--
+-- Name: idx_completed_trips_driver; Type: INDEX; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE INDEX idx_completed_trips_driver ON public.completed_trips USING btree (driver_id);
+
+
+--
+-- Name: idx_trips_date; Type: INDEX; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE INDEX idx_trips_date ON public.trips USING btree (date);
+
+
+--
+-- Name: idx_trips_driver; Type: INDEX; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE INDEX idx_trips_driver ON public.trips USING btree (driver_id);
+
+
+--
+-- Name: idx_trips_status; Type: INDEX; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE INDEX idx_trips_status ON public.trips USING btree (status);
+
+
+--
+-- Name: fixed_schedules trigger_set_schedule_id; Type: TRIGGER; Schema: public; Owner: dispatch_system_db_user
+--
+
+CREATE TRIGGER trigger_set_schedule_id BEFORE INSERT ON public.fixed_schedules FOR EACH ROW EXECUTE FUNCTION public.set_schedule_id();
+
+
+--
+-- Name: completed_trips completed_trips_driver_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dispatch_system_db_user
+--
+
+ALTER TABLE ONLY public.completed_trips
+    ADD CONSTRAINT completed_trips_driver_id_fkey FOREIGN KEY (driver_id) REFERENCES public.drivers(id);
+
+
+--
+-- Name: fixed_schedules fixed_schedules_end_point_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dispatch_system_db_user
+--
+
+ALTER TABLE ONLY public.fixed_schedules
+    ADD CONSTRAINT fixed_schedules_end_point_fkey FOREIGN KEY (end_point) REFERENCES public.customers(short_name) ON UPDATE CASCADE;
+
+
+--
+-- Name: fixed_schedules fixed_schedules_start_point_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dispatch_system_db_user
+--
+
+ALTER TABLE ONLY public.fixed_schedules
+    ADD CONSTRAINT fixed_schedules_start_point_fkey FOREIGN KEY (start_point) REFERENCES public.customers(short_name) ON UPDATE CASCADE;
+
+
+--
+-- Name: trips trips_driver_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dispatch_system_db_user
+--
+
+ALTER TABLE ONLY public.trips
+    ADD CONSTRAINT trips_driver_id_fkey FOREIGN KEY (driver_id) REFERENCES public.drivers(id);
+
+
+--
+-- Name: trips trips_end_point_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dispatch_system_db_user
+--
+
+ALTER TABLE ONLY public.trips
+    ADD CONSTRAINT trips_end_point_fkey FOREIGN KEY (end_point) REFERENCES public.customers(short_name) ON UPDATE CASCADE;
+
+
+--
+-- Name: trips trips_fixed_trip_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dispatch_system_db_user
+--
+
+ALTER TABLE ONLY public.trips
+    ADD CONSTRAINT trips_fixed_trip_id_fkey FOREIGN KEY (fixed_trip_id) REFERENCES public.fixed_schedules(id);
+
+
+--
+-- Name: trips trips_start_point_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dispatch_system_db_user
+--
+
+ALTER TABLE ONLY public.trips
+    ADD CONSTRAINT trips_start_point_fkey FOREIGN KEY (start_point) REFERENCES public.customers(short_name) ON UPDATE CASCADE;
+
+
+--
+-- Name: DEFAULT PRIVILEGES FOR SEQUENCES; Type: DEFAULT ACL; Schema: -; Owner: postgres
+--
+
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT ALL ON SEQUENCES TO dispatch_system_db_user;
+
+
+--
+-- Name: DEFAULT PRIVILEGES FOR TYPES; Type: DEFAULT ACL; Schema: -; Owner: postgres
+--
+
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT ALL ON TYPES TO dispatch_system_db_user;
+
+
+--
+-- Name: DEFAULT PRIVILEGES FOR FUNCTIONS; Type: DEFAULT ACL; Schema: -; Owner: postgres
+--
+
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT ALL ON FUNCTIONS TO dispatch_system_db_user;
+
+
+--
+-- Name: DEFAULT PRIVILEGES FOR TABLES; Type: DEFAULT ACL; Schema: -; Owner: postgres
+--
+
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT ALL ON TABLES TO dispatch_system_db_user;
+
+
+--
+-- PostgreSQL database dump complete
+--
+
