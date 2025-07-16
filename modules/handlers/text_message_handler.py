@@ -26,7 +26,6 @@ from modules.handlers.sequence_fix_handler import (
 from modules.services.driver_service import handle_driver_assign_request, handle_driver_assign_select, handle_driver_assign_confirm, handle_driver_assign_cancel
 
 # AI功能導入
-from modules.services.ai_fare_service import should_use_ai_query
 from modules.services.smart_assistant import process_with_smart_assistant, format_smart_response
 
 # 設定日誌
@@ -960,6 +959,31 @@ def process_text_message(event):
                         reply_text(reply_token, f"❌ 查詢執行失敗")
                     return
                 
+                # 🔥 修復：車資查詢命令整合 - 更精確的觸發條件
+                elif any(keyword in command for keyword in ["車資", "錶價", "加成", "修改.*金額", "記錄.*費用"]):
+                    # 只有明確的車資操作命令才調用車資AI服務
+                    try:
+                        from modules.services.ai_fare_service import handle_smart_fare_query
+                        result = handle_smart_fare_query(message_text, user_id, use_flex=True)
+                        
+                        if isinstance(result, str):
+                            reply_text(reply_token, result)
+                        elif isinstance(result, dict) and 'flex_message' in result:
+                            from linebot.v3.messaging import FlexMessage, FlexContainer
+                            flex_message = FlexMessage(
+                                alt_text=result.get("alt_text", "AI車資查詢結果"),
+                                contents=FlexContainer.from_dict(result['flex_message']),
+                                quick_reply=result.get('quick_reply')
+                            )
+                            reply_message(reply_token, [flex_message])
+                        else:
+                            reply_text(reply_token, result)
+                        return
+                    except Exception as e:
+                        logger.error(f"車資查詢執行失敗: {e}")
+                        reply_text(reply_token, f"❌ 車資查詢執行失敗：{str(e)}")
+                        return
+                
                 else:
                     # 其他命令嘗試傳統處理
                     reply_text(reply_token, f"✅ 收到命令：{command}\n正在處理...")
@@ -981,59 +1005,11 @@ def process_text_message(event):
                 
         except Exception as smart_error:
             logger.error(f"智能助手處理失敗: {smart_error}")
-            # 繼續使用傳統AI處理
+            # 如果智能助手失敗，繼續使用傳統邏輯
             pass
-            
-        # --- 🔥 傳統AI智能車資查詢檢測 (後備方案) ---
-        if should_use_ai_query(message_text):
-            try:
-                logger.info(f"檢測到AI智能車資查詢: {message_text}")
-                from modules.services.ai_fare_service import handle_smart_fare_query
-                
-                # 🔥 升級：啟用 Flex Message + Quick Reply 界面
-                result = handle_smart_fare_query(message_text, user_id, use_flex=True)
-                
-                # 🔥 修復：參考司機指派確認的成功處理方式
-                if isinstance(result, str):
-                    # 純文字結果
-                    reply_text(reply_token, result)
-                elif isinstance(result, dict) and 'flex_message' in result and 'quick_reply' in result:
-                    # 🔥 字典格式結果（和司機指派確認一樣）
-                    try:
-                        from linebot.v3.messaging import FlexMessage, FlexContainer
-                        
-                        flex_message = FlexMessage(
-                            alt_text=result.get("alt_text", "AI修改完成"),
-                            contents=FlexContainer.from_dict(result['flex_message']),
-                            quick_reply=result['quick_reply']
-                        )
-                        
-                        reply_message(reply_token, [flex_message])
-                        logger.info("成功發送AI修改完成的 Flex Message 與 Quick Reply")
-                    except Exception as flex_error:
-                        logger.error(f"發送AI Flex Message失敗: {flex_error}")
-                        traceback.print_exc()
-                        # 降級為文字模式
-                        try:
-                            fallback_result = handle_smart_fare_query(message_text, user_id, use_flex=False)
-                            reply_text(reply_token, fallback_result)
-                        except Exception as fallback_error:
-                            logger.error(f"AI文字模式降級也失敗: {fallback_error}")
-                            reply_text(reply_token, "❌ AI處理失敗，請稍後再試")
-                else:
-                    # 其他未知格式
-                    logger.warning(f"AI返回了未知格式的結果: {type(result)}")
-                    reply_text(reply_token, "❌ AI返回了無法識別的結果格式")
-                return
-            except Exception as e:
-                logger.error(f"AI智能車資查詢出錯: {e}")
-                traceback.print_exc()
-                reply_text(reply_token, f"❌ AI處理出錯: {str(e)}")
-                return
-        # --- 結束修改 ---
-            
+
         # --- 新增：查看已完成班次 ---
-        elif message_text.startswith("查看"):
+        if message_text.startswith("查看"):
             parts = message_text.split()
             if len(parts) >= 2:
                 try:
@@ -1053,8 +1029,8 @@ def process_text_message(event):
             return
         # --- 結束新增 ---
             
-        # 未識別的命令
-        else:
+        # 未識別的命令 - 使用智能助手處理
+        if True:  # 這裡會處理所有未識別的命令
             # 🚨 新增：檢測簡單請假格式（原因結尾加數字）
             # 🔧 修復：先排除已知的命令格式，避免誤判
             import re
@@ -1207,42 +1183,16 @@ def process_text_message(event):
                     traceback.print_exc()
                     # 如果AI处理失败，继续原有逻辑
             
-            # 🚀 使用智能助手處理未識別的命令
-            try:
-                logger.info(f"🤖 啟動智能助手處理: {message_text}")
-                smart_result = process_with_smart_assistant(message_text, user_id)
-                
-                if smart_result["type"] == "execute_command":
-                    # 智能助手解析出了標準命令，修改message_text繼續處理
-                    command = smart_result["command"]
-                    logger.info(f"✅ 智能助手解析成功，執行命令: {command}")
-                    
-                    # 修改message_text為AI生成的命令，讓它繼續被下面的邏輯處理
-                    message_text = command
-                    # 不要return，讓代碼繼續執行
-                else:
-                    # 提供智能引導或建議
-                    smart_response = format_smart_response(smart_result)
-                    logger.info(f"🎯 智能助手提供引導: {smart_result['type']}")
-                    reply_text(reply_token, smart_response)
-                    return
-                    
-            except Exception as smart_error:
-                logger.error(f"智能助手處理失敗: {smart_error}")
-                traceback.print_exc()
-                # 如果智能助手失敗，回退到原有邏輯
-                
-            # 原有的fallback邏輯（當智能助手也失敗時）
+            # 🔥 簡化fallback：當所有處理都失敗時的提示
             if any(keyword in message_text.lower() for keyword in ['車資', '費用', '查詢', '查', '找']):
-                suggestions = "💡 可能您想要使用AI車資查詢功能？\n\n範例:\n"
-                suggestions += "• 查詢今天台中車資\n"
-                suggestions += "• 查詢明天彰化車資\n" 
-                suggestions += "• 查詢6/1診所車資\n"
-                suggestions += "• 修改班次123車資500\n\n"
+                suggestions = "💡 建議使用自然語言描述需求：\n\n範例:\n"
+                suggestions += "• 前天司機5386所有班次\n"
+                suggestions += "• 查詢今天診所車資\n"
+                suggestions += "• 明天司機123的車資\n\n"
                 suggestions += "或使用「幫助」查看所有可用命令。"
                 reply_text(reply_token, suggestions)
             else:
-                reply_text(reply_token, "未識別的命令。請使用「幫助」查看可用命令。")
+                reply_text(reply_token, "未識別的命令。請使用「幫助」查看可用命令，或嘗試用自然語言描述您的需求。")
             
     except Exception as e:
         logger.error(f"處理消息時出錯: {e}")
