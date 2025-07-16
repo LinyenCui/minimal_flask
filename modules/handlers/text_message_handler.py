@@ -663,12 +663,31 @@ def process_text_message(event):
              return
         # --- 結束新增 ---
             
-        # --- 新增：記錄車資 --- 
+        # --- 🔥 修改：記錄車資統一使用智能引導模式 --- 
         elif message_text.startswith("記錄車資"):
-             result = handle_record_fare(message_text, user_id)
-             reply_text(reply_token, result)
-             return
-        # --- 結束新增 ---
+            # 統一使用智能引導模式，而不是直接處理
+            try:
+                from modules.services.ai_fare_service import handle_smart_fare_query
+                result = handle_smart_fare_query(message_text, user_id, use_flex=True)
+                
+                if isinstance(result, str):
+                    reply_text(reply_token, result)
+                elif isinstance(result, dict) and 'flex_message' in result:
+                    from linebot.v3.messaging import FlexMessage, FlexContainer
+                    flex_message = FlexMessage(
+                        alt_text=result.get("alt_text", "智能車資修改"),
+                        contents=FlexContainer.from_dict(result['flex_message']),
+                        quick_reply=result.get('quick_reply')
+                    )
+                    reply_message(reply_token, [flex_message])
+                else:
+                    reply_text(reply_token, result)
+                return
+            except Exception as e:
+                logger.error(f"智能車資處理失敗: {e}")
+                reply_text(reply_token, f"❌ 車資處理失敗：{str(e)}")
+                return
+        # --- 結束修改 ---
         
         # --- 新增：固定班表查詢功能 ---
         elif message_text.startswith("固定班表"):
@@ -928,12 +947,37 @@ def process_text_message(event):
                         reply_text(reply_token, f"❌ 統計金額執行失敗：{str(e)}")
                         return
                 
-                # 🔧 修復無限遞歸：直接執行命令而不是改變message_text
+                # 🔥 修復無限遞歸：直接執行命令而不是改變message_text
                 logger.info(f"🎯 智能助手生成命令: {command}")
                 logger.info(f"✅ 智能助手解析成功，執行命令: {command}")
                 
-                # 🔥 直接執行命令，不要改變message_text避免無限遞歸
-                if command.startswith("查已完成"):
+                # 🔥 智能引導模式：AI理解意圖後直接處理，不要生成標準命令
+                if command.startswith("記錄車資"):
+                    # 🎯 核心邏輯：AI已經理解用戶意圖，直接進入智能引導模式
+                    try:
+                        from modules.services.ai_fare_service import handle_smart_fare_query
+                        result = handle_smart_fare_query(message_text, user_id, use_flex=True)
+                        
+                        if isinstance(result, str):
+                            reply_text(reply_token, result)
+                        elif isinstance(result, dict) and 'flex_message' in result:
+                            from linebot.v3.messaging import FlexMessage, FlexContainer
+                            flex_message = FlexMessage(
+                                alt_text=result.get("alt_text", "AI智能修改確認"),
+                                contents=FlexContainer.from_dict(result['flex_message']),
+                                quick_reply=result.get('quick_reply')
+                            )
+                            reply_message(reply_token, [flex_message])
+                        else:
+                            reply_text(reply_token, result)
+                        return
+                    except Exception as e:
+                        logger.error(f"智能車資引導失敗: {e}")
+                        reply_text(reply_token, f"❌ 智能引導失敗：{str(e)}")
+                        return
+                
+                # 🔥 其他智能命令的直接處理
+                elif command.startswith("查已完成"):
                     from modules.services.advanced_query_processor import AdvancedQueryProcessor
                     processor = AdvancedQueryProcessor()
                     result = processor.process_complex_query(command, user_id)
@@ -959,47 +1003,28 @@ def process_text_message(event):
                         reply_text(reply_token, f"❌ 查詢執行失敗")
                     return
                 
-                # 🔥 修復：車資查詢命令整合 - 排除標準命令避免攔截
-                elif (any(keyword in command for keyword in ["車資", "錶價", "加成", "金額"]) 
-                      and not command.startswith("記錄車資")):
-                    # 只處理車資查詢，不攔截標準的記錄車資命令
+                # 🔥 統計金額命令的智能處理
+                elif command.startswith("統計金額"):
                     try:
-                        from modules.services.ai_fare_service import handle_smart_fare_query
-                        result = handle_smart_fare_query(message_text, user_id, use_flex=True)
+                        from modules.services.advanced_query_processor import AdvancedQueryProcessor
+                        processor = AdvancedQueryProcessor()
+                        result = processor.process_complex_query(command, user_id)
                         
-                        if isinstance(result, str):
-                            reply_text(reply_token, result)
-                        elif isinstance(result, dict) and 'flex_message' in result:
-                            from linebot.v3.messaging import FlexMessage, FlexContainer
-                            flex_message = FlexMessage(
-                                alt_text=result.get("alt_text", "AI車資查詢結果"),
-                                contents=FlexContainer.from_dict(result['flex_message']),
-                                quick_reply=result.get('quick_reply')
-                            )
-                            reply_message(reply_token, [flex_message])
+                        if result.get('type') == 'aggregation_success':
+                            reply_text(reply_token, result['message'])
+                        elif result.get('type') == 'no_results':
+                            reply_text(reply_token, result['message'])
                         else:
-                            reply_text(reply_token, result)
+                            reply_text(reply_token, f"❌ 統計執行失敗")
                         return
                     except Exception as e:
-                        logger.error(f"車資查詢執行失敗: {e}")
-                        reply_text(reply_token, f"❌ 車資查詢執行失敗：{str(e)}")
-                        return
-                
-                # 🔥 新增：標準記錄車資命令處理
-                elif command.startswith("記錄車資"):
-                    try:
-                        from modules.handlers.trip_handler import handle_record_fare
-                        result = handle_record_fare(command, user_id)
-                        reply_text(reply_token, result)
-                        return
-                    except Exception as e:
-                        logger.error(f"記錄車資執行失敗: {e}")
-                        reply_text(reply_token, f"❌ 記錄車資執行失敗：{str(e)}")
+                        logger.error(f"統計金額執行失敗: {e}")
+                        reply_text(reply_token, f"❌ 統計執行失敗：{str(e)}")
                         return
                 
                 else:
-                    # 其他命令嘗試傳統處理
-                    reply_text(reply_token, f"✅ 收到命令：{command}\n正在處理...")
+                    # 其他命令暫時保持原有邏輯
+                    reply_text(reply_token, f"🤖 AI理解您的需求：{command}\n正在處理...")
                     return
                 
             elif smart_result["type"] == "smart_guidance":
