@@ -959,9 +959,10 @@ def process_text_message(event):
                         reply_text(reply_token, f"❌ 查詢執行失敗")
                     return
                 
-                # 🔥 修復：車資查詢命令整合 - 更精確的觸發條件
-                elif any(keyword in command for keyword in ["車資", "錶價", "加成", "修改.*金額", "記錄.*費用"]):
-                    # 只有明確的車資操作命令才調用車資AI服務
+                # 🔥 修復：車資查詢命令整合 - 排除標準命令避免攔截
+                elif (any(keyword in command for keyword in ["車資", "錶價", "加成", "金額"]) 
+                      and not command.startswith("記錄車資")):
+                    # 只處理車資查詢，不攔截標準的記錄車資命令
                     try:
                         from modules.services.ai_fare_service import handle_smart_fare_query
                         result = handle_smart_fare_query(message_text, user_id, use_flex=True)
@@ -982,6 +983,18 @@ def process_text_message(event):
                     except Exception as e:
                         logger.error(f"車資查詢執行失敗: {e}")
                         reply_text(reply_token, f"❌ 車資查詢執行失敗：{str(e)}")
+                        return
+                
+                # 🔥 新增：標準記錄車資命令處理
+                elif command.startswith("記錄車資"):
+                    try:
+                        from modules.handlers.trip_handler import handle_record_fare
+                        result = handle_record_fare(command, user_id)
+                        reply_text(reply_token, result)
+                        return
+                    except Exception as e:
+                        logger.error(f"記錄車資執行失敗: {e}")
+                        reply_text(reply_token, f"❌ 記錄車資執行失敗：{str(e)}")
                         return
                 
                 else:
