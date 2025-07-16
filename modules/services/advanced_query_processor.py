@@ -280,7 +280,8 @@ class AdvancedQueryProcessor:
         # 1. 先檢查相對日期
         relative_date_patterns = {
             '今天': 'today',
-            '昨天': 'yesterday', 
+            '昨天': 'yesterday',
+            '前天': 'day_before_yesterday',  # 🔥 新增前天支援
             '明天': 'tomorrow',
             '本週': 'this_week',
             '上週': 'last_week'
@@ -383,6 +384,9 @@ class AdvancedQueryProcessor:
         elif date_type == 'yesterday':
             yesterday = get_taiwan_date() - timedelta(days=1)
             return f"{table_prefix}.date = :yesterday", {'yesterday': yesterday}
+        elif date_type == 'day_before_yesterday':  # 🔥 新增前天支援
+            day_before_yesterday = get_taiwan_date() - timedelta(days=2)
+            return f"{table_prefix}.date = :day_before_yesterday", {'day_before_yesterday': day_before_yesterday}
         elif date_type == 'tomorrow':
             tomorrow = get_taiwan_date() + timedelta(days=1)
             return f"{table_prefix}.date = :tomorrow", {'tomorrow': tomorrow}
