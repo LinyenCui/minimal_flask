@@ -7,6 +7,7 @@ import re
 import logging
 from modules.handlers.temp_booking_handler import temp_booking_states
 from modules.handlers.batch_allowance_handler import batch_allowance_states
+from modules.utils.conversation_context import conversation_manager
 
 logger = logging.getLogger(__name__)
 
@@ -17,9 +18,12 @@ KNOWN_COMMANDS = {
     "預約叫車幫助",  # Help for AI booking
     "東洋班次", "診所班次", "查已完成", "指派司機", "完成班次", "回報問題",
     "取消預約", "取消指派", "更新已完成班次", "取消AI修改",
+    "確認修改", "取消修改",  # 🔥 新增：車資修改確認框回覆
     "fix-sequence",   # Database sequence repair command
     "批量加成", "batch-allowance",   # Batch allowance command
-    "資料庫同步", "確認同步", "取消"   # Database sync and maintenance commands
+    "資料庫同步", "確認同步", "取消",   # Database sync and maintenance commands
+    # 🔥 新增：分頁相關命令
+    "更多", "下一頁", "更多結果", "next", "more"
 }
 
 # Commands that *can* take arguments
@@ -59,6 +63,13 @@ def should_process(message_text, source_type, user_id):
     if user_id in batch_allowance_states and not any(cmd in message_text.lower() for cmd in cancel_commands):
         if not any(message_text.startswith(f"{p}{cmd}") for p in ["!", "#", "/"] for cmd in cancel_commands):
             logger.info("[should_process] User in batch allowance state, returning True")
+            return True, message_text
+    
+    # 🔥 新增：檢查用戶是否在活躍對話狀態中（如車資修改、請假等）
+    if user_id in conversation_manager.active_conversations:
+        active_conv = conversation_manager.active_conversations[user_id]
+        if not active_conv.is_expired() and not active_conv.can_cancel_with(message_text):
+            logger.info(f"[should_process] User in active conversation ({active_conv.conversation_type}), returning True")
             return True, message_text
              
     prefix = None

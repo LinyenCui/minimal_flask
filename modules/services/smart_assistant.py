@@ -54,7 +54,7 @@ class SmartAssistant:
             logger.error(f"❌ Gemini AI 初始化失敗: {e}")
             return False
     
-    def _build_ai_prompt(self, user_input: str) -> str:
+    def _build_ai_prompt(self, user_input: str, user_id: str) -> str:  # 🔥 接收user_id參數
         """構建AI分析prompt - 整合完整系統知識庫與生產線思維"""
         # 導入系統知識庫
         from modules.services.system_knowledge_base import (
@@ -62,7 +62,49 @@ class SmartAssistant:
             CONDITION_PARSING_RULES, QUERY_EXAMPLES
         )
         
+        # 🔥 新增：檢查請假對話上下文
+        leave_context = ""
+        try:
+            from modules.utils.conversation_context import conversation_manager
+            
+            # 檢查是否在請假模式
+            is_in_leave_mode = conversation_manager.is_in_leave_mode(user_id)  # 🔥 使用真實user_id
+            recent_trip_id = conversation_manager.get_recent_trip_id(user_id)
+            recent_fixed_schedule_id = conversation_manager.get_recent_fixed_schedule_id(user_id)
+            
+            if is_in_leave_mode and (recent_trip_id or recent_fixed_schedule_id):
+                if recent_trip_id:
+                    leave_context = f"""
+## 🎯 重要：用戶對話上下文
+用戶當前在請假對話流程中！
+- 最近操作的班次ID：{recent_trip_id}
+- 請假模式：活躍
+- 期待格式：[原因] [加成] （例如："新建路請假 -30"）
+
+⚠️ 當用戶輸入類似"原因 數字"格式時，這是請假對話的第二步，應該生成：
+"乘客請假 {recent_trip_id} [數字] [原因]"
+
+例如：用戶輸入"新建路請假 -30" → 生成命令"乘客請假 {recent_trip_id} -30 新建路請假"
+"""
+                elif recent_fixed_schedule_id:
+                    leave_context = f"""
+## 🎯 重要：用戶對話上下文  
+用戶當前在固定班次請假對話流程中！
+- 最近操作的固定班次ID：{recent_fixed_schedule_id}
+- 請假模式：活躍
+- 期待格式：[原因] [加成] （例如："診所乘客長期住院 -50"）
+
+⚠️ 當用戶輸入類似"原因 數字"格式時，這是請假對話的第二步，應該生成：
+"固定班次請假 {recent_fixed_schedule_id} [數字] [原因]"
+
+例如：用戶輸入"診所乘客長期住院 -50" → 生成命令"固定班次請假 {recent_fixed_schedule_id} -50 診所乘客長期住院"
+"""
+        except Exception:
+            pass
+        
         return f"""你是一個專業的派班系統AI專家。你擁有完整的系統知識，能夠理解複雜的自然語言查詢並生成準確的系統命令。
+
+{leave_context}
 
 ## 🏭 系統核心概念：生產線思維
 
@@ -244,30 +286,71 @@ class SmartAssistant:
 目標表: completed_trips
 命令: "查已完成 昨天 司機533 診所"
 
+範例8.5: "查看 2014" / "查看 #2014" ⭐ 重要：班次ID查詢
+生產線分析: 用戶要查看特定班次ID的詳細信息，2014是班次編號不是日期
+時間態: 未知（使用統一查詢服務智能判斷）
+目標表: 自動判斷 trips 或 completed_trips
+命令: "統一班次查詢 2014"
+說明: 數字前有#號或在查看後面，通常是班次ID而非日期
+
+範例8.6: "班次詳情 1585" ⭐ 重要：統一班次詳情查詢
+生產線分析: 用戶要查看班次1585的詳細信息，讓AI智能判斷時間態
+時間態: 未知（使用統一查詢服務智能判斷）
+目標表: 自動判斷 trips 或 completed_trips  
+命令: "統一班次查詢 1585"
+說明: 所有「班次詳情 [ID]」都使用統一查詢服務
+
+範例8.7: "班次 1996" ⭐ 重要：簡化班次查詢
+生產線分析: 用戶要查看班次1996，使用最簡潔的表達方式
+時間態: 未知（使用統一查詢服務智能判斷）
+目標表: 自動判斷 trips 或 completed_trips
+命令: "統一班次查詢 1996"
+說明: 簡化版的班次詳情查詢
+
+範例8.8: "我想看看班次2014的詳情" ⭐ 重要：自然語言班次查詢
+生產線分析: 自然語言表達的班次詳情查詢需求
+時間態: 未知（使用統一查詢服務智能判斷）
+目標表: 自動判斷 trips 或 completed_trips
+命令: "統一班次查詢 2014"
+說明: 自然語言中提取班次ID並使用統一查詢
+
+## 🔥 重要：統一班次查詢命令格式
+
+### 新增統一命令
+- "統一班次查詢 [ID]" - AI跨時間態智能搜索班次詳情
+
+### 統一處理的查詢類型
+1. "班次詳情 [ID]" → "統一班次查詢 [ID]"
+2. "查看 [ID]" → "統一班次查詢 [ID]"  
+3. "班次 [ID]" → "統一班次查詢 [ID]"
+4. 任何包含班次ID的詳情查詢 → "統一班次查詢 [ID]"
+
+⭐ **關鍵提示**：當用戶查詢特定班次ID的詳情時，一律使用「統一班次查詢」命令，讓系統自動判斷時間態並提供智能提示！
+
 範例9: "我想修改班次2014的車資" ⭐ 重要：自然語言車資修改
-生產線分析: 用戶希望修改成品倉庫中班次2014的車資金額
+生產線分析: 用戶希望修改成品倉庫中班次2014的車資金額，信息不完整需要對話收集
 時間態: 過去 (車資修改針對已完成班次)
 目標表: completed_trips
 命令: "記錄車資 2014"
-說明: 先顯示當前車資，然後引導用戶輸入新的錶價和加成
+說明: 啟動AI智能對話，逐步收集錶價、加成和修改原因
 
-範例10: "修改班次2014錶價280加成-50" ⭐ 具體車資修改
-生產線分析: 修改成品倉庫中班次2014的具體車資數值
+範例10: "修改班次2014錶價280加成-50因為客戶要求調整" ⭐ 完整車資修改
+生產線分析: 修改成品倉庫中班次2014的具體車資數值，包含修改原因
 時間態: 過去 (車資記錄屬於已完成產品)
 目標表: completed_trips
-命令: "記錄車資 2014 280 -50"
+命令: "記錄車資 2014 280 -50 客戶要求調整"
 
-範例11: "班次1990的車資改成錶價350" ⭐ 自然語言車資修改
-生產線分析: 修改已完成班次的錶價，加成保持原值或設為0
+範例11: "班次1990的車資改成錶價350等候時間過長" ⭐ 自然語言車資修改
+生產線分析: 修改已完成班次的錶價，加成保持原值或設為0，包含原因
 時間態: 過去 (車資記錄)
 目標表: completed_trips
-命令: "記錄車資 1990 350 0"
+命令: "記錄車資 1990 350 0 等候時間過長"
 
-範例12: "幫我調整#2015的費用，錶價400，減免100" ⭐ 自然對話式修改
-生產線分析: 調整已完成班次的車資，減免表示負加成
+範例12: "幫我調整#2015的費用，錶價400，減免100，夜班費用" ⭐ 自然對話式修改
+生產線分析: 調整已完成班次的車資，減免表示負加成，包含修改原因
 時間態: 過去 (費用調整針對已完成班次)
 目標表: completed_trips
-命令: "記錄車資 2015 400 -100"
+命令: "記錄車資 2015 400 -100 夜班費用"
 
 ⭐ **關鍵時間態判斷規則**：
 1. **明天/未來日期** → 查生產線(trips) → "查詢班次"命令
@@ -313,12 +396,12 @@ class SmartAssistant:
     "reasoning": "詳細的分析推理過程，說明如何用生產線思維理解用戶意圖並選擇命令"
 }}"""
     
-    def _analyze_with_ai(self, user_input: str) -> Dict:
+    def _analyze_with_ai(self, user_input: str, user_id: str) -> Dict:
         """使用Gemini AI分析用戶輸入"""
         try:
             logger.info(f"🤖 使用Gemini分析: {user_input}")
             
-            prompt = self._build_ai_prompt(user_input)
+            prompt = self._build_ai_prompt(user_input, user_id)  # 🔥 傳遞user_id
             
             generation_config = GenerationConfig(
                 temperature=0.2,
@@ -358,7 +441,7 @@ class SmartAssistant:
         # 步驟1: 嘗試AI分析（如果可用）
         ai_result = None
         if self.ai_enabled:
-            ai_result = self._analyze_with_ai(user_input)
+            ai_result = self._analyze_with_ai(user_input, user_id)  # 🔥 傳遞user_id
         
         if ai_result and ai_result.get('confidence', 0) > 0.3:  # 🔥 降低門檻從0.6到0.3
             logger.info(f"✅ AI分析成功，信心度: {ai_result['confidence']}")

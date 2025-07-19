@@ -103,12 +103,10 @@ def format_sequence_report(results, need_fix):
         report_lines.append(f"⚠️ 發現 {len(need_fix)} 個表需要修復")
         report_lines.append("\n回覆「確認修復」來執行修復")
         report_lines.append("回覆「取消」來取消操作")
-        report_lines.append("\n💡 網頁版工具:")
-        report_lines.append(admin_url)
+        report_lines.append(f"\n💡 網頁版工具: {admin_url}")
     else:
         report_lines.append("✅ 所有序列狀態正常")
-        report_lines.append("\n💡 網頁版工具:")
-        report_lines.append(admin_url)
+        report_lines.append(f"\n💡 網頁版工具: {admin_url}")
     
     return "\n".join(report_lines)
 

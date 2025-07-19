@@ -217,7 +217,38 @@ def handle_trip_details(trip_id):
         trip_row = db.session.execute(sql_text(query), {"trip_id": trip_id}).fetchone()
         
         if not trip_row:
-            return f"找不到班次 #{trip_id}"
+            # 🚨 新增：智能錯誤提示 - 三時間態引導
+            logger.info(f"🔍 生產線上找不到班次 #{trip_id}，提供智能引導")
+            
+            # 檢查是否在已完成班次中存在相似ID
+            completed_query = """
+            SELECT COUNT(*) as count 
+            FROM completed_trips 
+            WHERE id <= :trip_id + 50 AND id >= :trip_id - 50
+            """
+            completed_count = db.session.execute(sql_text(completed_query), {"trip_id": trip_id}).fetchone()[0]
+            
+            error_message = f"❌ 在生產線上找不到班次 #{trip_id}\n\n"
+            error_message += "💡 可能的原因：\n"
+            error_message += "1. 班次已完成並移至成品倉庫\n"
+            error_message += "2. 班次ID輸入錯誤\n"
+            error_message += "3. 班次已被取消或刪除\n\n"
+            
+            error_message += "🔍 建議操作：\n"
+            
+            if completed_count > 0:
+                error_message += f"• 查已完成 昨天 → 查看最近完成的班次\n"
+                error_message += f"• 查看 {trip_id} → 如果是已完成班次ID\n"
+            
+            error_message += "• 東洋班次 今天 → 查看今天進行中班次\n"
+            error_message += "• 診所班次 今天 → 查看今天診所班次\n"
+            error_message += "• 查詢班次 狀態=準備 → 查看準備中班次\n\n"
+            
+            error_message += "📚 命令說明：\n"
+            error_message += "• 班次詳情 [ID] → 查看生產線上的班次 (trips表)\n"
+            error_message += "• 查看 [ID] → 查看已完成班次 (completed_trips表)\n"
+            
+            return error_message
         
         # 將 RowProxy 轉換為字典以便於訪問
         trip = dict(trip_row._mapping if hasattr(trip_row, '_mapping') else trip_row) 

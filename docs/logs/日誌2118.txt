@@ -1,0 +1,161 @@
+2025-07-17 21:13:18,423 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570302356051984456","quoteToken":"B4mWslHkXDRYbygXcwRBxDNKpH4NIdiNoN7oMxbS4E6gh3CBVqOQABmFiATriMmPkC_KpOAlLRm3z5OLt98IapvF7fmYpVkhCriqNF-EiwDMranZSg7JvMpAlmD6JuEAvAnnEgXtwxB86KfUQ2Ayng","text":"/今天診所班次"},"webhookEventId":"01K0C894D521JESD8X6R12QSQZ","deliveryContext":{"isRedelivery":false},"timestamp":1752757997524,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"d7b092384b414fc890734accfa5035a3","mode":"active"}]}
+2025-07-17 21:13:18,424 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-17 21:13:18,424 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-17 21:13:18,424 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-17 21:13:18,424 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-17 21:13:18,424 - modules.handlers.message_handler - INFO - [should_process] Checking: '/今天診所班次' from group
+2025-07-17 21:13:18,425 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '今天診所班次'
+2025-07-17 21:13:18,425 - modules.routes.webhook - INFO - Passing processed text '今天診所班次' to handler.
+2025-07-17 21:13:18,425 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '今天診所班次' (Normalized: '今天診所班次')
+2025-07-17 21:13:18,434 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 今天診所班次
+2025-07-17 21:13:18,434 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 今天診所班次
+2025-07-17 21:13:18,434 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 今天診所班次
+2025-07-17 21:13:21,673 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-17 21:13:21,673 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-17 21:13:21,674 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 查詢班次 今天 診所
+2025-07-17 21:13:21,674 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 查詢班次 今天 診所
+2025-07-17 21:13:21,676 - modules.services.advanced_query_processor - INFO - 🔍 處理複雜查詢: 查詢班次 今天 診所
+2025-07-17 21:13:21,677 - modules.services.advanced_query_processor - INFO - 📊 執行SQL: 
+                SELECT 
+                    t.trip_id,
+                    t.date,
+                    t.time,
+                    t.start_point,
+                    t.end_point,
+                    t.category,
+                    t.driver_id,
+                    t.status,
+                    d.name as driver_name
+                FROM trips t
+                LEFT JOIN drivers d ON t.driver_id = d.id
+                WHERE 1=1
+             AND t.date = :today AND t.category = :category ORDER BY t.date, t.time
+2025-07-17 21:13:21,682 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-17 21:13:22,039 - werkzeug - INFO - 127.0.0.1 - - [17/Jul/2025 21:13:22] "POST /callback HTTP/1.1" 200 -
+2025-07-17 21:13:41,525 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570302395629437361","quoteToken":"R3vxrq7wR0CBhzdJjLnJait_GCbUJr0eMu5PWYZhEinfCRS3kEifEkDz49kQe7rD0TpsirjTR2_M5git4DbBlqZl87OJ_a54gJaQL9zHGs1ox97khHyUwQSFldvsz_xtXANbjNhPVOEZHEviSrrncQ","text":"/下一頁"},"webhookEventId":"01K0C89V8CF2RS46A766KB7WEF","deliveryContext":{"isRedelivery":false},"timestamp":1752758021230,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"a0d0c984b0d443b785106e1a708c45e1","mode":"active"}]}
+2025-07-17 21:13:41,525 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-17 21:13:41,525 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-17 21:13:41,526 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-17 21:13:41,526 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-17 21:13:41,526 - modules.handlers.message_handler - INFO - [should_process] Checking: '/下一頁' from group
+2025-07-17 21:13:41,526 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '下一頁'
+2025-07-17 21:13:41,526 - modules.routes.webhook - INFO - Passing processed text '下一頁' to handler.
+2025-07-17 21:13:41,526 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '下一頁' (Normalized: '下一頁')
+2025-07-17 21:13:41,526 - modules.handlers.text_message_handler - INFO - 🔄 處理翻頁命令: 下一頁
+2025-07-17 21:13:41,527 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-17 21:13:42,384 - werkzeug - INFO - 127.0.0.1 - - [17/Jul/2025 21:13:42] "POST /callback HTTP/1.1" 200 -
+2025-07-17 21:14:14,442 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570302450708775157","quoteToken":"Xfwo3DjQr43zjaLxM3710AiOjQ2LFEQ0OoPNX2FqkYEzdJDQFABYSrDD1X7clKGLaPXs-a_x7ZJA3cEJWFJgtXVAGlYAdByyKPV2A3AwXP96q9U5Ai9DRwsyf62yQe18wP-qdOacXQuN988Dfgb7nQ","text":"/今天診所班次"},"webhookEventId":"01K0C8AVB2KRJHJS2YTR6SFRM3","deliveryContext":{"isRedelivery":false},"timestamp":1752758054013,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"5a7d74cbfe154a2bb1cdc8274e1529db","mode":"active"}]}
+2025-07-17 21:14:14,443 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-17 21:14:14,443 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-17 21:14:14,443 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-17 21:14:14,443 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-17 21:14:14,443 - modules.handlers.message_handler - INFO - [should_process] Checking: '/今天診所班次' from group
+2025-07-17 21:14:14,443 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '今天診所班次'
+2025-07-17 21:14:14,443 - modules.routes.webhook - INFO - Passing processed text '今天診所班次' to handler.
+2025-07-17 21:14:14,444 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '今天診所班次' (Normalized: '今天診所班次')
+2025-07-17 21:14:14,444 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 今天診所班次
+2025-07-17 21:14:14,444 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 今天診所班次
+2025-07-17 21:14:14,444 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 今天診所班次
+2025-07-17 21:14:16,840 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-17 21:14:16,840 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-17 21:14:16,841 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 查詢班次 今天 診所
+2025-07-17 21:14:16,841 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 查詢班次 今天 診所
+2025-07-17 21:14:16,841 - modules.services.advanced_query_processor - INFO - 🔍 處理複雜查詢: 查詢班次 今天 診所
+2025-07-17 21:14:16,841 - modules.services.advanced_query_processor - INFO - 📊 執行SQL: 
+                SELECT 
+                    t.trip_id,
+                    t.date,
+                    t.time,
+                    t.start_point,
+                    t.end_point,
+                    t.category,
+                    t.driver_id,
+                    t.status,
+                    d.name as driver_name
+                FROM trips t
+                LEFT JOIN drivers d ON t.driver_id = d.id
+                WHERE 1=1
+             AND t.date = :today AND t.category = :category ORDER BY t.date, t.time
+2025-07-17 21:14:16,844 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-17 21:14:17,210 - werkzeug - INFO - 127.0.0.1 - - [17/Jul/2025 21:14:17] "POST /callback HTTP/1.1" 200 -
+2025-07-17 21:14:31,902 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570302479682502887","quoteToken":"mn0lZihM0TaccygKV1lxKBeOKfwvi9xRWGpddPK0RFKAQu_Ipc79vo4P8lfVep7ZvE5On30dMdly_6GEiQyjrcFsS87SrWfELRMkUQGPsyW6DqHQF3uGc0cMgLIomSjWP9Ylcnw8spWTwjrD4fgSPA","text":"/更多"},"webhookEventId":"01K0C8BC7CH77EX6HX3ZVPCGZJ","deliveryContext":{"isRedelivery":false},"timestamp":1752758071200,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"383f93151bdd44c88b4f88f1acfc24bb","mode":"active"}]}
+2025-07-17 21:14:31,902 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-17 21:14:31,902 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-17 21:14:31,902 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-17 21:14:31,902 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-17 21:14:31,903 - modules.handlers.message_handler - INFO - [should_process] Checking: '/更多' from group
+2025-07-17 21:14:31,903 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '更多'
+2025-07-17 21:14:31,903 - modules.routes.webhook - INFO - Passing processed text '更多' to handler.
+2025-07-17 21:14:31,903 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '更多' (Normalized: '更多')
+2025-07-17 21:14:31,903 - modules.handlers.text_message_handler - INFO - 🔄 處理翻頁命令: 更多
+2025-07-17 21:14:31,903 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-17 21:14:32,507 - werkzeug - INFO - 127.0.0.1 - - [17/Jul/2025 21:14:32] "POST /callback HTTP/1.1" 200 -
+2025-07-17 21:14:55,794 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570302520065523975","quoteToken":"qt1KTyKVVF95nxzHALeQj0cKKHvyjEY5vEShQHYIErOCD-LohdQQHO3egObk659o2uR5_IKNu6lvDttc7lome6LWZkjpK-MusBAYxZDxE6QtEvQrNMdJsc7SQ4Z3RsXWrNd3ypNGkghPXKc6v4p3JA","text":"/我要修改班次2014的車資"},"webhookEventId":"01K0C8C3V6EG579YZ4NR969G1G","deliveryContext":{"isRedelivery":false},"timestamp":1752758095410,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"f0f7a64dff634228bdb10e03827f0f93","mode":"active"}]}
+2025-07-17 21:14:55,794 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-17 21:14:55,794 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-17 21:14:55,794 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-17 21:14:55,794 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-17 21:14:55,795 - modules.handlers.message_handler - INFO - [should_process] Checking: '/我要修改班次2014的車資' from group
+2025-07-17 21:14:55,795 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '我要修改班次2014的車資'
+2025-07-17 21:14:55,795 - modules.routes.webhook - INFO - Passing processed text '我要修改班次2014的車資' to handler.
+2025-07-17 21:14:55,795 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '我要修改班次2014的車資' (Normalized: '我要修改班次2014的車資')
+2025-07-17 21:14:55,795 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 我要修改班次2014的車資
+2025-07-17 21:14:55,795 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 我要修改班次2014的車資
+2025-07-17 21:14:55,795 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 我要修改班次2014的車資
+2025-07-17 21:14:59,149 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-17 21:14:59,149 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-17 21:14:59,149 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 記錄車資 2014
+2025-07-17 21:14:59,149 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 記錄車資 2014
+2025-07-17 21:14:59,167 - modules.services.ai_fare_service - INFO - 🔍 AI車資查詢開始: '我要修改班次2014的車資', user_id: U6b520261e9199a21d25e6d20509eda3f
+2025-07-17 21:14:59,171 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '我要修改班次2014的車資')
+2025-07-17 21:14:59,171 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': None, 'trip_id': 2014, 'raw_query': '我要修改班次2014的車資', 'confidence': 'high'}
+2025-07-17 21:14:59,171 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-17 21:14:59,171 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': None, 'trip_id': 2014, 'raw_query': '我要修改班次2014的車資', 'confidence': 'high'}
+2025-07-17 21:14:59,171 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-17 21:14:59,171 - modules.services.ai_fare_service - INFO - 信心度: high
+2025-07-17 21:14:59,171 - modules.services.ai_fare_service - INFO - AI理解的搜索條件: 🧠 📋 #2014 | 🟢 high
+2025-07-17 21:14:59,175 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-17 21:14:59,176 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-17 21:14:59,557 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-17 21:14:59,560 - werkzeug - INFO - 127.0.0.1 - - [17/Jul/2025 21:14:59] "POST /callback HTTP/1.1" 200 -
+2025-07-17 21:15:47,473 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570302606703067553","quoteToken":"whtAxuSo3hpQDBni2QEc4ArW53VOS3NFT3KBYhDtKBSshE3yKKyezc2jznWU-JUtM3c2WP0HVIf2DXN3lEMJ46JWVuIqnmnYn_ICIxzwDIKMKp1a92gzPhJr6wlkdwU9X4rfl0ab7j-w62xXER3Uvg","text":"/修改班次2014 $280 +-280"},"webhookEventId":"01K0C8DP7HHA4YRGGYF9RBBVZA","deliveryContext":{"isRedelivery":false},"timestamp":1752758147061,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"4ecb9bfc80f8408da4e4d1e6f10db378","mode":"active"}]}
+2025-07-17 21:15:47,473 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-17 21:15:47,473 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-17 21:15:47,473 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-17 21:15:47,473 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-17 21:15:47,473 - modules.handlers.message_handler - INFO - [should_process] Checking: '/修改班次2014 $280 +-280' from group
+2025-07-17 21:15:47,474 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '修改班次2014 $280 +-280'
+2025-07-17 21:15:47,474 - modules.routes.webhook - INFO - Passing processed text '修改班次2014 $280 +-280' to handler.
+2025-07-17 21:15:47,474 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '修改班次2014 $280 +-280' (Normalized: '修改班次2014 $280 +-280')
+2025-07-17 21:15:47,474 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 修改班次2014 $280 +-280
+2025-07-17 21:15:47,474 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 修改班次2014 $280 +-280
+2025-07-17 21:15:47,474 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 修改班次2014 $280 +-280
+2025-07-17 21:15:50,534 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-17 21:15:50,534 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-17 21:15:50,534 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 記錄車資 2014 280 -280
+2025-07-17 21:15:50,534 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 記錄車資 2014 280 -280
+2025-07-17 21:15:50,534 - modules.services.ai_fare_service - INFO - 🔍 AI車資查詢開始: '修改班次2014 $280 +-280', user_id: U6b520261e9199a21d25e6d20509eda3f
+2025-07-17 21:15:50,536 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {'meter_fare': 280, 'extra_fare': -280, 'reason': '透過AI智能修改'} (输入: '修改班次2014 $280 +-280')
+2025-07-17 21:15:50,536 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': None, 'trip_id': 2014, 'raw_query': '修改班次2014 $280 +-280', 'confidence': 'high'}
+2025-07-17 21:15:50,536 - modules.services.ai_fare_service - INFO - 修改意圖: {'meter_fare': 280, 'extra_fare': -280, 'reason': '透過AI智能修改'}
+2025-07-17 21:15:50,536 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': None, 'trip_id': 2014, 'raw_query': '修改班次2014 $280 +-280', 'confidence': 'high'}
+2025-07-17 21:15:50,536 - modules.services.ai_fare_service - INFO - 修改意圖: {'meter_fare': 280, 'extra_fare': -280, 'reason': '透過AI智能修改'}
+2025-07-17 21:15:50,536 - modules.services.ai_fare_service - INFO - 信心度: high
+2025-07-17 21:15:50,536 - modules.services.ai_fare_service - INFO - AI理解的搜索條件: 🧠 📋 #2014 | 🟢 high
+2025-07-17 21:15:50,539 - modules.services.ai_fare_service - INFO - 🎯 AI需要詢問修改原因，啟動統一對話系統
+2025-07-17 21:15:50,540 - modules.utils.conversation_context - INFO - 開始對話: 用戶=U6b520261e9199a21d25e6d20509eda3f, 類型=fare_modification, 步驟=waiting_reason
+2025-07-17 21:15:50,540 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-17 21:15:50,541 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-17 21:15:50,910 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-17 21:15:50,913 - werkzeug - INFO - 127.0.0.1 - - [17/Jul/2025 21:15:50] "POST /callback HTTP/1.1" 200 -
+2025-07-17 21:16:03,059 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570302632372470152","quoteToken":"z4179Ro0aQ5DMQMqRQ6hah3HHqWZrsgW1BdzncICWUbSD0nfdnf_PbemDwdjS5pIgEymnLM6wprlVtQhnG3gY0MbP_7nIz0I0aHrUt5dqtfKxVRtlYrb5yLhNRWLiS6s9NWbAOl8YhbJKrTF8ghfLQ","text":"前一班延誤，導致無法搭載"},"webhookEventId":"01K0C8E4XKXFRHPHRMH5EYVDKM","deliveryContext":{"isRedelivery":false},"timestamp":1752758162181,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"2f465f24eb434d8c80b14870d5acf033","mode":"active"}]}
+2025-07-17 21:16:03,059 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-17 21:16:03,059 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-17 21:16:03,059 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-17 21:16:03,060 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-17 21:16:03,060 - modules.handlers.message_handler - INFO - [should_process] Checking: '前一班延誤，導致無法搭載' from group
+2025-07-17 21:16:03,060 - modules.handlers.message_handler - INFO - [should_process] No prefix or prefix stripped, evaluating: '前一班延誤，導致無法搭載'
+2025-07-17 21:16:03,060 - modules.handlers.message_handler - INFO - [should_process] Group: Checking for commands with args pattern...
+2025-07-17 21:16:03,060 - modules.handlers.message_handler - INFO - [should_process] Group/Room: Not a KNOWN command (already checked), mention, or command+arg pattern, ignoring.
+2025-07-17 21:16:03,061 - modules.routes.webhook - INFO - Skipping message from group due to handler rules: 前一班延誤，導致無法搭載
+2025-07-17 21:16:03,061 - werkzeug - INFO - 127.0.0.1 - - [17/Jul/2025 21:16:03] "POST /callback HTTP/1.1" 200 -

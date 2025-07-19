@@ -193,6 +193,9 @@ class AdvancedQueryProcessor:
                     t.category,
                     t.driver_id,
                     t.status,
+                    t.trip_type,
+                    t.custom_start_point,
+                    t.custom_end_point,
                     d.name as driver_name
                 FROM trips t
                 LEFT JOIN drivers d ON t.driver_id = d.id
@@ -252,6 +255,9 @@ class AdvancedQueryProcessor:
                     'category': trip.category,
                     'driver_id': trip.driver_id,
                     'status': trip.status,
+                    'trip_type': trip.trip_type,
+                    'custom_start_point': trip.custom_start_point,
+                    'custom_end_point': trip.custom_end_point,
                     'driver_name': trip.driver_name
                 }
                 trips_dict_list.append(trip_dict)
@@ -259,8 +265,10 @@ class AdvancedQueryProcessor:
             # 保存查詢結果供翻頁使用（保存字典格式）
             context = get_conversation_context(user_id)
             context.save_query_result('current_trips', command, trips_dict_list, conditions)
+            self.logger.info(f"💾 保存查詢結果供翻頁使用: {len(trips_dict_list)} 個結果")
             
-            return self._format_current_trips_result(trips, command, conditions)
+            # 格式化結果
+            return self._format_current_trips_result(trips_dict_list, command, conditions, user_id)
             
         except Exception as e:
             self.logger.error(f"❌ 當前班次查詢失敗: {e}")
@@ -268,6 +276,7 @@ class AdvancedQueryProcessor:
     
     def _process_driver_query(self, command: str, user_id: str) -> Dict:
         """處理司機相關查詢（暫時回退到傳統處理）"""
+        # TODO: 實現司機查詢邏輯
         return {"type": "fallback", "command": command}
     
     def _parse_query_conditions(self, command: str) -> Dict:
@@ -474,9 +483,8 @@ class AdvancedQueryProcessor:
             driver_id = getattr(trip, 'driver_id', None)
             driver_name = getattr(trip, 'driver_name', None)
             
-            driver_info = f"司機{driver_id}" if driver_id else "未指派"
-            if driver_name:
-                driver_info += f"({driver_name})"
+            # 🎨 優化顯示：使用小黃車圖示+編號，去掉姓名讓結果更清爽
+            driver_info = f"🚕{driver_id}" if driver_id else "未指派"
             
             # 安全處理可能為None的欄位
             trip_id = getattr(trip, 'id', '未知')
@@ -496,7 +504,47 @@ class AdvancedQueryProcessor:
         
         if len(trips) > 10:
             result_text += f"\n... 還有 {len(trips) - 10} 筆結果\n"
-            result_text += f"💡 輸入「更多」或「下一頁」查看完整結果"
+            
+            # 🔥 新增：為分頁結果添加Quick Reply支持
+            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+            
+            pagination_quick_reply_items = [
+                QuickReplyItem(
+                    action=MessageAction(
+                        label="📄 下一頁",
+                        text="下一頁"
+                    )
+                ),
+                QuickReplyItem(
+                    action=MessageAction(
+                        label="💰 統計金額",
+                        text=f"統計金額 {command.replace('查已完成', '').strip()}"
+                    )
+                ),
+                QuickReplyItem(
+                    action=MessageAction(
+                        label="🔍 重新查詢",
+                        text="查已完成"
+                    )
+                ),
+                QuickReplyItem(
+                    action=MessageAction(
+                        label="❌ 取消",
+                        text="取消"
+                    )
+                )
+            ]
+            
+            pagination_quick_reply = QuickReply(items=pagination_quick_reply_items)
+            
+            return {
+                "type": "success_with_pagination",
+                "message": result_text + f"💡 點擊下方按鈕或輸入命令查看更多",
+                "count": len(trips),
+                "total_amount": total_amount,
+                "trips": trips,
+                "quick_reply": pagination_quick_reply
+            }
         
         return {
             "type": "success",
@@ -506,7 +554,7 @@ class AdvancedQueryProcessor:
             "trips": trips
         }
     
-    def _format_current_trips_result(self, trips: List, command: str, conditions: Dict) -> Dict:
+    def _format_current_trips_result(self, trips: List, command: str, conditions: Dict, user_id: str) -> Dict:
         """格式化當前班次查詢結果"""
         if not trips:
             return {
@@ -520,10 +568,71 @@ class AdvancedQueryProcessor:
         result_text += f"💬 {command}\n"
         result_text += f"📊 找到 {len(trips)} 個匹配班次\n\n"
         
+        # 🔥 新增：如果結果太多，實施分頁
+        if len(trips) > 10:
+            # 只顯示前10筆結果
+            displayed_trips = trips[:10]
+            
+            # 按狀態分組顯示
+            status_groups = {}
+            for trip in displayed_trips:
+                status = trip.get('status') or '未知'
+                if status not in status_groups:
+                    status_groups[status] = []
+                status_groups[status].append(trip)
+            
+            for status, status_trips in status_groups.items():
+                result_text += f"🎯 {status} ({len(status_trips)}個)：\n"
+                
+                for trip in status_trips:
+                    # 🚨 修復：安全處理可能為None的欄位，避免格式化錯誤
+                    driver_id = trip.get('driver_id')
+                    driver_name = trip.get('driver_name')
+                    
+                    # 🎨 優化顯示：使用小黃車圖示+編號，去掉姓名讓結果更清爽
+                    driver_info = f"🚕{driver_id}" if driver_id else "未指派"
+                    
+                    # 安全處理可能為None的欄位
+                    trip_id = trip.get('trip_id', '未知')
+                    trip_type = trip.get('trip_type', 'fixed')
+                    
+                    # 🔥 新增：根據trip_type決定使用哪個起點終點
+                    if trip_type == 'temp':
+                        # 臨時班次使用custom欄位
+                        start_point = trip.get('custom_start_point') or trip.get('start_point') or '未知'
+                        end_point = trip.get('custom_end_point') or trip.get('end_point') or '未知'
+                    else:
+                        # 固定班次使用標準欄位
+                        start_point = trip.get('start_point') or '未知'
+                        end_point = trip.get('end_point') or '未知'
+                        
+                    result_text += f"  📍 #{trip_id} - {start_point} → {end_point}"
+                    result_text += f" | {driver_info}\n"
+                result_text += "\n"
+            
+            result_text += f"\n... 還有 {len(trips) - 10} 筆結果\n"
+            
+            # 🔥 新增：為分頁結果添加Quick Reply支持
+            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+            quick_reply = QuickReply(
+                items=[
+                    QuickReplyItem(action=MessageAction(label="下一頁", text=f"下一頁")),
+                    QuickReplyItem(action=MessageAction(label="查看全部", text=f"查看全部結果")),
+                ]
+            )
+            
+            return {
+                "type": "success_with_pagination",
+                "message": result_text,
+                "count": len(trips),
+                "quick_reply": quick_reply.to_dict()
+            }
+        
+        # 原來的邏輯：結果不多時的處理
         # 按狀態分組顯示
         status_groups = {}
         for trip in trips:
-            status = trip.status or '未知'
+            status = trip.get('status') or '未知'
             if status not in status_groups:
                 status_groups[status] = []
             status_groups[status].append(trip)
@@ -531,32 +640,32 @@ class AdvancedQueryProcessor:
         for status, status_trips in status_groups.items():
             result_text += f"🎯 {status} ({len(status_trips)}個)：\n"
             
-            for trip in status_trips[:5]:  # 每個狀態最多顯示5個
+            for trip in status_trips:
                 # 🚨 修復：安全處理可能為None的欄位，避免格式化錯誤
-                driver_id = getattr(trip, 'driver_id', None)
-                driver_name = getattr(trip, 'driver_name', None)
+                driver_id = trip.get('driver_id')
+                driver_name = trip.get('driver_name')
                 
-                driver_info = f"司機#{driver_id}" if driver_id else "未指派"
-                if driver_name:
-                    driver_info += f"({driver_name})"
+                # 🎨 優化顯示：使用小黃車圖示+編號，去掉姓名讓結果更清爽
+                driver_info = f"🚕{driver_id}" if driver_id else "未指派"
                 
                 # 安全處理可能為None的欄位
-                trip_id = getattr(trip, 'trip_id', '未知')
-                start_point = getattr(trip, 'start_point', '未知') or '未知'
-                end_point = getattr(trip, 'end_point', '未知') or '未知'
+                trip_id = trip.get('trip_id', '未知')
+                trip_type = trip.get('trip_type', 'fixed')
+                
+                # 🔥 新增：根據trip_type決定使用哪個起點終點
+                if trip_type == 'temp':
+                    # 臨時班次使用custom欄位
+                    start_point = trip.get('custom_start_point') or trip.get('start_point') or '未知'
+                    end_point = trip.get('custom_end_point') or trip.get('end_point') or '未知'
+                else:
+                    # 固定班次使用標準欄位
+                    start_point = trip.get('start_point') or '未知'
+                    end_point = trip.get('end_point') or '未知'
                     
                 result_text += f"  📍 #{trip_id} - {start_point} → {end_point}"
                 result_text += f" | {driver_info}\n"
-            
-            if len(status_trips) > 5:
-                result_text += f"  ... 還有 {len(status_trips) - 5} 個{status}班次\n"
             result_text += "\n"
-        
-        # 如果總數超過顯示數量，提示翻頁功能
-        total_displayed = sum(min(5, len(trips)) for trips in status_groups.values())
-        if len(trips) > total_displayed:
-            result_text += f"💡 輸入「更多」或「下一頁」查看完整結果"
-        
+
         return {
             "type": "success",
             "message": result_text,

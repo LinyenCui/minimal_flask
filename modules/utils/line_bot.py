@@ -261,6 +261,25 @@ def reply_flex(reply_token, alt_text, flex_content):
         current_app.logger.error(f"發送Flex Message時出錯: {e}")
         return False
 
+def reply_message_with_quick_reply(reply_token, text, quick_reply):
+    """發送帶有Quick Reply的文字消息"""
+    try:
+        from linebot.v3.messaging import TextMessage
+        
+        message = TextMessage(text=text, quick_reply=quick_reply)
+        line_bot_api = get_line_bot_api()
+        line_bot_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=reply_token,
+                messages=[message]
+            )
+        )
+        logger.info("帶Quick Reply的消息發送成功")
+    except Exception as e:
+        logger.error(f"發送帶Quick Reply的消息失敗: {e}")
+        # 降級：發送普通文字消息
+        reply_text(reply_token, text)
+
 def get_user_profile(user_id):
     """獲取用戶的profile信息"""
     try:

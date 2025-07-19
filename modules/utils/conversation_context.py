@@ -1,6 +1,7 @@
 """
 AI對話上下文管理模塊
 用於維持多輪對話的連續性，讓AI能記住之前的查詢結果和操作意圖
+🔥 新增：統一對話狀態管理系統，防止智能助手搶戲
 """
 
 import logging
@@ -14,6 +15,40 @@ logger = logging.getLogger(__name__)
 
 # 全域變數存儲會話狀態
 conversation_states = {}
+
+@dataclass
+class ActiveConversation:
+    """活躍對話狀態"""
+    user_id: str
+    conversation_type: str  # 'fare_modification', 'temp_booking', 'passenger_leave', 'driver_assign'
+    current_step: str      # 'waiting_reason', 'waiting_confirmation', 'waiting_info'
+    context_data: Dict     # 相關的數據
+    created_at: datetime
+    expires_at: datetime
+    prompt_message: str    # 系統提示用戶的消息
+    cancel_commands: List[str]  # 可以取消的命令
+    
+    def is_expired(self) -> bool:
+        """檢查對話是否已過期"""
+        return datetime.now() > self.expires_at
+    
+    def can_cancel_with(self, message: str) -> bool:
+        """檢查消息是否可以取消對話"""
+        message_lower = message.lower().strip()
+        return any(cmd in message_lower for cmd in self.cancel_commands)
+    
+    def to_dict(self) -> Dict:
+        """轉換為字典格式"""
+        return {
+            'user_id': self.user_id,
+            'conversation_type': self.conversation_type,
+            'current_step': self.current_step,
+            'context_data': self.context_data,
+            'created_at': self.created_at.isoformat(),
+            'expires_at': self.expires_at.isoformat(),
+            'prompt_message': self.prompt_message,
+            'cancel_commands': self.cancel_commands
+        }
 
 @dataclass
 class QueryResult:
@@ -105,7 +140,7 @@ class ConversationContext:
                 driver_id = trip.get('driver_id', 'N/A')
                 
                 result_text += f"  🚗 #{trip_id} - {start_point} → {end_point}"
-                result_text += f" | 司機{driver_id} | {date_str}\n"
+                result_text += f" | 🚕{driver_id} | {date_str}\n"
                 
         else:
             # 當前班次 (current_trips)
@@ -117,14 +152,18 @@ class ConversationContext:
                     start_point = trip.start_point
                     end_point = trip.end_point
                     driver_id = trip.driver_id
-                    driver_info = f"司機{driver_id}" if driver_id else "未指派司機"
+                    driver_name = getattr(trip, 'driver_name', None)
+                    # 🎨 優化顯示：使用小黃車圖示+編號，去掉姓名讓結果更清爽
+                    driver_info = f"🚕{driver_id}" if driver_id else "未指派"
                 else:
                     # 字典格式
                     trip_id = trip.get('trip_id', trip.get('id', 'N/A'))
                     start_point = trip.get('start_point', 'N/A')
                     end_point = trip.get('end_point', 'N/A')
                     driver_id = trip.get('driver_id', 'N/A')
-                    driver_info = f"司機{driver_id}" if driver_id else "未指派司機"
+                    driver_name = trip.get('driver_name')
+                    # 🎨 優化顯示：使用小黃車圖示+編號，去掉姓名讓結果更清爽
+                    driver_info = f"🚕{driver_id}" if driver_id else "未指派"
                         
                 result_text += f"  📍 #{trip_id} - {start_point} → {end_point}"
                 result_text += f" | {driver_info}\n"
@@ -133,18 +172,63 @@ class ConversationContext:
         # 計算總頁數
         total_pages = (total_results + page_size - 1) // page_size
         
-        # 翻頁提示
+        # 🔥 新增：為翻頁結果添加Quick Reply支持
+        quick_reply_items = []
+        
+        # 如果還有下一頁，添加下一頁按鈕
         if page_num + 1 < total_pages:
-            result_text += f"\n💡 輸入「更多」或「下一頁」查看第 {page_num + 2} 頁"
+            result_text += f"\n💡 點擊下方按鈕查看第 {page_num + 2} 頁"
+            
+            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+            
+            quick_reply_items.extend([
+                QuickReplyItem(
+                    action=MessageAction(
+                        label="📄 下一頁",
+                        text="下一頁"
+                    )
+                ),
+                QuickReplyItem(
+                    action=MessageAction(
+                        label="🔍 重新查詢",
+                        text="重新查詢"
+                    )
+                ),
+                QuickReplyItem(
+                    action=MessageAction(
+                        label="❌ 取消",
+                        text="取消"
+                    )
+                )
+            ])
         else:
             result_text += f"\n🔚 已顯示全部結果"
+            
+            # 最後一頁只顯示重新查詢按鈕
+            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+            
+            quick_reply_items.append(
+                QuickReplyItem(
+                    action=MessageAction(
+                        label="🔍 重新查詢",
+                        text="重新查詢"
+                    )
+                )
+            )
         
-        return {
+        result_dict = {
             'type': 'success',
             'message': result_text,
             'page': page_num + 1,
             'total_pages': total_pages
         }
+        
+        # 🔥 新增：如果有Quick Reply項目，添加到返回結果中
+        if quick_reply_items:
+            quick_reply = QuickReply(items=quick_reply_items)
+            result_dict['quick_reply'] = quick_reply
+        
+        return result_dict
     
     def clear_context(self):
         """清除會話上下文"""
@@ -184,6 +268,25 @@ class ConversationContext:
         return page_result.get('message', "無法格式化結果")
 
 
+def save_pagination_context(query_type: str, all_results: List, page_size: int = 15, user_id: str = "default"):
+    """保存分頁查詢結果到上下文"""
+    global conversation_states
+    
+    state_key = f"query_results_{user_id}"
+    
+    # 保存查詢結果
+    state = {
+        'query_type': query_type,
+        'all_results': all_results,
+        'page_size': page_size,
+        'current_page': 0,
+        'timestamp': time.time()
+    }
+    
+    conversation_states[state_key] = state
+    logger.info(f"已保存 {query_type} 分頁上下文：{len(all_results)} 筆結果，頁面大小 {page_size}")
+
+
 class ConversationManager:
     """全局對話管理器 - 管理所有用戶的對話狀態"""
     
@@ -198,6 +301,121 @@ class ConversationManager:
         self.leave_modes = {}
         # 待執行的修改操作
         self.pending_modifications = {}
+        # 🔥 新增：活躍對話狀態
+        self.active_conversations = {}
+    
+    # === 🔥 統一對話狀態管理 ===
+    
+    def start_conversation(self, user_id: str, conversation_type: str, 
+                          current_step: str, context_data: Dict, 
+                          prompt_message: str, duration_minutes: int = 5) -> ActiveConversation:
+        """開始一個新的對話流程"""
+        now = datetime.now()
+        expires_at = now + timedelta(minutes=duration_minutes)
+        
+        # 定義各種對話的取消命令
+        cancel_commands_map = {
+            'fare_modification': ['取消修改', '取消', '放棄修改', '退出', '不修改'],
+            'temp_booking': ['取消預約', '取消', '放棄預約', '退出', '不預約'],
+            'passenger_leave': ['取消請假', '取消', '放棄請假', '退出', '不請假'],
+            'driver_assign': ['取消指派', '取消', '放棄指派', '退出', '不指派'],
+            'fixed_schedule': ['取消', '放棄', '退出']
+        }
+        
+        conversation = ActiveConversation(
+            user_id=user_id,
+            conversation_type=conversation_type,
+            current_step=current_step,
+            context_data=context_data,
+            created_at=now,
+            expires_at=expires_at,
+            prompt_message=prompt_message,
+            cancel_commands=cancel_commands_map.get(conversation_type, ['取消', '退出'])
+        )
+        
+        # 清除該用戶的舊對話（如果有）
+        if user_id in self.active_conversations:
+            logger.info(f"清除用戶 {user_id} 的舊對話: {self.active_conversations[user_id].conversation_type}")
+        
+        self.active_conversations[user_id] = conversation
+        logger.info(f"開始對話: 用戶={user_id}, 類型={conversation_type}, 步驟={current_step}")
+        
+        return conversation
+    
+    def get_active_conversation(self, user_id: str) -> Optional[ActiveConversation]:
+        """獲取用戶的活躍對話"""
+        if user_id not in self.active_conversations:
+            return None
+            
+        conversation = self.active_conversations[user_id]
+        
+        # 檢查是否已過期
+        if conversation.is_expired():
+            logger.info(f"對話已過期，自動清除: 用戶={user_id}, 類型={conversation.conversation_type}")
+            self.end_conversation(user_id)
+            return None
+        
+        return conversation
+    
+    def has_active_conversation(self, user_id: str) -> bool:
+        """檢查用戶是否有活躍對話"""
+        return self.get_active_conversation(user_id) is not None
+    
+    def update_conversation(self, user_id: str, current_step: str = None, 
+                           context_data: Dict = None, prompt_message: str = None):
+        """更新對話狀態"""
+        if user_id not in self.active_conversations:
+            logger.warning(f"嘗試更新不存在的對話: 用戶={user_id}")
+            return
+        
+        conversation = self.active_conversations[user_id]
+        
+        if current_step:
+            conversation.current_step = current_step
+        if context_data:
+            conversation.context_data.update(context_data)
+        if prompt_message:
+            conversation.prompt_message = prompt_message
+            
+        logger.info(f"更新對話: 用戶={user_id}, 步驟={conversation.current_step}")
+    
+    def end_conversation(self, user_id: str, reason: str = "正常結束"):
+        """結束對話"""
+        if user_id in self.active_conversations:
+            conversation = self.active_conversations[user_id]
+            logger.info(f"結束對話: 用戶={user_id}, 類型={conversation.conversation_type}, 原因={reason}")
+            del self.active_conversations[user_id]
+        
+        # 同時清理舊的狀態
+        self.clear_pending_modification(user_id)
+        self.clear_leave_mode(user_id)
+    
+    def can_user_cancel_with_message(self, user_id: str, message: str) -> bool:
+        """檢查用戶消息是否可以取消當前對話"""
+        conversation = self.get_active_conversation(user_id)
+        if not conversation:
+            return False
+        return conversation.can_cancel_with(message)
+    
+    def get_conversation_status_message(self, user_id: str) -> Optional[str]:
+        """獲取對話狀態提示消息"""
+        conversation = self.get_active_conversation(user_id)
+        if not conversation:
+            return None
+        
+        time_left = conversation.expires_at - datetime.now()
+        minutes_left = int(time_left.total_seconds() / 60)
+        
+        cancel_text = "、".join(conversation.cancel_commands[:2])  # 只顯示前兩個取消命令
+        
+        return f"""🤖 正在等待您的回答...
+
+{conversation.prompt_message}
+
+💡 請回覆內容，或輸入「{cancel_text}」放棄
+⏰ 此對話將在 {minutes_left} 分鐘後自動過期"""
+    
+    # === 舊API兼容性方法 ===
     
     def set_recent_trip_id(self, user_id: str, trip_id: int):
         """設定用戶最近操作的班次ID"""
@@ -206,6 +424,14 @@ class ConversationManager:
     
     def get_recent_trip_id(self, user_id: str) -> Optional[int]:
         """獲取用戶最近操作的班次ID"""
+        # 🔥 修復：優先從請假模式中獲取
+        if user_id in self.leave_modes:
+            mode_data = self.leave_modes[user_id]
+            # 檢查時效性
+            if time.time() - mode_data['timestamp'] <= 300:  # 5分鐘內有效
+                return mode_data.get('trip_id')
+        
+        # 回退到普通記錄
         return self.recent_trip_ids.get(user_id)
     
     def set_recent_fixed_schedule_id(self, user_id: str, schedule_id: int):
@@ -248,7 +474,7 @@ class ConversationManager:
         """獲取用戶待執行的修改操作"""
         if user_id not in self.pending_modifications:
             return None
-        
+            
         # 檢查時效性（5分鐘內有效）
         modification_data = self.pending_modifications[user_id]
         if time.time() - modification_data['timestamp'] > 300:
@@ -275,6 +501,8 @@ class ConversationManager:
         self.recent_fixed_schedule_ids.pop(user_id, None)
         self.clear_leave_mode(user_id)
         self.clear_pending_modification(user_id)
+        # 🔥 新增：也清除活躍對話
+        self.end_conversation(user_id, "重置上下文")
         logger.info(f"重置用戶 {user_id} 的所有上下文狀態")
 
 

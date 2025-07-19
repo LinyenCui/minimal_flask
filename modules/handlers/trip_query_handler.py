@@ -17,7 +17,6 @@ from linebot.v3.messaging import (
 )
 from modules.services.trip_service import get_trips_by_date, get_trip_details
 from modules.views.trip_view import format_trips_flex
-# 🗑️ 已移除 format_trip_details_flex 導入 - 舊版班次詳情系統已清理
 from linebot.models import TextSendMessage
 from modules.utils.helpers import get_taiwan_time, get_taiwan_date
 
@@ -467,8 +466,11 @@ def handle_query_trips(message_text=None):
     # 生成Flex Message
     return format_trips_flex(trips, date)
 
-# 🗑️ 已移除重複的 handle_trip_details(trip_id) 函數 - 舊版系統
-# 現在統一使用 handle_trip_details(message_text=None) 版本
+def handle_trip_details_flex(trip_id):
+    """處理班次詳情查詢，並返回Flex Message"""
+    # 使用 trip_detail_service 中的實現
+    from modules.services.trip_detail_service import handle_trip_details_flex as service_handle_trip_details_flex
+    return service_handle_trip_details_flex(trip_id)
 
 def handle_query_trips_flex(text):
     # 從命令文本中提取日期

@@ -8,7 +8,8 @@ from modules.utils.helpers import parse_date_input
 from modules.utils.line_bot import (
     reply_text, reply_message, reply_flex,
     create_postback_action, create_message_action,
-    create_flex_message, get_line_bot_api
+    create_flex_message, get_line_bot_api,
+    reply_message_with_quick_reply
 )
 from modules.handlers.trip_handler import handle_query_trips, handle_trip_details, handle_change_status, handle_record_fare, handle_modify_category, handle_completed_trip_details
 from modules.flex_designs.help_flex import get_help_flex
@@ -23,6 +24,10 @@ from modules.handlers.sequence_fix_handler import (
     handle_sequence_fix_message,
     sequence_fix_states
 )
+from modules.handlers.database_sync_handler import (
+    handle_database_sync_request,
+    handle_database_sync_confirm
+)
 from modules.services.driver_service import handle_driver_assign_request, handle_driver_assign_select, handle_driver_assign_confirm, handle_driver_assign_cancel
 
 # AI功能導入
@@ -30,6 +35,38 @@ from modules.services.smart_assistant import process_with_smart_assistant, forma
 
 # 設定日誌
 logger = logging.getLogger(__name__)
+
+def handle_ai_fare_result(result, reply_token: str):
+    """統一處理AI車資查詢結果，支持quick_reply"""
+    try:
+        if isinstance(result, dict):
+            if result.get("type") == "text_with_quick_reply":
+                # 🔥 處理帶有Quick Reply的文字消息
+                from linebot.v3.messaging import TextMessage
+                text_message = TextMessage(
+                    text=result["text"],
+                    quick_reply=result["quick_reply"]
+                )
+                reply_message(reply_token, [text_message])
+            elif 'flex_message' in result:
+                # 原有的Flex消息處理
+                from linebot.v3.messaging import FlexMessage, FlexContainer
+                flex_message = FlexMessage(
+                    alt_text=result.get("alt_text", "AI智能結果"),
+                    contents=FlexContainer.from_dict(result['flex_message']),
+                    quick_reply=result.get('quick_reply')
+                )
+                reply_message(reply_token, [flex_message])
+            else:
+                # 其他字典格式，轉為字符串
+                reply_text(reply_token, str(result))
+        elif isinstance(result, str):
+            reply_text(reply_token, result)
+        else:
+            reply_text(reply_token, str(result))
+    except Exception as e:
+        logger.error(f"處理AI結果時出錯: {e}")
+        reply_text(reply_token, f"❌ 處理結果時出錯：{str(e)}")
 
 def process_text_message(event):
     """處理文本消息的主函數"""
@@ -48,10 +85,83 @@ def process_text_message(event):
         return
     
     # 記錄將要處理的文本
-    command_text_lower = message_text.strip().lower()
-    logger.info(f"Processing text message handed over: '{message_text}' (Normalized: '{command_text_lower}')") 
+    logger.info(f"Processing text message handed over: '{message_text}' (Normalized: '{message_text}')")
+    
+    # 🔥 統一對話狀態檢查 - 防止智能助手搶戲
+    from modules.utils.conversation_context import conversation_manager
+    
+    # 1. 檢查是否有活躍對話
+    active_conversation = conversation_manager.get_active_conversation(user_id)
+    if active_conversation:
+        logger.info(f"🎯 用戶在活躍對話中: {active_conversation.conversation_type}, 步驟: {active_conversation.current_step}")
+        
+        # 2. 檢查是否是取消命令
+        if conversation_manager.can_user_cancel_with_message(user_id, message_text):
+            conversation_manager.end_conversation(user_id, f"用戶取消: {message_text}")
+            reply_text(reply_token, "✅ 已取消操作\n\n💡 您可以重新發起新的命令")
+            return
+        
+        # 3. 根據對話類型分發處理
+        if active_conversation.conversation_type == 'fare_modification':
+            # 車資修改對話
+            return handle_fare_modification_conversation(active_conversation, message_text, user_id, reply_token)
+        elif active_conversation.conversation_type == 'temp_booking':
+            # 預約叫車對話
+            return handle_temp_booking_conversation(active_conversation, message_text, user_id, reply_token)
+        elif active_conversation.conversation_type == 'passenger_leave':
+            # 乘客請假對話
+            return handle_passenger_leave_conversation(active_conversation, message_text, user_id, reply_token)
+        elif active_conversation.conversation_type == 'driver_assign':
+            # 司機指派對話
+            return handle_driver_assign_conversation(active_conversation, message_text, user_id, reply_token)
+        elif active_conversation.conversation_type == 'query_clarification':
+            # 查詢澄清對話
+            return handle_query_clarification_conversation(active_conversation, message_text, user_id, reply_token)
+        elif active_conversation.conversation_type == 'query_confirmation':
+            # 查詢確認對話
+            return handle_query_confirmation_conversation(active_conversation, message_text, user_id, reply_token)
+        else:
+            logger.warning(f"未知的對話類型: {active_conversation.conversation_type}")
+            conversation_manager.end_conversation(user_id, "未知對話類型")
+    
+    # 4. 沒有活躍對話，進入正常處理流程...
     
     try:
+        # 🔥 新增：處理查詢範例命令（來自Quick Reply）
+        if message_text in ["查詢範例", "查看範例格式", "範例格式", "我想查詢具體的班次資料"]:
+            example_text = """📋 **AI智能查詢範例**
+
+🗓️ **日期查詢：**
+• 7/15司機533診所班次
+• 今天東洋班次
+• 昨天司機123的車資
+
+👨‍💼 **司機查詢：**
+• 司機533所有班次
+• 533號司機今天車資
+• 查詢司機123本週收入
+
+🏥 **類別查詢：**
+• 診所班次車資統計
+• 東洋類別今天收入
+• 臨時班次費用查詢
+
+🔧 **修改車資：**
+• 修改班次#2014車資280加成-50
+• 修改班次2014$280 -50
+• 班次2014改為280元加成-50元
+
+💡 **組合查詢：**
+• 7/15司機533診所班次車資
+• 今天司機123到診所的費用
+• 修改昨天533號司機班次車資
+
+✨ **智能理解：**
+AI會自動理解您的自然語言描述，無需記憶固定格式！"""
+            
+            reply_text(reply_token, example_text)
+            return
+        
         # 檢查用戶是否在序列修復流程中
         if user_id in sequence_fix_states:
             logger.info(f"用戶 {user_id} 在序列修復流程中，處理消息: {message_text}")
@@ -117,7 +227,7 @@ def process_text_message(event):
             return
         
         # 臨時預約命令
-        if command_text_lower == "預約叫車":
+        if message_text.startswith("預約叫車"):
             logger.info(f"用戶 {user_id} 請求 預約叫車 (AI流程)")
             response = handle_temp_booking_start(user_id)
             
@@ -159,16 +269,123 @@ def process_text_message(event):
             return
         
         # 序列修復命令
-        elif command_text_lower == "fix-sequence":
+        elif message_text.startswith("fix-sequence"):
             logger.info(f"用戶 {user_id} 請求序列修復")
-            response = handle_sequence_fix_start(user_id)
-            
-            if response:
-                reply_text(reply_token, response.get("text", "檢查序列中..."))
+            try:
+                response = handle_sequence_fix_start(user_id)
+                
+                if response and response.get("text"):
+                    # 檢查是否需要修復（包含「需要修復」關鍵字）
+                    if "需要修復" in response["text"]:
+                        # 提供 Quick Reply 按鈕
+                        from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+                        
+                        quick_reply_items = [
+                            QuickReplyItem(
+                                action=MessageAction(
+                                    label="✅ 確認修復",
+                                    text="確認修復"
+                                )
+                            ),
+                            QuickReplyItem(
+                                action=MessageAction(
+                                    label="❌ 取消操作",
+                                    text="取消"
+                                )
+                            )
+                        ]
+                        
+                        quick_reply = QuickReply(items=quick_reply_items)
+                        reply_message_with_quick_reply(reply_token, response["text"], quick_reply)
+                    else:
+                        # 序列正常，也提供Quick Reply按鈕
+                        from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+                        
+                        quick_reply_items = [
+                            QuickReplyItem(
+                                action=MessageAction(
+                                    label="✅ 確定",
+                                    text="取消"
+                                )
+                            )
+                        ]
+                        
+                        quick_reply = QuickReply(items=quick_reply_items)
+                        reply_message_with_quick_reply(reply_token, response["text"], quick_reply)
+                else:
+                    reply_text(reply_token, "檢查序列中...")
+            except Exception as e:
+                logger.error(f"序列修復命令處理失敗: {e}")
+                reply_text(reply_token, f"❌ 序列檢查失敗: {str(e)}")
+            return
+        
+        # 資料庫同步命令
+        elif message_text == "資料庫同步":
+            logger.info(f"用戶 {user_id} 請求資料庫同步檢查")
+            try:
+                # 創建模擬的event對象來適配原函數
+                class MockEvent:
+                    def __init__(self, user_id):
+                        self.source = type('', (), {'user_id': user_id})()
+                
+                mock_event = MockEvent(user_id)
+                result = handle_database_sync_request(mock_event, None)
+                
+                if result and result.get("text"):
+                    # 如果檢查成功，提供Quick Reply按鈕
+                    if "❌" not in result["text"]:  # 沒有錯誤
+                        from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+                        
+                        quick_reply_items = [
+                            QuickReplyItem(
+                                action=MessageAction(
+                                    label="✅ 確認同步",
+                                    text="確認同步"
+                                )
+                            ),
+                            QuickReplyItem(
+                                action=MessageAction(
+                                    label="❌ 取消操作",
+                                    text="取消"
+                                )
+                            )
+                        ]
+                        
+                        quick_reply = QuickReply(items=quick_reply_items)
+                        reply_message_with_quick_reply(reply_token, result["text"], quick_reply)
+                    else:
+                        # 有錯誤，只顯示文字
+                        reply_text(reply_token, result["text"])
+                else:
+                    reply_text(reply_token, "❌ 無法獲取資料庫狀態")
+            except Exception as e:
+                logger.error(f"資料庫同步命令處理失敗: {e}")
+                reply_text(reply_token, f"❌ 資料庫同步檢查失敗: {str(e)}")
+            return
+        
+        # 確認同步命令
+        elif message_text == "確認同步":
+            logger.info(f"用戶 {user_id} 確認執行資料庫同步")
+            try:
+                # 創建模擬的event對象來適配原函數
+                class MockEvent:
+                    def __init__(self, user_id):
+                        self.source = type('', (), {'user_id': user_id})()
+                
+                mock_event = MockEvent(user_id)
+                result = handle_database_sync_confirm(mock_event, None)
+                
+                if result:
+                    reply_text(reply_token, result)
+                else:
+                    reply_text(reply_token, "❌ 同步執行失敗")
+            except Exception as e:
+                logger.error(f"確認同步命令處理失敗: {e}")
+                reply_text(reply_token, f"❌ 同步執行失敗: {str(e)}")
             return
         
         # 批量加成命令
-        elif command_text_lower == "batch-allowance" or command_text_lower == "批量加成":
+        elif message_text.startswith("batch-allowance") or message_text.startswith("批量加成"):
             logger.info(f"用戶 {user_id} 請求批量加成")
             from modules.handlers.batch_allowance_handler import handle_batch_allowance_start
             response = handle_batch_allowance_start(user_id)
@@ -219,79 +436,75 @@ def process_text_message(event):
             if len(parts) >= 2:
                 try:
                     trip_id = int(parts[1])
-                    # 确保导入正确的函数
+                    # 使用原有的美麗Flex Message服務
+                    logger.info(f"處理班次詳情Flex Message: {trip_id}")
                     from modules.services.trip_detail_service import handle_trip_details_flex
-                    
-                    # 记录日志便于调试
-                    current_app.logger.info(f"处理班次详情: {trip_id}")
-                    
-                    # 🚨 新增：記錄班次ID到上下文（用於簡單請假格式）
-                    try:
-                        from modules.utils.conversation_context import conversation_manager
-                        conversation_manager.set_recent_trip_id(user_id, trip_id)
-                    except Exception as context_error:
-                        logger.error(f"記錄班次ID到上下文時出錯: {context_error}")
                     
                     result, error_message = handle_trip_details_flex(trip_id)
                     
                     if result and 'flex_message' in result:
-                        current_app.logger.info("获取到Flex内容，准备发送")
+                        logger.info("獲取到Flex內容，準備發送")
                         
                         try:
+                            # 使用Flex版本回複
                             from linebot.v3.messaging import FlexMessage, FlexContainer, QuickReply, QuickReplyItem, PostbackAction
                             
-                            flex_message_content = result['flex_message']
-                            quick_reply_data = result.get('quick_reply') # 使用 .get() 以安全處理 None
-
-                            quick_reply_obj = None
-                            if quick_reply_data and isinstance(quick_reply_data, dict) and 'items' in quick_reply_data and isinstance(quick_reply_data['items'], list):
+                            # 添加Quick Reply
+                            if 'quick_reply' in result:
                                 quick_reply_items = []
-                                for item_data in quick_reply_data['items']:
-                                    action_data = item_data.get('action')
-                                    if action_data and isinstance(action_data, dict):
-                                        quick_reply_items.append(
-                                            QuickReplyItem(
-                                                action=PostbackAction(
-                                                    label=action_data.get('label'),
-                                                    data=action_data.get('data'),
-                                                    display_text=action_data.get('displayText')
-                                                )
+                                for item in result['quick_reply']['items']:
+                                    action = item['action']
+                                    quick_reply_items.append(
+                                        QuickReplyItem(
+                                            action=PostbackAction(
+                                                label=action['label'],
+                                                data=action['data'],
+                                                display_text=action['displayText']
                                             )
                                         )
-                                if quick_reply_items: # 只有當 items 列表不為空時才創建 QuickReply 物件
-                                    quick_reply_obj = QuickReply(items=quick_reply_items)
-                            
-                            flex_message = FlexMessage(
-                                alt_text=f"班次 #{trip_id} 詳細信息",
-                                contents=FlexContainer.from_dict(flex_message_content),
-                                quick_reply=quick_reply_obj # quick_reply_obj 可能為 None
-                            )
+                                    )
+                                
+                                quick_reply = QuickReply(items=quick_reply_items)
+                                flex_message = FlexMessage(
+                                    alt_text=f"班次 #{trip_id} 詳細信息",
+                                    contents=FlexContainer.from_dict(result['flex_message']),
+                                    quick_reply=quick_reply
+                                )
+                            else:
+                                flex_message = FlexMessage(
+                                    alt_text=f"班次 #{trip_id} 詳細信息",
+                                    contents=FlexContainer.from_dict(result['flex_message'])
+                                )
                             
                             reply_message(reply_token, [flex_message])
-                            current_app.logger.info("成功发送Flex Message (班次詳情)") # 更新日誌
-                            return
+                            
+                            # 記錄班次ID到上下文（用於簡單請假格式）
+                            try:
+                                from modules.utils.conversation_context import conversation_manager
+                                conversation_manager.set_recent_trip_id(user_id, trip_id)
+                            except Exception as context_error:
+                                logger.error(f"記錄班次ID到上下文時出錯: {context_error}")
+                            
                         except Exception as flex_error:
-                            current_app.logger.error(f"发送Flex Message時出錯: {flex_error}")
-                            traceback.print_exc()
-                            # 如果发送Flex失败，使用文本版本
-                        
-                    # 如果没有Flex内容或者发送失败，使用文本版本
-                    if error_message:
-                        reply_text(reply_token, error_message)
+                            logger.error(f"發送Flex Message失敗: {flex_error}")
+                            # 回退到文本版本
+                            from modules.handlers.trip_handler import handle_trip_details
+                            text_result = handle_trip_details(trip_id)
+                            reply_text(reply_token, text_result)
                     else:
-                        from modules.handlers.trip_handler import handle_trip_details
-                        result_text = handle_trip_details(trip_id)
-                        reply_text(reply_token, result_text)
+                        reply_text(reply_token, error_message or f"找不到班次 #{trip_id}")
                 except ValueError:
                     reply_text(reply_token, "班次ID必須是數字。")
                 except Exception as e:
-                    current_app.logger.error(f"处理班次详情时出错: {e}")
+                    logger.error(f"處理班次詳情失敗: {e}")
                     traceback.print_exc()
-                    reply_text(reply_token, f"查询班次详情失败: {str(e)}")
+                    reply_text(reply_token, f"班次查詢失敗: {str(e)}")
             else:
-                reply_text(reply_token, "请提供班次ID，例如：班次详情 123")
+                reply_text(reply_token, "請提供班次ID，例如：班次詳情 123")
             return
-            
+
+
+        
         # 司機指派相關命令
         # 指派司機請求
         elif message_text.startswith('指派司機') and len(message_text.split()) == 2:
@@ -522,10 +735,8 @@ def process_text_message(event):
                         logger.info(f"找到診所班次，發送 Flex Message")
                         reply_flex(reply_token, "診所班次查詢結果", flex_content)
                     else: # No trips found OR error occurred
-                         # --- FIX: Directly use the message returned by the service --- 
                          logger.info(f"診所班次查詢無結果或發生錯誤，發送消息: {message}")
-                         reply_text(reply_token, message or "查詢診所班次時發生未知錯誤。") # Send the message directly
-                         # --- END FIX --- 
+                         reply_text(reply_token, message or "查詢診所班次時發生未知錯誤。")
 
                 else: # "診所班次" without date
                     logger.info(f"處理診所班次命令 (觸發日期選擇): {message_text}")
@@ -582,7 +793,7 @@ def process_text_message(event):
         # --- 修改：查詢已完成班次 --- 
         elif message_text.startswith("查已完成"):
             try:
-                logger.info(f"🔍 處理查已完成命令: {message_text}")
+                logger.info(f"�� 處理查已完成命令: {message_text}")
                 from modules.services.advanced_query_processor import AdvancedQueryProcessor
                 
                 # 🔥 修復：使用高級查詢處理器（包含總和計算功能）
@@ -669,19 +880,7 @@ def process_text_message(event):
             try:
                 from modules.services.ai_fare_service import handle_smart_fare_query
                 result = handle_smart_fare_query(message_text, user_id, use_flex=True)
-                
-                if isinstance(result, str):
-                    reply_text(reply_token, result)
-                elif isinstance(result, dict) and 'flex_message' in result:
-                    from linebot.v3.messaging import FlexMessage, FlexContainer
-                    flex_message = FlexMessage(
-                        alt_text=result.get("alt_text", "智能車資修改"),
-                        contents=FlexContainer.from_dict(result['flex_message']),
-                        quick_reply=result.get('quick_reply')
-                    )
-                    reply_message(reply_token, [flex_message])
-                else:
-                    reply_text(reply_token, result)
+                handle_ai_fare_result(result, reply_token)
                 return
             except Exception as e:
                 logger.error(f"智能車資處理失敗: {e}")
@@ -901,10 +1100,28 @@ def process_text_message(event):
                 from modules.utils.conversation_context import get_conversation_context
                 
                 context = get_conversation_context(user_id)
-                next_page_result = context.get_next_page()
+                query_state = context.get_query_result()
                 
-                if next_page_result:
-                    reply_text(reply_token, next_page_result)
+                if not query_state:
+                    reply_text(reply_token, "💡 沒有可用的查詢結果或會話已過期\n\n請重新執行查詢命令")
+                    return
+                
+                current_page = query_state.get('current_page', 0)
+                page_result = context.get_page_results(current_page + 1)
+                
+                if page_result and page_result.get('type') == 'success':
+                    result_message = page_result.get('message')
+                    quick_reply = page_result.get('quick_reply')
+                    
+                    if quick_reply:
+                        # 🔥 修復：支持Quick Reply的翻頁結果
+                        from linebot.v3.messaging import TextMessage
+                        text_msg = TextMessage(text=result_message, quick_reply=quick_reply)
+                        reply_message(reply_token, [text_msg])
+                        logger.info(f"✅ 發送帶Quick Reply的翻頁結果")
+                    else:
+                        reply_text(reply_token, result_message)
+                        logger.info(f"✅ 發送純文本翻頁結果")
                 else:
                     reply_text(reply_token, "💡 沒有更多結果或會話已過期\n\n請重新執行查詢命令")
                 return
@@ -914,6 +1131,13 @@ def process_text_message(event):
                 return
             
         # --- 🤖 智能助手系統整合 ---
+        # 排除特定命令，不交給智能助手處理
+        excluded_commands = ["資料庫同步", "確認同步", "fix-sequence", "batch-allowance", "批量加成"]
+        if message_text in excluded_commands:
+            logger.info(f"❌ 命令 '{message_text}' 在排除列表中，但沒有被正確處理")
+            reply_text(reply_token, f"❌ 未識別的命令: {message_text}\n\n請使用「幫助」查看可用命令")
+            return
+        
         # 優先嘗試智能助手處理
         try:
             logger.info(f"🤖 智能助手處理用戶訊息: {message_text}")
@@ -957,19 +1181,7 @@ def process_text_message(event):
                     try:
                         from modules.services.ai_fare_service import handle_smart_fare_query
                         result = handle_smart_fare_query(message_text, user_id, use_flex=True)
-                        
-                        if isinstance(result, str):
-                            reply_text(reply_token, result)
-                        elif isinstance(result, dict) and 'flex_message' in result:
-                            from linebot.v3.messaging import FlexMessage, FlexContainer
-                            flex_message = FlexMessage(
-                                alt_text=result.get("alt_text", "AI智能修改確認"),
-                                contents=FlexContainer.from_dict(result['flex_message']),
-                                quick_reply=result.get('quick_reply')
-                            )
-                            reply_message(reply_token, [flex_message])
-                        else:
-                            reply_text(reply_token, result)
+                        handle_ai_fare_result(result, reply_token)
                         return
                     except Exception as e:
                         logger.error(f"智能車資引導失敗: {e}")
@@ -984,6 +1196,9 @@ def process_text_message(event):
                     
                     if result.get('type') == 'success':
                         reply_text(reply_token, result['message'])
+                    elif result.get('type') == 'success_with_pagination':
+                        # 🔥 新增：支持帶Quick Reply的分頁結果
+                        reply_message_with_quick_reply(reply_token, result['message'], result['quick_reply'])
                     elif result.get('type') == 'no_results':
                         reply_text(reply_token, result['message'])
                     else:
@@ -997,6 +1212,9 @@ def process_text_message(event):
                     
                     if result.get('type') == 'success':
                         reply_text(reply_token, result['message'])
+                    elif result.get('type') == 'success_with_pagination':
+                        # 🔥 新增：支持帶Quick Reply的分頁結果
+                        reply_message_with_quick_reply(reply_token, result['message'], result['quick_reply'])
                     elif result.get('type') == 'no_results':
                         reply_text(reply_token, result['message'])
                     else:
@@ -1020,6 +1238,64 @@ def process_text_message(event):
                     except Exception as e:
                         logger.error(f"統計金額執行失敗: {e}")
                         reply_text(reply_token, f"❌ 統計執行失敗：{str(e)}")
+                        return
+                
+                # 🔥 新增：乘客請假命令的智能處理
+                elif command.startswith("乘客請假"):
+                    try:
+                        from modules.handlers.passenger_leave_handler import handle_passenger_leave_command
+                        result = handle_passenger_leave_command(command, user_id)
+                        
+                        # 🔥 請假完成後清除請假模式
+                        from modules.utils.conversation_context import conversation_manager
+                        conversation_manager.clear_leave_mode(user_id)
+                        
+                        reply_text(reply_token, result)
+                        return
+                    except Exception as e:
+                        logger.error(f"乘客請假執行失敗: {e}")
+                        reply_text(reply_token, f"❌ 請假執行失敗：{str(e)}")
+                        return
+                
+                # 🔥 新增：統一班次查詢命令的智能處理
+                elif command.startswith("統一班次查詢"):
+                    try:
+                        # 解析班次ID
+                        parts = command.strip().split()
+                        if len(parts) >= 2:
+                            trip_id = parts[1]
+                            logger.info(f"🔍 智能助手調用統一班次查詢: {trip_id}")
+                            
+                            # 執行統一班次查詢邏輯
+                            from modules.services.trip_detail_service import handle_trip_details_flex
+                            from modules.services.trip_service import get_completed_trip_details
+                            
+                            # 1. 先嘗試查詢現在態 (trips表)
+                            flex_message, text_fallback = handle_trip_details_flex(trip_id)
+                            
+                            if flex_message and flex_message != "找不到班次":
+                                # 找到現在態班次
+                                logger.info(f"✅ 找到現在態班次 #{trip_id}")
+                                reply_flex_message(reply_token, flex_message)
+                                return
+                            
+                            # 2. 如果現在態沒找到，查詢過去態 (completed_trips表)
+                            logger.info(f"🔍 現在態未找到，查詢過去態班次 #{trip_id}")
+                            completed_result = get_completed_trip_details(trip_id)
+                            
+                            if completed_result:
+                                reply_text(reply_token, completed_result)
+                                return
+                            else:
+                                # 都沒找到
+                                reply_text(reply_token, f"❌ 找不到班次 #{trip_id}\n\n💡 提示：\n• 確認班次ID是否正確\n• 該班次可能已被刪除")
+                                return
+                        else:
+                            reply_text(reply_token, "❌ 統一班次查詢格式錯誤\n正確格式：統一班次查詢 [班次ID]")
+                            return
+                    except Exception as e:
+                        logger.error(f"統一班次查詢執行失敗: {e}")
+                        reply_text(reply_token, f"❌ 統一班次查詢失敗：{str(e)}")
                         return
                 
                 else:
@@ -1046,27 +1322,6 @@ def process_text_message(event):
             # 如果智能助手失敗，繼續使用傳統邏輯
             pass
 
-        # --- 新增：查看已完成班次 ---
-        if message_text.startswith("查看"):
-            parts = message_text.split()
-            if len(parts) >= 2:
-                try:
-                    completed_trip_id = int(parts[1])
-                    logger.info(f"處理查看已完成班次: {completed_trip_id}")
-                    
-                    result = handle_completed_trip_details(completed_trip_id)
-                    reply_text(reply_token, result)
-                except ValueError:
-                    reply_text(reply_token, "班次ID必須是數字。")
-                except Exception as e:
-                    logger.error(f"處理查看命令時出錯: {e}")
-                    traceback.print_exc()
-                    reply_text(reply_token, f"查詢失敗: {str(e)}")
-            else:
-                reply_text(reply_token, "請提供班次ID，例如：查看 123")
-            return
-        # --- 結束新增 ---
-            
         # 未識別的命令 - 使用智能助手處理
         if True:  # 這裡會處理所有未識別的命令
             # 🚨 新增：檢測簡單請假格式（原因結尾加數字）
@@ -1204,10 +1459,7 @@ def process_text_message(event):
                             # 降級為文字模式
                             try:
                                 fallback_result = handle_smart_fare_query(message_text, user_id, use_flex=False)
-                                if isinstance(fallback_result, str):
-                                    reply_text(reply_token, fallback_result)
-                                else:
-                                    reply_text(reply_token, "❌ AI處理完成但無法顯示結果")
+                                handle_ai_fare_result(fallback_result, reply_token)
                             except Exception as fallback_error:
                                 logger.error(f"AI文字模式降級也失敗: {fallback_error}")
                                 reply_text(reply_token, "❌ AI處理失敗，請稍後再試")
@@ -1283,3 +1535,315 @@ def get_help_text():
 📚 完整文檔：使用圖形化幫助菜單可訪問更詳細的系統指南
 在群組中使用時，可選擇性在命令前添加前綴... (例如 !, #, /)
 """
+
+# === 🔥 統一對話處理函數 ===
+
+def handle_fare_modification_conversation(conversation, message_text: str, user_id: str, reply_token: str):
+    """處理車資修改對話"""
+    # 🔥 修復：導入 conversation_manager
+    from modules.utils.conversation_context import conversation_manager
+    
+    logger.info(f"🎯 處理車資修改對話: 步驟={conversation.current_step}, 消息='{message_text}'")
+    
+    if conversation.current_step == 'waiting_reason':
+        # 用戶在回答修改原因
+        reason_indicators = ['原因', '因為', '由於', '要求', '調整', '客戶', '等候', '等待', '夜班', '加班', '延誤', '來不及', '臨時', '不適', '有事', '路況', '塞車']
+        
+        # 檢查是否包含原因關鍵詞，或者是簡單的原因描述
+        is_reason_response = False
+        if any(keyword in message_text for keyword in reason_indicators):
+            is_reason_response = True
+        elif len(message_text.strip()) > 3 and not any(num in message_text for num in ['0','1','2','3','4','5','6','7','8','9']):
+            # 如果沒有數字且長度大於3，可能是原因描述
+            is_reason_response = True
+        
+        if is_reason_response:
+            # 提取原因
+            extracted_reason = message_text.strip()
+            
+            # 清理原因文本（移除"原因："等前綴）
+            import re
+            cleaned_reason = re.sub(r'^原因[：:]\s*', '', extracted_reason)
+            cleaned_reason = re.sub(r'^因為\s*', '', cleaned_reason)
+            cleaned_reason = re.sub(r'^由於\s*', '', cleaned_reason)
+            cleaned_reason = cleaned_reason.strip()
+            
+            if len(cleaned_reason) > 0:
+                # 從對話上下文獲取修改信息
+                context_data = conversation.context_data
+                trip_id = context_data['trip_id']
+                new_meter = context_data['meter_fare']
+                new_extra = context_data['extra_fare']
+                original_meter = context_data['original_meter']
+                original_extra = context_data['original_extra']
+                trip = context_data['trip']
+                
+                logger.info(f"🎯 用戶提供修改原因: {cleaned_reason}，準備顯示確認框")
+                
+                # 🔥 重建確認框機制：更新對話狀態為等待確認
+                context_data['modification_reason'] = cleaned_reason
+                conversation_manager.update_conversation(
+                    user_id=user_id,
+                    current_step='waiting_confirmation',
+                    context_data=context_data
+                )
+                
+                # 🔥 建立確認框Flex消息 with Quick Reply
+                from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+                
+                quick_reply_items = [
+                    QuickReplyItem(
+                        action=MessageAction(
+                            label="✅ 確認修改",
+                            text="確認修改"
+                        )
+                    ),
+                    QuickReplyItem(
+                        action=MessageAction(
+                            label="❌ 取消修改",
+                            text="取消修改"
+                        )
+                    )
+                ]
+                
+                quick_reply = QuickReply(items=quick_reply_items)
+                
+                confirmation_message = f"""⚠️ 確認修改
+
+🤖 AI智能修改確認
+
+📋 班次：#{trip_id} ({trip['category']})
+📍 路線：{trip['start_point']} → {trip['end_point']}
+🚗 司機：#{trip.get('driver_id', 'N/A')}
+
+💰 費用變更：{original_meter}+{original_extra} → {new_meter}+{new_extra}
+📊 總計變化：{(new_meter + new_extra) - (original_meter + original_extra):+d} 元
+📝 修改原因：{cleaned_reason}
+
+請確認是否執行此修改？"""
+                
+                # 發送確認框消息
+                reply_message_with_quick_reply(reply_token, confirmation_message, quick_reply)
+                return
+            else:
+                reply_text(reply_token, "⚠️ 修改原因不能為空，請重新輸入修改原因")
+                return
+        else:
+            # 用戶輸入不像是原因回答，提示重新輸入
+            status_message = conversation_manager.get_conversation_status_message(user_id)
+            reply_text(reply_token, f"💭 請提供修改原因\n\n{status_message}")
+            return
+    
+    elif conversation.current_step == 'waiting_confirmation':
+        # 🔥 新增：處理用戶確認選擇
+        if message_text in ['確認修改', '確認', '是', 'yes', 'Y', 'y']:
+            # 用戶確認執行修改
+            context_data = conversation.context_data
+            trip_id = context_data['trip_id']
+            new_meter = context_data['meter_fare']
+            new_extra = context_data['extra_fare']
+            cleaned_reason = context_data['modification_reason']
+            
+            logger.info(f"🔥 用戶確認執行AI智能修改: trip_id={trip_id}, meter={new_meter}, extra={new_extra}, reason='{cleaned_reason}'")
+            
+            # 執行修改
+            from modules.handlers.trip_handler import handle_record_fare
+            modify_command = f"記錄車資 {trip_id} {new_meter} {new_extra} {cleaned_reason}"
+            result = handle_record_fare(modify_command, user_id=user_id)
+            
+            # 結束對話
+            conversation_manager.end_conversation(user_id, "修改完成")
+            
+            if "需要說明原因" in result or "修改原因" in result:
+                reply_text(reply_token, f"❌ 修改被系統拒絕：{result}")
+            else:
+                reply_text(reply_token, f"""✅ AI智能修改執行成功！
+
+📋 班次：#{trip_id}
+💰 新費用：{new_meter}+{new_extra} = {new_meter + new_extra}元
+📝 修改原因：{cleaned_reason}
+
+{result}""")
+            return
+            
+        elif message_text in ['取消修改', '取消', '否', 'no', 'N', 'n']:
+            # 用戶取消修改
+            conversation_manager.end_conversation(user_id, "用戶取消修改")
+            reply_text(reply_token, """❌ 已取消修改流程
+
+🔒 數據庫未被修改，您可以重新發起命令。""")
+            return
+        else:
+            # 用戶回覆不明確，提示重新選擇
+            reply_text(reply_token, """⚠️ 請明確選擇：
+
+✅ 回覆「確認修改」執行修改
+❌ 回覆「取消修改」放棄修改""")
+            return
+    
+    # 其他步驟的處理...
+    logger.warning(f"未處理的車資修改對話步驟: {conversation.current_step}")
+
+def handle_temp_booking_conversation(conversation, message_text: str, user_id: str, reply_token: str):
+    """處理預約叫車對話"""
+    logger.info(f"🎯 處理預約叫車對話: 步驟={conversation.current_step}")
+    
+    # 使用現有的temp_booking_handler邏輯
+    from modules.handlers.temp_booking_handler import handle_temp_booking_message
+    response = handle_temp_booking_message(user_id, message_text)
+    
+    if response and response.get("type") == "text":
+        reply_text(reply_token, response["text"])
+    elif response:
+        # 處理其他類型的回覆
+        reply_text(reply_token, str(response))
+    else:
+        # 如果沒有回覆，結束對話
+        conversation_manager.end_conversation(user_id, "預約流程結束")
+        reply_text(reply_token, "預約流程已結束")
+
+def handle_passenger_leave_conversation(conversation, message_text: str, user_id: str, reply_token: str):
+    """處理乘客請假對話"""
+    logger.info(f"🎯 處理乘客請假對話: 步驟={conversation.current_step}")
+    
+    # 使用現有的passenger_leave_handler邏輯
+    from modules.handlers.passenger_leave_handler import handle_passenger_leave_command
+    result = handle_passenger_leave_command(message_text, user_id)
+    
+    # 結束對話
+    conversation_manager.end_conversation(user_id, "請假處理完成")
+    reply_text(reply_token, result)
+
+def handle_driver_assign_conversation(conversation, message_text: str, user_id: str, reply_token: str):
+    """處理司機指派對話"""
+    logger.info(f"🎯 處理司機指派對話: 步驟={conversation.current_step}")
+    
+    # 使用現有的driver_service邏輯
+    from modules.services.driver_service import handle_driver_assign_request
+    # 根據對話步驟處理...
+    
+    # 暫時結束對話
+    conversation_manager.end_conversation(user_id, "指派處理完成")
+    reply_text(reply_token, "司機指派處理完成")
+
+def handle_query_clarification_conversation(conversation, message_text: str, user_id: str, reply_token: str):
+    """處理查詢澄清對話"""
+    logger.info(f"🎯 處理查詢澄清對話: 消息='{message_text}'")
+    
+    # 🔥 修復：導入conversation_manager
+    from modules.utils.conversation_context import conversation_manager
+    
+    if conversation.current_step == 'waiting_clarification':
+        # 用戶提供了澄清信息，重新處理查詢
+        logger.info(f"🔄 用戶提供澄清信息，重新處理: {message_text}")
+        
+        # 結束澄清對話
+        conversation_manager.end_conversation(user_id, "澄清完成")
+        
+        # 重新處理用戶的查詢（遞歸調用）
+        try:
+            # 🔥 移除重複AI邏輯，統一使用智能助手作為唯一入口
+            from modules.services.smart_assistant import process_with_smart_assistant
+            smart_result = process_with_smart_assistant(message_text, user_id)
+            
+            if smart_result["type"] == "execute_command":
+                # 智能助手解析出了標準命令，執行對應命令
+                command = smart_result["command"]
+                logger.info(f"🎯 澄清後智能助手生成命令: {command}")
+                
+                # 🔥 統一命令執行邏輯
+                if command.startswith("記錄車資"):
+                    from modules.services.ai_fare_service import handle_smart_fare_query
+                    result = handle_smart_fare_query(message_text, user_id, use_flex=True)
+                    handle_ai_fare_result(result, reply_token)
+                elif command.startswith("查已完成"):
+                    from modules.services.advanced_query_processor import AdvancedQueryProcessor
+                    processor = AdvancedQueryProcessor()
+                    result = processor.process_complex_query(command, user_id)
+                    if result.get('type') == 'success':
+                        reply_text(reply_token, result['message'])
+                    else:
+                        reply_text(reply_token, "❌ 查詢執行失敗")
+                else:
+                    reply_text(reply_token, f"收到澄清後的命令：{command}")
+            else:
+                reply_text(reply_token, "謝謝您的澄清，但我仍然無法理解。請嘗試更具體的描述。")
+        except Exception as e:
+            logger.error(f"處理澄清後的查詢失敗: {e}")
+            reply_text(reply_token, "處理您的澄清查詢時出現錯誤，請重新嘗試。")
+
+def handle_query_confirmation_conversation(conversation, message_text: str, user_id: str, reply_token: str):
+    """處理查詢確認對話"""
+    logger.info(f"🎯 處理查詢確認對話: 消息='{message_text}'")
+    
+    if conversation.current_step == 'waiting_confirmation':
+        # 檢查用戶是否確認
+        confirmation_keywords = ['確認', '對的', '正確', 'yes', '是', '對', 'ok', '好']
+        rejection_keywords = ['不對', '錯誤', '不是', 'no', '錯', '不正確']
+        
+        message_lower = message_text.lower().strip()
+        
+        if any(keyword in message_lower for keyword in confirmation_keywords):
+            # 用戶確認理解正確，執行原查詢
+            logger.info(f"✅ 用戶確認理解正確，執行查詢")
+            
+            context_data = conversation.context_data
+            original_criteria = context_data.get('parsed_criteria', {})
+            modification_intent = context_data.get('modification_intent')
+            
+            # 結束確認對話
+            conversation_manager.end_conversation(user_id, "確認完成")
+            
+            # 繼續執行原查詢（模擬搜索）
+            try:
+                from modules.services.ai_fare_service import CompletedTripMatcher, format_understood_criteria
+                matcher = CompletedTripMatcher()
+                matching_trips = matcher.search_completed_trips(original_criteria)
+                
+                understood_criteria = format_understood_criteria(original_criteria)
+                search_header = f"""🔍 AI智能搜索
+
+💬 {context_data.get('original_query', message_text)}
+{understood_criteria}
+
+"""
+                
+                if not matching_trips:
+                    reply_text(reply_token, f"""{search_header}❌ 找不到符合條件的班次記錄
+
+💡 建議：
+• 嘗試更寬泛的條件
+• 使用「查已完成」查看完整列表
+• 確認日期和關鍵詞是否正確""")
+                else:
+                    # 處理找到的結果（簡化版）
+                    result_summary = f"✅ 找到 {len(matching_trips)} 筆符合條件的班次"
+                    reply_text(reply_token, f"{search_header}{result_summary}")
+                    
+            except Exception as e:
+                logger.error(f"執行確認後的查詢失敗: {e}")
+                reply_text(reply_token, "執行查詢時出現錯誤，請重新嘗試。")
+                
+        elif any(keyword in message_lower for keyword in rejection_keywords):
+            # 用戶認為理解不正確
+            logger.info(f"❌ 用戶認為理解不正確，請求重新描述")
+            
+            # 結束確認對話
+            conversation_manager.end_conversation(user_id, "用戶否認理解")
+            
+            reply_text(reply_token, """💭 理解，請提供更準確的描述
+
+💡 請嘗試：
+• 使用具體的日期格式（如 7/15）
+• 明確指定司機號碼（如 司機533）
+• 包含班次類別（如 診所、東洋）
+• 如果要修改，請說明具體的錶價和加成
+
+或使用「查已完成」查看完整列表後再選擇。""")
+        else:
+            # 用戶回覆不明確，請求明確回答
+            status_message = conversation_manager.get_conversation_status_message(user_id)
+            reply_text(reply_token, f"💭 請明確回答「確認」或「不對」\n\n{status_message}")
+    else:
+        logger.warning(f"未處理的查詢確認對話步驟: {conversation.current_step}")
+        conversation_manager.end_conversation(user_id, "未知步驟")
