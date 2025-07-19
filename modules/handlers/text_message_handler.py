@@ -1190,20 +1190,27 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 
                 # 🔥 其他智能命令的直接處理
                 elif command.startswith("查已完成"):
-                    from modules.services.advanced_query_processor import AdvancedQueryProcessor
-                    processor = AdvancedQueryProcessor()
-                    result = processor.process_complex_query(command, user_id)
-                    
-                    if result.get('type') == 'success':
-                        reply_text(reply_token, result['message'])
-                    elif result.get('type') == 'success_with_pagination':
-                        # 🔥 新增：支持帶Quick Reply的分頁結果
-                        reply_message_with_quick_reply(reply_token, result['message'], result['quick_reply'])
-                    elif result.get('type') == 'no_results':
-                        reply_text(reply_token, result['message'])
-                    else:
-                        reply_text(reply_token, f"❌ 查詢執行失敗")
-                    return
+                    # 🔥 修復：查詢類命令優先使用AI車資服務（Flex Message）
+                    try:
+                        from modules.services.ai_fare_service import handle_smart_fare_query
+                        result = handle_smart_fare_query(message_text, user_id, use_flex=True)
+                        handle_ai_fare_result(result, reply_token)
+                        return
+                    except Exception as e:
+                        logger.error(f"智能查詢處理失敗，回退到advanced_query_processor: {e}")
+                        # 回退到原來的處理方式
+                        from modules.services.advanced_query_processor import AdvancedQueryProcessor
+                        processor = AdvancedQueryProcessor()
+                        result = processor.process_complex_query(command, user_id)
+                        
+                        if result.get('type') == 'success':
+                            reply_text(reply_token, result['message'])
+                        elif result.get('type') == 'success_with_pagination':
+                            # 🔥 新增：支持帶Quick Reply的分頁結果
+                            reply_message_with_quick_reply(reply_token, result['message'], result['quick_reply'])
+                        else:
+                            reply_text(reply_token, f"❌ 查詢執行失敗")
+                        return
                 
                 elif command.startswith("查詢班次"):
                     from modules.services.advanced_query_processor import AdvancedQueryProcessor
