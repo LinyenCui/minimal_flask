@@ -113,7 +113,7 @@ def create_ai_search_result_flex(search_info, trips, confidence):
                         {
                             "type": "text",
                             "text": str(trip['id']),
-                            "size": "xs",  # 🔥 縮小字體
+                            "size": "xxs",  # 🔥 過去態字體小一號：xs → xxs
                             "flex": 1,
                             "weight": "bold",
                             "color": "#FF8C00"  # 橘色
@@ -122,7 +122,7 @@ def create_ai_search_result_flex(search_info, trips, confidence):
                         {
                             "type": "text",
                             "text": f"{trip.get('start_point', '?')}({trip.get('category', '')})" if trip.get('category') in ['往', '回'] else f"{trip.get('start_point', '?')} → {trip.get('end_point', '?')}",
-                            "size": "xs",  # 🔥 縮小字體
+                            "size": "xxs",  # 🔥 過去態字體小一號：xs → xxs
                             "flex": 3,
                             "wrap": True,
                             "color": "#333333"
@@ -131,7 +131,7 @@ def create_ai_search_result_flex(search_info, trips, confidence):
                         {
                             "type": "text",
                             "text": str(driver_display.replace('🚕', '')),
-                            "size": "xs",  # 🔥 縮小字體
+                            "size": "xxs",  # 🔥 過去態字體小一號：xs → xxs
                             "flex": 1,
                             "color": "#666666"
                         },
@@ -139,7 +139,7 @@ def create_ai_search_result_flex(search_info, trips, confidence):
                         {
                             "type": "text",
                             "text": f"${total_fare}",  # 🔥 改用$號節省空間
-                            "size": "xs",  # 🔥 縮小字體
+                            "size": "xxs",  # 🔥 過去態字體小一號：xs → xxs
                             "flex": 1,
                             "align": "end",
                             "color": "#FF8C00",  # 橘色

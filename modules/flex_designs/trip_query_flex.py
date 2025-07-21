@@ -164,7 +164,7 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
                     {
                         "type": "text",
                         "text": f"{status_emoji} {trip_id}",
-                        "size": "xxs",  # 🔥 改為xxs，字體再小一號
+                        "size": "xs",  # 🔧 改回xs，現在態保持原來字體大小
                         "flex": 3,
                         "color": text_color,
                         "align": "start"
@@ -172,7 +172,7 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
                     {
                         "type": "text",
                         "text": time_val,
-                        "size": "xxs",  # 🔥 改為xxs，字體再小一號
+                        "size": "xs",  # 🔧 改回xs，現在態保持原來字體大小
                         "flex": 2,
                         "color": text_color,
                         "align": "start"
@@ -180,7 +180,7 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
                     {
                         "type": "text",
                         "text": location_display_text,
-                        "size": "xxs",  # 🔥 改為xxs，字體再小一號
+                        "size": "xs",  # 🔧 改回xs，現在態保持原來字體大小
                         "flex": 4,
                         "wrap": True,
                         "color": text_color,
@@ -189,7 +189,7 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
                     {
                         "type": "text",
                         "text": f"🚕{driver_id}",
-                        "size": "xxs",  # 🔥 改為xxs，字體再小一號
+                        "size": "xs",  # 🔧 改回xs，現在態保持原來字體大小
                         "flex": 3,
                         "align": "end",
                         "color": text_color
