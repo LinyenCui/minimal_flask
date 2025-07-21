@@ -292,6 +292,7 @@ class AdvancedQueryProcessor:
             '昨天': 'yesterday',
             '前天': 'day_before_yesterday',  # 🔥 新增前天支援
             '明天': 'tomorrow',
+            '後天': 'day_after_tomorrow',    # 🔥 新增後天支援
             '本週': 'this_week',
             '上週': 'last_week'
         }
@@ -399,6 +400,9 @@ class AdvancedQueryProcessor:
         elif date_type == 'tomorrow':
             tomorrow = get_taiwan_date() + timedelta(days=1)
             return f"{table_prefix}.date = :tomorrow", {'tomorrow': tomorrow}
+        elif date_type == 'day_after_tomorrow':  # 🔥 新增後天支援
+            day_after_tomorrow = get_taiwan_date() + timedelta(days=2)
+            return f"{table_prefix}.date = :day_after_tomorrow", {'day_after_tomorrow': day_after_tomorrow}
         elif date_type and re.match(r'^\d{4}-\d{2}-\d{2}$', date_type):
             # 🔥 新增：處理具體日期格式 (YYYY-MM-DD)
             self.logger.info(f"🗓️ 構建具體日期條件: {date_type}")
@@ -505,37 +509,43 @@ class AdvancedQueryProcessor:
         if len(trips) > 10:
             result_text += f"\n... 還有 {len(trips) - 10} 筆結果\n"
             
-            # 🔥 新增：為分頁結果添加Quick Reply支持
-            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
-            
-            pagination_quick_reply_items = [
-                QuickReplyItem(
-                    action=MessageAction(
-                        label="📄 下一頁",
-                        text="下一頁"
-                    )
-                ),
-                QuickReplyItem(
-                    action=MessageAction(
-                        label="💰 統計金額",
-                        text=f"統計金額 {command.replace('查已完成', '').strip()}"
-                    )
-                ),
-                QuickReplyItem(
-                    action=MessageAction(
-                        label="🔍 重新查詢",
-                        text="查已完成"
-                    )
-                ),
-                QuickReplyItem(
-                    action=MessageAction(
-                        label="❌ 取消",
-                        text="取消"
-                    )
-                )
-            ]
-            
-            pagination_quick_reply = QuickReply(items=pagination_quick_reply_items)
+            # 🔥 修復：使用正確的Quick Reply格式
+            pagination_quick_reply_dict = {
+                "items": [
+                    {
+                        "type": "action",
+                        "action": {
+                            "type": "message",
+                            "label": "📄 下一頁",
+                            "text": "下一頁"
+                        }
+                    },
+                    {
+                        "type": "action", 
+                        "action": {
+                            "type": "message",
+                            "label": "💰 統計金額",
+                            "text": f"統計金額 {command.replace('查已完成', '').strip()}"
+                        }
+                    },
+                    {
+                        "type": "action",
+                        "action": {
+                            "type": "message",
+                            "label": "🔍 重新查詢",
+                            "text": "查已完成"
+                        }
+                    },
+                    {
+                        "type": "action",
+                        "action": {
+                            "type": "message",
+                            "label": "❌ 取消",
+                            "text": "取消"
+                        }
+                    }
+                ]
+            }
             
             return {
                 "type": "success_with_pagination",
@@ -543,7 +553,7 @@ class AdvancedQueryProcessor:
                 "count": len(trips),
                 "total_amount": total_amount,
                 "trips": trips,
-                "quick_reply": pagination_quick_reply
+                "quick_reply": pagination_quick_reply_dict
             }
         
         return {
@@ -614,18 +624,31 @@ class AdvancedQueryProcessor:
             
             # 🔥 新增：為分頁結果添加Quick Reply支持
             from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
-            quick_reply = QuickReply(
-                items=[
-                    QuickReplyItem(action=MessageAction(label="下一頁", text=f"下一頁")),
-                    QuickReplyItem(action=MessageAction(label="查看全部", text=f"查看全部結果")),
-                ]
-            )
+            # 🔥 修復：直接使用字典格式構建Quick Reply，避免to_dict()轉換問題
+            quick_reply_items = [
+                {
+                    "type": "action",
+                    "action": {
+                        "type": "message",
+                        "label": "📄 下一頁",
+                        "text": "下一頁"
+                    }
+                },
+                {
+                    "type": "action",
+                    "action": {
+                        "type": "message", 
+                        "label": "🔍 查看全部",
+                        "text": "查看全部結果"
+                    }
+                }
+            ]
             
             return {
                 "type": "success_with_pagination",
                 "message": result_text,
                 "count": len(trips),
-                "quick_reply": quick_reply.to_dict()
+                "quick_reply": {"items": quick_reply_items}
             }
         
         # 原來的邏輯：結果不多時的處理

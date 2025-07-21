@@ -44,19 +44,19 @@ def parse_date_enhanced(date_string: str, context: str = 'general') -> Tuple[Opt
     
     # 星期幾 - 中等信心度
     weekday_patterns = {
-        '星期一': 0, '週一': 0, '一': 0,
-        '星期二': 1, '週二': 1, '二': 1,
-        '星期三': 2, '週三': 2, '三': 2,
-        '星期四': 3, '週四': 3, '四': 3,
-        '星期五': 4, '週五': 4, '五': 4,
-        '星期六': 5, '週六': 5, '六': 5,
-        '星期日': 6, '週日': 6, '日': 6
+        '星期一': 0, '周一': 0, '一': 0,
+        '星期二': 1, '周二': 1, '二': 1,
+        '星期三': 2, '周三': 2, '三': 2,
+        '星期四': 3, '周四': 3, '四': 3,
+        '星期五': 4, '周五': 4, '五': 4,
+        '星期六': 5, '周六': 5, '六': 5,
+        '星期日': 6, '周日': 6, '日': 6
     }
     
     for pattern, target_weekday in weekday_patterns.items():
         if pattern in date_string:
             days_ahead = target_weekday - today.weekday()
-            if days_ahead <= 0:  # 如果是過去的星期幾，指向下週
+            if days_ahead <= 0:  # 如果是過去的星期幾，指向下周
                 days_ahead += 7
             target_date = today + timedelta(days=days_ahead)
             return target_date, 'medium'

@@ -1,0 +1,69 @@
+同步時間: 2025-07-21 14:07:00
+執行用戶: linyan
+返回碼: 0
+錯誤概要: 
+==================================================
+
+🎉 同步成功完成！
+
+📋 完整輸出日誌:
+------------------------------
+🚀 開始 Render 資料庫混合模式同步流程
+============================================================
+🔌 正在連接到 Render 資料庫 (dpg-cvhb8fdrie7s73emf81g-a.singapore-postgres.render.com)...
+✅ 成功連接到 Render 資料庫。
+🔌 正在連接到 Local 資料庫 (localhost)...
+✅ 成功連接到 Local 資料庫。
+--- 開始完全同步資料表: drivers ---
+   - 正在從 Render 讀取 'drivers'...
+   - 正在清空本地 'drivers'...
+   - 從 Render 讀取了 9 筆紀錄，正在寫入本地...
+   ✅ 資料表 'drivers' 完全同步成功。
+--- 開始完全同步資料表: customers ---
+   - 正在從 Render 讀取 'customers'...
+   - 正在清空本地 'customers'...
+   - 從 Render 讀取了 75 筆紀錄，正在寫入本地...
+   ✅ 資料表 'customers' 完全同步成功。
+--- 開始完全同步資料表: fixed_schedules ---
+   - 正在從 Render 讀取 'fixed_schedules'...
+   - 正在清空本地 'fixed_schedules'...
+   - 從 Render 讀取了 47 筆紀錄，正在寫入本地...
+   ✅ 資料表 'fixed_schedules' 完全同步成功。
+--- 開始完全同步資料表: trips ---
+   - 正在從 Render 讀取 'trips'...
+   - 正在清空本地 'trips'...
+   - 從 Render 讀取了 138 筆紀錄，正在寫入本地...
+   ✅ 資料表 'trips' 完全同步成功。
+--- 開始增量同步資料表: completed_trips ---
+   - 本地最新的 'completed_trips' 日期: 2000-01-01
+   - 正在從 Render 讀取 date >= '2000-01-01' 的新紀錄...
+   - 從 Render 找到 1966 筆可能需要同步的紀錄。
+   - 原始欄位: 20 個，過濾後: 19 個
+   - 正在將新紀錄寫入本地，並自動跳過已存在的紀錄...
+   - ✅ 成功插入 1 筆新紀錄。(1965 筆已存在)
+--- 開始校準本地資料庫序列 ---
+   - 正在校準序列 'drivers_id_seq'...
+   - ⚠️ 找不到序列 'drivers_id_seq'，跳過校準。可能是因為資料表沒有使用標準序列。
+   - 正在校準序列 'customers_id_seq'...
+   - ✅ 序列 'customers_id_seq' 已校準。
+   - 正在校準序列 'fixed_schedules_id_seq'...
+   - ⚠️ 找不到序列 'fixed_schedules_id_seq'，跳過校準。可能是因為資料表沒有使用標準序列。
+   - 正在校準序列 'trips_trip_id_seq'...
+   - ✅ 序列 'trips_trip_id_seq' 已校準。
+   - 正在校準序列 'completed_trips_id_seq'...
+   - ✅ 序列 'completed_trips_id_seq' 已校準。
+
+🎉 同步成功完成！
+   - `completed_trips` 已基於日期增量更新。
+   - 其他指定資料表已與 Render 完全同步。
+   - 所有本地資料庫序列已自動校準。
+🔌 資料庫連線已關閉。
+
+------------------------------
+
+💡 常見問題解決方案:
+• total_fare錯誤 → 生成欄位問題，腳本需更新
+• users表錯誤 → 移除不存在的表
+• completed_trips錯誤 → 增量同步生成欄位過濾問題
+• 序列錯誤 → 執行序列校準
+• 連線錯誤 → 檢查網路和資料庫狀態

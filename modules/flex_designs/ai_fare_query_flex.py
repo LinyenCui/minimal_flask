@@ -77,89 +77,88 @@ def create_ai_search_result_flex(search_info, trips, confidence):
                 "margin": "sm"
             })
             
-        elif len(trips) == 1:
-            # 單個結果
-            trip = trips[0]
-            meter_fare = trip.get('meter_fare', 0) or 0
-            extra_fare = trip.get('extra_fare', 0) or 0
-            
-            if extra_fare >= 0:
-                fare_display = f"錶價 {meter_fare}, 加成 {extra_fare}"
-            else:
-                fare_display = f"錶價 {meter_fare}, 加成 {extra_fare}"
-            
-            body_contents.extend([
-                {
-                    "type": "text",
-                    "text": "🎯 找到唯一匹配的班次：",
-                    "size": "md",
-                    "color": "#4CAF50",
-                    "weight": "bold",
-                    "margin": "md"
-                },
-                {
-                    "type": "text",
-                    "text": f"📋 班次 #{trip['id']} ({trip.get('category', '未分類')})",
-                    "size": "sm",
-                    "weight": "bold",
-                    "margin": "sm"
-                },
-                {
-                    "type": "text", 
-                    "text": f"📍 {trip.get('start_point', '?')} → {trip.get('end_point', '?')}",
-                    "size": "sm",
-                    "margin": "xs"
-                },
-                {
-                    "type": "text",
-                    "text": f"🚕 {trip.get('driver_id', 'N/A')} | 💰 {fare_display}",
-                    "size": "sm", 
-                    "margin": "xs"
-                }
-            ])
-            
         else:
-            # 多個結果 - 顯示前5個
+            # 🔥 新方案：用可點擊的班次列表，就像東洋班次那樣
             body_contents.append({
                 "type": "text",
                 "text": f"🎯 找到 {len(trips)} 個匹配班次：",
                 "size": "md",
-                "color": "#FF9800",
+                "color": "#4CAF50" if len(trips) == 1 else "#FF9800",
                 "weight": "bold",
                 "margin": "md"
             })
             
-            MAX_DISPLAY = 50  # 大幅提高顯示上限，支援顯示更多班次（如颱風假等特殊情況）
-            display_count = min(MAX_DISPLAY, len(trips))
-            for i, trip in enumerate(trips[:display_count]):
+            # 顯示可點擊的班次列表（顯示所有班次）
+            for i, trip in enumerate(trips):  # 🔥 修復：移除20個限制，顯示所有班次
                 meter_fare = trip.get('meter_fare', 0) or 0
                 extra_fare = trip.get('extra_fare', 0) or 0
+                total_fare = meter_fare + extra_fare
                 
-                if extra_fare >= 0:
-                    fare_display = f"{meter_fare}+{extra_fare}"
-                else:
-                    fare_display = f"{meter_fare}{extra_fare}"
+                # 🔥 微調：簡化金額顯示，只顯示總金額
+                fare_display = f"💰{total_fare}"
                 
                 driver_display = trip.get('driver_id', 'N/A')
                 if driver_display and driver_display != 'N/A':
-                    driver_display = f"#{driver_display}"
+                    driver_display = f"🚕{driver_display}"
+                else:
+                    driver_display = "🚕未指派"
                 
-                body_contents.append({
-                    "type": "text",
-                    "text": f"📍 {i+1}. #{trip['id']} ({trip.get('category', '?')}) - {trip.get('start_point', '?')} → {trip.get('end_point', '?')} | 🚕{driver_display} | 💰{fare_display}",
-                    "size": "xs",
-                    "wrap": True,
-                    "margin": "xs"
-                })
+                # 🔥 新格式：像現在態一樣的排版，但用橘色代表過去態
+                trip_box = {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "spacing": "sm",
+                    "contents": [
+                        # 班次ID（移除橘點，節省空間）
+                        {
+                            "type": "text",
+                            "text": str(trip['id']),
+                            "size": "xs",  # 🔥 縮小字體
+                            "flex": 1,
+                            "weight": "bold",
+                            "color": "#FF8C00"  # 橘色
+                        },
+                        # 地點（前移）
+                        {
+                            "type": "text",
+                            "text": f"{trip.get('start_point', '?')}({trip.get('category', '')})" if trip.get('category') in ['往', '回'] else f"{trip.get('start_point', '?')} → {trip.get('end_point', '?')}",
+                            "size": "xs",  # 🔥 縮小字體
+                            "flex": 3,
+                            "wrap": True,
+                            "color": "#333333"
+                        },
+                        # 司機（移除emoji，節省空間）
+                        {
+                            "type": "text",
+                            "text": str(driver_display.replace('🚕', '')),
+                            "size": "xs",  # 🔥 縮小字體
+                            "flex": 1,
+                            "color": "#666666"
+                        },
+                        # 總金額（改用$號）
+                        {
+                            "type": "text",
+                            "text": f"${total_fare}",  # 🔥 改用$號節省空間
+                            "size": "xs",  # 🔥 縮小字體
+                            "flex": 1,
+                            "align": "end",
+                            "color": "#FF8C00",  # 橘色
+                            "weight": "bold"
+                        }
+                    ],
+                    "margin": "sm",
+                    "paddingAll": "sm",
+                    "backgroundColor": "#FFF8F0",  # 淡橘色背景
+                    "cornerRadius": "sm",
+                    "action": {
+                        "type": "message",
+                        "text": f"查看 {trip['id']}"  # 🔥 修復：過去態用"查看"指令
+                    }
+                }
+                
+                body_contents.append(trip_box)
             
-            if len(trips) > MAX_DISPLAY:
-                body_contents.append({
-                    "type": "text",
-                    "text": f"...還有 {len(trips) - MAX_DISPLAY} 個班次",
-                    "size": "xs",
-                    "color": "#666666",
-                    "margin": "xs"
-                })
+            # �� 移除限制提示 - 現在顯示所有班次
         
         # 構建 Flex Message
         flex_content = {
@@ -176,41 +175,35 @@ def create_ai_search_result_flex(search_info, trips, confidence):
                         "color": "#FFFFFF"
                     }
                 ],
-                "backgroundColor": "#3B82F6",
+                "backgroundColor": "#FF8C00",  # 🔥 改為橘色，代表過去態
                 "paddingAll": "md"
             },
             "body": {
                 "type": "box",
                 "layout": "vertical",
                 "contents": body_contents
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "點擊班次查看詳情和操作選項",
+                        "size": "xs",
+                        "color": "#888888",
+                        "wrap": True,
+                        "align": "center"
+                    }
+                ]
             }
         }
         
-        # 創建 Quick Reply (如果有單個結果)
-        quick_reply = None
-        if len(trips) == 1:
-            trip = trips[0]
-            quick_reply_items = [
-                QuickReplyItem(
-                    action=MessageAction(
-                        label="💰 修改車資",
-                        text=f"修改班次#{trip['id']} 車資"
-                    )
-                ),
-                QuickReplyItem(
-                    action=MessageAction(
-                        label="📋 查看詳情", 
-                        text=f"班次詳情 {trip['id']}"
-                    )
-                )
-            ]
-            quick_reply = QuickReply(items=quick_reply_items)
-        
-        # 🔥 修復：返回字典格式，和司機指派確認一致
+        # 🔥 簡化：不再需要複雜的Quick Reply，直接點擊班次即可
         return {
-            "flex_message": flex_content,  # 直接返回字典
-            "quick_reply": quick_reply,    # Quick Reply 對象
-            "alt_text": f"AI搜索結果: {query}"
+            "flex_message": flex_content,
+            "quick_reply": None,  # 不需要Quick Reply，直接點擊班次
+            "alt_text": f"AI搜索到{len(trips)}個班次: {query}"
         }
         
     except Exception as e:

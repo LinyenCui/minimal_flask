@@ -164,7 +164,7 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
                     {
                         "type": "text",
                         "text": f"{status_emoji} {trip_id}",
-                        "size": "xs",
+                        "size": "xxs",  # 🔥 改為xxs，字體再小一號
                         "flex": 3,
                         "color": text_color,
                         "align": "start"
@@ -172,7 +172,7 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
                     {
                         "type": "text",
                         "text": time_val,
-                        "size": "xs",
+                        "size": "xxs",  # 🔥 改為xxs，字體再小一號
                         "flex": 2,
                         "color": text_color,
                         "align": "start"
@@ -180,7 +180,7 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
                     {
                         "type": "text",
                         "text": location_display_text,
-                        "size": "xs",
+                        "size": "xxs",  # 🔥 改為xxs，字體再小一號
                         "flex": 4,
                         "wrap": True,
                         "color": text_color,
@@ -189,7 +189,7 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
                     {
                         "type": "text",
                         "text": f"🚕{driver_id}",
-                        "size": "xs",
+                        "size": "xxs",  # 🔥 改為xxs，字體再小一號
                         "flex": 3,
                         "align": "end",
                         "color": text_color

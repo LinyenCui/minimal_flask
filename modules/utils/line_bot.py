@@ -307,3 +307,56 @@ def get_user_display_name(user_id):
     except Exception as e:
         logger.error(f"獲取用戶顯示名稱時出錯: {e}")
         return f"用戶{user_id[-4:]}" if user_id else "未知用戶"
+
+def create_unified_confirmation_message(message_text: str, confirmation_type: str = "default"):
+    """
+    創建統一的確認對話框，確保都有Quick Reply按鈕
+    
+    Args:
+        message_text: 確認框的文字內容
+        confirmation_type: 確認類型 (default, modification, deletion, sync等)
+    
+    Returns:
+        TextMessage with QuickReply
+    """
+    from linebot.v3.messaging import TextMessage, QuickReply, QuickReplyItem, MessageAction
+    
+    # 根據確認類型設置不同的按鈕
+    if confirmation_type == "modification":
+        quick_reply_items = [
+            QuickReplyItem(action=MessageAction(label="✅ 確認修改", text="確認修改")),
+            QuickReplyItem(action=MessageAction(label="❌ 取消修改", text="取消修改")),
+            QuickReplyItem(action=MessageAction(label="📋 查看詳情", text="詳情"))
+        ]
+    elif confirmation_type == "deletion":
+        quick_reply_items = [
+            QuickReplyItem(action=MessageAction(label="✅ 確認刪除", text="確認刪除")),
+            QuickReplyItem(action=MessageAction(label="❌ 取消操作", text="取消"))
+        ]
+    elif confirmation_type == "sync":
+        quick_reply_items = [
+            QuickReplyItem(action=MessageAction(label="✅ 確認同步", text="確認同步")),
+            QuickReplyItem(action=MessageAction(label="❌ 取消操作", text="取消"))
+        ]
+    elif confirmation_type == "ai_query":
+        quick_reply_items = [
+            QuickReplyItem(action=MessageAction(label="✅ 確認", text="確認")),
+            QuickReplyItem(action=MessageAction(label="❌ 不對", text="不對")),
+            QuickReplyItem(action=MessageAction(label="🔍 重新查詢", text="重新查詢"))
+        ]
+    else:  # default
+        quick_reply_items = [
+            QuickReplyItem(action=MessageAction(label="✅ 確認", text="確認")),
+            QuickReplyItem(action=MessageAction(label="❌ 取消", text="取消"))
+        ]
+    
+    quick_reply = QuickReply(items=quick_reply_items)
+    
+    return TextMessage(text=message_text, quick_reply=quick_reply)
+
+def reply_unified_confirmation(reply_token: str, message_text: str, confirmation_type: str = "default"):
+    """
+    回覆統一格式的確認對話框
+    """
+    message = create_unified_confirmation_message(message_text, confirmation_type)
+    reply_message(reply_token, [message])

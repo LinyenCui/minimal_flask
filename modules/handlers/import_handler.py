@@ -13,7 +13,7 @@ from modules.utils.week_utils import (
 )
 
 def handle_import_fixed_trips_week(message_text):
-    """處理匯入固定班次的命令 - 支援週次選擇和覆蓋選項"""
+    """處理匯入固定班次的命令 - 支援周次選擇和覆蓋選項"""
     try:
         # 解析命令參數
         parts = message_text.strip().split()
@@ -33,13 +33,13 @@ def handle_import_fixed_trips_week(message_text):
             else:
                 return f"❌ 無效的選項: {overwrite_param}\n\n{show_available_weeks()}"
         
-        # 解析週次參數
+        # 解析周次參數
         try:
             week_offset, week_name = parse_week_parameter(week_param)
         except ValueError as e:
             return f"❌ {str(e)}\n\n{show_available_weeks()}"
         
-        # 計算目標週次
+        # 計算目標周次
         today = date.today()
         week_start, dates, week_desc = calculate_target_week(today, week_offset)
         
@@ -56,30 +56,30 @@ def handle_import_fixed_trips_week(message_text):
         return f"處理匯入固定班次命令失敗: {str(e)}"
 
 def show_available_weeks():
-    """顯示可用的週次選項"""
+    """顯示可用的周次選項"""
     try:
         weeks = get_available_weeks()
         
-        result = "📅 可用的匯入週次選項：\n\n"
+        result = "📅 可用的匯入周次選項：\n\n"
         
         for week_offset, name, desc in weeks:
             result += f"• 匯入固定班次 {name} ({desc})\n"
         
         result += "\n🔄 覆蓋選項：\n"
-        result += "• 匯入固定班次 [週次] 覆蓋\n"
+        result += "• 匯入固定班次 [周次] 覆蓋\n"
         
-        result += "\n💡 輸入格式：匯入固定班次 [週次] [覆蓋]\n"
-        result += "例如：匯入固定班次 下週\n"
-        result += "例如：匯入固定班次 本週 覆蓋"
+        result += "\n💡 輸入格式：匯入固定班次 [周次] [覆蓋]\n"
+        result += "例如：匯入固定班次 下周\n"
+        result += "例如：匯入固定班次 本周 覆蓋"
         
         return result
         
     except Exception as e:
-        current_app.logger.error(f"顯示可用週次失敗: {str(e)}")
-        return f"顯示可用週次失敗: {str(e)}"
+        current_app.logger.error(f"顯示可用周次失敗: {str(e)}")
+        return f"顯示可用周次失敗: {str(e)}"
 
 def import_week_trips(week_start, dates, week_name, week_desc, force_overwrite=False):
-    """執行週次固定班次匯入 - 優化版本"""
+    """執行周次固定班次匯入 - 優化版本"""
     start_time = time.time()
     
     try:
@@ -100,7 +100,7 @@ def import_week_trips(week_start, dates, week_name, week_desc, force_overwrite=F
             # 提供覆蓋選項的提示
             return f"⚠️ {week_name} ({week_desc}) 的固定班次已經匯入過了（共 {existing_count} 筆）。\n\n如需覆蓋，請使用：\n🔄 匯入固定班次 {week_name} 覆蓋\n\n⚠️ 注意：如選覆蓋資料，原先對班次的修改會失效"
         
-        # 如果是覆蓋模式，先清除該週次的固定班次 - 優化DELETE
+        # 如果是覆蓋模式，先清除該周次的固定班次 - 優化DELETE
         if force_overwrite and existing_count > 0:
             current_app.logger.info(f"🔄 覆蓋模式：開始清除原有 {existing_count} 筆固定班次")
             
@@ -115,17 +115,17 @@ def import_week_trips(week_start, dates, week_name, week_desc, force_overwrite=F
             deleted_count = delete_result.rowcount
             current_app.logger.info(f"✅ 已刪除 {deleted_count} 筆原有固定班次")
         
-        # 週次選擇邏輯：
-        # - 本週：在現有基礎上追加（不清空）
-        # - 下週：可以清空（因為是未來規劃）
+        # 周次選擇邏輯：
+        # - 本周：在現有基礎上追加（不清空）
+        # - 下周：可以清空（因為是未來規劃）
         week_offset = (week_start - date.today()).days // 7
         
         if week_offset == 0:
-            # 本週：追加模式（不清空現有班次）
-            current_app.logger.info("📝 本週匯入模式：追加到現有班次")
+            # 本周：追加模式（不清空現有班次）
+            current_app.logger.info("📝 本周匯入模式：追加到現有班次")
         else:
-            # 未來週次：規劃模式（可以清空重新規劃）
-            current_app.logger.info(f"📅 未來週次匯入模式：{week_name}")
+            # 未來周次：規劃模式（可以清空重新規劃）
+            current_app.logger.info(f"📅 未來周次匯入模式：{week_name}")
             
             # 如果不是覆蓋模式，在匯入新班次之前，先將所有未完成的班次移到已完成班次表
             if not force_overwrite:
@@ -145,7 +145,7 @@ def import_week_trips(week_start, dates, week_name, week_desc, force_overwrite=F
                     # 不中斷流程，繼續匯入
                 
                 # 優化：清空班次總覽表時添加條件，避免全表刪除
-                current_app.logger.info("🗑️ 清空現有班次，準備匯入新週次")
+                current_app.logger.info("🗑️ 清空現有班次，準備匯入新周次")
                 
                 # 只刪除非固定班次，或者添加更安全的條件
                 delete_query = """
@@ -200,7 +200,7 @@ def import_week_trips(week_start, dates, week_name, week_desc, force_overwrite=F
                 # 生成唯一識別碼
                 unique_code = f"{fixed_trip_id}_{day_of_year}_{week_number}"
                 
-                # 優化：批量檢查重複（只在本週追加模式且不是覆蓋模式時）
+                # 優化：批量檢查重複（只在本周追加模式且不是覆蓋模式時）
                 skip_duplicate_check = not (week_offset == 0 and not force_overwrite)
                 
                 if not skip_duplicate_check:

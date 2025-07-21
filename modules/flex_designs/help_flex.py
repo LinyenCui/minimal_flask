@@ -396,7 +396,9 @@ def get_maintenance_help():
                 {"type": "text", "text": "• 更新已完成班次", "size": "xs", "margin": "sm"},
                 {"type": "text", "text": "• 待派班次 - 查看未指派班次", "size": "xs"},
                 {"type": "text", "text": "• 指派司機 [ID] - 指派司機", "size": "xs"},
-                {"type": "text", "text": "• 資料庫同步 - 從Render同步資料", "size": "xs"},
+                {"type": "text", "text": "• 資料庫同步 - 檢查並確認同步", "size": "xs"},
+                {"type": "text", "text": "• 確認同步 - 執行快速同步（群組回覆）", "size": "xs"},
+                {"type": "text", "text": "• 同步結果 - 查看最後同步詳細結果", "size": "xs"},
                 
                 {"type": "text", "text": "🔧 資料修復", "weight": "bold", "size": "sm", "color": "#8B0000", "margin": "md"},
                 {"type": "text", "text": "• /fix-sequence - 修復序列", "size": "xs", "margin": "sm"},

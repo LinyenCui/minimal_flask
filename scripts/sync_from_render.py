@@ -43,9 +43,9 @@ LOCAL_DB_CONFIG = {
 FULL_SYNC_TABLES = [
     "drivers",
     "customers",
-    "fixed_schedules",
-    "trips",
-    "users"
+    "fixed_schedules",  # 移到trips之前，因為trips有外鍵參考
+    "trips"
+    # 移除 "users" 因為本地資料庫沒有這個表
     # ... 請根據您的需求，將其他需要完全同步的資料表加到這裡
 ]
 
@@ -101,11 +101,25 @@ def truncate_and_copy(local_conn, render_conn, table_name):
                 return
 
             print(f"   - 從 Render 讀取了 {len(records)} 筆紀錄，正在寫入本地...")
-            cols = [desc[0] for desc in render_cur.description]
-            placeholders = "%s, " * len(cols)
-            insert_sql = f"INSERT INTO {table_name} ({', '.join(cols)}) VALUES ({placeholders.strip(', ')})"
             
-            execute_batch(local_cur, insert_sql, [tuple(rec) for rec in records])
+            # 獲取所有欄位
+            all_cols = [desc[0] for desc in render_cur.description]
+            
+            # 過濾掉自動生成的欄位
+            generated_columns = ['actual_fare', 'total_fare']  # 已知的自動生成欄位
+            filtered_cols = [col for col in all_cols if col not in generated_columns]
+            
+            # 獲取對應的資料索引
+            col_indices = [all_cols.index(col) for col in filtered_cols]
+            
+            # 準備插入語句
+            placeholders = "%s, " * len(filtered_cols)
+            insert_sql = f"INSERT INTO {table_name} ({', '.join(filtered_cols)}) VALUES ({placeholders.strip(', ')})"
+            
+            # 過濾記錄資料，只包含非生成欄位
+            filtered_records = [[rec[i] for i in col_indices] for rec in records]
+            
+            execute_batch(local_cur, insert_sql, filtered_records)
             local_conn.commit()
             print(f"   ✅ 資料表 '{table_name}' 完全同步成功。")
 
@@ -141,14 +155,26 @@ def incremental_sync_completed_trips(local_conn, render_conn):
 
             print(f"   - 從 Render 找到 {len(new_records)} 筆可能需要同步的紀錄。")
 
-            # 3. 使用 ON CONFLICT DO NOTHING 將新資料優雅地寫入本地
-            print(f"   - 正在將新紀錄寫入本地，並自動跳過已存在的紀錄...")
-            cols = [desc[0] for desc in render_cur.description]
-            placeholders = "%s, " * len(cols)
-            # 關鍵：ON CONFLICT (id) DO NOTHING
-            insert_sql = f"INSERT INTO {table_name} ({', '.join(cols)}) VALUES ({placeholders.strip(', ')}) ON CONFLICT (id) DO NOTHING"
+            # 3. 過濾生成欄位，避免插入錯誤
+            all_cols = [desc[0] for desc in render_cur.description]
+            generated_columns = ['actual_fare', 'total_fare']  # completed_trips 也要過濾生成欄位
+            filtered_cols = [col for col in all_cols if col not in generated_columns]
             
-            execute_batch(local_cur, insert_sql, [tuple(rec) for rec in new_records])
+            print(f"   - 原始欄位: {len(all_cols)} 個，過濾後: {len(filtered_cols)} 個")
+            
+            # 獲取對應的資料索引
+            col_indices = [all_cols.index(col) for col in filtered_cols]
+            
+            # 過濾記錄資料，只包含非生成欄位
+            filtered_records = [[rec[i] for i in col_indices] for rec in new_records]
+
+            # 4. 使用 ON CONFLICT DO NOTHING 將新資料優雅地寫入本地
+            print(f"   - 正在將新紀錄寫入本地，並自動跳過已存在的紀錄...")
+            placeholders = "%s, " * len(filtered_cols)
+            # 關鍵：ON CONFLICT (id) DO NOTHING，並且只插入非生成欄位
+            insert_sql = f"INSERT INTO {table_name} ({', '.join(filtered_cols)}) VALUES ({placeholders.strip(', ')}) ON CONFLICT (id) DO NOTHING"
+            
+            execute_batch(local_cur, insert_sql, filtered_records)
             inserted_count = local_cur.rowcount
             local_conn.commit()
             print(f"   - ✅ 成功插入 {inserted_count} 筆新紀錄。({len(new_records) - inserted_count} 筆已存在)")

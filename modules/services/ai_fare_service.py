@@ -19,34 +19,28 @@ logger = logging.getLogger(__name__)
 
 def should_use_ai_query(message_text: str) -> bool:
     """
-    🔥 智能檢測是否應該使用AI車資查詢
-    結合關鍵詞檢測和上下文理解
+    🔥 修復：嚴格判斷是否應該使用AI車資查詢
+    只有真正的車資相關查詢才使用，避免攔截一般班次查詢
     """
-    # 車資相關關鍵詞 - 擴展版本
-    fare_keywords = ['車資', '費用', '金額', '收費', '錢', '價格', '票價', '錶價', '加成', '$', '元', '台幣', '現金', '付費', '收入', '車費', '運費']
-    
-    # 查詢/修改動詞
-    action_verbs = ['查詢', '查', '看', '顯示', '搜尋', '找', '修改', '改', '更新', '設定', '調整', '記錄']
-    
-    # 班次相關詞彙
-    trip_keywords = ['班次', '趟次', '行程', '路線']
-    
-    # 地點關鍵詞
-    location_keywords = ['台中', '彰化', '南投', '診所', '醫院', '火車站', '高鐵', '機場', '東洋', '臨時']
-    
-    # 時間關鍵詞
-    time_keywords = ['今天', '明天', '昨天', '今日', '明日', '昨日', '前天', '後天', '這週', '上週', '月', '日', '星期']
-    
-    # 司機相關
-    driver_keywords = ['司機', 'driver']
-    
-    # 修改意圖關鍵詞
-    modification_keywords = ['改成', '調整為', '變成', '設為', '修改為']
-    
     message_lower = message_text.lower()
     
-    # 檢查各類關鍵詞
+    # 🔥 修復：必須包含車資關鍵詞的查詢才使用AI服務
+    fare_keywords = ['車資', '錶價', '加成', '費用', '金額', '價格', '收費']
+    modification_keywords = ['修改', '更改', '調整', '設定', '改成']
+    action_verbs = ['查詢', '查看', '查', '顯示', '統計']
+    trip_keywords = ['班次', '趟次', '行程']
+    location_keywords = ['診所', '東洋', '臨時', '固定']
+    time_keywords = ['今天', '昨天', '明天', '本周', '上周', '這週', '7/', '07/', '6/', '06/']
+    driver_keywords = ['司機', '駕駛']
+    
+    # 🔥 關鍵修復：必須包含車資相關詞彙
     has_fare = any(keyword in message_lower for keyword in fare_keywords)
+    
+    # 🚫 如果沒有車資關鍵詞，直接返回False
+    if not has_fare:
+        return False
+    
+    # 檢查其他關鍵詞
     has_action = any(verb in message_lower for verb in action_verbs)
     has_trip = any(keyword in message_lower for keyword in trip_keywords)
     has_location = any(keyword in message_lower for keyword in location_keywords)
@@ -60,20 +54,16 @@ def should_use_ai_query(message_text: str) -> bool:
     # 檢查是否有數字模式（可能是費用或ID）
     has_numbers = bool(re.search(r'\d+', message_text))
     
-    # 決策邏輯 - 🔧 修復：只處理真正的車資查詢，不要貪心攔截所有班次查詢
-    # 1. 明確的車資相關查詢（必須包含車資詞彙）
-    if has_fare and has_action:
+    # 🔥 修復：只有真正的車資查詢才返回True
+    # 1. 明確的車資相關查詢
+    if has_fare and (has_action or has_modification):
         return True
     
-    # 2. 有班次ID的車資操作（必須包含車資詞彙）
-    if has_trip_id and has_fare and (has_action or has_modification):
+    # 2. 有班次ID的車資操作
+    if has_trip_id and has_fare:
         return True
     
-    # 🔥 刪除：貪心的班次查詢攔截邏輯
-    # if has_trip and (has_action or has_time or has_location or has_driver):
-    #     return True
-    
-    # 3. 修改意圖（必須包含車資詞彙）
+    # 3. 車資修改意圖
     if has_modification and has_numbers and has_fare:
         return True
     
@@ -81,22 +71,9 @@ def should_use_ai_query(message_text: str) -> bool:
     if has_location and has_time and has_action and has_fare:
         return True
     
-    # 5. 司機車資查詢（必須包含車資詞彙）
+    # 5. 司機車資查詢
     if has_driver and (has_action or has_time) and has_numbers and has_fare:
         return True
-    
-    # 6. 自然語言車資模式檢測
-    fare_patterns = [
-        r'.*車資.*',               # 明確提到車資
-        r'.*費用.*',               # 明確提到費用  
-        r'.*金額.*',               # 明確提到金額
-        r'.*錶價.*加成.*',         # 錶價400加成80
-        r'修改.*班次.*\d+.*元',    # 修改班次費用
-    ]
-    
-    for pattern in fare_patterns:
-        if re.search(pattern, message_text):
-            return True
     
     return False
 
@@ -529,13 +506,76 @@ class CompletedTripMatcher:
         
         return filtered_trips
 
-def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True):
+def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True, parsed_command=None, skip_parsing=False):
     """
     🔥 智能車資查詢和修改服務 - 增強版
     支持自然語言理解、多輪對話、智能修改確認
+    
+    Args:
+        message_text: 用戶輸入的原始查詢
+        user_id: 用戶ID
+        use_flex: 是否使用Flex消息
+        parsed_command: 智能助手已解析的標準命令（可選）
+        skip_parsing: 是否跳過重新解析，直接執行parsed_command
     """
     try:
         logger.info(f"🔍 AI車資查詢開始: '{message_text}', user_id: {user_id}")
+        if parsed_command:
+            logger.info(f"🎯 接收到已解析命令: '{parsed_command}'")
+        if skip_parsing:
+            logger.info(f"⚡ 跳過解析，直接執行命令: '{parsed_command}'")
+        
+        # 🔥 如果跳過解析，直接執行已解析的標準命令，但使用AI車資服務格式
+        if skip_parsing and parsed_command:
+            try:
+                logger.info(f"🎯 跳過解析，直接執行查詢並返回Flex Message: {parsed_command}")
+                
+                # 🔥 關鍵修復：解析已確認的命令，提取查詢條件
+                matcher = CompletedTripMatcher()
+                criteria = matcher.parse_natural_query(parsed_command)
+                
+                # 🔥 直接搜索，不再進行信心度評估
+                trips = matcher.search_completed_trips(criteria)
+                
+                # 🔥 格式化AI理解的條件（用於顯示）
+                understood_criteria = format_understood_criteria(criteria)
+                
+                # 🔥 使用AI車資服務的Flex Message格式返回結果
+                if not trips:
+                    if use_flex:
+                        from modules.flex_designs.ai_fare_query_flex import create_ai_search_result_flex
+                        search_info = {
+                            'query': message_text,
+                            'criteria_text': understood_criteria.replace('\n', ', ').replace('  ', '')
+                        }
+                        return create_ai_search_result_flex(search_info, [], 'high')
+                    else:
+                        return {
+                            'type': 'text',
+                            'message': f"❌ 找不到符合條件的班次記錄\n\n💡 建議使用「查已完成」查看完整列表"
+                        }
+                else:
+                    # 🔥 返回可點擊的Flex Message
+                    if use_flex:
+                        from modules.flex_designs.ai_fare_query_flex import create_ai_search_result_flex
+                        search_info = {
+                            'query': message_text,
+                            'criteria_text': understood_criteria.replace('\n', ', ').replace('  ', '')
+                        }
+                        return create_ai_search_result_flex(search_info, trips, 'high')
+                    else:
+                        trips_summary = format_multiple_trips_summary(trips)
+                        return {
+                            'type': 'text', 
+                            'message': f"🔍 查詢結果：\n\n{trips_summary}"
+                        }
+                        
+            except Exception as e:
+                logger.error(f"跳過解析執行失敗: {e}")
+                return {
+                    'type': 'text',
+                    'message': f"❌ 執行查詢時出現錯誤: {str(e)}"
+                }
         
         # 🔥 首先檢查用戶是否在回答修改原因
         pending_modification = conversation_manager.get_pending_modification(user_id)
@@ -893,9 +933,10 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True):
 
 {understood_criteria}
 
-✅ 如果正確，請回覆「確認」或「對的」
-❌ 如果不正確，請提供更準確的描述"""
+💡 請確認理解是否正確，或提供更準確的描述
+⏰ 此對話將在 3 分鐘後自動過期"""
             
+            # 🔥 修復：使用統一的確認對話框格式
             conversation_manager.start_conversation(
                 user_id=user_id,
                 conversation_type='query_confirmation',
@@ -903,16 +944,27 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True):
                 context_data={
                     'original_query': message_text,
                     'parsed_criteria': criteria,
-                    'modification_intent': modification_intent
+                    'modification_intent': modification_intent,
+                    'parsed_command': parsed_command  # 保存已解析的標準命令
                 },
                 prompt_message=confirmation_message,
                 duration_minutes=3
             )
             
-            return f"""{confirmation_message}
-
-💡 請確認理解是否正確，或提供更準確的描述
-⏰ 此對話將在 3 分鐘後自動過期"""
+            # 🔥 統一格式：使用標準的Quick Reply按鈕
+            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+            quick_reply = QuickReply(items=[
+                QuickReplyItem(action=MessageAction(label="✅ 確認正確", text="確認")),
+                QuickReplyItem(action=MessageAction(label="❌ 理解錯誤", text="不對")),
+                QuickReplyItem(action=MessageAction(label="🔍 重新查詢", text="重新查詢")),
+                QuickReplyItem(action=MessageAction(label="🚫 取消查詢", text="取消"))
+            ])
+            
+            return {
+                "type": "text_with_quick_reply",
+                "message": confirmation_message,
+                "quick_reply": quick_reply
+            }
         
         # 信心度足夠，直接執行查詢
         # 搜索匹配的班次
