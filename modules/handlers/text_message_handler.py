@@ -535,6 +535,26 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 reply_text(reply_token, "請提供班次ID，例如：班次詳情 123")
             return
 
+        # 🔥 新增：查看已完成班次詳情
+        elif message_text.startswith("查看"):
+            parts = message_text.split()
+            if len(parts) >= 2:
+                try:
+                    completed_trip_id = int(parts[1])
+                    logger.info(f"處理查看已完成班次詳情: {completed_trip_id}")
+                    from modules.handlers.trip_handler import handle_completed_trip_details
+                    result = handle_completed_trip_details(completed_trip_id)
+                    reply_text(reply_token, result)
+                except ValueError:
+                    reply_text(reply_token, "班次ID必須是數字。")
+                except Exception as e:
+                    logger.error(f"處理查看已完成班次失敗: {e}")
+                    traceback.print_exc()
+                    reply_text(reply_token, f"查看班次失敗: {str(e)}")
+            else:
+                reply_text(reply_token, "請提供班次ID，例如：查看 2207")
+            return
+
 
         
         # 司機指派相關命令
