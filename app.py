@@ -125,6 +125,175 @@ def test_env():
         'app_config': {k: str(v) for k, v in app.config.items() if not k.startswith('LINE') and not k.startswith('DATABASE')}  # 过滤敏感信息
     }
 
+# 在文件末尾添加診斷端點
+@app.route('/render_diagnosis')
+def render_diagnosis():
+    """Render端診斷頁面"""
+    from flask import jsonify
+    import traceback
+    from datetime import datetime, date, timedelta
+    
+    results = {}
+    
+    try:
+        # 1. 測試系統時間
+        results['system_time'] = {
+            'utc_now': datetime.utcnow().isoformat(),
+            'local_now': datetime.now().isoformat(),
+            'date_today': date.today().isoformat()
+        }
+        
+        # 2. 測試環境變數
+        import os
+        results['environment'] = {
+            'TZ': os.environ.get('TZ', 'Not Set'),
+            'PYTHONPATH': os.environ.get('PYTHONPATH', 'Not Set')
+        }
+        
+        # 3. 測試台灣時間函數
+        try:
+            from modules.utils.helpers import get_taiwan_date, get_taiwan_time
+            taiwan_time = get_taiwan_time()
+            taiwan_date = get_taiwan_date()
+            
+            results['taiwan_time'] = {
+                'taiwan_datetime': taiwan_time.isoformat(),
+                'taiwan_date': taiwan_date.isoformat(),
+                'timezone': str(taiwan_time.tzinfo),
+                'offset': str(taiwan_time.utcoffset())
+            }
+        except Exception as e:
+            results['taiwan_time'] = {'error': str(e), 'traceback': traceback.format_exc()}
+        
+        # 4. 測試日期解析函數
+        try:
+            from modules.utils.helpers import parse_date_input
+            
+            test_dates = ['昨天', '前天', '今天', '明天', '7/25', '7/24']
+            parsed_dates = {}
+            
+            for date_str in test_dates:
+                try:
+                    parsed = parse_date_input(date_str)
+                    parsed_dates[date_str] = parsed.isoformat() if parsed else None
+                except Exception as e:
+                    parsed_dates[date_str] = f"Error: {str(e)}"
+            
+            results['date_parsing'] = parsed_dates
+        except Exception as e:
+            results['date_parsing'] = {'error': str(e), 'traceback': traceback.format_exc()}
+        
+        # 5. 測試AI車資服務解析
+        try:
+            from modules.services.ai_fare_service import CompletedTripMatcher
+            
+            matcher = CompletedTripMatcher()
+            
+            test_queries = [
+                '查已完成 昨天 診所',
+                '查已完成 7/25 診所',
+                '查已完成 前天 診所',
+                '查已完成 7/24 診所'
+            ]
+            
+            query_results = {}
+            for query in test_queries:
+                try:
+                    criteria = matcher.parse_natural_query(query)
+                    # 將日期轉換為字符串以便JSON序列化
+                    criteria_serializable = {}
+                    for key, value in criteria.items():
+                        if isinstance(value, date):
+                            criteria_serializable[key] = value.isoformat()
+                        else:
+                            criteria_serializable[key] = value
+                    query_results[query] = criteria_serializable
+                except Exception as e:
+                    query_results[query] = {'error': str(e)}
+            
+            results['query_parsing'] = query_results
+        except Exception as e:
+            results['query_parsing'] = {'error': str(e), 'traceback': traceback.format_exc()}
+        
+        # 6. 測試數據庫查詢（簡化版）
+        try:
+            from modules import db
+            from sqlalchemy import text
+            
+            # 查詢7/25的診所班次數量
+            sql_725 = """
+                SELECT COUNT(*) as count 
+                FROM completed_trips 
+                WHERE date = '2025-07-25' AND category = '診所'
+            """
+            
+            # 查詢7/24的診所班次數量  
+            sql_724 = """
+                SELECT COUNT(*) as count 
+                FROM completed_trips 
+                WHERE date = '2025-07-24' AND category = '診所'
+            """
+            
+            # 查詢最近3天的診所班次數量
+            sql_recent = """
+                SELECT COUNT(*) as count 
+                FROM completed_trips 
+                WHERE date >= '2025-07-24' AND category = '診所'
+            """
+            
+            count_725 = db.session.execute(text(sql_725)).scalar()
+            count_724 = db.session.execute(text(sql_724)).scalar()
+            count_recent = db.session.execute(text(sql_recent)).scalar()
+            
+            results['database_counts'] = {
+                '2025-07-25_clinic': count_725,
+                '2025-07-24_clinic': count_724,
+                'recent_3days_clinic': count_recent
+            }
+        except Exception as e:
+            results['database_counts'] = {'error': str(e), 'traceback': traceback.format_exc()}
+        
+        # 7. 關鍵分析
+        analysis = []
+        
+        # 分析日期解析結果
+        if 'date_parsing' in results and isinstance(results['date_parsing'], dict):
+            yesterday_parsed = results['date_parsing'].get('昨天')
+            absolute_725 = results['date_parsing'].get('7/25')
+            
+            if yesterday_parsed and absolute_725:
+                if yesterday_parsed == absolute_725:
+                    analysis.append("✅ '昨天'和'7/25'解析為相同日期")
+                else:
+                    analysis.append(f"❌ '昨天'解析為{yesterday_parsed}，'7/25'解析為{absolute_725}")
+            else:
+                analysis.append(f"⚠️ 日期解析有問題：昨天={yesterday_parsed}, 7/25={absolute_725}")
+        
+        # 分析數據庫計數
+        if 'database_counts' in results and isinstance(results['database_counts'], dict):
+            count_725 = results['database_counts'].get('2025-07-25_clinic')
+            count_724 = results['database_counts'].get('2025-07-24_clinic')
+            count_recent = results['database_counts'].get('recent_3days_clinic')
+            
+            if count_725 == 21:
+                analysis.append(f"✅ 7/25診所班次：{count_725}筆（正確）")
+            else:
+                analysis.append(f"⚠️ 7/25診所班次：{count_725}筆（預期21筆）")
+            
+            if count_recent == 54:
+                analysis.append(f"❌ 最近3天診所班次：{count_recent}筆（這可能是'昨天'查詢錯誤的原因）")
+            
+        results['analysis'] = analysis
+        
+    except Exception as e:
+        results['global_error'] = {
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }
+    
+    # 返回JSON結果
+    return jsonify(results)
+
 # 啟動應用
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 3000))
