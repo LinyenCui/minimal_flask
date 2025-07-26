@@ -1226,7 +1226,7 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                     # 🎯 核心邏輯：AI已經理解用戶意圖，直接進入智能引導模式
                     try:
                         from modules.services.ai_fare_service import handle_smart_fare_query
-                        result = handle_smart_fare_query(message_text, user_id, use_flex=True, parsed_command=command)
+                        result = handle_smart_fare_query(message_text, user_id, use_flex=True, parsed_command=command, skip_parsing=True)
                         handle_ai_fare_result(result, reply_token)
                         return
                     except Exception as e:
@@ -1240,8 +1240,8 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                     try:
                         logger.info(f"🎯 智能助手路由查已完成命令，使用AI車資服務: {command}")
                         from modules.services.ai_fare_service import handle_smart_fare_query
-                        # 🔥 關鍵修復：傳遞parsed_command參數，這樣確認對話能保存已解析命令
-                        result = handle_smart_fare_query(command, user_id, use_flex=True, parsed_command=command)
+                        # 🔥 關鍵修復：傳遞parsed_command參數和skip_parsing=True，避免重複解析
+                        result = handle_smart_fare_query(command, user_id, use_flex=True, parsed_command=command, skip_parsing=True)
                         handle_ai_fare_result(result, reply_token)
                         return
                     except Exception as e:
