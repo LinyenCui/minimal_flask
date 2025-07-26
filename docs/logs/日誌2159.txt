@@ -1,0 +1,203 @@
+2025-07-20 21:53:53,390 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570741306709246362","quoteToken":"UzxZI5bc5afO4C29Qi9swNZs1zQIdsq4dBBdBRonL73RJyG-h3HcWGgBciMcvzvNReKcBE882dRT2VwFySsga6yFak09J2dPcpWc5AFZLK8nAH1lIUs82knaYCgp4EfeRNusVY4fCDROvrJRtcntkA","text":"/後天司機5386診所班次"},"webhookEventId":"01K0M1SK5S4ZQF8CH28ED1PBC4","deliveryContext":{"isRedelivery":false},"timestamp":1753019632524,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"645232caac6442968922a9d9a22e41ee","mode":"active"}]}
+2025-07-20 21:53:53,390 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 21:53:53,390 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 21:53:53,391 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 21:53:53,391 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 21:53:53,392 - modules.handlers.message_handler - INFO - [should_process] Checking: '/後天司機5386診所班次' from group
+2025-07-20 21:53:53,392 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '後天司機5386診所班次'
+2025-07-20 21:53:53,392 - modules.routes.webhook - INFO - Passing processed text '後天司機5386診所班次' to handler.
+2025-07-20 21:53:53,392 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '後天司機5386診所班次' (Normalized: '後天司機5386診所班次')
+2025-07-20 21:53:53,392 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 後天司機5386診所班次
+2025-07-20 21:53:53,392 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 後天司機5386診所班次
+2025-07-20 21:53:53,392 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 後天司機5386診所班次
+2025-07-20 21:53:56,824 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-20 21:53:56,824 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-20 21:53:56,824 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 查詢班次 2025-07-22 司機5386 診所
+2025-07-20 21:53:56,824 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 查詢班次 2025-07-22 司機5386 診所
+2025-07-20 21:53:56,835 - modules.services.advanced_query_processor - INFO - 🔍 處理複雜查詢: 查詢班次 2025-07-22 司機5386 診所
+2025-07-20 21:53:56,836 - modules.services.advanced_query_processor - INFO - 🗓️ 解析具體日期: '2025-07-22' → '2025-07-22'
+2025-07-20 21:53:56,836 - modules.services.advanced_query_processor - INFO - 🗓️ 構建具體日期條件: 2025-07-22
+2025-07-20 21:53:56,836 - modules.services.advanced_query_processor - INFO - 📊 執行SQL: 
+                SELECT 
+                    t.trip_id,
+                    t.date,
+                    t.time,
+                    t.start_point,
+                    t.end_point,
+                    t.category,
+                    t.driver_id,
+                    t.status,
+                    t.trip_type,
+                    t.custom_start_point,
+                    t.custom_end_point,
+                    d.name as driver_name
+                FROM trips t
+                LEFT JOIN drivers d ON t.driver_id = d.id
+                WHERE 1=1
+             AND t.date = :specific_date AND t.category = :category AND t.driver_id = :driver_id ORDER BY t.date, t.time
+2025-07-20 21:53:56,840 - modules.services.advanced_query_processor - INFO - 💾 保存查詢結果供翻頁使用: 4 個結果
+2025-07-20 21:53:56,840 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 21:53:57,176 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 21:53:57] "POST /callback HTTP/1.1" 200 -
+2025-07-20 21:54:43,577 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570741390812643418","quoteToken":"Sd1w0RiH6H4PC0_Lgb0_-KXINRWMM6_4zPHIClNOLsk0eYwzTjcWtrNZbB7yfMyS51IugwF8qf1AziHgrCSbSfKdwfkY1B-2D4tfK749G1TrPIebggCo92zfD84-tipkxC8jPTc9iKee0EWeSeAUbQ","text":"/前天5386東洋班次"},"webhookEventId":"01K0M1V4EAH38S11RJTP4M8DMQ","deliveryContext":{"isRedelivery":false},"timestamp":1753019682770,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"902b2db771b24542adce401dab1feaed","mode":"active"}]}
+2025-07-20 21:54:43,578 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 21:54:43,578 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 21:54:43,578 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 21:54:43,578 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 21:54:43,578 - modules.handlers.message_handler - INFO - [should_process] Checking: '/前天5386東洋班次' from group
+2025-07-20 21:54:43,578 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '前天5386東洋班次'
+2025-07-20 21:54:43,578 - modules.routes.webhook - INFO - Passing processed text '前天5386東洋班次' to handler.
+2025-07-20 21:54:43,579 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '前天5386東洋班次' (Normalized: '前天5386東洋班次')
+2025-07-20 21:54:43,579 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 前天5386東洋班次
+2025-07-20 21:54:43,579 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 前天5386東洋班次
+2025-07-20 21:54:43,579 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 前天5386東洋班次
+2025-07-20 21:54:45,986 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-20 21:54:45,986 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-20 21:54:45,986 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 查已完成 前天 司機5386 東洋
+2025-07-20 21:54:45,986 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 查已完成 前天 司機5386 東洋
+2025-07-20 21:54:45,989 - modules.services.ai_fare_service - INFO - 🔍 AI車資查詢開始: '前天5386東洋班次', user_id: Udd6d10d2a6f1b465a20be447a2172c78
+2025-07-20 21:54:45,993 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '前天5386東洋班次')
+2025-07-20 21:54:45,996 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': '東洋', 'trip_id': None, 'raw_query': '前天5386東洋班次', 'confidence': 'low'}
+2025-07-20 21:54:45,996 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-20 21:54:45,996 - modules.services.ai_fare_service - INFO - ⚠️ 查詢信心度較低，請求確認: 前天5386東洋班次
+2025-07-20 21:54:45,996 - modules.utils.conversation_context - INFO - 開始對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_confirmation, 步驟=waiting_confirmation
+2025-07-20 21:54:45,996 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 21:54:46,831 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 21:54:46] "POST /callback HTTP/1.1" 200 -
+2025-07-20 21:55:15,231 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570741445003313401","quoteToken":"_rVXlcySndJWYNyyb7yKv2yDJgsERqbMsRkjP-pz-DJC2rw8cEJ4ZBBJ7t6flnW7tqHQkEy9nrq9blxxf725vJUYuggTQAhK2uQU3OW1UyvOVwbHqT6i9pxP6MCF4Tn_KxJ7UIzw48f3EJokoS1N1w","text":"/前天司機5386東洋班次"},"webhookEventId":"01K0M1W3EJ1BQWZ5FR1336FMW4","deliveryContext":{"isRedelivery":false},"timestamp":1753019714936,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"f1649fa1baac4874bfd1f94768584fd4","mode":"active"}]}
+2025-07-20 21:55:15,232 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 21:55:15,232 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 21:55:15,232 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 21:55:15,232 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 21:55:15,232 - modules.handlers.message_handler - INFO - [should_process] Checking: '/前天司機5386東洋班次' from group
+2025-07-20 21:55:15,232 - modules.handlers.message_handler - INFO - [should_process] User in active conversation (query_confirmation), returning True
+2025-07-20 21:55:15,232 - modules.routes.webhook - INFO - Passing processed text '/前天司機5386東洋班次' to handler.
+2025-07-20 21:55:15,232 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '/前天司機5386東洋班次' (Normalized: '/前天司機5386東洋班次')
+2025-07-20 21:55:15,233 - modules.handlers.text_message_handler - INFO - 🎯 用戶在活躍對話中: query_confirmation, 步驟: waiting_confirmation
+2025-07-20 21:55:15,233 - modules.handlers.text_message_handler - INFO - 🎯 處理查詢確認對話: 消息='/前天司機5386東洋班次'
+2025-07-20 21:55:15,233 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 21:55:15,994 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 21:55:15] "POST /callback HTTP/1.1" 200 -
+2025-07-20 21:55:52,395 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570741506609250894","quoteToken":"4xvNuMckQGjjKZL9jF6laZWlVKJwPr8BVqu5KHHlfON7sJ-Wq77lKzoeAbToRSsrp0rsDHjL7OsUWcOP64cLCNOZhWfGDCGqc74TQo-EmUE4WlPSgiA7Ee2ZMqYzIK5Ge-o6esKDufTXMvJFwiFqIg","text":"/取消"},"webhookEventId":"01K0M1X7R3MST2BDQ3PTYVDK77","deliveryContext":{"isRedelivery":false},"timestamp":1753019751697,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"6c90ff104a684f93b1c880824a7a2e7e","mode":"active"}]}
+2025-07-20 21:55:52,395 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 21:55:52,395 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 21:55:52,395 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 21:55:52,395 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 21:55:52,395 - modules.handlers.message_handler - INFO - [should_process] Checking: '/取消' from group
+2025-07-20 21:55:52,395 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '取消'
+2025-07-20 21:55:52,395 - modules.routes.webhook - INFO - Passing processed text '取消' to handler.
+2025-07-20 21:55:52,395 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '取消' (Normalized: '取消')
+2025-07-20 21:55:52,395 - modules.handlers.text_message_handler - INFO - 🎯 用戶在活躍對話中: query_confirmation, 步驟: waiting_confirmation
+2025-07-20 21:55:52,395 - modules.utils.conversation_context - INFO - 結束對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_confirmation, 原因=用戶取消: 取消
+2025-07-20 21:55:52,395 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 21:55:52,868 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 21:55:52] "POST /callback HTTP/1.1" 200 -
+2025-07-20 21:56:24,148 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570741559121936422","quoteToken":"DWqXLz44xxsCr3n8Wa732k19iXCJ-TB6rmcyRYAogaLl6NmtmXopxuBSH_PyW3jTAYQEidYMG4Q8hVlYdvsUp3rPEcgcHOIC3lcJrpQDWC7Q6HfsRzVYPqpnWuhCRuWsUiHZdNSxOvUdYQCj3wHEtw","text":"/前天司機5386東洋班次"},"webhookEventId":"01K0M1Y6A8H35DY7PJ6MKQBC0Z","deliveryContext":{"isRedelivery":false},"timestamp":1753019782991,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"c327f944e97749588d404d5db8af2b82","mode":"active"}]}
+2025-07-20 21:56:24,148 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 21:56:24,148 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 21:56:24,148 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 21:56:24,148 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 21:56:24,149 - modules.handlers.message_handler - INFO - [should_process] Checking: '/前天司機5386東洋班次' from group
+2025-07-20 21:56:24,149 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '前天司機5386東洋班次'
+2025-07-20 21:56:24,149 - modules.routes.webhook - INFO - Passing processed text '前天司機5386東洋班次' to handler.
+2025-07-20 21:56:24,149 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '前天司機5386東洋班次' (Normalized: '前天司機5386東洋班次')
+2025-07-20 21:56:24,149 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 前天司機5386東洋班次
+2025-07-20 21:56:24,149 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 前天司機5386東洋班次
+2025-07-20 21:56:24,149 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 前天司機5386東洋班次
+2025-07-20 21:56:26,611 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-20 21:56:26,611 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-20 21:56:26,611 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 查已完成 前天 司機5386 東洋
+2025-07-20 21:56:26,611 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 查已完成 前天 司機5386 東洋
+2025-07-20 21:56:26,611 - modules.services.ai_fare_service - INFO - 🔍 AI車資查詢開始: '前天司機5386東洋班次', user_id: Udd6d10d2a6f1b465a20be447a2172c78
+2025-07-20 21:56:26,611 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '前天司機5386東洋班次')
+2025-07-20 21:56:26,612 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': 5386, 'category': '東洋', 'trip_id': None, 'raw_query': '前天司機5386東洋班次', 'confidence': 'high'}
+2025-07-20 21:56:26,612 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-20 21:56:26,612 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': 5386, 'category': '東洋', 'trip_id': None, 'raw_query': '前天司機5386東洋班次', 'confidence': 'high'}
+2025-07-20 21:56:26,612 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-20 21:56:26,612 - modules.services.ai_fare_service - INFO - 信心度: high
+2025-07-20 21:56:26,612 - modules.services.ai_fare_service - INFO - AI理解的搜索條件: 🧠 🚕 5386 | 🏷️ 東洋 | 🟢 high
+2025-07-20 21:56:26,619 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 21:56:26,620 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-20 21:56:27,077 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-20 21:56:27,079 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 21:56:27] "POST /callback HTTP/1.1" 200 -
+2025-07-20 21:56:44,207 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570741592390893655","quoteToken":"kJYz6jLifVVn8hPEBlXoQfSys_D3vhFNefVhlvmcetkXIdYa7XvyW5clBgqL1EE5VormoaBhllAB8iezyZ57l9t5tFjXxZSJbm1KP1BUs7jNCe8jH9P2SEAPJFdUxzqgBi-jaadiX1ZdypoV-y5Cow","text":"/前天所有班次"},"webhookEventId":"01K0M1YS5S5JHG9FJ9SMH69N8E","deliveryContext":{"isRedelivery":false},"timestamp":1753019802762,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"61656f59f5e14669a8c47cbc348dfa50","mode":"active"}]}
+2025-07-20 21:56:44,208 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 21:56:44,208 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 21:56:44,208 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 21:56:44,208 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 21:56:44,208 - modules.handlers.message_handler - INFO - [should_process] Checking: '/前天所有班次' from group
+2025-07-20 21:56:44,208 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '前天所有班次'
+2025-07-20 21:56:44,208 - modules.routes.webhook - INFO - Passing processed text '前天所有班次' to handler.
+2025-07-20 21:56:44,208 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '前天所有班次' (Normalized: '前天所有班次')
+2025-07-20 21:56:44,208 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 前天所有班次
+2025-07-20 21:56:44,208 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 前天所有班次
+2025-07-20 21:56:44,209 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 前天所有班次
+2025-07-20 21:56:46,604 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-20 21:56:46,604 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-20 21:56:46,604 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 查已完成 前天
+2025-07-20 21:56:46,604 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 查已完成 前天
+2025-07-20 21:56:46,604 - modules.services.ai_fare_service - INFO - 🔍 AI車資查詢開始: '前天所有班次', user_id: Udd6d10d2a6f1b465a20be447a2172c78
+2025-07-20 21:56:46,605 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '前天所有班次')
+2025-07-20 21:56:46,605 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': None, 'trip_id': None, 'raw_query': '前天所有班次', 'confidence': 'very_low'}
+2025-07-20 21:56:46,605 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-20 21:56:46,605 - modules.services.ai_fare_service - INFO - ⚠️ 查詢信心度極低，啟動澄清對話: 前天所有班次
+2025-07-20 21:56:46,605 - modules.utils.conversation_context - INFO - 開始對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_clarification, 步驟=waiting_clarification
+2025-07-20 21:56:46,606 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 21:56:46,607 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-20 21:56:47,106 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-20 21:56:47,109 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 21:56:47] "POST /callback HTTP/1.1" 200 -
+2025-07-20 21:57:17,402 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570741649248879127","quoteToken":"uSA72mdFszDC5uNDHxHMqvw57PjzgFP-Iw2cD06i75uXGV2O0bLNKSDeIajvnoKgPXH1hRObOP5d7jIzbMw7gQb9g8OFg1bAaKOEM-dlHsBvp9WsAMFw1ERieLjS5-88dlyIq7zjjc3GTj9tHVsE5g","text":"查詢範例"},"webhookEventId":"01K0M1ZTP6BQ1MDHJF8WZ8D9SP","deliveryContext":{"isRedelivery":false},"timestamp":1753019836757,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"565fa83627944ecd883d2214794839c6","mode":"active"}]}
+2025-07-20 21:57:17,402 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 21:57:17,402 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 21:57:17,403 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 21:57:17,403 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 21:57:17,403 - modules.handlers.message_handler - INFO - [should_process] Checking: '查詢範例' from group
+2025-07-20 21:57:17,403 - modules.handlers.message_handler - INFO - [should_process] User in active conversation (query_clarification), returning True
+2025-07-20 21:57:17,403 - modules.routes.webhook - INFO - Passing processed text '查詢範例' to handler.
+2025-07-20 21:57:17,403 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '查詢範例' (Normalized: '查詢範例')
+2025-07-20 21:57:17,403 - modules.handlers.text_message_handler - INFO - 🎯 用戶在活躍對話中: query_clarification, 步驟: waiting_clarification
+2025-07-20 21:57:17,403 - modules.handlers.text_message_handler - INFO - 🎯 處理查詢澄清對話: 消息='查詢範例'
+2025-07-20 21:57:17,403 - modules.handlers.text_message_handler - INFO - 🔄 用戶提供澄清信息，重新處理: 查詢範例
+2025-07-20 21:57:17,403 - modules.utils.conversation_context - INFO - 結束對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_clarification, 原因=澄清完成
+2025-07-20 21:57:17,403 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 查詢範例
+2025-07-20 21:57:17,404 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 查詢範例
+2025-07-20 21:57:19,088 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.9
+2025-07-20 21:57:19,089 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.9
+2025-07-20 21:57:19,089 - modules.handlers.text_message_handler - INFO - 🎯 澄清後智能助手生成命令: 顯示系統查詢範例
+2025-07-20 21:57:19,089 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 21:57:19,508 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 21:57:19] "POST /callback HTTP/1.1" 200 -
+2025-07-20 21:57:54,327 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570741711694201039","quoteToken":"YVDKCw5FtvOYMS7IJ1gTkGz4vAgqZ9FkAHOpK59f6mMlTHrSudOqFRYvZVfPhyoHYxHpWInuDmu-OMQ5zgFXVafWDpxioFbxk13pWwi_PlvBWi83MYhlbNm8PmR-HsMa6CgpgPNQkOkeuWNoee9DPQ","text":"/7/18 所有班次"},"webhookEventId":"01K0M20YW0GKJ1EHBMS797052N","deliveryContext":{"isRedelivery":false},"timestamp":1753019873922,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"0e7d207da525413483ef6804000d90a0","mode":"active"}]}
+2025-07-20 21:57:54,327 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 21:57:54,327 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 21:57:54,327 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 21:57:54,327 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 21:57:54,327 - modules.handlers.message_handler - INFO - [should_process] Checking: '/7/18 所有班次' from group
+2025-07-20 21:57:54,327 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '7/18 所有班次'
+2025-07-20 21:57:54,327 - modules.routes.webhook - INFO - Passing processed text '7/18 所有班次' to handler.
+2025-07-20 21:57:54,327 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '7/18 所有班次' (Normalized: '7/18 所有班次')
+2025-07-20 21:57:54,327 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 7/18 所有班次
+2025-07-20 21:57:54,327 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 7/18 所有班次
+2025-07-20 21:57:54,327 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 7/18 所有班次
+2025-07-20 21:57:56,487 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-20 21:57:56,487 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-20 21:57:56,487 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 查已完成 7/18
+2025-07-20 21:57:56,487 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 查已完成 7/18
+2025-07-20 21:57:56,487 - modules.services.ai_fare_service - INFO - 🔍 AI車資查詢開始: '7/18 所有班次', user_id: Udd6d10d2a6f1b465a20be447a2172c78
+2025-07-20 21:57:56,488 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '7/18 所有班次')
+2025-07-20 21:57:56,488 - modules.services.ai_fare_service - INFO - 解析條件: {'date': datetime.date(2025, 7, 18), 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': None, 'trip_id': None, 'raw_query': '7/18 所有班次', 'confidence': 'low'}
+2025-07-20 21:57:56,488 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-20 21:57:56,488 - modules.services.ai_fare_service - INFO - ⚠️ 查詢信心度較低，請求確認: 7/18 所有班次
+2025-07-20 21:57:56,488 - modules.utils.conversation_context - INFO - 開始對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_confirmation, 步驟=waiting_confirmation
+2025-07-20 21:57:56,488 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 21:57:56,889 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 21:57:56] "POST /callback HTTP/1.1" 200 -
+2025-07-20 21:58:14,347 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570741744811901108","quoteToken":"FWk1mgMew5UTwkwoNy7Ry1zE-JiaXgJDd9t0cXqY1v9f2IUB9ci1-4PJ_qT76VdWZoUYrnwzxzwteg81WMU7p8dnVwef85nW9WBUG2u1PCOgp8tmSOakF6pS377DMxj2wsVhjusRN-JOMXRyfopneA","text":"/確認"},"webhookEventId":"01K0M21J1K3JE1075ZMM8MDTS2","deliveryContext":{"isRedelivery":false},"timestamp":1753019893731,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"d8fdfcd4769f407fbf227c8ac9451699","mode":"active"}]}
+2025-07-20 21:58:14,347 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 21:58:14,347 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 21:58:14,348 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 21:58:14,348 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 21:58:14,348 - modules.handlers.message_handler - INFO - [should_process] Checking: '/確認' from group
+2025-07-20 21:58:14,348 - modules.handlers.message_handler - INFO - [should_process] User in active conversation (query_confirmation), returning True
+2025-07-20 21:58:14,348 - modules.routes.webhook - INFO - Passing processed text '/確認' to handler.
+2025-07-20 21:58:14,348 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '/確認' (Normalized: '/確認')
+2025-07-20 21:58:14,348 - modules.handlers.text_message_handler - INFO - 🎯 用戶在活躍對話中: query_confirmation, 步驟: waiting_confirmation
+2025-07-20 21:58:14,348 - modules.handlers.text_message_handler - INFO - 🎯 處理查詢確認對話: 消息='/確認'
+2025-07-20 21:58:14,348 - modules.handlers.text_message_handler - INFO - ✅ 用戶確認理解正確，執行查詢
+2025-07-20 21:58:14,348 - modules.utils.conversation_context - INFO - 結束對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_confirmation, 原因=確認完成
+2025-07-20 21:58:14,350 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 21:58:14,656 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 21:58:14] "POST /callback HTTP/1.1" 200 -

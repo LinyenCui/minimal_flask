@@ -1,0 +1,97 @@
+2025-07-17 18:46:46,353 - werkzeug - INFO - Press CTRL+C to quit
+2025-07-17 18:48:26,595 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570287774285431180","quoteToken":"hbUAAINBSQTIRsWyLRgLs4uJrd2D5mh-Yr2Epousd9XQna6sbrI9eRmrcjLwqLFPB0rQrhigp9fZ_TY2TUy45J1sMqGeYNFvITX8NMsUrbEMzr9jQr6hM6mx14lbDFMznuBU_RxukfyIGV1qALK2tA","text":"/我要修改2014的車資"},"webhookEventId":"01K0BZZWM1J7RB9M18CQMA3V89","deliveryContext":{"isRedelivery":false},"timestamp":1752749306177,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"7b1030d687e0447a8409c7c20ae30857","mode":"active"}]}
+2025-07-17 18:48:26,596 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-17 18:48:26,596 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-17 18:48:26,596 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-17 18:48:26,596 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-17 18:48:26,596 - modules.handlers.message_handler - INFO - [should_process] Checking: '/我要修改2014的車資' from group
+2025-07-17 18:48:26,597 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '我要修改2014的車資'
+2025-07-17 18:48:26,597 - modules.routes.webhook - INFO - Passing processed text '我要修改2014的車資' to handler.
+2025-07-17 18:48:26,597 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '我要修改2014的車資' (Normalized: '我要修改2014的車資')
+2025-07-17 18:48:26,602 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 我要修改2014的車資
+2025-07-17 18:48:26,602 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 我要修改2014的車資
+2025-07-17 18:48:26,602 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 我要修改2014的車資
+2025-07-17 18:48:29,462 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-17 18:48:29,462 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-17 18:48:29,462 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 記錄車資 2014
+2025-07-17 18:48:29,462 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 記錄車資 2014
+2025-07-17 18:48:29,480 - modules.services.ai_fare_service - INFO - 🔍 AI車資查詢開始: '我要修改2014的車資', user_id: U6b520261e9199a21d25e6d20509eda3f
+2025-07-17 18:48:29,483 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '我要修改2014的車資')
+2025-07-17 18:48:29,485 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': None, 'trip_id': None, 'raw_query': '我要修改2014的車資', 'confidence': 'very_low'}
+2025-07-17 18:48:29,485 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-17 18:48:29,485 - modules.services.ai_fare_service - INFO - ⚠️ 查詢信心度極低，啟動澄清對話: 我要修改2014的車資
+2025-07-17 18:48:29,485 - modules.utils.conversation_context - INFO - 開始對話: 用戶=U6b520261e9199a21d25e6d20509eda3f, 類型=query_clarification, 步驟=waiting_clarification
+2025-07-17 18:48:29,485 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-17 18:48:29,487 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-17 18:48:29,843 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-17 18:48:29,846 - werkzeug - INFO - 127.0.0.1 - - [17/Jul/2025 18:48:29] "POST /callback HTTP/1.1" 200 -
+2025-07-17 18:48:32,732 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570287784805007740","quoteToken":"k8KxmbMaEIEZOG3dJZVr8SbxPTPBlEuB_CPZqfkesRoYGEpWv-uRSjQNI5IFtd5S5gb_zpOfgj27LYqmIaoTxkzZ_c1HYZpHay-GaYrbT1jYHrCshaDbnOlnafb5WwUBrg5hsF5bpU_zMhlw0gYv5w","text":"我想查詢具體的班次資料"},"webhookEventId":"01K0C002HA7AY7D9QD7Y4F0PYH","deliveryContext":{"isRedelivery":false},"timestamp":1752749312455,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"7d109b7bc0a34bf58fd4d98aafebbe6b","mode":"active"}]}
+2025-07-17 18:48:32,732 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-17 18:48:32,732 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-17 18:48:32,732 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-17 18:48:32,732 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-17 18:48:32,733 - modules.handlers.message_handler - INFO - [should_process] Checking: '我想查詢具體的班次資料' from group
+2025-07-17 18:48:32,733 - modules.handlers.message_handler - INFO - [should_process] No prefix or prefix stripped, evaluating: '我想查詢具體的班次資料'
+2025-07-17 18:48:32,733 - modules.handlers.message_handler - INFO - [should_process] Group: Checking for commands with args pattern...
+2025-07-17 18:48:32,733 - modules.handlers.message_handler - INFO - [should_process] Group/Room: Not a KNOWN command (already checked), mention, or command+arg pattern, ignoring.
+2025-07-17 18:48:32,733 - modules.routes.webhook - INFO - Skipping message from group due to handler rules: 我想查詢具體的班次資料
+2025-07-17 18:48:32,734 - werkzeug - INFO - 127.0.0.1 - - [17/Jul/2025 18:48:32] "POST /callback HTTP/1.1" 200 -
+2025-07-17 18:49:17,352 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570287859245515253","quoteToken":"rT95l2E9vhQxLsZNuSSfxsO2Q36aisUKJGsLvRqwk-iYcN2xwhBYqHsrC2x0NIYiksaDYklcuPNkMZmTra7Nf917XBNIJn-yYBq5NQesQaQR-8G4OXbYOoHcmF9BMtGKofwpRTmSioLl07OE5Q3hNQ","text":"/修改班次2014車資280 -280"},"webhookEventId":"01K0C01E19TEJYCJTD0569XA68","deliveryContext":{"isRedelivery":false},"timestamp":1752749356797,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"8cf77b5efffb4568a6ffbf949b6f8b81","mode":"active"}]}
+2025-07-17 18:49:17,352 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-17 18:49:17,352 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-17 18:49:17,352 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-17 18:49:17,352 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-17 18:49:17,353 - modules.handlers.message_handler - INFO - [should_process] Checking: '/修改班次2014車資280 -280' from group
+2025-07-17 18:49:17,353 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '修改班次2014車資280 -280'
+2025-07-17 18:49:17,353 - modules.routes.webhook - INFO - Passing processed text '修改班次2014車資280 -280' to handler.
+2025-07-17 18:49:17,353 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '修改班次2014車資280 -280' (Normalized: '修改班次2014車資280 -280')
+2025-07-17 18:49:17,353 - modules.handlers.text_message_handler - INFO - 🎯 用戶在活躍對話中: query_clarification, 步驟: waiting_clarification
+2025-07-17 18:49:17,353 - modules.handlers.text_message_handler - INFO - 🎯 處理查詢澄清對話: 消息='修改班次2014車資280 -280'
+2025-07-17 18:49:17,353 - modules.handlers.text_message_handler - INFO - 🔄 用戶提供澄清信息，重新處理: 修改班次2014車資280 -280
+2025-07-17 18:49:17,353 - modules.utils.conversation_context - INFO - 結束對話: 用戶=U6b520261e9199a21d25e6d20509eda3f, 類型=query_clarification, 原因=澄清完成
+2025-07-17 18:49:17,354 - modules.services.ai_fare_service - INFO - 🔍 AI車資查詢開始: '修改班次2014車資280 -280', user_id: U6b520261e9199a21d25e6d20509eda3f
+2025-07-17 18:49:17,355 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {'meter_fare': 280, 'reason': '透過AI智能修改'} (输入: '修改班次2014車資280 -280')
+2025-07-17 18:49:17,355 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': None, 'trip_id': 2014, 'raw_query': '修改班次2014車資280 -280', 'confidence': 'high'}
+2025-07-17 18:49:17,355 - modules.services.ai_fare_service - INFO - 修改意圖: {'meter_fare': 280, 'reason': '透過AI智能修改'}
+2025-07-17 18:49:17,356 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': None, 'trip_id': 2014, 'raw_query': '修改班次2014車資280 -280', 'confidence': 'high'}
+2025-07-17 18:49:17,356 - modules.services.ai_fare_service - INFO - 修改意圖: {'meter_fare': 280, 'reason': '透過AI智能修改'}
+2025-07-17 18:49:17,356 - modules.services.ai_fare_service - INFO - 信心度: high
+2025-07-17 18:49:17,356 - modules.services.ai_fare_service - INFO - AI理解的搜索條件: 🧠 📋 #2014 | 🟢 high
+2025-07-17 18:49:17,360 - modules.services.ai_fare_service - INFO - 🎯 AI需要詢問修改原因，啟動統一對話系統
+2025-07-17 18:49:17,361 - modules.utils.conversation_context - INFO - 開始對話: 用戶=U6b520261e9199a21d25e6d20509eda3f, 類型=fare_modification, 步驟=waiting_reason
+2025-07-17 18:49:17,361 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-17 18:49:17,757 - werkzeug - INFO - 127.0.0.1 - - [17/Jul/2025 18:49:17] "POST /callback HTTP/1.1" 200 -
+2025-07-17 18:50:00,444 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570287931353203080","quoteToken":"5IGFdoyU-3X7Fv_2MWlScCOh1r-gB1jNUUBFCmhyhjaM8n8Rx-Vc9wAak8IB7V__YGRV1swBsa1d671A2iSsJZZ9bqPbOhE0qs51wWKXXUuVVQ8RcMVlycQBZS_YqNuMtn4yRkdo65f5lXvpJ8CuIg","text":"/前一班延誤，導致無法搭載"},"webhookEventId":"01K0C02R6G8M5ND7J5JNXW6PAG","deliveryContext":{"isRedelivery":false},"timestamp":1752749399890,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"115a5c51d57545d0ad63a3178ac43851","mode":"active"}]}
+2025-07-17 18:50:00,445 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-17 18:50:00,445 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-17 18:50:00,445 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-17 18:50:00,445 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-17 18:50:00,445 - modules.handlers.message_handler - INFO - [should_process] Checking: '/前一班延誤，導致無法搭載' from group
+2025-07-17 18:50:00,445 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '前一班延誤，導致無法搭載'
+2025-07-17 18:50:00,446 - modules.routes.webhook - INFO - Passing processed text '前一班延誤，導致無法搭載' to handler.
+2025-07-17 18:50:00,446 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '前一班延誤，導致無法搭載' (Normalized: '前一班延誤，導致無法搭載')
+2025-07-17 18:50:00,446 - modules.handlers.text_message_handler - INFO - 🎯 用戶在活躍對話中: fare_modification, 步驟: waiting_reason
+2025-07-17 18:50:00,446 - modules.handlers.text_message_handler - INFO - 🎯 處理車資修改對話: 步驟=waiting_reason, 消息='前一班延誤，導致無法搭載'
+2025-07-17 18:50:00,446 - modules.handlers.text_message_handler - INFO - 🔥 執行AI智能修改: trip_id=2014, meter=280, extra=0, reason='前一班延誤，導致無法搭載'
+2025-07-17 18:50:00,446 - modules.handlers.trip_handler - INFO - 🔧 handle_record_fare 收到命令: '記錄車資 2014 280 0 前一班延誤，導致無法搭載'
+2025-07-17 18:50:00,448 - modules.handlers.trip_handler - INFO - 🔧 比較數據: 數據庫(280+0) vs 新值(280+0), 原因: '前一班延誤，導致無法搭載'
+2025-07-17 18:50:00,449 - modules.handlers.trip_handler - INFO - 🔧 準備執行數據庫更新: trip_id=2014, meter=280, extra=0
+2025-07-17 18:50:00,449 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-17 18:50:00,804 - modules.utils.modification_utils - INFO - 修改 completed_trips modification_reason: 'None' → '[1] 前一班延誤，導致無法搭載'
+2025-07-17 18:50:00,808 - modules.handlers.trip_handler - INFO - 🔧 數據庫更新完成！
+2025-07-17 18:50:00,808 - modules.handlers.trip_handler - INFO - 成功記錄車資 - ID: 2014, 錶價: 280, 加成: 0, 修改者: U6b520261e9199a21d25e6d20509eda3f
+2025-07-17 18:50:00,809 - modules.routes.webhook - ERROR - 處理webhook時出錯: name 'conversation_manager' is not defined
+Traceback (most recent call last):
+  File "/Users/linyancui/minimal_flask/modules/routes/webhook.py", line 47, in callback
+    handle_text_message(event)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/Users/linyancui/minimal_flask/modules/routes/webhook.py", line 65, in handle_text_message
+    process_text_message(event)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/Users/linyancui/minimal_flask/modules/handlers/text_message_handler.py", line 102, in process_text_message
+    return handle_fare_modification_conversation(active_conversation, message_text, user_id, reply_token)
+  File "/Users/linyancui/minimal_flask/modules/handlers/text_message_handler.py", line 1409, in handle_fare_modification_conversation
+    conversation_manager.end_conversation(user_id, "修改完成")
+    ^^^^^^^^^^^^^^^^^^^^
+NameError: name 'conversation_manager' is not defined
+2025-07-17 18:50:00,814 - werkzeug - INFO - 127.0.0.1 - - [17/Jul/2025 18:50:00] "POST /callback HTTP/1.1" 500 -

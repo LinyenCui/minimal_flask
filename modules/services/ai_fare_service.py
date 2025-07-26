@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 from modules.models.base import db
 from modules.utils.taiwan_time import get_taiwan_time, get_taiwan_date
-from modules.utils.helpers import parse_date_input  # 🔥 修復：使用系統統一的日期解析器
+from modules.utils.unified_date_parser import UnifiedDateParser  # 🔥 使用統一日期解析器
 from modules.utils.conversation_context import conversation_manager  # 🔥 重新啟用：對話上下文管理
 # from modules.utils.enhanced_date_parser import EnhancedDateParser
 from sqlalchemy import text
@@ -298,7 +298,7 @@ class CompletedTripMatcher:
         # 嘗試解析找到的日期
         for date_str in possible_dates:
             try:
-                parsed_date = parse_date_input(date_str)  # 🔥 修復：使用統一日期解析器
+                parsed_date = UnifiedDateParser.parse(date_str)  # 🔥 使用統一日期解析器
                 if parsed_date:
                     criteria['date'] = parsed_date
                     # parse_date_input 總是返回高信心度，因為它經過充分測試

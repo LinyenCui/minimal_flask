@@ -167,14 +167,14 @@ def render_diagnosis():
         
         # 4. 測試日期解析函數
         try:
-            from modules.utils.helpers import parse_date_input
+            from modules.utils.unified_date_parser import UnifiedDateParser
             
             test_dates = ['昨天', '前天', '今天', '明天', '7/25', '7/24']
             parsed_dates = {}
             
             for date_str in test_dates:
                 try:
-                    parsed = parse_date_input(date_str)
+                    parsed = UnifiedDateParser.parse(date_str)
                     parsed_dates[date_str] = parsed.isoformat() if parsed else None
                 except Exception as e:
                     parsed_dates[date_str] = f"Error: {str(e)}"

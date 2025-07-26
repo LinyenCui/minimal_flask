@@ -1,0 +1,557 @@
+2025-07-16 03:06:15,725 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570047975909752901","quoteToken":"7NmgHcleTTEOKQwuBQZNcQnak18hl9PROhecJQctdkBy_V9dhE_791EVs4gvmAYU1axP0vM2tXcxgO5ovGDZnRuSano3qOWpmmRdCw2clgInNZf7gnaLPQ6CaqPko58jpptuqH5nF6E6fGagxZgP5w","text":"/昨天診所班次"},"webhookEventId":"01K07QNZNRHA00C73WE3SJVQKF","deliveryContext":{"isRedelivery":false},"timestamp":1752606375104,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"2af5012351d64704a8852f11c141f24c","mode":"active"}]}
+2025-07-16 03:06:15,726 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-16 03:06:15,726 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-16 03:06:15,726 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-16 03:06:15,726 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-16 03:06:15,726 - modules.handlers.message_handler - INFO - [should_process] Checking: '/昨天診所班次' from group
+2025-07-16 03:06:15,726 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '昨天診所班次'
+2025-07-16 03:06:15,726 - modules.routes.webhook - INFO - Passing processed text '昨天診所班次' to handler.
+2025-07-16 03:06:15,726 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '昨天診所班次' (Normalized: '昨天診所班次')
+2025-07-16 03:06:15,727 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 昨天診所班次
+2025-07-16 03:06:15,727 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 昨天診所班次
+2025-07-16 03:06:15,727 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 昨天診所班次
+2025-07-16 03:06:19,703 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-16 03:06:19,703 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-16 03:06:19,704 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 查已完成 昨天 診所
+2025-07-16 03:06:19,704 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 查已完成 昨天 診所
+2025-07-16 03:06:19,704 - modules.handlers.text_message_handler - INFO - 檢測到AI智能車資查詢: 查已完成 昨天 診所
+2025-07-16 03:06:19,704 - modules.services.ai_fare_service - INFO - 處理智能車資查詢: 查已完成 昨天 診所
+2025-07-16 03:06:19,708 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '查已完成 昨天 診所')
+2025-07-16 03:06:19,711 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': '診所', 'trip_id': None, 'raw_query': '查已完成 昨天 診所', 'confidence': 'low'}
+2025-07-16 03:06:19,711 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-16 03:06:19,714 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-16 03:06:19,714 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-16 03:06:19,997 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-16 03:06:19,999 - modules.handlers.text_message_handler - INFO - 成功發送AI修改完成的 Flex Message 與 Quick Reply
+2025-07-16 03:06:19,999 - werkzeug - INFO - 127.0.0.1 - - [16/Jul/2025 03:06:19] "POST /callback HTTP/1.1" 200 -
+^C%                                                                     (fresh_venv) linyancui@Mac minimal_flask % python app.py
+非 Render 環境：加載 .env
+使用的 Channel Secret: e18667...c156
+使用的 Channel Token: jC0mYA...lFU=
+/Users/linyancui/minimal_flask/app.py:42: DeprecationWarning: The '__version__' attribute is deprecated and will be removed in Flask 3.1. Use feature detection or 'importlib.metadata.version("flask")' instead.
+  flask_version = flask.__version__
+Flask version: 3.1.0
+SQLAlchemy version: 2.0.39
+使用 Flask 3.x 兼容模式
+2025-07-16 03:12:16,232 - __main__ - INFO - Channel token: jC0mYA...lFU=
+2025-07-16 03:12:16,232 - __main__ - INFO - Database URL: **********
+2025-07-16 03:12:16,232 - __main__ - INFO - Channel Secret: e18667...c156
+2025-07-16 03:12:16,232 - apscheduler.scheduler - INFO - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2025-07-16 03:12:16,232 - apscheduler.scheduler - INFO - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2025-07-16 03:12:16,232 - apscheduler.scheduler - INFO - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2025-07-16 03:12:16,233 - apscheduler.scheduler - INFO - Added job "schedule_daily_updates" to job store "default"
+2025-07-16 03:12:16,233 - apscheduler.scheduler - INFO - Added job "hourly_update_completed" to job store "default"
+2025-07-16 03:12:16,233 - apscheduler.scheduler - INFO - Added job "hourly_update_unique_codes" to job store "default"
+2025-07-16 03:12:16,233 - apscheduler.scheduler - INFO - Scheduler started
+2025-07-16 03:12:16,233 - modules - INFO - 開始執行更新已完成班次任務...
+2025-07-16 03:12:16,233 - modules - INFO - 當前日期: 2025-07-16, 當前時間: 03:12:16.233198
+2025-07-16 03:12:16,257 - modules - INFO - 找到 0 個需要更新的班次
+2025-07-16 03:12:16,257 - modules - INFO - 沒有需要更新的已完成班次
+2025-07-16 03:12:16,257 - modules - INFO - 開始初始化班次唯一識別碼...
+2025-07-16 03:12:16,257 - modules - INFO - 找到 0 個沒有唯一識別碼的班次
+2025-07-16 03:12:16,259 - modules - INFO - 找到 0 個沒有唯一識別碼的已完成班次
+2025-07-16 03:12:16,259 - modules - INFO - 初始化班次唯一識別碼任務結束。成功更新班次: 0, 已完成班次: 0
+2025-07-16 03:12:16,261 - apscheduler.scheduler - INFO - Added job "update_trip_1816" to job store "default"
+2025-07-16 03:12:16,261 - modules - INFO - 已安排班次 #1816 的自動更新任務，執行時間：2025-07-16 05:25:00+08:00
+2025-07-16 03:12:16,261 - apscheduler.scheduler - INFO - Added job "update_trip_1826" to job store "default"
+2025-07-16 03:12:16,261 - modules - INFO - 已安排班次 #1826 的自動更新任務，執行時間：2025-07-16 06:25:00+08:00
+2025-07-16 03:12:16,261 - apscheduler.scheduler - INFO - Added job "update_trip_1909" to job store "default"
+2025-07-16 03:12:16,261 - modules - INFO - 已安排班次 #1909 的自動更新任務，執行時間：2025-07-16 06:55:00+08:00
+2025-07-16 03:12:16,261 - apscheduler.scheduler - INFO - Added job "update_trip_1831" to job store "default"
+2025-07-16 03:12:16,261 - modules - INFO - 已安排班次 #1831 的自動更新任務，執行時間：2025-07-16 06:55:00+08:00
+2025-07-16 03:12:16,261 - apscheduler.scheduler - INFO - Added job "update_trip_1821" to job store "default"
+2025-07-16 03:12:16,261 - modules - INFO - 已安排班次 #1821 的自動更新任務，執行時間：2025-07-16 07:15:00+08:00
+2025-07-16 03:12:16,261 - apscheduler.scheduler - INFO - Added job "update_trip_1900" to job store "default"
+2025-07-16 03:12:16,261 - modules - INFO - 已安排班次 #1900 的自動更新任務，執行時間：2025-07-16 07:35:00+08:00
+2025-07-16 03:12:16,261 - apscheduler.scheduler - INFO - Added job "update_trip_1818" to job store "default"
+2025-07-16 03:12:16,261 - modules - INFO - 已安排班次 #1818 的自動更新任務，執行時間：2025-07-16 07:35:00+08:00
+2025-07-16 03:12:16,261 - apscheduler.scheduler - INFO - Added job "update_trip_1825" to job store "default"
+2025-07-16 03:12:16,261 - modules - INFO - 已安排班次 #1825 的自動更新任務，執行時間：2025-07-16 09:35:00+08:00
+2025-07-16 03:12:16,261 - apscheduler.scheduler - INFO - Added job "update_trip_1811" to job store "default"
+2025-07-16 03:12:16,261 - modules - INFO - 已安排班次 #1811 的自動更新任務，執行時間：2025-07-16 09:55:00+08:00
+2025-07-16 03:12:16,261 - apscheduler.scheduler - INFO - Added job "update_trip_1814" to job store "default"
+2025-07-16 03:12:16,261 - modules - INFO - 已安排班次 #1814 的自動更新任務，執行時間：2025-07-16 10:05:00+08:00
+2025-07-16 03:12:16,261 - apscheduler.scheduler - INFO - Added job "update_trip_1808" to job store "default"
+2025-07-16 03:12:16,261 - modules - INFO - 已安排班次 #1808 的自動更新任務，執行時間：2025-07-16 10:45:00+08:00
+2025-07-16 03:12:16,261 - apscheduler.scheduler - INFO - Added job "update_trip_1823" to job store "default"
+2025-07-16 03:12:16,261 - modules - INFO - 已安排班次 #1823 的自動更新任務，執行時間：2025-07-16 10:50:00+08:00
+2025-07-16 03:12:16,261 - apscheduler.scheduler - INFO - Added job "update_trip_1828" to job store "default"
+2025-07-16 03:12:16,261 - modules - INFO - 已安排班次 #1828 的自動更新任務，執行時間：2025-07-16 10:55:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1832" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1832 的自動更新任務，執行時間：2025-07-16 11:05:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1827" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1827 的自動更新任務，執行時間：2025-07-16 11:20:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1813" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1813 的自動更新任務，執行時間：2025-07-16 11:35:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1817" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1817 的自動更新任務，執行時間：2025-07-16 12:15:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1908" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1908 的自動更新任務，執行時間：2025-07-16 12:55:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1809" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1809 的自動更新任務，執行時間：2025-07-16 14:45:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1815" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1815 的自動更新任務，執行時間：2025-07-16 14:55:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1810" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1810 的自動更新任務，執行時間：2025-07-16 15:05:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1824" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1824 的自動更新任務，執行時間：2025-07-16 15:05:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1812" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1812 的自動更新任務，執行時間：2025-07-16 15:20:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1830" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1830 的自動更新任務，執行時間：2025-07-16 15:30:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1829" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1829 的自動更新任務，執行時間：2025-07-16 15:45:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1910" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1910 的自動更新任務，執行時間：2025-07-16 16:37:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1822" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1822 的自動更新任務，執行時間：2025-07-16 17:35:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1853" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1853 的自動更新任務，執行時間：2025-07-17 06:15:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1840" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1840 的自動更新任務，執行時間：2025-07-17 06:25:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1852" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1852 的自動更新任務，執行時間：2025-07-17 06:35:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1845" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1845 的自動更新任務，執行時間：2025-07-17 06:35:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1901" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1901 的自動更新任務，執行時間：2025-07-17 07:10:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1842" to job store "default"
+2025-07-16 03:12:16,262 - modules - INFO - 已安排班次 #1842 的自動更新任務，執行時間：2025-07-17 07:15:00+08:00
+2025-07-16 03:12:16,262 - apscheduler.scheduler - INFO - Added job "update_trip_1836" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1836 的自動更新任務，執行時間：2025-07-17 10:25:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1851" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1851 的自動更新任務，執行時間：2025-07-17 10:35:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1844" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1844 的自動更新任務，執行時間：2025-07-17 10:35:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1838" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1838 的自動更新任務，執行時間：2025-07-17 10:55:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1846" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1846 的自動更新任務，執行時間：2025-07-17 10:55:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1847" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1847 的自動更新任務，執行時間：2025-07-17 10:55:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1839" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1839 的自動更新任務，執行時間：2025-07-17 11:15:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1848" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1848 的自動更新任務，執行時間：2025-07-17 11:35:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1837" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1837 的自動更新任務，執行時間：2025-07-17 11:55:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1849" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1849 的自動更新任務，執行時間：2025-07-17 14:45:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1835" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1835 的自動更新任務，執行時間：2025-07-17 15:20:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1850" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1850 的自動更新任務，執行時間：2025-07-17 15:35:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1834" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1834 的自動更新任務，執行時間：2025-07-17 15:35:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1833" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1833 的自動更新任務，執行時間：2025-07-17 16:05:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1902" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1902 的自動更新任務，執行時間：2025-07-18 04:35:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1862" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1862 的自動更新任務，執行時間：2025-07-18 05:25:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1865" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1865 的自動更新任務，執行時間：2025-07-18 06:25:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1872" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1872 的自動更新任務，執行時間：2025-07-18 06:25:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1877" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1877 的自動更新任務，執行時間：2025-07-18 06:55:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1867" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1867 的自動更新任務，執行時間：2025-07-18 07:15:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1864" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1864 的自動更新任務，執行時間：2025-07-18 07:35:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1871" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1871 的自動更新任務，執行時間：2025-07-18 09:35:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1857" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1857 的自動更新任務，執行時間：2025-07-18 09:55:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1860" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1860 的自動更新任務，執行時間：2025-07-18 10:05:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1854" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1854 的自動更新任務，執行時間：2025-07-18 10:45:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1869" to job store "default"
+2025-07-16 03:12:16,263 - modules - INFO - 已安排班次 #1869 的自動更新任務，執行時間：2025-07-18 10:50:00+08:00
+2025-07-16 03:12:16,263 - apscheduler.scheduler - INFO - Added job "update_trip_1874" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1874 的自動更新任務，執行時間：2025-07-18 10:55:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1878" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1878 的自動更新任務，執行時間：2025-07-18 11:05:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1873" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1873 的自動更新任務，執行時間：2025-07-18 11:20:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1859" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1859 的自動更新任務，執行時間：2025-07-18 11:35:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1863" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1863 的自動更新任務，執行時間：2025-07-18 12:15:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1855" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1855 的自動更新任務，執行時間：2025-07-18 14:45:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1861" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1861 的自動更新任務，執行時間：2025-07-18 14:55:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1870" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1870 的自動更新任務，執行時間：2025-07-18 15:05:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1856" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1856 的自動更新任務，執行時間：2025-07-18 15:05:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1858" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1858 的自動更新任務，執行時間：2025-07-18 15:20:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1876" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1876 的自動更新任務，執行時間：2025-07-18 15:30:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1875" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1875 的自動更新任務，執行時間：2025-07-18 15:45:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1868" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1868 的自動更新任務，執行時間：2025-07-18 17:35:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1866" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1866 的自動更新任務，執行時間：2025-07-18 17:35:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1894" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1894 的自動更新任務，執行時間：2025-07-19 06:15:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1893" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1893 的自動更新任務，執行時間：2025-07-19 06:35:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1888" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1888 的自動更新任務，執行時間：2025-07-19 06:35:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1882" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1882 的自動更新任務，執行時間：2025-07-19 10:25:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1887" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1887 的自動更新任務，執行時間：2025-07-19 10:35:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1892" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1892 的自動更新任務，執行時間：2025-07-19 10:35:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1884" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1884 的自動更新任務，執行時間：2025-07-19 10:55:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1890" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1890 的自動更新任務，執行時間：2025-07-19 10:55:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1889" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1889 的自動更新任務，執行時間：2025-07-19 10:55:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1885" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1885 的自動更新任務，執行時間：2025-07-19 11:15:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1891" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1891 的自動更新任務，執行時間：2025-07-19 11:35:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1883" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1883 的自動更新任務，執行時間：2025-07-19 11:55:00+08:00
+2025-07-16 03:12:16,264 - apscheduler.scheduler - INFO - Added job "update_trip_1886" to job store "default"
+2025-07-16 03:12:16,264 - modules - INFO - 已安排班次 #1886 的自動更新任務，執行時間：2025-07-19 14:45:00+08:00
+2025-07-16 03:12:16,265 - apscheduler.scheduler - INFO - Added job "update_trip_1881" to job store "default"
+2025-07-16 03:12:16,265 - modules - INFO - 已安排班次 #1881 的自動更新任務，執行時間：2025-07-19 15:20:00+08:00
+2025-07-16 03:12:16,265 - apscheduler.scheduler - INFO - Added job "update_trip_1880" to job store "default"
+2025-07-16 03:12:16,265 - modules - INFO - 已安排班次 #1880 的自動更新任務，執行時間：2025-07-19 15:35:00+08:00
+2025-07-16 03:12:16,265 - apscheduler.scheduler - INFO - Added job "update_trip_1879" to job store "default"
+2025-07-16 03:12:16,265 - modules - INFO - 已安排班次 #1879 的自動更新任務，執行時間：2025-07-19 16:05:00+08:00
+ * Serving Flask app 'modules'
+ * Debug mode: off
+2025-07-16 03:12:16,287 - werkzeug - INFO - WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:3000
+ * Running on http://192.168.43.61:3000
+2025-07-16 03:12:16,287 - werkzeug - INFO - Press CTRL+C to quit
+2025-07-16 03:12:23,416 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570048592707322078","quoteToken":"h0JYZhpGjXio4ZzBw7QchgSyh3B5QdZyvU9ORaJIWaUJvrX2moUuJFOC9tSY5JEU2QOJqDwNgfVW5QdtSmWNDvXxVfmMGh1NUo6P9wQ6u3HOmXhvc_n3Td3CJBN2UeQmNgFableO6TqsNiqlqNiQRw","text":"/昨天診所班次"},"webhookEventId":"01K07R16PHESC7HGGG7WMN7XGZ","deliveryContext":{"isRedelivery":false},"timestamp":1752606742744,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"e46b2a2954174834b510884335c0fa90","mode":"active"}]}
+2025-07-16 03:12:23,416 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-16 03:12:23,416 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-16 03:12:23,416 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-16 03:12:23,416 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-16 03:12:23,416 - modules.handlers.message_handler - INFO - [should_process] Checking: '/昨天診所班次' from group
+2025-07-16 03:12:23,416 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '昨天診所班次'
+2025-07-16 03:12:23,416 - modules.routes.webhook - INFO - Passing processed text '昨天診所班次' to handler.
+2025-07-16 03:12:23,416 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '昨天診所班次' (Normalized: '昨天診所班次')
+2025-07-16 03:12:23,416 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 昨天診所班次
+2025-07-16 03:12:23,416 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 昨天診所班次
+2025-07-16 03:12:23,417 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 昨天診所班次
+2025-07-16 03:12:26,751 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-16 03:12:26,751 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-16 03:12:26,751 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 查已完成 昨天 診所
+2025-07-16 03:12:26,751 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 查已完成 昨天 診所
+2025-07-16 03:12:26,751 - modules.handlers.text_message_handler - INFO - 檢測到AI智能車資查詢: 查已完成 昨天 診所
+2025-07-16 03:12:26,751 - modules.services.ai_fare_service - INFO - 處理智能車資查詢: 查已完成 昨天 診所
+2025-07-16 03:12:26,754 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '查已完成 昨天 診所')
+2025-07-16 03:12:26,757 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': '診所', 'trip_id': None, 'raw_query': '查已完成 昨天 診所', 'confidence': 'low'}
+2025-07-16 03:12:26,757 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-16 03:12:26,763 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-16 03:12:26,763 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-16 03:12:27,062 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-16 03:12:27,064 - modules.handlers.text_message_handler - INFO - 成功發送AI修改完成的 Flex Message 與 Quick Reply
+2025-07-16 03:12:27,065 - werkzeug - INFO - 127.0.0.1 - - [16/Jul/2025 03:12:27] "POST /callback HTTP/1.1" 200 -
+2025-07-16 03:13:19,637 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570048687163047937","quoteToken":"jspowqsMWHKEUNj9Eu-iE4S-1lwuQEMPmVu6tcIDCROOwlriEVLfyQPtE4DiZxwUekb_FnBIQ5Vp61xo8YyN6R_DHIgQb9QRHqKb9Ww7TL-Ui_GCm86_cZx6IukENCSTujy8ehrKCOgGBSBIx2kvUg","text":"/司機5386 7/15東洋班次的金額總和"},"webhookEventId":"01K07R2XNNYMXWCRJBR2W2SG06","deliveryContext":{"isRedelivery":false},"timestamp":1752606799035,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"e1a105aab1144731ba1de04757e6bf56","mode":"active"}]}
+2025-07-16 03:13:19,637 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-16 03:13:19,637 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-16 03:13:19,637 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-16 03:13:19,637 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-16 03:13:19,638 - modules.handlers.message_handler - INFO - [should_process] Checking: '/司機5386 7/15東洋班次的金額總和' from group
+2025-07-16 03:13:19,638 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '司機5386 7/15東洋班次的金額總和'
+2025-07-16 03:13:19,638 - modules.routes.webhook - INFO - Passing processed text '司機5386 7/15東洋班次的金額總和' to handler.
+2025-07-16 03:13:19,638 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '司機5386 7/15東洋班次的金額總和' (Normalized: '司機5386 7/15東洋班次的金額總和')
+2025-07-16 03:13:19,638 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 司機5386 7/15東洋班次的金額總和
+2025-07-16 03:13:19,638 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 司機5386 7/15東洋班次的金額總和
+2025-07-16 03:13:19,638 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 司機5386 7/15東洋班次的金額總和
+2025-07-16 03:13:22,400 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-16 03:13:22,400 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-16 03:13:22,405 - modules.services.advanced_query_processor - INFO - 🔍 處理複雜查詢: 統計金額 2024-07-15 司機5386 東洋
+2025-07-16 03:13:22,406 - modules.services.advanced_query_processor - INFO - 📊 執行SQL: 
+                SELECT 
+                    ct.id,
+                    ct.date,
+                    ct.start_point,
+                    ct.end_point,
+                    ct.category,
+                    ct.driver_id,
+                    ct.meter_fare,
+                    ct.extra_fare,
+                    (ct.meter_fare + ct.extra_fare) as total_amount,
+                    d.name as driver_name
+                FROM completed_trips ct
+                LEFT JOIN drivers d ON ct.driver_id = d.id
+                WHERE 1=1
+             AND ct.category = :category AND ct.driver_id = :driver_id ORDER BY ct.date DESC, ct.id DESC LIMIT 50
+2025-07-16 03:13:22,406 - modules.services.advanced_query_processor - INFO - 📊 參數: {'category': '東洋', 'driver_id': 5386}
+2025-07-16 03:13:22,410 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-16 03:13:22,716 - werkzeug - INFO - 127.0.0.1 - - [16/Jul/2025 03:13:22] "POST /callback HTTP/1.1" 200 -
+2025-07-16 03:13:56,016 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570048748651806740","quoteToken":"-9qFVfqm_TukVucG0AKXRHFljLs3nny_timYHytSKQp_xdHV9MNaX3sKF1rmViY1Vbynnp12pyN3E-LQbgVwxENDEPNTY44rFANteBY5y7Qfe-isEgTEM3lt5eE14xhpA4DJa79EkTJv8c7-zMLZag","text":"/司機5386 昨天東洋班次的金額總和"},"webhookEventId":"01K07R4174YRE5W7AWS484MZVZ","deliveryContext":{"isRedelivery":false},"timestamp":1752606835833,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"c31a6182015e4e9ab581a3b8d932899a","mode":"active"}]}
+2025-07-16 03:13:56,016 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-16 03:13:56,016 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-16 03:13:56,017 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-16 03:13:56,017 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-16 03:13:56,017 - modules.handlers.message_handler - INFO - [should_process] Checking: '/司機5386 昨天東洋班次的金額總和' from group
+2025-07-16 03:13:56,017 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '司機5386 昨天東洋班次的金額總和'
+2025-07-16 03:13:56,017 - modules.routes.webhook - INFO - Passing processed text '司機5386 昨天東洋班次的金額總和' to handler.
+2025-07-16 03:13:56,017 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '司機5386 昨天東洋班次的金額總和' (Normalized: '司機5386 昨天東洋班次的金額總和')
+2025-07-16 03:13:56,017 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 司機5386 昨天東洋班次的金額總和
+2025-07-16 03:13:56,017 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 司機5386 昨天東洋班次的金額總和
+2025-07-16 03:13:56,018 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 司機5386 昨天東洋班次的金額總和
+2025-07-16 03:13:58,629 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-16 03:13:58,630 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-16 03:13:58,630 - modules.services.advanced_query_processor - INFO - 🔍 處理複雜查詢: 統計金額 昨天 司機5386 東洋
+2025-07-16 03:13:58,630 - modules.services.advanced_query_processor - INFO - 📊 執行SQL: 
+                SELECT 
+                    ct.id,
+                    ct.date,
+                    ct.start_point,
+                    ct.end_point,
+                    ct.category,
+                    ct.driver_id,
+                    ct.meter_fare,
+                    ct.extra_fare,
+                    (ct.meter_fare + ct.extra_fare) as total_amount,
+                    d.name as driver_name
+                FROM completed_trips ct
+                LEFT JOIN drivers d ON ct.driver_id = d.id
+                WHERE 1=1
+             AND ct.date = :yesterday AND ct.category = :category AND ct.driver_id = :driver_id ORDER BY ct.date DESC, ct.id DESC LIMIT 50
+2025-07-16 03:13:58,630 - modules.services.advanced_query_processor - INFO - 📊 參數: {'yesterday': datetime.date(2025, 7, 15), 'category': '東洋', 'driver_id': 5386}
+2025-07-16 03:13:58,633 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-16 03:13:58,940 - werkzeug - INFO - 127.0.0.1 - - [16/Jul/2025 03:13:58] "POST /callback HTTP/1.1" 200 -
+2025-07-16 03:14:22,716 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570048792859508788","quoteToken":"_XYU3C_jhj5T150zWx_6aUbTAyoYmUDZfi5hnCS5SWP11E9HhJjAyNH8rIrjGenco2-arG0Ot5Wn5gU0ZqblyVnQ4EVmiPiTmuIsyJlS-6t3qInzwT-jROCSCP9tHC_CPprwaJToLZ_4LJWUSanNhw","text":"/司機5386 昨天東洋班"},"webhookEventId":"01K07R4V6ECGB7A7JSYBA7E885","deliveryContext":{"isRedelivery":false},"timestamp":1752606862038,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"4aeb2d4f36134d40923e6273b0564f87","mode":"active"}]}
+2025-07-16 03:14:22,716 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-16 03:14:22,716 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-16 03:14:22,716 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-16 03:14:22,716 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-16 03:14:22,717 - modules.handlers.message_handler - INFO - [should_process] Checking: '/司機5386 昨天東洋班' from group
+2025-07-16 03:14:22,717 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '司機5386 昨天東洋班'
+2025-07-16 03:14:22,717 - modules.routes.webhook - INFO - Passing processed text '司機5386 昨天東洋班' to handler.
+2025-07-16 03:14:22,717 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '司機5386 昨天東洋班' (Normalized: '司機5386 昨天東洋班')
+2025-07-16 03:14:22,717 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 司機5386 昨天東洋班
+2025-07-16 03:14:22,717 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 司機5386 昨天東洋班
+2025-07-16 03:14:22,717 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 司機5386 昨天東洋班
+2025-07-16 03:14:25,786 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-16 03:14:25,786 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-16 03:14:25,786 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 查已完成 昨天 司機5386 東洋
+2025-07-16 03:14:25,786 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 查已完成 昨天 司機5386 東洋
+2025-07-16 03:14:25,786 - modules.handlers.text_message_handler - INFO - 檢測到AI智能車資查詢: 查已完成 昨天 司機5386 東洋
+2025-07-16 03:14:25,786 - modules.services.ai_fare_service - INFO - 處理智能車資查詢: 查已完成 昨天 司機5386 東洋
+2025-07-16 03:14:25,787 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '查已完成 昨天 司機5386 東洋')
+2025-07-16 03:14:25,787 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': 5386, 'category': '東洋', 'trip_id': None, 'raw_query': '查已完成 昨天 司機5386 東洋', 'confidence': 'high'}
+2025-07-16 03:14:25,787 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-16 03:14:25,791 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-16 03:14:25,792 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-16 03:14:26,139 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-16 03:14:26,141 - modules.handlers.text_message_handler - INFO - 成功發送AI修改完成的 Flex Message 與 Quick Reply
+2025-07-16 03:14:26,142 - werkzeug - INFO - 127.0.0.1 - - [16/Jul/2025 03:14:26] "POST /callback HTTP/1.1" 200 -
+2025-07-16 03:14:52,819 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570048843358928897","quoteToken":"kCJWdmxLxfm65hZbHkdDCGnl2ysjyjByq6QUEktATR6A-oQLMeW0qNJc9-I0Mp2YbbY2iEJgRzcNg_g3xHpQLtHhq3B4Kkaer3la_s9YD-7qw5TsSGVqAYFHQxMUPHW_pVPxksdlia7PmhSEZtJRjA","text":"/司機28530昨天東洋班次"},"webhookEventId":"01K07R5RK3279M6A70D8VZ29SG","deliveryContext":{"isRedelivery":false},"timestamp":1752606892137,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"f82d350670b84cc19ede8cae1adee31d","mode":"active"}]}
+2025-07-16 03:14:52,819 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-16 03:14:52,819 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-16 03:14:52,819 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-16 03:14:52,819 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-16 03:14:52,820 - modules.handlers.message_handler - INFO - [should_process] Checking: '/司機28530昨天東洋班次' from group
+2025-07-16 03:14:52,820 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '司機28530昨天東洋班次'
+2025-07-16 03:14:52,820 - modules.routes.webhook - INFO - Passing processed text '司機28530昨天東洋班次' to handler.
+2025-07-16 03:14:52,820 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '司機28530昨天東洋班次' (Normalized: '司機28530昨天東洋班次')
+2025-07-16 03:14:52,820 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 司機28530昨天東洋班次
+2025-07-16 03:14:52,820 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 司機28530昨天東洋班次
+2025-07-16 03:14:52,820 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 司機28530昨天東洋班次
+2025-07-16 03:14:55,892 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-16 03:14:55,892 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-16 03:14:55,892 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 查已完成 昨天 司機28530 東洋
+2025-07-16 03:14:55,892 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 查已完成 昨天 司機28530 東洋
+2025-07-16 03:14:55,893 - modules.handlers.text_message_handler - INFO - 檢測到AI智能車資查詢: 查已完成 昨天 司機28530 東洋
+2025-07-16 03:14:55,893 - modules.services.ai_fare_service - INFO - 處理智能車資查詢: 查已完成 昨天 司機28530 東洋
+2025-07-16 03:14:55,893 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '查已完成 昨天 司機28530 東洋')
+2025-07-16 03:14:55,893 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': 28530, 'category': '東洋', 'trip_id': None, 'raw_query': '查已完成 昨天 司機28530 東洋', 'confidence': 'high'}
+2025-07-16 03:14:55,893 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-16 03:14:55,897 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-16 03:14:55,898 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-16 03:14:56,212 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-16 03:14:56,214 - modules.handlers.text_message_handler - INFO - 成功發送AI修改完成的 Flex Message 與 Quick Reply
+2025-07-16 03:14:56,215 - werkzeug - INFO - 127.0.0.1 - - [16/Jul/2025 03:14:56] "POST /callback HTTP/1.1" 200 -
+2025-07-16 03:15:29,086 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570048905031974964","quoteToken":"7XliBUO2Bzydryj649PcDjt0Su3lCERwCfUo06n-3rHUuxNGeG0RIoMf3zoaZHyIfzwVy_-EaxLXJXZO7gfQHOlGB1b13AEJjBUOiVFFVJDA9LPE8zdq76AICD0T_u2KpgRlcmTeG32FvNv2DWntFQ","text":"/昨天診所班次"},"webhookEventId":"01K07R6W2E0N26AADG4FEDY192","deliveryContext":{"isRedelivery":false},"timestamp":1752606928898,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"71700b2d0b1d4c1c82150dba2e5882b8","mode":"active"}]}
+2025-07-16 03:15:29,087 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-16 03:15:29,087 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-16 03:15:29,087 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-16 03:15:29,087 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-16 03:15:29,087 - modules.handlers.message_handler - INFO - [should_process] Checking: '/昨天診所班次' from group
+2025-07-16 03:15:29,088 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '昨天診所班次'
+2025-07-16 03:15:29,088 - modules.routes.webhook - INFO - Passing processed text '昨天診所班次' to handler.
+2025-07-16 03:15:29,088 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '昨天診所班次' (Normalized: '昨天診所班次')
+2025-07-16 03:15:29,088 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 昨天診所班次
+2025-07-16 03:15:29,088 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 昨天診所班次
+2025-07-16 03:15:29,088 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 昨天診所班次
+2025-07-16 03:15:31,338 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-16 03:15:31,338 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-16 03:15:31,338 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 查已完成 昨天 診所
+2025-07-16 03:15:31,338 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 查已完成 昨天 診所
+2025-07-16 03:15:31,338 - modules.handlers.text_message_handler - INFO - 檢測到AI智能車資查詢: 查已完成 昨天 診所
+2025-07-16 03:15:31,338 - modules.services.ai_fare_service - INFO - 處理智能車資查詢: 查已完成 昨天 診所
+2025-07-16 03:15:31,338 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '查已完成 昨天 診所')
+2025-07-16 03:15:31,339 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': '診所', 'trip_id': None, 'raw_query': '查已完成 昨天 診所', 'confidence': 'low'}
+2025-07-16 03:15:31,339 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-16 03:15:31,345 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-16 03:15:31,347 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-16 03:15:31,656 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-16 03:15:31,657 - modules.handlers.text_message_handler - INFO - 成功發送AI修改完成的 Flex Message 與 Quick Reply
+2025-07-16 03:15:31,658 - werkzeug - INFO - 127.0.0.1 - - [16/Jul/2025 03:15:31] "POST /callback HTTP/1.1" 200 -
+2025-07-16 03:16:30,621 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570049008043556968","quoteToken":"ijgvL5rH48DjlgEuoZWu8K1_iAG8m5M78c_eElOSBN7AQzvDZbxJK0phUUgYA60SUgSC5iUzmW3OvcsvEZ-WSSdm50tVATe5XkmJbuhN5h5vOPRI5qYrrB6We50ya4W2C3utG7k8THVtqXagrRJ92g","text":"/昨天診所的班次"},"webhookEventId":"01K07R8R4AQC9TXGKWRJCYQTHH","deliveryContext":{"isRedelivery":false},"timestamp":1752606990372,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"9de20f2be0f8432bbc0d0adaefafa3b5","mode":"active"}]}
+2025-07-16 03:16:30,621 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-16 03:16:30,622 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-16 03:16:30,622 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-16 03:16:30,622 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-16 03:16:30,622 - modules.handlers.message_handler - INFO - [should_process] Checking: '/昨天診所的班次' from group
+2025-07-16 03:16:30,622 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '昨天診所的班次'
+2025-07-16 03:16:30,622 - modules.routes.webhook - INFO - Passing processed text '昨天診所的班次' to handler.
+2025-07-16 03:16:30,622 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '昨天診所的班次' (Normalized: '昨天診所的班次')
+2025-07-16 03:16:30,622 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 昨天診所的班次
+2025-07-16 03:16:30,623 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 昨天診所的班次
+2025-07-16 03:16:30,623 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 昨天診所的班次
+2025-07-16 03:16:33,267 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-16 03:16:33,267 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-16 03:16:33,267 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 查已完成 昨天 診所
+2025-07-16 03:16:33,267 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 查已完成 昨天 診所
+2025-07-16 03:16:33,267 - modules.handlers.text_message_handler - INFO - 檢測到AI智能車資查詢: 查已完成 昨天 診所
+2025-07-16 03:16:33,267 - modules.services.ai_fare_service - INFO - 處理智能車資查詢: 查已完成 昨天 診所
+2025-07-16 03:16:33,267 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '查已完成 昨天 診所')
+2025-07-16 03:16:33,268 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': '診所', 'trip_id': None, 'raw_query': '查已完成 昨天 診所', 'confidence': 'low'}
+2025-07-16 03:16:33,268 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-16 03:16:33,273 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-16 03:16:33,274 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-16 03:16:33,613 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-16 03:16:33,615 - modules.handlers.text_message_handler - INFO - 成功發送AI修改完成的 Flex Message 與 Quick Reply
+2025-07-16 03:16:33,617 - werkzeug - INFO - 127.0.0.1 - - [16/Jul/2025 03:16:33] "POST /callback HTTP/1.1" 200 -
+2025-07-16 03:16:59,380 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570049055372083339","quoteToken":"WX_5WMNehwnZ1PJSYhw6hQjrwY-Qb2esPZXjW7THw_Xjj56Ek6PhKSsB2OwxvnTK4IxA5uYxBVTByS6A8N_BrAnTrv6lRdX4q6auBazquLb41EASJVaHsEwCRIf-mhFw0UIQ-wHQnJQ0RvbIBZM6BQ","text":"/昨天司機533診所班次"},"webhookEventId":"01K07R9M5F81BQK7526R0WJ0FW","deliveryContext":{"isRedelivery":false},"timestamp":1752607018678,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"c1cbf2a502c34ea081b287c229fbb06b","mode":"active"}]}
+2025-07-16 03:16:59,380 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-16 03:16:59,380 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-16 03:16:59,380 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-16 03:16:59,380 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-16 03:16:59,381 - modules.handlers.message_handler - INFO - [should_process] Checking: '/昨天司機533診所班次' from group
+2025-07-16 03:16:59,381 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '昨天司機533診所班次'
+2025-07-16 03:16:59,381 - modules.routes.webhook - INFO - Passing processed text '昨天司機533診所班次' to handler.
+2025-07-16 03:16:59,381 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '昨天司機533診所班次' (Normalized: '昨天司機533診所班次')
+2025-07-16 03:16:59,381 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 昨天司機533診所班次
+2025-07-16 03:16:59,381 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 昨天司機533診所班次
+2025-07-16 03:16:59,381 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 昨天司機533診所班次
+2025-07-16 03:17:02,041 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-16 03:17:02,041 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-16 03:17:02,041 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 查已完成 昨天 司機533 診所
+2025-07-16 03:17:02,041 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 查已完成 昨天 司機533 診所
+2025-07-16 03:17:02,041 - modules.handlers.text_message_handler - INFO - 檢測到AI智能車資查詢: 查已完成 昨天 司機533 診所
+2025-07-16 03:17:02,041 - modules.services.ai_fare_service - INFO - 處理智能車資查詢: 查已完成 昨天 司機533 診所
+2025-07-16 03:17:02,042 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '查已完成 昨天 司機533 診所')
+2025-07-16 03:17:02,042 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': 533, 'category': '診所', 'trip_id': None, 'raw_query': '查已完成 昨天 司機533 診所', 'confidence': 'high'}
+2025-07-16 03:17:02,042 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-16 03:17:02,046 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-16 03:17:02,047 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-16 03:17:02,371 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-16 03:17:02,373 - modules.handlers.text_message_handler - INFO - 成功發送AI修改完成的 Flex Message 與 Quick Reply
+2025-07-16 03:17:02,374 - werkzeug - INFO - 127.0.0.1 - - [16/Jul/2025 03:17:02] "POST /callback HTTP/1.1" 200 -
+2025-07-16 03:17:42,034 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570049127279755299","quoteToken":"EDw0SzYwOwSV4w25qgaPvSrVbbZxHg5oyxovzgNK9SFgsU7ESJhrR0VQ9a5FgF6Be8s0SwAqJh9U7II9gD82D-ruteEM8xYAhx2-81mRsI8c-hX_1UcnMAGo5ta6zEwyP1k8T6f4v2CKuVxXtw_CUg","text":"/7/15司機533診所班次"},"webhookEventId":"01K07RAXVFJXZRQ5ZPTKBRX4N0","deliveryContext":{"isRedelivery":false},"timestamp":1752607061367,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"e6a62e512e8f4e9b9094098d3f157542","mode":"active"}]}
+2025-07-16 03:17:42,034 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-16 03:17:42,034 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-16 03:17:42,035 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-16 03:17:42,035 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-16 03:17:42,035 - modules.handlers.message_handler - INFO - [should_process] Checking: '/7/15司機533診所班次' from group
+2025-07-16 03:17:42,035 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '7/15司機533診所班次'
+2025-07-16 03:17:42,035 - modules.routes.webhook - INFO - Passing processed text '7/15司機533診所班次' to handler.
+2025-07-16 03:17:42,035 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '7/15司機533診所班次' (Normalized: '7/15司機533診所班次')
+2025-07-16 03:17:42,035 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 7/15司機533診所班次
+2025-07-16 03:17:42,035 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 7/15司機533診所班次
+2025-07-16 03:17:42,036 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 7/15司機533診所班次
+2025-07-16 03:17:44,742 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-16 03:17:44,742 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-16 03:17:44,742 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 查詢班次 7/15 司機533 診所
+2025-07-16 03:17:44,742 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 查詢班次 7/15 司機533 診所
+2025-07-16 03:17:44,742 - modules.handlers.text_message_handler - INFO - 檢測到AI智能車資查詢: 查詢班次 7/15 司機533 診所
+2025-07-16 03:17:44,743 - modules.services.ai_fare_service - INFO - 處理智能車資查詢: 查詢班次 7/15 司機533 診所
+2025-07-16 03:17:44,743 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '查詢班次 7/15 司機533 診所')
+2025-07-16 03:17:44,743 - modules.services.ai_fare_service - INFO - 解析條件: {'date': datetime.date(2025, 7, 15), 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': 533, 'category': '診所', 'trip_id': None, 'raw_query': '查詢班次 7/15 司機533 診所', 'confidence': 'high'}
+2025-07-16 03:17:44,743 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-16 03:17:44,747 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-16 03:17:44,749 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-16 03:17:45,103 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-16 03:17:45,106 - modules.handlers.text_message_handler - INFO - 成功發送AI修改完成的 Flex Message 與 Quick Reply
+2025-07-16 03:17:45,107 - werkzeug - INFO - 127.0.0.1 - - [16/Jul/2025 03:17:45] "POST /callback HTTP/1.1" 200 -
+2025-07-16 03:18:49,155 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570049239670587513","quoteToken":"ngK0GuordxlQw95QXjpIcvPp_c0kkwmZ1076ytiJn64DsFf6HHLP0M-fW8h8QF9q1Te_0-wafa01D3h6yZcLfbVo6H_UZBtst2x7clquylp9b5idGiDdcbq8JRi6rjGHEla6I3IKhSBkaEkME9QdlQ","text":"/7/15司機533診所班次的金額總和"},"webhookEventId":"01K07RCZAW2E112X9NPMZNXFSZ","deliveryContext":{"isRedelivery":false},"timestamp":1752607128420,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"545a5063c619465482efb48f81d3c529","mode":"active"}]}
+2025-07-16 03:18:49,155 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-16 03:18:49,155 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-16 03:18:49,155 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-16 03:18:49,155 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-16 03:18:49,156 - modules.handlers.message_handler - INFO - [should_process] Checking: '/7/15司機533診所班次的金額總和' from group
+2025-07-16 03:18:49,156 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '7/15司機533診所班次的金額總和'
+2025-07-16 03:18:49,156 - modules.routes.webhook - INFO - Passing processed text '7/15司機533診所班次的金額總和' to handler.
+2025-07-16 03:18:49,156 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '7/15司機533診所班次的金額總和' (Normalized: '7/15司機533診所班次的金額總和')
+2025-07-16 03:18:49,156 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 7/15司機533診所班次的金額總和
+2025-07-16 03:18:49,156 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 7/15司機533診所班次的金額總和
+2025-07-16 03:18:49,156 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 7/15司機533診所班次的金額總和
+2025-07-16 03:18:52,205 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-16 03:18:52,205 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-16 03:18:52,205 - modules.services.advanced_query_processor - INFO - 🔍 處理複雜查詢: 統計金額 2024-07-15 司機533 診所
+2025-07-16 03:18:52,206 - modules.services.advanced_query_processor - INFO - 📊 執行SQL: 
+                SELECT 
+                    ct.id,
+                    ct.date,
+                    ct.start_point,
+                    ct.end_point,
+                    ct.category,
+                    ct.driver_id,
+                    ct.meter_fare,
+                    ct.extra_fare,
+                    (ct.meter_fare + ct.extra_fare) as total_amount,
+                    d.name as driver_name
+                FROM completed_trips ct
+                LEFT JOIN drivers d ON ct.driver_id = d.id
+                WHERE 1=1
+             AND ct.category = :category AND ct.driver_id = :driver_id ORDER BY ct.date DESC, ct.id DESC LIMIT 50
+2025-07-16 03:18:52,206 - modules.services.advanced_query_processor - INFO - 📊 參數: {'category': '診所', 'driver_id': 533}
+2025-07-16 03:18:52,209 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-16 03:18:52,510 - werkzeug - INFO - 127.0.0.1 - - [16/Jul/2025 03:18:52] "POST /callback HTTP/1.1" 200 -
+2025-07-16 03:19:42,441 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570049329159995614","quoteToken":"dd8VKvxebAgDSKHOHvo3JErfQrQZ7JQtQ1e0CAimSdMZcyUuppSfmqUlCq3RhGDXhhXQaXk44s5veZD7Yzi6qDJsFNr91x_I89Sg6s-rzOjk0cx9w2wtzYlDhL6JwvuE4tcFuHYshjcXhYGcVxA7ww","text":"/昨天司機533診所班次的金額總和"},"webhookEventId":"01K07REKC28WWDV8X5TG0X238D","deliveryContext":{"isRedelivery":false},"timestamp":1752607181704,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"U6b520261e9199a21d25e6d20509eda3f"},"replyToken":"bb3c19f0ca6b49f4a9af6115fb5f62f4","mode":"active"}]}
+2025-07-16 03:19:42,441 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-16 03:19:42,441 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-16 03:19:42,442 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-16 03:19:42,442 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-16 03:19:42,442 - modules.handlers.message_handler - INFO - [should_process] Checking: '/昨天司機533診所班次的金額總和' from group
+2025-07-16 03:19:42,442 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '昨天司機533診所班次的金額總和'
+2025-07-16 03:19:42,442 - modules.routes.webhook - INFO - Passing processed text '昨天司機533診所班次的金額總和' to handler.
+2025-07-16 03:19:42,442 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '昨天司機533診所班次的金額總和' (Normalized: '昨天司機533診所班次的金額總和')
+2025-07-16 03:19:42,442 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 昨天司機533診所班次的金額總和
+2025-07-16 03:19:42,442 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 昨天司機533診所班次的金額總和
+2025-07-16 03:19:42,442 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 昨天司機533診所班次的金額總和
+2025-07-16 03:19:45,063 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-16 03:19:45,063 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-16 03:19:45,063 - modules.services.advanced_query_processor - INFO - 🔍 處理複雜查詢: 統計金額 昨天 司機533 診所
+2025-07-16 03:19:45,063 - modules.services.advanced_query_processor - INFO - 📊 執行SQL: 
+                SELECT 
+                    ct.id,
+                    ct.date,
+                    ct.start_point,
+                    ct.end_point,
+                    ct.category,
+                    ct.driver_id,
+                    ct.meter_fare,
+                    ct.extra_fare,
+                    (ct.meter_fare + ct.extra_fare) as total_amount,
+                    d.name as driver_name
+                FROM completed_trips ct
+                LEFT JOIN drivers d ON ct.driver_id = d.id
+                WHERE 1=1
+             AND ct.date = :yesterday AND ct.category = :category AND ct.driver_id = :driver_id ORDER BY ct.date DESC, ct.id DESC LIMIT 50
+2025-07-16 03:19:45,064 - modules.services.advanced_query_processor - INFO - 📊 參數: {'yesterday': datetime.date(2025, 7, 15), 'category': '診所', 'driver_id': 533}
+2025-07-16 03:19:45,066 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-16 03:19:45,431 - werkzeug - INFO - 127.0.0.1 - - [16/Jul/2025 03:19:45] "POST /callback HTTP/1.1" 200 -
+

@@ -1,0 +1,221 @@
+2025-07-20 22:20:56,758 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570744030926209351","quoteToken":"mF7m72dkRu4imVvUJ3HizlDUGG24caJEpqLrsgd2EKZuAg2atLg9JQikVrdPm7W7ucbf11dkLFgTb26NrLb08Df6diDWVPidRtAXaOS74VaKWhWRmQcmCZ78DLvpr9JWZp-yN5IGI0JcTbVvABpTFg","text":"/7/18所有班次"},"webhookEventId":"01K0M3B4V7C00BE9CM0J1H4QH5","deliveryContext":{"isRedelivery":false},"timestamp":1753021256334,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"6837bfc54664439d8a1e4f153b1ceff6","mode":"active"}]}
+2025-07-20 22:20:56,758 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 22:20:56,758 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 22:20:56,758 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 22:20:56,758 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 22:20:56,759 - modules.handlers.message_handler - INFO - [should_process] Checking: '/7/18所有班次' from group
+2025-07-20 22:20:56,759 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '7/18所有班次'
+2025-07-20 22:20:56,759 - modules.routes.webhook - INFO - Passing processed text '7/18所有班次' to handler.
+2025-07-20 22:20:56,759 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '7/18所有班次' (Normalized: '7/18所有班次')
+2025-07-20 22:20:56,759 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 7/18所有班次
+2025-07-20 22:20:56,759 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 7/18所有班次
+2025-07-20 22:20:56,759 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 7/18所有班次
+2025-07-20 22:21:00,218 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-20 22:21:00,218 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-20 22:21:00,219 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 查已完成 7/18
+2025-07-20 22:21:00,219 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 查已完成 7/18
+2025-07-20 22:21:00,221 - modules.services.ai_fare_service - INFO - 🔍 AI車資查詢開始: '7/18所有班次', user_id: Udd6d10d2a6f1b465a20be447a2172c78
+2025-07-20 22:21:00,224 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '7/18所有班次')
+2025-07-20 22:21:00,227 - modules.services.ai_fare_service - INFO - 解析條件: {'date': datetime.date(2025, 7, 18), 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': None, 'trip_id': None, 'raw_query': '7/18所有班次', 'confidence': 'low'}
+2025-07-20 22:21:00,227 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-20 22:21:00,227 - modules.services.ai_fare_service - INFO - ⚠️ 查詢信心度較低，請求確認: 7/18所有班次
+2025-07-20 22:21:00,227 - modules.utils.conversation_context - INFO - 開始對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_confirmation, 步驟=waiting_confirmation
+2025-07-20 22:21:00,227 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 22:21:00,229 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-20 22:21:00,588 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-20 22:21:00,590 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 22:21:00] "POST /callback HTTP/1.1" 200 -
+2025-07-20 22:21:16,310 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570744063020761603","quoteToken":"-LoyBdVSpFv3Mcu6xE4ZgD2egfn5uloACJ8xnOp0hZeVgo4mdFuu_kFDqiNG5dHOGcpI8yh_dQRf1sKS1t_maHHfAudaRutbhCt3tSZPvzhZbLzgsYX9SREH-IWMsc97oS3RLgV1I0cup-WqhGdqWQ","text":"確認"},"webhookEventId":"01K0M3BQNB921F88YXCE13D4TG","deliveryContext":{"isRedelivery":false},"timestamp":1753021275543,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"350827d0fa454aeda428afd4ee72784a","mode":"active"}]}
+2025-07-20 22:21:16,311 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 22:21:16,311 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 22:21:16,311 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 22:21:16,311 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 22:21:16,311 - modules.handlers.message_handler - INFO - [should_process] Checking: '確認' from group
+2025-07-20 22:21:16,311 - modules.handlers.message_handler - INFO - [should_process] User in active conversation (query_confirmation), returning True
+2025-07-20 22:21:16,311 - modules.routes.webhook - INFO - Passing processed text '確認' to handler.
+2025-07-20 22:21:16,311 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '確認' (Normalized: '確認')
+2025-07-20 22:21:16,311 - modules.handlers.text_message_handler - INFO - 🎯 用戶在活躍對話中: query_confirmation, 步驟: waiting_confirmation
+2025-07-20 22:21:16,311 - modules.handlers.text_message_handler - INFO - 🎯 處理查詢確認對話: 消息='確認'
+2025-07-20 22:21:16,311 - modules.handlers.text_message_handler - INFO - ✅ 用戶確認理解正確，執行查詢
+2025-07-20 22:21:16,312 - modules.utils.conversation_context - INFO - 結束對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_confirmation, 原因=確認完成
+2025-07-20 22:21:16,312 - modules.services.ai_fare_service - INFO - 🔍 AI車資查詢開始: '7/18所有班次', user_id: Udd6d10d2a6f1b465a20be447a2172c78
+2025-07-20 22:21:16,312 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '7/18所有班次')
+2025-07-20 22:21:16,312 - modules.services.ai_fare_service - INFO - 解析條件: {'date': datetime.date(2025, 7, 18), 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': None, 'trip_id': None, 'raw_query': '7/18所有班次', 'confidence': 'low'}
+2025-07-20 22:21:16,312 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-20 22:21:16,312 - modules.services.ai_fare_service - INFO - ⚠️ 查詢信心度較低，請求確認: 7/18所有班次
+2025-07-20 22:21:16,312 - modules.utils.conversation_context - INFO - 開始對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_confirmation, 步驟=waiting_confirmation
+2025-07-20 22:21:16,312 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 22:21:16,313 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-20 22:21:16,631 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-20 22:21:16,633 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 22:21:16] "POST /callback HTTP/1.1" 200 -
+2025-07-20 22:21:24,669 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570744077315473431","quoteToken":"IhhSgngfe3X_sx9TcrByCP9VlZnTtudJPtLSR3_1wM5wLmMu6PqBNZEd7tO3UweEeuDWH7JPfR8BEVElWVU9z4yfUeHm72OZMa33MhmP5L1fCerinNJSwzuYYe6v5K6Zy4m3ECAohOYmysSVQCam2w","text":"確認"},"webhookEventId":"01K0M3C06E4RW4SJMJQCCSEARE","deliveryContext":{"isRedelivery":false},"timestamp":1753021284053,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"b4843676163a435ab9fbf5d7eb87f7dc","mode":"active"}]}
+2025-07-20 22:21:24,670 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 22:21:24,670 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 22:21:24,670 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 22:21:24,670 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 22:21:24,670 - modules.handlers.message_handler - INFO - [should_process] Checking: '確認' from group
+2025-07-20 22:21:24,670 - modules.handlers.message_handler - INFO - [should_process] User in active conversation (query_confirmation), returning True
+2025-07-20 22:21:24,671 - modules.routes.webhook - INFO - Passing processed text '確認' to handler.
+2025-07-20 22:21:24,671 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '確認' (Normalized: '確認')
+2025-07-20 22:21:24,671 - modules.handlers.text_message_handler - INFO - 🎯 用戶在活躍對話中: query_confirmation, 步驟: waiting_confirmation
+2025-07-20 22:21:24,671 - modules.handlers.text_message_handler - INFO - 🎯 處理查詢確認對話: 消息='確認'
+2025-07-20 22:21:24,671 - modules.handlers.text_message_handler - INFO - ✅ 用戶確認理解正確，執行查詢
+2025-07-20 22:21:24,671 - modules.utils.conversation_context - INFO - 結束對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_confirmation, 原因=確認完成
+2025-07-20 22:21:24,671 - modules.services.ai_fare_service - INFO - 🔍 AI車資查詢開始: '7/18所有班次', user_id: Udd6d10d2a6f1b465a20be447a2172c78
+2025-07-20 22:21:24,671 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '7/18所有班次')
+2025-07-20 22:21:24,671 - modules.services.ai_fare_service - INFO - 解析條件: {'date': datetime.date(2025, 7, 18), 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': None, 'trip_id': None, 'raw_query': '7/18所有班次', 'confidence': 'low'}
+2025-07-20 22:21:24,671 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-20 22:21:24,671 - modules.services.ai_fare_service - INFO - ⚠️ 查詢信心度較低，請求確認: 7/18所有班次
+2025-07-20 22:21:24,671 - modules.utils.conversation_context - INFO - 開始對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_confirmation, 步驟=waiting_confirmation
+2025-07-20 22:21:24,671 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 22:21:24,672 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-20 22:21:25,049 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-20 22:21:25,051 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 22:21:25] "POST /callback HTTP/1.1" 200 -
+2025-07-20 22:21:27,581 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570744082566217834","quoteToken":"e9kPPmzXdYefmwXdoYOATsTED5aGOyjgLodEd2Pkd-PODgT550Di-bOySemuAP2fxHctq0tgYMUdFbaABPv-O7iYxqLLim3-_hU8TjnSAKXF6Qiuq-CYOUElYRjz3y2xdA7heUdeB0dy0hRqVIFIgg","text":"查詢範例"},"webhookEventId":"01K0M3C32Q63X17AKG576ZGW13","deliveryContext":{"isRedelivery":false},"timestamp":1753021287194,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"6d7db54536c54899ae6c7850dd875d4d","mode":"active"}]}
+2025-07-20 22:21:27,581 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 22:21:27,581 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 22:21:27,581 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 22:21:27,581 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 22:21:27,582 - modules.handlers.message_handler - INFO - [should_process] Checking: '查詢範例' from group
+2025-07-20 22:21:27,582 - modules.handlers.message_handler - INFO - [should_process] User in active conversation (query_confirmation), returning True
+2025-07-20 22:21:27,582 - modules.routes.webhook - INFO - Passing processed text '查詢範例' to handler.
+2025-07-20 22:21:27,582 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '查詢範例' (Normalized: '查詢範例')
+2025-07-20 22:21:27,582 - modules.handlers.text_message_handler - INFO - 🎯 用戶在活躍對話中: query_confirmation, 步驟: waiting_confirmation
+2025-07-20 22:21:27,582 - modules.handlers.text_message_handler - INFO - 🎯 處理查詢確認對話: 消息='查詢範例'
+2025-07-20 22:21:27,582 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 22:21:27,953 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 22:21:27] "POST /callback HTTP/1.1" 200 -
+2025-07-20 22:21:48,420 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570744117178139121","quoteToken":"_vWPMpulxTmE-lMDNpqwuHAMm2gGjj3jV8VCSvtei8w8Afkn2BFnEjfv53xDzZcaklCF-TXjjnGasAJ0CBUEUTYTcCYOR4QC4V7oAuxYSqOd8Faq22eKawgSUF5vkFp2OF968x8uzMOL_GuFkcvcCg","text":"/取消"},"webhookEventId":"01K0M3CQAJ6E9P6K4YSB0NTW99","deliveryContext":{"isRedelivery":false},"timestamp":1753021307819,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"1fa4b99c35244bad9c96ea18f3b689f1","mode":"active"}]}
+2025-07-20 22:21:48,420 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 22:21:48,420 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 22:21:48,420 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 22:21:48,420 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 22:21:48,421 - modules.handlers.message_handler - INFO - [should_process] Checking: '/取消' from group
+2025-07-20 22:21:48,421 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '取消'
+2025-07-20 22:21:48,421 - modules.routes.webhook - INFO - Passing processed text '取消' to handler.
+2025-07-20 22:21:48,421 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '取消' (Normalized: '取消')
+2025-07-20 22:21:48,421 - modules.handlers.text_message_handler - INFO - 🎯 用戶在活躍對話中: query_confirmation, 步驟: waiting_confirmation
+2025-07-20 22:21:48,421 - modules.utils.conversation_context - INFO - 結束對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_confirmation, 原因=用戶取消: 取消
+2025-07-20 22:21:48,421 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 22:21:48,754 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 22:21:48] "POST /callback HTTP/1.1" 200 -
+2025-07-20 22:22:04,380 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570744144524738959","quoteToken":"m5VKgDTzmpUUqH_UT44eb834nnLROQnwvwYKj8VFXStQijG2aSx73PestmdkxdrpCwK0UAm1yHR2ewjrNCx9K-l5A18LjnIB9Wt8cJt53jb9KtcQrxSRZQTJeby4y-kX9PDsN2606-6dVHglhNQ0hg","text":"/7/18診所班次"},"webhookEventId":"01K0M3D6XX45THKAKBM4MX7JRW","deliveryContext":{"isRedelivery":false},"timestamp":1753021324103,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"1c6477d7f151440080354e143fbe2875","mode":"active"}]}
+2025-07-20 22:22:04,380 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 22:22:04,380 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 22:22:04,380 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 22:22:04,380 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 22:22:04,381 - modules.handlers.message_handler - INFO - [should_process] Checking: '/7/18診所班次' from group
+2025-07-20 22:22:04,381 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '7/18診所班次'
+2025-07-20 22:22:04,381 - modules.routes.webhook - INFO - Passing processed text '7/18診所班次' to handler.
+2025-07-20 22:22:04,381 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '7/18診所班次' (Normalized: '7/18診所班次')
+2025-07-20 22:22:04,381 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 7/18診所班次
+2025-07-20 22:22:04,381 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 7/18診所班次
+2025-07-20 22:22:04,381 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 7/18診所班次
+2025-07-20 22:22:06,870 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-20 22:22:06,871 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-20 22:22:06,871 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 查已完成 7/18 診所
+2025-07-20 22:22:06,871 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 查已完成 7/18 診所
+2025-07-20 22:22:06,871 - modules.services.ai_fare_service - INFO - 🔍 AI車資查詢開始: '7/18診所班次', user_id: Udd6d10d2a6f1b465a20be447a2172c78
+2025-07-20 22:22:06,871 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '7/18診所班次')
+2025-07-20 22:22:06,871 - modules.services.ai_fare_service - INFO - 解析條件: {'date': datetime.date(2025, 7, 18), 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': '診所', 'trip_id': None, 'raw_query': '7/18診所班次', 'confidence': 'high'}
+2025-07-20 22:22:06,871 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-20 22:22:06,872 - modules.services.ai_fare_service - INFO - 解析條件: {'date': datetime.date(2025, 7, 18), 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': '診所', 'trip_id': None, 'raw_query': '7/18診所班次', 'confidence': 'high'}
+2025-07-20 22:22:06,872 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-20 22:22:06,872 - modules.services.ai_fare_service - INFO - 信心度: high
+2025-07-20 22:22:06,872 - modules.services.ai_fare_service - INFO - AI理解的搜索條件: 🧠 📅 07/18 | 🏷️ 診所 | 🟢 high
+2025-07-20 22:22:06,880 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 22:22:06,881 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-20 22:22:07,236 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-20 22:22:07,239 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 22:22:07] "POST /callback HTTP/1.1" 200 -
+2025-07-20 22:23:40,540 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570744305552457780","quoteToken":"88W854klk_nOjiaQADNDV0-wIDRheitP4q4syjom94bYWAD66cFi5tg_Z086oaAeLjiuPwy9WDt690uFIkNdfA-3Hf7V5XlgbSQVGE57xMD404F7iLwWMRr7pca3l5LunY-mVBBr-JHA8_o6TjNEgA","text":"/七月十九日東洋班次"},"webhookEventId":"01K0M3G4V3F7S5T7CJG11M098F","deliveryContext":{"isRedelivery":false},"timestamp":1753021419906,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"c1a55ffbd5de425a9fbca094e4423ed0","mode":"active"}]}
+2025-07-20 22:23:40,540 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 22:23:40,540 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 22:23:40,540 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 22:23:40,540 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 22:23:40,541 - modules.handlers.message_handler - INFO - [should_process] Checking: '/七月十九日東洋班次' from group
+2025-07-20 22:23:40,541 - modules.handlers.message_handler - INFO - [should_process] Prefix '/' found, command body: '七月十九日東洋班次'
+2025-07-20 22:23:40,541 - modules.routes.webhook - INFO - Passing processed text '七月十九日東洋班次' to handler.
+2025-07-20 22:23:40,541 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '七月十九日東洋班次' (Normalized: '七月十九日東洋班次')
+2025-07-20 22:23:40,541 - modules.handlers.text_message_handler - INFO - 🤖 智能助手處理用戶訊息: 七月十九日東洋班次
+2025-07-20 22:23:40,541 - modules.services.smart_assistant - INFO - 🤖 智能助手處理: 七月十九日東洋班次
+2025-07-20 22:23:40,541 - modules.services.smart_assistant - INFO - 🤖 使用Gemini分析: 七月十九日東洋班次
+2025-07-20 22:23:43,078 - modules.services.smart_assistant - INFO - ✅ AI分析成功: 信心度=0.95
+2025-07-20 22:23:43,078 - modules.services.smart_assistant - INFO - ✅ AI分析成功，信心度: 0.95
+2025-07-20 22:23:43,078 - modules.handlers.text_message_handler - INFO - 🎯 智能助手生成命令: 查已完成 7/19 東洋
+2025-07-20 22:23:43,078 - modules.handlers.text_message_handler - INFO - ✅ 智能助手解析成功，執行命令: 查已完成 7/19 東洋
+2025-07-20 22:23:43,078 - modules.services.ai_fare_service - INFO - 🔍 AI車資查詢開始: '七月十九日東洋班次', user_id: Udd6d10d2a6f1b465a20be447a2172c78
+2025-07-20 22:23:43,078 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '七月十九日東洋班次')
+2025-07-20 22:23:43,078 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': '東洋', 'trip_id': None, 'raw_query': '七月十九日東洋班次', 'confidence': 'low'}
+2025-07-20 22:23:43,078 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-20 22:23:43,078 - modules.services.ai_fare_service - INFO - ⚠️ 查詢信心度較低，請求確認: 七月十九日東洋班次
+2025-07-20 22:23:43,079 - modules.utils.conversation_context - INFO - 開始對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_confirmation, 步驟=waiting_confirmation
+2025-07-20 22:23:43,079 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 22:23:43,080 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-20 22:23:43,768 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-20 22:23:43,771 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 22:23:43] "POST /callback HTTP/1.1" 200 -
+2025-07-20 22:23:52,836 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570744326826229966","quoteToken":"GAMk60sZBMpVHaMNkh_1WYTmIBROS5TXi7-pXXE_zKL-zrU45VpFkWvBrbEBoOkx4uS5cJsYX3aCsT2y96biWP9Y3ZJENCEfXj4mZDOCfgQ9b881GMXIVyoVzSudwfLweXkeA1YgQA3nA3D-3XGr1w","text":"確認"},"webhookEventId":"01K0M3GGSGPWZ349MFJKDAGBYY","deliveryContext":{"isRedelivery":false},"timestamp":1753021432603,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"0cb19383726b4e988cefb146a3c7b8df","mode":"active"}]}
+2025-07-20 22:23:52,836 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 22:23:52,837 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 22:23:52,837 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 22:23:52,837 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 22:23:52,837 - modules.handlers.message_handler - INFO - [should_process] Checking: '確認' from group
+2025-07-20 22:23:52,837 - modules.handlers.message_handler - INFO - [should_process] User in active conversation (query_confirmation), returning True
+2025-07-20 22:23:52,837 - modules.routes.webhook - INFO - Passing processed text '確認' to handler.
+2025-07-20 22:23:52,837 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '確認' (Normalized: '確認')
+2025-07-20 22:23:52,837 - modules.handlers.text_message_handler - INFO - 🎯 用戶在活躍對話中: query_confirmation, 步驟: waiting_confirmation
+2025-07-20 22:23:52,837 - modules.handlers.text_message_handler - INFO - 🎯 處理查詢確認對話: 消息='確認'
+2025-07-20 22:23:52,837 - modules.handlers.text_message_handler - INFO - ✅ 用戶確認理解正確，執行查詢
+2025-07-20 22:23:52,837 - modules.utils.conversation_context - INFO - 結束對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_confirmation, 原因=確認完成
+2025-07-20 22:23:52,837 - modules.services.ai_fare_service - INFO - 🔍 AI車資查詢開始: '七月十九日東洋班次', user_id: Udd6d10d2a6f1b465a20be447a2172c78
+2025-07-20 22:23:52,837 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '七月十九日東洋班次')
+2025-07-20 22:23:52,838 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': '東洋', 'trip_id': None, 'raw_query': '七月十九日東洋班次', 'confidence': 'low'}
+2025-07-20 22:23:52,838 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-20 22:23:52,838 - modules.services.ai_fare_service - INFO - ⚠️ 查詢信心度較低，請求確認: 七月十九日東洋班次
+2025-07-20 22:23:52,838 - modules.utils.conversation_context - INFO - 開始對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_confirmation, 步驟=waiting_confirmation
+2025-07-20 22:23:52,838 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 22:23:52,839 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-20 22:23:53,188 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-20 22:23:53,191 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 22:23:53] "POST /callback HTTP/1.1" 200 -
+2025-07-20 22:23:54,845 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570744329828827143","quoteToken":"E4nwJ8vgNfk8YbG7fG9UWUyWb1L1kYggvYyUOx8DRT_zK-EwRdCVgWiZKdYusTkxgAc6prEog8HTTPsLBStUtzrTp0qwcEDIay-7o-qzbDWSKAnvtrOO5FAnBXgaRWJYVQTXs4-pFFhRFBun-8Wwvg","text":"確認"},"webhookEventId":"01K0M3GJTM2BKSC1H775AG2AVT","deliveryContext":{"isRedelivery":false},"timestamp":1753021434553,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"fcc580102f9a461dab0a85088a68eeb6","mode":"active"}]}
+2025-07-20 22:23:54,845 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 22:23:54,845 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 22:23:54,845 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 22:23:54,845 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 22:23:54,846 - modules.handlers.message_handler - INFO - [should_process] Checking: '確認' from group
+2025-07-20 22:23:54,846 - modules.handlers.message_handler - INFO - [should_process] User in active conversation (query_confirmation), returning True
+2025-07-20 22:23:54,846 - modules.routes.webhook - INFO - Passing processed text '確認' to handler.
+2025-07-20 22:23:54,846 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '確認' (Normalized: '確認')
+2025-07-20 22:23:54,846 - modules.handlers.text_message_handler - INFO - 🎯 用戶在活躍對話中: query_confirmation, 步驟: waiting_confirmation
+2025-07-20 22:23:54,846 - modules.handlers.text_message_handler - INFO - 🎯 處理查詢確認對話: 消息='確認'
+2025-07-20 22:23:54,846 - modules.handlers.text_message_handler - INFO - ✅ 用戶確認理解正確，執行查詢
+2025-07-20 22:23:54,846 - modules.utils.conversation_context - INFO - 結束對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_confirmation, 原因=確認完成
+2025-07-20 22:23:54,846 - modules.services.ai_fare_service - INFO - 🔍 AI車資查詢開始: '七月十九日東洋班次', user_id: Udd6d10d2a6f1b465a20be447a2172c78
+2025-07-20 22:23:54,846 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '七月十九日東洋班次')
+2025-07-20 22:23:54,846 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': '東洋', 'trip_id': None, 'raw_query': '七月十九日東洋班次', 'confidence': 'low'}
+2025-07-20 22:23:54,846 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-20 22:23:54,846 - modules.services.ai_fare_service - INFO - ⚠️ 查詢信心度較低，請求確認: 七月十九日東洋班次
+2025-07-20 22:23:54,847 - modules.utils.conversation_context - INFO - 開始對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_confirmation, 步驟=waiting_confirmation
+2025-07-20 22:23:54,847 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 22:23:54,848 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-20 22:23:55,339 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-20 22:23:55,342 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 22:23:55] "POST /callback HTTP/1.1" 200 -
+2025-07-20 22:23:57,187 - modules - INFO - Request body: {"destination":"Ucc206ebd78da70606bb7c21b0faeea45","events":[{"type":"message","message":{"type":"text","id":"570744333251117815","quoteToken":"YnHzfdHLHPxabx1Yrun1METptP1HNsGWF3oI4FV1TIgVVrZ3mqH-NZYRd_2pj980Kb6IWe6Nn3tgyfICo1uMJmM9hl67qsjl5IESO9GylrW8p9iPVUL5xZF1h4kmKFTs6b10fAJv4oIkuPuZnZp44Q","text":"確認"},"webhookEventId":"01K0M3GN41GWTSVKH6F8BJM9YX","deliveryContext":{"isRedelivery":false},"timestamp":1753021436552,"source":{"type":"group","groupId":"C8fc24bca48034e550d56eec9ba9587bf","userId":"Udd6d10d2a6f1b465a20be447a2172c78"},"replyToken":"09391d1586524640a5a18fc040fe083c","mode":"active"}]}
+2025-07-20 22:23:57,188 - modules.utils.line_bot - INFO - Channel Secret length: 32
+2025-07-20 22:23:57,188 - modules.utils.line_bot - INFO - Channel Secret from config: e18667...c156
+2025-07-20 22:23:57,188 - modules.utils.line_bot - INFO - Channel Secret from env: e18667...c156
+2025-07-20 22:23:57,188 - modules.utils.line_bot - INFO - Using Channel Secret from configuration
+2025-07-20 22:23:57,188 - modules.handlers.message_handler - INFO - [should_process] Checking: '確認' from group
+2025-07-20 22:23:57,188 - modules.handlers.message_handler - INFO - [should_process] User in active conversation (query_confirmation), returning True
+2025-07-20 22:23:57,188 - modules.routes.webhook - INFO - Passing processed text '確認' to handler.
+2025-07-20 22:23:57,188 - modules.handlers.text_message_handler - INFO - Processing text message handed over: '確認' (Normalized: '確認')
+2025-07-20 22:23:57,188 - modules.handlers.text_message_handler - INFO - 🎯 用戶在活躍對話中: query_confirmation, 步驟: waiting_confirmation
+2025-07-20 22:23:57,188 - modules.handlers.text_message_handler - INFO - 🎯 處理查詢確認對話: 消息='確認'
+2025-07-20 22:23:57,188 - modules.handlers.text_message_handler - INFO - ✅ 用戶確認理解正確，執行查詢
+2025-07-20 22:23:57,188 - modules.utils.conversation_context - INFO - 結束對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_confirmation, 原因=確認完成
+2025-07-20 22:23:57,189 - modules.services.ai_fare_service - INFO - 🔍 AI車資查詢開始: '七月十九日東洋班次', user_id: Udd6d10d2a6f1b465a20be447a2172c78
+2025-07-20 22:23:57,189 - modules.services.ai_fare_service - INFO - AI修改意图解析结果: {} (输入: '七月十九日東洋班次')
+2025-07-20 22:23:57,189 - modules.services.ai_fare_service - INFO - 解析條件: {'date': None, 'time_range': None, 'locations': [], 'sequence': None, 'driver_id': None, 'category': '東洋', 'trip_id': None, 'raw_query': '七月十九日東洋班次', 'confidence': 'low'}
+2025-07-20 22:23:57,189 - modules.services.ai_fare_service - INFO - 修改意圖: None
+2025-07-20 22:23:57,189 - modules.services.ai_fare_service - INFO - ⚠️ 查詢信心度較低，請求確認: 七月十九日東洋班次
+2025-07-20 22:23:57,189 - modules.utils.conversation_context - INFO - 開始對話: 用戶=Udd6d10d2a6f1b465a20be447a2172c78, 類型=query_confirmation, 步驟=waiting_confirmation
+2025-07-20 22:23:57,189 - modules.utils.line_bot - INFO - Using Channel Token: jC0mYA...lFU=
+2025-07-20 22:23:57,190 - modules.utils.line_bot - INFO - 準備發送 1 條處理後的消息
+2025-07-20 22:23:57,563 - modules.utils.line_bot - INFO - 消息發送成功
+2025-07-20 22:23:57,565 - werkzeug - INFO - 127.0.0.1 - - [20/Jul/2025 22:23:57] "POST /callback HTTP/1.1" 200 -

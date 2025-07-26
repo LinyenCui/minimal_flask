@@ -225,7 +225,10 @@ def should_process_message(message_text, source_type):
     return False, message_text 
 
 def parse_date_input(date_input):
-    """解析各種格式的日期輸入"""
+    """
+    ⚠️ 已棄用：請使用 modules.utils.unified_date_parser.UnifiedDateParser
+    此函數將在下個版本移除 - 解析各種格式的日期輸入
+    """
     
     today = get_taiwan_date()
     current_year = today.year
@@ -304,7 +307,11 @@ def parse_date_input(date_input):
         
         return today + timedelta(days=days_ahead)
     
-    # 嘗試解析相對日期 ("今天", "明天", "後天")
+    # 嘗試解析相對日期 ("前天", "昨天", "今天", "明天", "後天")
+    elif date_input == "前天":
+        return today - timedelta(days=2)
+    elif date_input == "昨天":
+        return today - timedelta(days=1)
     elif date_input == "今天":
         return today
     elif date_input == "明天":
