@@ -540,8 +540,8 @@ class AdvancedQueryProcessor:
                         "type": "action",
                         "action": {
                             "type": "message",
-                            "label": "❌ 取消",
-                            "text": "取消"
+                            "label": "❌ 放棄",
+                            "text": "放棄"
                         }
                     }
                 ]
