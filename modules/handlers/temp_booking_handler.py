@@ -119,9 +119,17 @@ def _handle_ai_input(user_id, message_text):
 def _handle_ai_followup(user_id, message_text):
     logger.info(f"[_handle_ai_followup] User={user_id} Msg='{message_text}'")
     booking_data = temp_booking_states[user_id]["data"].copy()
+    
+    # 先嘗試 AI 解析
     extracted_info_followup = extract_booking_info_with_gemini(message_text)
+    
+    # 如果 AI 失敗，嘗試簡單的時間解析
     if not extracted_info_followup:
-         logger.warning("AI 未能提取任何有效信息 (followup)。")
+        logger.warning("AI 解析失敗，嘗試簡單解析")
+        extracted_info_followup = _simple_time_parsing(message_text)
+    
+    if not extracted_info_followup:
+         logger.warning("AI 和簡單解析都未能提取任何有效信息 (followup)。")
          missing_fields = _check_missing_fields(booking_data) 
          feedback_text = f"抱歉，還是不太明白。還需要請您提供：{'、'.join(missing_fields)}。" if missing_fields else "抱歉，還是不太明白，請嘗試重新說明。"
          return {"type": "text", "text": feedback_text}
@@ -210,6 +218,48 @@ def _generate_confirm_response(booking_data):
              "回覆「確認」或「取消」。"
         )
         return {"type": "text", "text": confirm_text}
+
+def _simple_time_parsing(message_text):
+    """簡單的時間/日期解析，專門處理 AI 無法識別的簡單格式"""
+    import re
+    from datetime import datetime, date
+    
+    result = {}
+    text = message_text.lower()
+    
+    # 解析日期
+    if "今天" in text:
+        result["date"] = "今天"
+    elif "明天" in text:
+        result["date"] = "明天"
+    elif "後天" in text:
+        result["date"] = "後天"
+    
+    # 解析時間
+    # HH:MM 格式
+    time_match = re.search(r'(\d{1,2}):(\d{2})', text)
+    if time_match:
+        result["time"] = f"{time_match.group(1)}:{time_match.group(2)}"
+    else:
+        # 中文數字時間
+        chinese_nums = {
+            '一': '1', '二': '2', '三': '3', '四': '4', '五': '5',
+            '六': '6', '七': '7', '八': '8', '九': '9', '十': '10',
+            '十一': '11', '十二': '12'
+        }
+        
+        # 轉換中文數字
+        normalized_text = text
+        for chinese, digit in chinese_nums.items():
+            normalized_text = normalized_text.replace(chinese + '點', digit + ':00')
+        
+        # 尋找時間
+        hour_match = re.search(r'(\d{1,2}):00', normalized_text)
+        if hour_match:
+            result["time"] = hour_match.group(0)
+    
+    logger.info(f"簡單解析結果: {result}")
+    return result if result else None
 
 def _generate_followup_prompt(booking_data, missing_fields):
     feedback_parts = []
