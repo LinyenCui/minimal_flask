@@ -297,6 +297,21 @@ def import_week_trips(week_start, dates, week_name, week_desc, force_overwrite=F
         # 提交事務
         db.session.commit()
         
+        # 自動重置序列（針對匯入後可能的序列不同步問題）
+        current_app.logger.info("🔧 檢查並修復資料庫序列...")
+        try:
+            from modules.handlers.sequence_fix_handler import check_all_sequences, fix_sequences
+            results, need_fix = check_all_sequences()
+            if need_fix:
+                current_app.logger.info(f"發現序列問題: {need_fix}")
+                fix_result = fix_sequences(need_fix)
+                current_app.logger.info(f"序列修復結果: {fix_result}")
+            else:
+                current_app.logger.info("✅ 所有序列狀態正常")
+        except Exception as seq_error:
+            current_app.logger.error(f"⚠️ 序列檢查失敗: {seq_error}")
+            # 不中斷主流程，繼續執行
+        
         # 計算總耗時
         total_time = time.time() - start_time
         current_app.logger.info(f"🎉 成功匯入{total_inserted}筆固定班次，耗時 {total_time:.2f} 秒")
