@@ -98,7 +98,7 @@ def handle_database_sync_request(event, line_bot_api):
     
     quick_reply = QuickReply(items=[
         QuickReplyItem(action=MessageAction(label="✅ 確認同步", text="確認同步")),
-        QuickReplyItem(action=MessageAction(label="❌ 取消操作", text="取消"))
+        QuickReplyItem(action=MessageAction(label="❌ 放棄操作", text="放棄"))
     ])
     
     return {"type": "text", "text": response_text, "quick_reply": quick_reply.to_dict()}

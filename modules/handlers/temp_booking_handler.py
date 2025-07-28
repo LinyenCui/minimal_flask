@@ -51,7 +51,7 @@ def handle_temp_booking_start(user_id, category="東洋"):
     
     # Corrected Quick Reply for AI flow (Only Cancel)
     quick_reply = QuickReply(items=[
-         QuickReplyItem(action=MessageAction(label="取消", text="取消"))
+         QuickReplyItem(action=MessageAction(label="放棄", text="放棄"))
     ])
     
     logger.info(f"[AI Flow Start] Returning prompt: '{prompt_text}' with QuickReply: {quick_reply.to_dict()}")
@@ -65,7 +65,7 @@ def handle_temp_booking_message(user_id, message_text):
         return None 
         
     # --- Always handle cancel first --- 
-    if message_text.lower() in ["取消", "取消預約", "cancel", "退出", "exit"]:
+    if message_text.lower() in ["放棄", "取消", "取消預約", "cancel", "退出", "exit"]:
         logger.info(f"用戶 {user_id} 取消預約流程。")
         del temp_booking_states[user_id]
         return {"type": "text", "text": "已取消預約流程"}

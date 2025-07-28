@@ -325,18 +325,18 @@ def create_unified_confirmation_message(message_text: str, confirmation_type: st
     if confirmation_type == "modification":
         quick_reply_items = [
             QuickReplyItem(action=MessageAction(label="✅ 確認修改", text="確認修改")),
-            QuickReplyItem(action=MessageAction(label="❌ 取消修改", text="取消修改")),
+            QuickReplyItem(action=MessageAction(label="❌ 放棄修改", text="放棄修改")),
             QuickReplyItem(action=MessageAction(label="📋 查看詳情", text="詳情"))
         ]
     elif confirmation_type == "deletion":
         quick_reply_items = [
             QuickReplyItem(action=MessageAction(label="✅ 確認刪除", text="確認刪除")),
-            QuickReplyItem(action=MessageAction(label="❌ 取消操作", text="取消"))
+            QuickReplyItem(action=MessageAction(label="❌ 放棄操作", text="放棄"))
         ]
     elif confirmation_type == "sync":
         quick_reply_items = [
             QuickReplyItem(action=MessageAction(label="✅ 確認同步", text="確認同步")),
-            QuickReplyItem(action=MessageAction(label="❌ 取消操作", text="取消"))
+            QuickReplyItem(action=MessageAction(label="❌ 放棄操作", text="放棄"))
         ]
     elif confirmation_type == "ai_query":
         quick_reply_items = [
@@ -347,7 +347,7 @@ def create_unified_confirmation_message(message_text: str, confirmation_type: st
     else:  # default
         quick_reply_items = [
             QuickReplyItem(action=MessageAction(label="✅ 確認", text="確認")),
-            QuickReplyItem(action=MessageAction(label="❌ 取消", text="取消"))
+            QuickReplyItem(action=MessageAction(label="❌ 放棄", text="放棄"))
         ]
     
     quick_reply = QuickReply(items=quick_reply_items)

@@ -645,7 +645,7 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                             logger.error(f"發送確認指派司機 Flex Message 時出錯: {flex_error}")
                             traceback.print_exc()
                             # 發送文本版本作為後備
-                            reply_text(reply_token, "無法顯示確認界面，請直接輸入：確認指派 [班次ID] [司機ID] 或 取消指派 [班次ID]")
+                            reply_text(reply_token, "無法顯示確認界面，請直接輸入：確認指派 [班次ID] [司機ID] 或 取消指派 [班次ID] 或 放棄指派 [班次ID]")
                     else:
                         # 兼容舊格式，直接發送 Flex Message
                         reply_flex(reply_token, "確認指派司機", result)
@@ -684,28 +684,28 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 reply_text(reply_token, f"處理確認指派失敗: {str(e)}")
                 return
         
-        # 取消指派
-        elif message_text.startswith('取消指派 '):
+        # 取消指派/放棄指派
+        elif message_text.startswith('取消指派 ') or message_text.startswith('放棄指派 '):
             try:
                 parts = message_text.split()
                 if len(parts) == 2:
                     trip_id = int(parts[1])
                     
-                    logger.info(f"處理取消指派: 班次={trip_id}")
+                    logger.info(f"處理取消/放棄指派: 班次={trip_id}")
                     
                     result = handle_driver_assign_cancel(trip_id)
                     reply_text(reply_token, result)
                     return
                 else:
-                    reply_text(reply_token, "取消指派命令格式不正確。正確格式：取消指派 [班次ID]")
+                    reply_text(reply_token, "取消/放棄指派命令格式不正確。正確格式：取消指派 [班次ID] 或 放棄指派 [班次ID]")
                     return
             except ValueError:
                 reply_text(reply_token, "班次ID必須是數字。")
                 return
             except Exception as e:
-                logger.error(f"處理取消指派時出錯: {e}")
+                logger.error(f"處理取消/放棄指派時出錯: {e}")
                 traceback.print_exc()
-                reply_text(reply_token, f"處理取消指派失敗: {str(e)}")
+                reply_text(reply_token, f"處理取消/放棄指派失敗: {str(e)}")
                 return
             
         # 幫助（Flex Message版本）
@@ -1457,7 +1457,7 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 r'^班次\s+\d+$',  # 班次 ID
                 r'^班次詳情\s+\d+$',  # 班次詳情 ID
                 r'^確認指派\s+\d+\s+\d+$',  # 確認指派 ID DRIVER_ID
-                r'^取消指派\s+\d+$',  # 取消指派 ID
+                r'^(取消指派|放棄指派)\s+\d+$',  # 取消指派/放棄指派 ID
                 r'^確認AI修改\s+\d+\s+\d+\s+\d+',  # 確認AI修改 ID 錶價 加成
             ]
             

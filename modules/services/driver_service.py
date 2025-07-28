@@ -90,8 +90,8 @@ def handle_driver_assign_request(trip_id):
         quick_reply_items.append(
             QuickReplyItem(
                 action=MessageAction(
-                    label="取消",
-                    text="取消"
+                    label="放棄",
+                    text="放棄"
                 )
             )
         )
@@ -189,8 +189,8 @@ def handle_driver_assign_select(trip_id, driver_id):
             ),
             QuickReplyItem(
                 action=MessageAction(
-                    label="❌ 取消",
-                    text=f"取消指派 {trip_id}"
+                    label="❌ 放棄",
+                    text=f"放棄指派 {trip_id}"
                 )
             )
         ]
