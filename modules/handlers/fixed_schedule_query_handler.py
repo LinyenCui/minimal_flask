@@ -145,13 +145,13 @@ def query_fixed_schedules_by_customer(customer_name, user_id):
                     }
                 })
         
-        # 添加取消選項
+        # 添加放棄選項
         quick_reply_options.append({
             "type": "action",
             "action": {
                 "type": "message", 
-                "label": "取消",
-                "text": "取消操作"
+                "label": "放棄",
+                "text": "放棄操作"
             }
         })
         

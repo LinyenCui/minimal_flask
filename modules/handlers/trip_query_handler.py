@@ -19,6 +19,7 @@ from modules.services.trip_service import get_trips_by_date, get_trip_details
 from modules.views.trip_view import format_trips_flex
 from linebot.models import TextSendMessage
 from modules.utils.helpers import get_taiwan_time, get_taiwan_date
+from modules.utils.unified_date_parser import parse_date_input
 
 # 建立日誌記錄器
 logger = logging.getLogger(__name__)
@@ -274,8 +275,8 @@ def create_query_fixed_trips_quick_reply():
         items.append(QuickReplyItem(
             action=PostbackAction(
                 label="今天",
-                data="action=query_fixed_trips&date=today",
-                display_text="查詢固定班次 今天"
+                text="查詢固定班次 今天",
+                data="action=query_fixed_trips&date=today"
             )
         ))
         
@@ -283,8 +284,8 @@ def create_query_fixed_trips_quick_reply():
         items.append(QuickReplyItem(
             action=PostbackAction(
                 label="明天",
-                data="action=query_fixed_trips&date=tomorrow",
-                display_text="查詢固定班次 明天"
+                text="查詢固定班次 明天",
+                data="action=query_fixed_trips&date=tomorrow"
             )
         ))
         
@@ -292,8 +293,8 @@ def create_query_fixed_trips_quick_reply():
         items.append(QuickReplyItem(
             action=PostbackAction(
                 label="後天",
-                data="action=query_fixed_trips&date=day_after_tomorrow",
-                display_text="查詢固定班次 後天"
+                text="查詢固定班次 後天",
+                data="action=query_fixed_trips&date=day_after_tomorrow"
             )
         ))
         
@@ -301,8 +302,8 @@ def create_query_fixed_trips_quick_reply():
         items.append(QuickReplyItem(
             action=PostbackAction(
                 label="本週",
-                data="action=query_fixed_trips&date=this_week",
-                display_text="查詢固定班次 本週"
+                text="查詢固定班次 本週",
+                data="action=query_fixed_trips&date=this_week"
             )
         ))
         
@@ -403,42 +404,6 @@ def handle_trip_details(message_text=None):
         logger.error(f"查詢班次詳情時出錯: {e}")
         return f"查詢班次詳情錯誤: {str(e)}"
 
-def parse_date_input(date_input):
-    """解析各種格式的日期輸入"""
-    today = get_taiwan_time()
-    
-    # 處理特殊關鍵字
-    if date_input in ["今天", "today"]:
-        return today.strftime('%Y-%m-%d')
-    elif date_input in ["明天", "tomorrow"]:
-        return (today + timedelta(days=1)).strftime('%Y-%m-%d')
-    elif date_input in ["後天"]:
-        return (today + timedelta(days=2)).strftime('%Y-%m-%d')
-    elif date_input in ["昨天", "yesterday"]:
-        return (today - timedelta(days=1)).strftime('%Y-%m-%d')
-    
-    # 處理月/日格式
-    if re.match(r'^\d{1,2}/\d{1,2}$', date_input):
-        month, day = date_input.split('/')
-        current_year = today.year
-        try:
-            date_obj = datetime(current_year, int(month), int(day))
-            # 如果日期已經過去且超過30天，假設是明年的日期
-            if (today - date_obj).days > 30:
-                date_obj = datetime(current_year + 1, int(month), int(day))
-            return date_obj.strftime('%Y-%m-%d')
-        except ValueError:
-            return None
-    
-    # 處理年-月-日格式
-    if re.match(r'^\d{4}-\d{1,2}-\d{1,2}$', date_input):
-        try:
-            date_obj = datetime.strptime(date_input, '%Y-%m-%d')
-            return date_input
-        except ValueError:
-            return None
-    
-    return None
 
 def handle_query_trips(message_text=None):
     """處理班次查詢命令，並始終返回Flex Message"""

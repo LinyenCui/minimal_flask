@@ -33,11 +33,17 @@ def should_use_ai_query(message_text: str) -> bool:
     time_keywords = ['今天', '昨天', '明天', '本周', '上周', '這週', '7/', '07/', '6/', '06/']
     driver_keywords = ['司機', '駕駛']
     
-    # 🔥 關鍵修復：必須包含車資相關詞彙
-    has_fare = any(keyword in message_lower for keyword in fare_keywords)
+    # 🔥 關鍵修復：檢查修改意圖和符號模式
+    has_fare_keywords = any(keyword in message_lower for keyword in fare_keywords)
+    has_modification = any(keyword in message_lower for keyword in modification_keywords)
+    has_money_symbols = '$' in message_text or '+' in message_text or '+-' in message_text
     
-    # 🚫 如果沒有車資關鍵詞，直接返回False
-    if not has_fare:
+    # 🔥 新邏輯：如果是修改命令且包含金額符號，也允許通過
+    if has_modification and has_money_symbols:
+        return True
+    
+    # 原有邏輯：必須包含車資關鍵詞
+    if not has_fare_keywords:
         return False
     
     # 檢查其他關鍵詞
@@ -46,7 +52,6 @@ def should_use_ai_query(message_text: str) -> bool:
     has_location = any(keyword in message_lower for keyword in location_keywords)
     has_time = any(keyword in message_lower for keyword in time_keywords)
     has_driver = any(keyword in message_lower for keyword in driver_keywords)
-    has_modification = any(keyword in message_lower for keyword in modification_keywords)
     
     # 檢查是否有班次ID模式
     has_trip_id = bool(re.search(r'班次#?\d+|#\d+', message_text))
@@ -56,23 +61,23 @@ def should_use_ai_query(message_text: str) -> bool:
     
     # 🔥 修復：只有真正的車資查詢才返回True
     # 1. 明確的車資相關查詢
-    if has_fare and (has_action or has_modification):
+    if has_fare_keywords and (has_action or has_modification):
         return True
     
     # 2. 有班次ID的車資操作
-    if has_trip_id and has_fare:
+    if has_trip_id and has_fare_keywords:
         return True
     
     # 3. 車資修改意圖
-    if has_modification and has_numbers and has_fare:
+    if has_modification and has_numbers and has_fare_keywords:
         return True
     
     # 4. 車資相關的地點+時間查詢
-    if has_location and has_time and has_action and has_fare:
+    if has_location and has_time and has_action and has_fare_keywords:
         return True
     
     # 5. 司機車資查詢
-    if has_driver and (has_action or has_time) and has_numbers and has_fare:
+    if has_driver and (has_action or has_time) and has_numbers and has_fare_keywords:
         return True
     
     return False
@@ -209,6 +214,7 @@ class CompletedTripMatcher:
             r'班次#?(\d+)',
             r'#(\d+)',
             r'修改班次#?(\d+)',
+            r'記錄車資\s+(\d+)',  # 🔥 修復：支援"記錄車資 XXXX"格式
             r'ID\s*#?(\d+)',
             r'編號#?(\d+)'
         ]
@@ -530,6 +536,10 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True, pars
             try:
                 logger.info(f"🎯 跳過解析，直接執行查詢並返回Flex Message: {parsed_command}")
                 
+                # 🔥 關鍵修復：仍然要檢測修改意圖
+                modification_intent = parse_fare_modification_intent(parsed_command)
+                logger.info(f"🔍 跳過解析模式下檢測到修改意圖: {modification_intent}")
+                
                 # 🔥 關鍵修復：解析已確認的命令，提取查詢條件
                 matcher = CompletedTripMatcher()
                 criteria = matcher.parse_natural_query(parsed_command)
@@ -539,6 +549,58 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True, pars
                 
                 # 🔥 格式化AI理解的條件（用於顯示）
                 understood_criteria = format_understood_criteria(criteria)
+                
+                # 🔥 如果有修改意圖且找到唯一班次，直接進入修改流程
+                if modification_intent and len(trips) == 1:
+                    trip = trips[0]
+                    logger.info(f"🎯 跳過解析模式：找到唯一班次且有修改意圖，直接執行修改: {trip['id']}")
+                    
+                    # 檢查是否需要詢問原因
+                    reason = modification_intent.get('reason', '')
+                    default_reasons = ['透過AI智能修改', '錶價260加成', '費用調整要求']
+                    is_default_reason = not reason or reason in default_reasons or len(reason.strip()) < 3
+                    
+                    if is_default_reason:
+                        # 需要詢問原因，啟動統一對話系統
+                        logger.info(f"🎯 跳過解析模式：需要詢問修改原因")
+                        
+                        meter_change = modification_intent.get('meter_fare', trip['meter_fare'])
+                        extra_change = modification_intent.get('extra_fare', trip['extra_fare'])
+                        
+                        # 準備對話上下文數據
+                        context_data = {
+                            'trip_id': trip['id'],
+                            'meter_fare': meter_change,
+                            'extra_fare': extra_change,
+                            'trip': trip,
+                            'original_meter': trip['meter_fare'],
+                            'original_extra': trip['extra_fare']
+                        }
+                        
+                        from modules.utils.conversation_context import conversation_manager
+                        conversation_manager.start_conversation(
+                            user_id, "ai_modification_reason", 
+                            current_step="waiting_reason",
+                            context_data=context_data,
+                            prompt_message=f"請提供修改班次#{trip['id']}車資的原因",
+                            duration_minutes=3
+                        )
+                        
+                        confirmation_message = f"""🎯 AI理解您要修改班次#{trip['id']}的車資：
+
+📊 當前記錄：錶價 {trip['meter_fare']}, 加成 {trip['extra_fare']}
+🔄 修改為：錶價 {meter_change}, 加成 {extra_change}
+
+⚠️ 請說明修改原因（例如：客戶要求調整、等候時間過長等）"""
+                        
+                        return {
+                            "type": "text",
+                            "message": confirmation_message
+                        }
+                    else:
+                        # 有明確原因，直接執行修改
+                        result = execute_fare_modification(trip, modification_intent, user_id)
+                        return result
                 
                 # 🔥 使用AI車資服務的Flex Message格式返回結果
                 if not trips:
@@ -1330,24 +1392,32 @@ def parse_fare_modification_intent(message_text: str) -> Optional[Dict]:
         # 🔥 新增：檢測簡單數字格式 (班次ID 錶價 加成 原因)
         # 例如：修改班次1505 270 -40 怡平路沒搭車
         # 🔥 修复：支持$符号格式，如：修改班次1560$400 +100
+        # 🔥 新增：支持#號開頭格式，如：修改#2111$1150+375
+        # 🔥 修復：支持"記錄車資"格式，如：記錄車資 2111 1150 375
         simple_format_patterns = [
             r'修改班次#?(\d+)\s+(\d+)\s+([+-]?\d+)',        # 空格分隔：修改班次1505 270 -40
             r'修改班次#?(\d+)\$(\d+)\s+([+-]?\d+)',        # $符号格式：修改班次1560$400 +100
             r'修改班次#?(\d+)\s+\$(\d+)\s+([+-]?\d+)',     # 空格+$格式
+            r'修改#(\d+)\$(\d+)([+-]?\d+)',                # 緊湊格式：修改#2111$1150+375
+            r'修改#(\d+)\s*\$\s*(\d+)\s*([+-]?\d+)',      # #號格式帶空格
+            r'記錄車資\s+(\d+)\s+(\d+)\s+([+-]?\d+)',      # 🔥 修復：記錄車資格式
         ]
         
         simple_format_match = None
         for pattern in simple_format_patterns:
             simple_format_match = re.search(pattern, message_text)
             if simple_format_match:
+                result['trip_id'] = int(simple_format_match.group(1))  # 🔥 新增：提取班次ID
                 result['meter_fare'] = int(simple_format_match.group(2))
                 result['extra_fare'] = int(simple_format_match.group(3))
                 # 檢查是否有原因在數字後面
                 after_numbers = message_text[simple_format_match.end():].strip()
                 if after_numbers and not after_numbers.isdigit() and len(after_numbers) > 2:
-                    # 🔥 过滤掉纯数字或过短的内容
-                    result['reason'] = after_numbers
-                logger.info(f"簡單格式解析成功 (模式: {pattern}): 錶價{result['meter_fare']}, 加成{result['extra_fare']}, 原因'{result.get('reason', '無')}'")
+                    # 🔥 过滤掉纯数字或过短的内容，並清理括號
+                    cleaned_reason = after_numbers.strip('() ')
+                    if cleaned_reason:
+                        result['reason'] = cleaned_reason
+                logger.info(f"簡單格式解析成功 (模式: {pattern}): 班次ID#{result['trip_id']}, 錶價{result['meter_fare']}, 加成{result['extra_fare']}, 原因'{result.get('reason', '無')}'")
                 break
         
         # 提取錶價 - 增強版本

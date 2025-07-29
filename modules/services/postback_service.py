@@ -110,22 +110,22 @@ def handle_postback(event):
                     QuickReplyItem(
                         action=PostbackAction(
                             label="診所",
-                            data="action=generate_report&category=診所",
-                            display_text="生成周報表 診所"
+                            text="生成周報表 診所",
+                            data="action=generate_report&category=診所"
                         )
                     ),
                     QuickReplyItem(
                         action=PostbackAction(
                             label="東洋",
-                            data="action=generate_report&category=東洋",
-                            display_text="生成周報表 東洋"
+                            text="生成周報表 東洋",
+                            data="action=generate_report&category=東洋"
                         )
                     ),
                     QuickReplyItem(
                         action=PostbackAction(
                             label="全部",
-                            data="action=generate_report&category=全部",
-                            display_text="生成周報表 全部"
+                            text="生成周報表 全部",
+                            data="action=generate_report&category=全部"
                         )
                     )
                 ])

@@ -10,6 +10,7 @@ from sqlalchemy import text
 from modules.models.base import db
 from modules.utils.taiwan_time import get_taiwan_time
 from modules.utils.modification_utils import append_modification_reason
+from modules.utils.unified_date_parser import UnifiedDateParser
 
 logger = logging.getLogger(__name__)
 
@@ -44,19 +45,13 @@ def parse_date_input(date_str):
             except ValueError:
                 return None, None
     
-    # 單日期格式：7/7
-    single_pattern = r'^(\d{1,2})/(\d{1,2})$'
-    match = re.match(single_pattern, date_str)
-    if match:
-        month, day = match.groups()
-        current_year = get_taiwan_time().year
-        
-        try:
-            single_date = f"{current_year}-{int(month):02d}-{int(day):02d}"
-            datetime.strptime(single_date, "%Y-%m-%d")
-            return single_date, single_date
-        except ValueError:
-            return None, None
+    # 使用統一日期解析器處理單日期
+    try:
+        parsed_date = UnifiedDateParser.parse(date_str)
+        single_date = parsed_date.strftime("%Y-%m-%d")
+        return single_date, single_date
+    except ValueError:
+        return None, None
     
     return None, None
 

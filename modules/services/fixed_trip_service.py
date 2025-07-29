@@ -4,7 +4,8 @@ from flask import current_app
 import traceback
 
 from modules.models.base import db
-from modules.utils.helpers import parse_date_input, get_taiwan_time, get_taiwan_date
+from modules.utils.unified_date_parser import parse_date_input
+from modules.utils.helpers import get_taiwan_time, get_taiwan_date
 
 def handle_query_fixed_trips_flex(message_text=None):
     """返回Flex Message格式的固定班次查詢結果"""

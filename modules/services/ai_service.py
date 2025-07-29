@@ -9,6 +9,7 @@ from vertexai.generative_models import GenerativeModel, GenerationConfig
 from google.oauth2 import service_account
 from google.auth import exceptions as auth_exceptions
 # --- END ADDED ---
+from modules.services.ai_environment_validator import AIEnvironmentValidator
 
 logger = logging.getLogger(__name__)
 
@@ -55,19 +56,25 @@ def init_vertexai():
     """Initialize Vertex AI client with explicit credentials.""" # Modified docstring
     credentials = None
     try:
-        # --- MODIFIED: Load credentials explicitly --- 
+        # --- MODIFIED: Load credentials explicitly and set environment variable --- 
         if os.path.exists(_KEY_FILE_PATH):
+            # Set environment variable for Google credentials
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = _KEY_FILE_PATH
             credentials = service_account.Credentials.from_service_account_file(_KEY_FILE_PATH)
-            logger.info(f"Loaded credentials from: {_KEY_FILE_PATH}")
+            logger.info(f"✅ Loaded credentials from: {_KEY_FILE_PATH}")
+            logger.info(f"✅ Set GOOGLE_APPLICATION_CREDENTIALS environment variable")
         else:
-            logger.error(f"Service account key file not found at: {_KEY_FILE_PATH}. Vertex AI will use default credentials if available, which might fail.")
-            # Fallback to default - might still cause issues
-            # credentials = None 
+            logger.error(f"❌ Service account key file not found at: {_KEY_FILE_PATH}")
+            logger.error(f"❌ Cannot initialize Vertex AI without credentials")
+            raise FileNotFoundError(f"Service account key file not found: {_KEY_FILE_PATH}")
         # --- END MODIFIED ---
 
         # --- MODIFIED: Pass credentials to init --- 
         vertexai.init(project=PROJECT_ID, location=LOCATION, credentials=credentials)
-        logger.info(f"Vertex AI initialized for project: {PROJECT_ID}, location: {LOCATION}")
+        logger.info(f"✅ Vertex AI initialized successfully:")
+        logger.info(f"   Project: {PROJECT_ID}")
+        logger.info(f"   Location: {LOCATION}")
+        logger.info(f"   Model: {MODEL_ID}")
         # --- END MODIFIED ---
 
     # --- ADDED: Specific auth error handling ---
@@ -80,6 +87,14 @@ def init_vertexai():
 def extract_booking_info_with_gemini(user_text: str) -> dict | None:
     """Extract booking info from text using Gemini API."""
     try:
+        # 驗證AI環境配置
+        is_valid, errors = AIEnvironmentValidator.validate_environment()
+        if not is_valid:
+            logger.error("AI環境配置驗證失敗:")
+            for error in errors:
+                logger.error(f"  - {error}")
+            return None
+        
         # 必須先初始化 Vertex AI
         init_vertexai()
         
@@ -101,13 +116,26 @@ def extract_booking_info_with_gemini(user_text: str) -> dict | None:
             # response_mime_type="application/json", # Uncomment if using a model/version that supports direct JSON output
         )
 
-        logger.info(f"Calling Gemini API model: {MODEL_ID}...")
+        logger.info(f"🚀 Calling Gemini API model: {MODEL_ID}...")
+        logger.info(f"🚀 Prompt length: {len(prompt)} characters")
+        
         # Call the Gemini API
         response = model.generate_content(
             prompt, # Send prompt as string directly
             generation_config=generation_config,
         )
-        logger.info("Gemini API response received.")
+        logger.info("✅ Gemini API response received successfully")
+        
+        # Log response details for debugging
+        if response.candidates:
+            logger.info(f"✅ Response has {len(response.candidates)} candidates")
+            if response.text:
+                logger.info(f"✅ Response text length: {len(response.text)} characters")
+                logger.info(f"✅ Response text preview: {response.text[:200]}...")
+            else:
+                logger.warning("⚠️ Response text is empty or None")
+        else:
+            logger.warning("⚠️ Response has no candidates")
 
         # Extract and parse the JSON response
         if response.candidates and response.text:

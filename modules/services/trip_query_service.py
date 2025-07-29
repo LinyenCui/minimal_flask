@@ -7,7 +7,8 @@ import re
 import logging
 
 from modules.models.base import db
-from modules.utils.helpers import parse_date_input, row_to_dict
+from modules.utils.unified_date_parser import parse_date_input
+from modules.utils.helpers import row_to_dict
 from modules.flex_designs.trip_query_flex import generate_trips_flex
 from modules.utils.taiwan_time import get_taiwan_date
 from modules.utils.line_bot import QuickReply, QuickReplyItem, MessageAction, TextMessage

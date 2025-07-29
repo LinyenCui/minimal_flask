@@ -206,12 +206,12 @@ def create_flex_message(alt_text, contents):
         # 返回一個文字訊息作為備用
         return TextMessage(text=alt_text)
 
-def create_postback_action(label, data, display_text=None):
+def create_postback_action(label, data, display_text=None, text=None):
     """創建Postback操作"""
     return PostbackAction(
         label=label,
-        data=data,
-        display_text=display_text
+        text=text or display_text or label,
+        data=data
     )
 
 def create_message_action(label, text):
@@ -266,7 +266,19 @@ def reply_message_with_quick_reply(reply_token, text, quick_reply):
     try:
         from linebot.v3.messaging import TextMessage
         
-        message = TextMessage(text=text, quick_reply=quick_reply)
+        logger.info(f"📤 準備發送Quick Reply消息 - text: '{text[:50]}...', quick_reply類型: {type(quick_reply)}")
+        logger.info(f"📤 Quick Reply詳情: {quick_reply}")
+        
+        # 🔥 修復：確保 quick_reply 是正確的物件格式
+        if isinstance(quick_reply, dict):
+            # 如果傳入的是字典，需要轉換為 QuickReply 物件
+            logger.info("🔄 將字典格式的quick_reply轉換為QuickReply物件")
+            quick_reply_obj = QuickReply.from_dict(quick_reply)
+        else:
+            # 假設已經是 QuickReply 物件
+            quick_reply_obj = quick_reply
+        
+        message = TextMessage(text=text, quick_reply=quick_reply_obj)
         line_bot_api = get_line_bot_api()
         line_bot_api.reply_message(
             ReplyMessageRequest(
@@ -274,11 +286,17 @@ def reply_message_with_quick_reply(reply_token, text, quick_reply):
                 messages=[message]
             )
         )
-        logger.info("帶Quick Reply的消息發送成功")
+        logger.info("✅ 帶Quick Reply的消息發送成功")
     except Exception as e:
-        logger.error(f"發送帶Quick Reply的消息失敗: {e}")
-        # 降級：發送普通文字消息
-        reply_text(reply_token, text)
+        logger.error(f"❌ 發送帶Quick Reply的消息失敗: {e}")
+        import traceback
+        logger.error(f"❌ 完整錯誤堆疊: {traceback.format_exc()}")
+        # 🔥 修復：如果Quick Reply失敗，回退到純文字消息
+        try:
+            logger.info("🔄 回退到純文字消息發送")
+            reply_text(reply_token, text)
+        except Exception as fallback_e:
+            logger.error(f"❌ 純文字消息發送也失敗: {fallback_e}")
 
 def get_user_profile(user_id):
     """獲取用戶的profile信息"""

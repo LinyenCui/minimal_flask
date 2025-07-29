@@ -485,7 +485,7 @@ REASONING: 選擇這些工具的原因
                 else:
                     # 嘗試解析其他日期格式
                     try:
-                        from modules.utils.helpers import parse_date_input
+                        from modules.utils.unified_date_parser import parse_date_input
                         actual_date = parse_date_input(date_param)
                     except:
                         actual_date = get_taiwan_date()  # 回退到今天

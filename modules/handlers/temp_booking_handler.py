@@ -10,7 +10,8 @@ import re
 
 from modules.models.base import db
 from modules.utils.taiwan_time import get_taiwan_time, get_taiwan_date
-from modules.utils.helpers import parse_date_input, parse_time_input
+from modules.utils.unified_date_parser import parse_date_input
+from modules.utils.helpers import parse_time_input
 from modules.flex_designs.temp_booking_flex import (
     get_temp_booking_start_flex, 
     get_temp_booking_time_flex, 
@@ -54,8 +55,10 @@ def handle_temp_booking_start(user_id, category="東洋"):
          QuickReplyItem(action=MessageAction(label="放棄", text="放棄"))
     ])
     
-    logger.info(f"[AI Flow Start] Returning prompt: '{prompt_text}' with QuickReply: {quick_reply.to_dict()}")
-    return {"type": "text", "text": prompt_text, "quick_reply": quick_reply.to_dict()}
+    response = {"type": "text", "text": prompt_text, "quick_reply": quick_reply.to_dict()}
+    logger.info(f"[AI Flow Start] 返回完整響應: {response}")
+    logger.info(f"[AI Flow Start] QuickReply詳情: {response.get('quick_reply')}")
+    return response
 
 
 def handle_temp_booking_message(user_id, message_text):
@@ -68,7 +71,20 @@ def handle_temp_booking_message(user_id, message_text):
     if message_text.lower() in ["放棄", "取消", "取消預約", "cancel", "退出", "exit"]:
         logger.info(f"用戶 {user_id} 取消預約流程。")
         del temp_booking_states[user_id]
-        return {"type": "text", "text": "已取消預約流程"}
+        
+        # 🔥 修復：取消後提供 Quick Reply 按鈕
+        from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+        quick_reply = QuickReply(items=[
+            QuickReplyItem(action=MessageAction(label="重新預約", text="預約叫車")),
+            QuickReplyItem(action=MessageAction(label="查詢班次", text="幫助")),
+            QuickReplyItem(action=MessageAction(label="離開", text="謝謝"))
+        ])
+        
+        return {
+            "type": "text", 
+            "text": "✅ 已取消預約流程\n\n💡 您可以重新開始預約或查看其他功能",
+            "quick_reply": quick_reply.to_dict()
+        }
 
     current_state = temp_booking_states[user_id]["state"]
     booking_data = temp_booking_states[user_id]["data"].copy() 
@@ -86,12 +102,38 @@ def handle_temp_booking_message(user_id, message_text):
             # This case should ideally not be reached if all AI states are handled above.
             logger.warning(f"未知的預約狀態 (AI 流程): {current_state}, Resetting.")
             if user_id in temp_booking_states: del temp_booking_states[user_id]
-            response = {"type": "text", "text": "預約流程出現未預期錯誤，請重新開始「預約叫車」。"}
+            
+            # 🔥 修復：未知狀態也提供 Quick Reply 按鈕
+            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+            quick_reply = QuickReply(items=[
+                QuickReplyItem(action=MessageAction(label="重新預約", text="預約叫車")),
+                QuickReplyItem(action=MessageAction(label="查詢幫助", text="幫助")),
+                QuickReplyItem(action=MessageAction(label="離開", text="謝謝"))
+            ])
+            
+            response = {
+                "type": "text", 
+                "text": "⚠️ 預約流程出現未預期錯誤，請重新開始「預約叫車」。\n\n💡 您可以重新嘗試預約或查看幫助",
+                "quick_reply": quick_reply.to_dict()
+            }
 
     except Exception as e:
         logger.error(f"處理 AI 叫車消息時頂層出錯: {e}", exc_info=True)
         if user_id in temp_booking_states: del temp_booking_states[user_id]
-        response = {"type": "text", "text": "預約處理過程中出現錯誤，請重新開始。"}
+        
+        # 🔥 修復：錯誤時也提供 Quick Reply 按鈕
+        from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+        quick_reply = QuickReply(items=[
+            QuickReplyItem(action=MessageAction(label="重新預約", text="預約叫車")),
+            QuickReplyItem(action=MessageAction(label="查詢幫助", text="幫助")),
+            QuickReplyItem(action=MessageAction(label="離開", text="謝謝"))
+        ])
+        
+        response = {
+            "type": "text", 
+            "text": "❌ 預約處理過程中出現錯誤，請重新開始。\n\n💡 您可以重新嘗試預約或查看幫助",
+            "quick_reply": quick_reply.to_dict()
+        }
 
     return response
 
@@ -99,10 +141,28 @@ def handle_temp_booking_message(user_id, message_text):
 def _handle_ai_input(user_id, message_text): 
     logger.info(f"[_handle_ai_input] User={user_id} Msg='{message_text}'")
     booking_data = temp_booking_states[user_id]["data"].copy()
-    extracted_info = extract_booking_info_with_gemini(message_text)
-    if not extracted_info: 
-        logger.warning("AI 未能提取任何有效信息 (initial)。")
-        return {"type": "text", "text": "抱歉，無法理解您的預約需求，請嘗試換句話說或更詳細地描述。"}
+    # 嘗試AI提取並增強錯誤處理
+    try:
+        logger.info(f"🤖 開始AI提取，輸入文字: '{message_text}'")
+        extracted_info = extract_booking_info_with_gemini(message_text)
+        logger.info(f"🤖 AI提取結果: {extracted_info}")
+        
+        if not extracted_info: 
+            logger.error("❌ AI未能提取任何有效信息 (initial) - 可能是API調用失敗、憑證問題或解析失敗")
+            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+            quick_reply = QuickReply(items=[
+                QuickReplyItem(action=MessageAction(label="✘ 取消預約", text="取消")),
+                QuickReplyItem(action=MessageAction(label="🚪 退出", text="退出"))
+            ])
+            return {"type": "text", "text": "🔧 AI解析服務暫時不可用，請稍後再試或使用完整命令格式。\n\n範例：\n明天下午3點從台北車站到桃園機場", "quick_reply": quick_reply.to_dict()}
+    except Exception as ai_error:
+        logger.error(f"🚨 AI服務調用異常: {ai_error}", exc_info=True)
+        from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+        quick_reply = QuickReply(items=[
+            QuickReplyItem(action=MessageAction(label="✘ 取消預約", text="取消")),
+            QuickReplyItem(action=MessageAction(label="🚪 退出", text="退出"))
+        ])
+        return {"type": "text", "text": "🔧 預約服務暫時不可用，請稍後再試。", "quick_reply": quick_reply.to_dict()}
     logger.info(f"AI 初始解析結果: {extracted_info}")
     booking_data = _update_booking_data(booking_data, extracted_info) 
     missing_fields = _check_missing_fields(booking_data)

@@ -440,16 +440,35 @@ class ConversationManager:
         logger.info(f"設定用戶 {user_id} 最近固定班次ID: {schedule_id}")
     
     def get_recent_fixed_schedule_id(self, user_id: str) -> Optional[int]:
-        """獲取用戶最近操作的固定班次ID"""
+        """獲取用戶最近操作的固定班次ID，優先使用leave_mode中的ID"""
+        # 🔥 修復：優先從請假模式中獲取固定班次ID
+        if user_id in self.leave_modes:
+            mode_data = self.leave_modes[user_id]
+            # 檢查時效性
+            if time.time() - mode_data['timestamp'] <= 300:  # 5分鐘內有效
+                fixed_schedule_id = mode_data.get('fixed_schedule_id')
+                if fixed_schedule_id:
+                    return fixed_schedule_id
+        
+        # 回退到普通記錄
         return self.recent_fixed_schedule_ids.get(user_id)
     
-    def set_leave_mode(self, user_id: str, trip_id: int):
+    def set_leave_mode(self, user_id: str, trip_id: int = None, fixed_schedule_id: int = None):
         """設定用戶進入請假模式"""
+        if trip_id is None and fixed_schedule_id is None:
+            logger.error(f"設定請假模式時必須提供 trip_id 或 fixed_schedule_id")
+            return
+            
         self.leave_modes[user_id] = {
             'trip_id': trip_id,
+            'fixed_schedule_id': fixed_schedule_id,
             'timestamp': time.time()
         }
-        logger.info(f"用戶 {user_id} 進入請假模式，班次ID: {trip_id}")
+        
+        if trip_id:
+            logger.info(f"用戶 {user_id} 進入普通班次請假模式，班次ID: {trip_id}")
+        elif fixed_schedule_id:
+            logger.info(f"用戶 {user_id} 進入固定班次請假模式，固定班次ID: {fixed_schedule_id}")
     
     def is_in_leave_mode(self, user_id: str) -> bool:
         """檢查用戶是否在請假模式"""

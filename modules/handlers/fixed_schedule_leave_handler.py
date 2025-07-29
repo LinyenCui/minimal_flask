@@ -14,26 +14,42 @@ logger = logging.getLogger(__name__)
 def handle_fixed_schedule_leave_command(message_text, user_id):
     """處理固定班次請假命令"""
     try:
+        logger.info(f"🎯 [fixed_schedule_leave_handler] 接收到命令: '{message_text}', 用戶: {user_id}")
+        
         # 解析格式：固定班次請假 [固定班次ID] [加成] [原因]
         # 例如：固定班次請假 5 -50 診所乘客長期請假
         parts = message_text.split(maxsplit=3)  # 分割成4部分：命令 命令 ID 加成 原因
+        logger.info(f"🎯 [fixed_schedule_leave_handler] 分割結果: {parts} (長度: {len(parts)})")
         
         if len(parts) < 4:
-            return "請補充加成和原因資訊。\n\n📝 建議使用：/固定班表 [客戶簡稱] 查詢後點擊按鈕操作\n\n💡 完整格式：固定班次請假 [固定班次ID] [加成] [原因]\n範例：固定班次請假 5 -50 診所乘客長期請假"
+            error_msg = "請補充加成和原因資訊。\n\n📝 建議使用：/固定班表 [客戶簡稱] 查詢後點擊按鈕操作\n\n💡 完整格式：固定班次請假 [固定班次ID] [加成] [原因]\n範例：固定班次請假 5 -50 診所乘客長期請假"
+            logger.warning(f"🎯 [fixed_schedule_leave_handler] 參數不足: {error_msg}")
+            return error_msg
         
         try:
             fixed_schedule_id = int(parts[1])
+            logger.info(f"🎯 [fixed_schedule_leave_handler] 解析固定班次ID: {fixed_schedule_id} (原始: '{parts[1]}')")
         except ValueError:
-            return f"固定班次ID格式錯誤，請輸入數字，您輸入的是：{parts[1]}"
+            error_msg = f"固定班次ID格式錯誤，請輸入數字，您輸入的是：{parts[1]}"
+            logger.error(f"🎯 [fixed_schedule_leave_handler] ID格式錯誤: {error_msg}")
+            return error_msg
         
         try:
             surcharge = int(parts[2])
+            logger.info(f"🎯 [fixed_schedule_leave_handler] 解析加成: {surcharge} (原始: '{parts[2]}')")
         except ValueError:
-            return f"加成格式錯誤，請輸入數字，您輸入的是：{parts[2]}"
+            error_msg = f"加成格式錯誤，請輸入數字，您輸入的是：{parts[2]}"
+            logger.error(f"🎯 [fixed_schedule_leave_handler] 加成格式錯誤: {error_msg}")
+            return error_msg
         
         reason = parts[3].strip()
         if not reason:
-            return "請提供請假原因說明"
+            error_msg = "請提供請假原因說明"
+            logger.warning(f"🎯 [fixed_schedule_leave_handler] 原因為空: {error_msg}")
+            return error_msg
+        
+        logger.info(f"🎯 [fixed_schedule_leave_handler] 解析完成 - ID: {fixed_schedule_id}, 加成: {surcharge}, 原因: '{reason}'")
+        logger.info(f"🎯 [fixed_schedule_leave_handler] 開始調用 process_fixed_schedule_leave...")
         
         return process_fixed_schedule_leave(fixed_schedule_id, surcharge, reason, user_id)
         
@@ -44,6 +60,8 @@ def handle_fixed_schedule_leave_command(message_text, user_id):
 def process_fixed_schedule_leave(fixed_schedule_id, surcharge, reason, user_id):
     """執行固定班次請假處理"""
     try:
+        logger.info(f"🎯 [process_fixed_schedule_leave] 開始處理 - ID: {fixed_schedule_id}, 加成: {surcharge}, 原因: '{reason}', 用戶: {user_id}")
+        
         # 查詢固定班次信息
         query = """
         SELECT 
@@ -64,10 +82,27 @@ def process_fixed_schedule_leave(fixed_schedule_id, surcharge, reason, user_id):
             fs.id = :fixed_schedule_id
         """
         
+        logger.info(f"🎯 [process_fixed_schedule_leave] 執行查詢 - SQL: {query.strip()}")
+        logger.info(f"🎯 [process_fixed_schedule_leave] 查詢參數: fixed_schedule_id = {fixed_schedule_id} (類型: {type(fixed_schedule_id)})")
+        
         schedule = db.session.execute(text(query), {"fixed_schedule_id": fixed_schedule_id}).fetchone()
         
+        logger.info(f"🎯 [process_fixed_schedule_leave] 查詢結果: {schedule}")
+        
         if not schedule:
-            return f"找不到ID為 {fixed_schedule_id} 的固定班次。"
+            error_msg = f"找不到ID為 {fixed_schedule_id} 的固定班次。"
+            logger.error(f"🎯 [process_fixed_schedule_leave] {error_msg}")
+            
+            # 添加調試查詢：查看所有現有的固定班次ID
+            debug_query = "SELECT id FROM fixed_schedules ORDER BY id LIMIT 20"
+            try:
+                all_ids = db.session.execute(text(debug_query)).fetchall()
+                existing_ids = [row[0] for row in all_ids]
+                logger.info(f"🎯 [process_fixed_schedule_leave] 調試 - 現有固定班次ID (前20個): {existing_ids}")
+            except Exception as debug_e:
+                logger.error(f"🎯 [process_fixed_schedule_leave] 調試查詢失敗: {debug_e}")
+            
+            return error_msg
         
         current_status = schedule[6] or '準備'
         current_note = schedule[7]

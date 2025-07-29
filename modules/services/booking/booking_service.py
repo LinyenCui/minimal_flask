@@ -1,128 +1,14 @@
 """
 預約服務模組 - 提供班次預約功能
 """
-import re
 from datetime import datetime, date, timedelta
 from sqlalchemy import text as sql_text
 from modules.models.base import db
 from modules.utils.taiwan_time import get_taiwan_time, get_taiwan_date
+from modules.utils.unified_date_parser import parse_date_input
 
 # 用戶預約狀態字典，用於跟踪預約流程
 booking_states = {}
-
-# 实现自己的日期解析函数，解决循环导入问题
-def parse_date_input(date_input):
-    """解析各種格式的日期輸入"""
-    
-    today = get_taiwan_date()
-    current_year = today.year
-    
-    # 嘗試解析完整日期格式 (YYYY-MM-DD)
-    if re.match(r'^\d{4}-\d{1,2}-\d{1,2}$', date_input):
-        return datetime.strptime(date_input, "%Y-%m-%d").date()
-    
-    # 嘗試解析簡短日期格式 (MM-DD)
-    elif re.match(r'^\d{1,2}-\d{1,2}$', date_input):
-        month, day = date_input.split('-')
-        try:
-            parsed_date = datetime(current_year, int(month), int(day)).date()
-            
-            # 如果日期在過去，但在最近7天內，保持當前年份
-            if parsed_date < today and (today - parsed_date).days <= 7:
-                return parsed_date
-            # 如果日期在過去且超過7天，假設是明年的日期
-            elif parsed_date < today:
-                return parsed_date.replace(year=current_year + 1)
-            # 日期在未來
-            else:
-                return parsed_date
-        except ValueError:
-            raise ValueError(f"無效的日期: {date_input}")
-    
-    # 嘗試解析斜線日期格式 (MM/DD)
-    elif re.match(r'^\d{1,2}/\d{1,2}$', date_input):
-        month, day = date_input.split('/')
-        try:
-            parsed_date = datetime(current_year, int(month), int(day)).date()
-            
-            # 如果日期在過去，但在最近7天內，保持當前年份
-            if parsed_date < today and (today - parsed_date).days <= 7:
-                return parsed_date
-            # 如果日期在過去且超過7天，假設是明年的日期
-            elif parsed_date < today:
-                return parsed_date.replace(year=current_year + 1)
-            # 日期在未來
-            else:
-                return parsed_date
-        except ValueError:
-            raise ValueError(f"無效的日期: {date_input}")
-    
-    # 嘗試解析中文日期格式 (MM月DD日)
-    elif re.match(r'^\d{1,2}月\d{1,2}日$', date_input):
-        month, day = re.findall(r'\d+', date_input)
-        try:
-            parsed_date = datetime(current_year, int(month), int(day)).date()
-            
-            # 如果日期在過去，但在最近7天內，保持當前年份
-            if parsed_date < today and (today - parsed_date).days <= 7:
-                return parsed_date
-            # 如果日期在過去且超過7天，假設是明年的日期
-            elif parsed_date < today:
-                return parsed_date.replace(year=current_year + 1)
-            # 日期在未來
-            else:
-                return parsed_date
-        except ValueError:
-            raise ValueError(f"無效的日期: {date_input}")
-    
-    # 嘗試解析數字日期格式 (MMDD)
-    elif re.match(r'^\d{3,4}$', date_input):
-        if len(date_input) == 3:  # 例如 "125" 表示 1月25日
-            month = date_input[0]
-            day = date_input[1:3]
-        else:  # 例如 "0125" 表示 1月25日
-            month = date_input[0:2]
-            day = date_input[2:4]
-            
-        try:
-            parsed_date = datetime(current_year, int(month), int(day)).date()
-            
-            # 如果日期在過去，但在最近7天內，保持當前年份
-            if parsed_date < today and (today - parsed_date).days <= 7:
-                return parsed_date
-            # 如果日期在過去且超過7天，假設是明年的日期
-            elif parsed_date < today:
-                return parsed_date.replace(year=current_year + 1)
-            # 日期在未來
-            else:
-                return parsed_date
-        except ValueError:
-            raise ValueError(f"無效的日期: {date_input}")
-    
-    # 嘗試解析星期幾 (一, 二, 三, 四, 五, 六, 日)
-    elif date_input in ['一', '二', '三', '四', '五', '六', '日']:
-        weekday_map = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6}
-        target_weekday = weekday_map[date_input]
-        current_weekday = today.weekday()
-        
-        # 計算到目標星期幾的天數
-        days_ahead = (target_weekday - current_weekday) % 7
-        if days_ahead == 0:
-            days_ahead = 7  # 如果是同一天，則取下一周的同一天
-        
-        return today + timedelta(days=days_ahead)
-    
-    # 嘗試解析相對日期 ("今天", "明天", "後天")
-    elif date_input == "今天":
-        return today
-    elif date_input == "明天":
-        return today + timedelta(days=1)
-    elif date_input == "後天":
-        return today + timedelta(days=2)
-    
-    # 無法識別的格式
-    else:
-        raise ValueError("無法識別的日期格式")
 
 def start_booking(user_id, category="診所"):
     """

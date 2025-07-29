@@ -10,7 +10,7 @@ from modules.models.base import db
 from modules.models.trip import Trip, FixedSchedule
 from modules.models.driver import Driver
 from modules.models.customer import Customer
-from modules.utils.helpers import parse_date_input
+from modules.utils.unified_date_parser import parse_date_input
 from modules.utils.line_bot import reply_text, reply_flex, get_user_display_name  # 添加必要的LINE Bot工具函数
 from modules.utils.taiwan_time import get_taiwan_time
 
@@ -551,6 +551,123 @@ def handle_modify_category(message_text):
         return f"修改類別錯誤: {str(e)}"
 
 # 處理查看已完成班次命令
+def handle_modify_fare(message_text, user_id=None):
+    """處理修改車資命令 - 支援trips和completed_trips兩個表"""
+    try:
+        parts = message_text.split()
+        
+        logger.info(f"🔧 handle_modify_fare 收到命令: '{message_text}'")
+        
+        if len(parts) < 3:
+            return "命令格式不正確。正確格式：修改車資 [ID] [錶價] [加成] [修改原因]"
+            
+        trip_id = None
+        meter_fare = None
+        extra_fare = 0
+        reason = None
+        
+        # 解析參數並進行類型檢查
+        try:
+            trip_id = int(parts[1])
+        except ValueError:
+            return "錯誤：班次 ID 必須是數字。"
+            
+        try:
+            meter_fare = int(parts[2])
+        except ValueError:
+             return "錯誤：錶價必須是數字。"
+             
+        if len(parts) >= 4:
+            try:
+                extra_fare = int(parts[3]) # 允許負數
+            except ValueError:
+                # 如果第3個參數不是數字，可能是原因
+                extra_fare = 0
+                reason = ' '.join(parts[3:])
+        
+        if len(parts) >= 5:
+            # 如果有5個或更多參數，第4個開始是原因
+            reason = ' '.join(parts[4:])
+
+        # 首先嘗試在trips表中查找（生產線上的班次）
+        trip_in_trips = db.session.query(Trip).filter(Trip.trip_id == trip_id).first()
+        
+        if trip_in_trips:
+            # 在trips表中找到，更新車資
+            logger.info(f"🔧 在trips表中找到班次 {trip_id}，準備更新車資")
+            
+            old_meter = trip_in_trips.meter_fare or 0
+            old_extra = trip_in_trips.extra_fare or 0
+            
+            # 檢查是否有變更
+            meter_changed = old_meter != meter_fare
+            extra_changed = old_extra != extra_fare
+            has_changes = meter_changed or extra_changed
+            
+            # 如果有變更但沒有提供原因，要求說明
+            if has_changes and not reason:
+                change_summary = []
+                if meter_changed:
+                    change_summary.append(f"錶價: {old_meter} → {meter_fare} ({meter_fare - old_meter:+d})")
+                if extra_changed:
+                    change_summary.append(f"加成: {old_extra} → {extra_fare} ({extra_fare - old_extra:+d})")
+                
+                return f"""⚠️ 檢測到車資變更，需要說明原因：
+
+📊 當前記錄：
+• {chr(10).join(change_summary)}
+
+💡 請使用完整格式：
+修改車資 {trip_id} {meter_fare} {extra_fare} [修改原因]
+
+範例：修改車資 {trip_id} {meter_fare} {extra_fare} 客戶要求調整價格"""
+
+            # 更新trips表中的車資
+            trip_in_trips.meter_fare = meter_fare
+            trip_in_trips.extra_fare = extra_fare
+            trip_in_trips.actual_fare = meter_fare + extra_fare
+            
+            db.session.commit()
+            logger.info(f"成功修改trips表中班次 {trip_id} 的車資")
+            
+            result = f"✅ 成功修改班次 {trip_id} 車資：錶價={meter_fare}, 加成={extra_fare}"
+            if has_changes:
+                change_info = []
+                if meter_changed:
+                    change_info.append(f"錶價: {old_meter} → {meter_fare}")
+                if extra_changed:
+                    change_info.append(f"加成: {old_extra} → {extra_fare}")
+                result += f"\n📝 變更記錄：\n• {chr(10).join(change_info)}"
+            if reason:
+                result += f"\n• 原因: {reason}"
+            
+            return result
+            
+        else:
+            # trips表中沒找到，嘗試在completed_trips表中查找
+            query = sql_text("SELECT id, meter_fare, extra_fare FROM completed_trips WHERE id = :id")
+            completed_trip = db.session.execute(query, {"id": trip_id}).fetchone()
+            
+            if completed_trip:
+                # 在completed_trips表中找到，使用原有的handle_record_fare邏輯
+                logger.info(f"🔧 在completed_trips表中找到班次 {trip_id}，轉發到record_fare處理")
+                
+                # 重新構建命令格式為record_fare可以處理的格式
+                record_fare_command = f"記錄車資 {trip_id} {meter_fare} {extra_fare}"
+                if reason:
+                    record_fare_command += f" {reason}"
+                
+                return handle_record_fare(record_fare_command, user_id)
+            else:
+                # 兩個表都沒找到
+                return f"❌ 找不到班次 #{trip_id}\n\n💡 建議操作：\n• 班次詳情 {trip_id} → 查看生產線上的班次\n• 查看 {trip_id} → 查看已完成班次\n• 東洋班次 今天 → 查看今天進行中班次"
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"修改車資時出錯: {e}")
+        traceback.print_exc()
+        return f"修改車資失敗: {str(e)}"
+
 def handle_completed_trip_details(completed_trip_id):
     """查看已完成班次詳細信息"""
     logger.info(f"處理查看已完成班次查詢: completed_trip_id={completed_trip_id}")
