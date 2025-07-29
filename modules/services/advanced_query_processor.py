@@ -196,6 +196,8 @@ class AdvancedQueryProcessor:
                     t.trip_type,
                     t.custom_start_point,
                     t.custom_end_point,
+                    t.passenger_leave_reason,
+                    t.actual_fare,
                     d.name as driver_name
                 FROM trips t
                 LEFT JOIN drivers d ON t.driver_id = d.id
@@ -258,6 +260,8 @@ class AdvancedQueryProcessor:
                     'trip_type': trip.trip_type,
                     'custom_start_point': trip.custom_start_point,
                     'custom_end_point': trip.custom_end_point,
+                    'passenger_leave_reason': trip.passenger_leave_reason,
+                    'actual_fare': trip.actual_fare,
                     'driver_name': trip.driver_name
                 }
                 trips_dict_list.append(trip_dict)
@@ -576,35 +580,90 @@ class AdvancedQueryProcessor:
         
         result_text = f"🔍 AI智能搜索結果\n\n"
         result_text += f"💬 {command}\n"
-        result_text += f"📊 找到 {len(trips)} 個匹配班次\n\n"
+        
+        # 🔥 修正：狀態統計 - 考慮請假情況（請假班次狀態是準備但有passenger_leave_reason）
+        status_counts = {}
+        for trip in trips:
+            # 檢查是否為請假狀態（狀態是準備但有請假原因）
+            if trip.get('status') == '準備' and trip.get('passenger_leave_reason'):
+                display_status = '請假'
+            else:
+                display_status = trip.get('status') or '未知'
+            
+            status_counts[display_status] = status_counts.get(display_status, 0) + 1
+        
+        # 按指定順序顯示狀態統計
+        status_order = ['準備', '待派', '已完成', '取消', '衝突', '請假']
+        status_stats = []
+        for status in status_order:
+            if status in status_counts:
+                count = status_counts[status]
+                if status == '準備':
+                    status_stats.append(f"🟢準備{count}筆")
+                elif status == '待派':
+                    status_stats.append(f"🔴待派{count}筆")
+                elif status == '已完成':
+                    status_stats.append(f"✅已完成{count}筆")
+                elif status == '取消':
+                    status_stats.append(f"❌取消{count}筆")
+                elif status == '衝突':
+                    status_stats.append(f"🟠衝突{count}筆")
+                elif status == '請假':
+                    status_stats.append(f"🔵請假{count}筆")
+        
+        # 添加其他未歸類的狀態
+        for status, count in status_counts.items():
+            if status not in status_order:
+                status_stats.append(f"{status}{count}筆")
+        
+        result_text += f"📊 {', '.join(status_stats)}\n\n"
         
         # 🔥 新增：如果結果太多，實施分頁
         if len(trips) > 10:
             # 只顯示前10筆結果
             displayed_trips = trips[:10]
             
-            # 按狀態分組顯示
+            # 🔥 修正：按狀態分組顯示，考慮請假情況
             status_groups = {}
             for trip in displayed_trips:
-                status = trip.get('status') or '未知'
-                if status not in status_groups:
-                    status_groups[status] = []
-                status_groups[status].append(trip)
+                # 檢查是否為請假狀態（狀態是準備但有請假原因）
+                if trip.get('status') == '準備' and trip.get('passenger_leave_reason'):
+                    display_status = '請假'
+                else:
+                    display_status = trip.get('status') or '未知'
+                
+                if display_status not in status_groups:
+                    status_groups[display_status] = []
+                status_groups[display_status].append(trip)
             
             for status, status_trips in status_groups.items():
-                result_text += f"🎯 {status} ({len(status_trips)}個)：\n"
+                # 🔥 新增：根據狀態使用不同圖示，保持一致性
+                if status == '準備':
+                    status_icon = "🟢"
+                elif status == '待派':
+                    status_icon = "🔴"
+                elif status == '已完成':
+                    status_icon = "✅"
+                elif status == '取消':
+                    status_icon = "❌"
+                elif status == '衝突':
+                    status_icon = "🟠"
+                elif status == '請假':
+                    status_icon = "🔵"
+                else:
+                    status_icon = "🎯"
+                
+                # 🔥 修正：顯示分頁說明，避免用戶混淆
+                result_text += f"{status_icon} {status} (前{len(status_trips)}個)：\n"
                 
                 for trip in status_trips:
-                    # 🚨 修復：安全處理可能為None的欄位，避免格式化錯誤
-                    driver_id = trip.get('driver_id')
-                    driver_name = trip.get('driver_name')
-                    
-                    # 🎨 優化顯示：使用小黃車圖示+編號，去掉姓名讓結果更清爽
-                    driver_info = f"🚕{driver_id}" if driver_id else "未指派"
-                    
                     # 安全處理可能為None的欄位
+                    driver_id = trip.get('driver_id')
                     trip_id = trip.get('trip_id', '未知')
                     trip_type = trip.get('trip_type', 'fixed')
+                    
+                    # 司機信息顯示
+                    driver_info = f"🚕{driver_id}" if driver_id else "未指派"
                     
                     # 🔥 新增：根據trip_type決定使用哪個起點終點
                     if trip_type == 'temp':
@@ -615,9 +674,13 @@ class AdvancedQueryProcessor:
                         # 固定班次使用標準欄位
                         start_point = trip.get('start_point') or '未知'
                         end_point = trip.get('end_point') or '未知'
-                        
-                    result_text += f"  📍 #{trip_id} - {start_point} → {end_point}"
-                    result_text += f" | {driver_info}\n"
+                    
+                    # 🔥 新增：顯示actual_fare金額（如果有的話）
+                    actual_fare = trip.get('actual_fare')
+                    fare_info = f" 💰{actual_fare}" if actual_fare else ""
+                    
+                    # 🔥 修改：去掉📍圖示，保留#號，縮小字體，加上金額
+                    result_text += f"#{trip_id}-{start_point}→{end_point}|{driver_info}{fare_info}\n"
                 result_text += "\n"
             
             result_text += f"\n... 還有 {len(trips) - 10} 筆結果\n"
@@ -652,28 +715,46 @@ class AdvancedQueryProcessor:
             }
         
         # 原來的邏輯：結果不多時的處理
-        # 按狀態分組顯示
+        # 🔥 修正：按狀態分組顯示，考慮請假情況
         status_groups = {}
         for trip in trips:
-            status = trip.get('status') or '未知'
-            if status not in status_groups:
-                status_groups[status] = []
-            status_groups[status].append(trip)
+            # 檢查是否為請假狀態（狀態是準備但有請假原因）
+            if trip.get('status') == '準備' and trip.get('passenger_leave_reason'):
+                display_status = '請假'
+            else:
+                display_status = trip.get('status') or '未知'
+            
+            if display_status not in status_groups:
+                status_groups[display_status] = []
+            status_groups[display_status].append(trip)
         
         for status, status_trips in status_groups.items():
-            result_text += f"🎯 {status} ({len(status_trips)}個)：\n"
+            # 🔥 新增：根據狀態使用不同圖示，保持一致性
+            if status == '準備':
+                status_icon = "🟢"
+            elif status == '待派':
+                status_icon = "🔴"
+            elif status == '已完成':
+                status_icon = "✅"
+            elif status == '取消':
+                status_icon = "❌"
+            elif status == '衝突':
+                status_icon = "🟠"
+            elif status == '請假':
+                status_icon = "🔵"
+            else:
+                status_icon = "🎯"
+            
+            result_text += f"{status_icon} {status} ({len(status_trips)}個)：\n"
             
             for trip in status_trips:
-                # 🚨 修復：安全處理可能為None的欄位，避免格式化錯誤
-                driver_id = trip.get('driver_id')
-                driver_name = trip.get('driver_name')
-                
-                # 🎨 優化顯示：使用小黃車圖示+編號，去掉姓名讓結果更清爽
-                driver_info = f"🚕{driver_id}" if driver_id else "未指派"
-                
                 # 安全處理可能為None的欄位
+                driver_id = trip.get('driver_id')
                 trip_id = trip.get('trip_id', '未知')
                 trip_type = trip.get('trip_type', 'fixed')
+                
+                # 司機信息顯示
+                driver_info = f"🚕{driver_id}" if driver_id else "未指派"
                 
                 # 🔥 新增：根據trip_type決定使用哪個起點終點
                 if trip_type == 'temp':
@@ -684,9 +765,13 @@ class AdvancedQueryProcessor:
                     # 固定班次使用標準欄位
                     start_point = trip.get('start_point') or '未知'
                     end_point = trip.get('end_point') or '未知'
-                    
-                result_text += f"  📍 #{trip_id} - {start_point} → {end_point}"
-                result_text += f" | {driver_info}\n"
+                
+                # 🔥 新增：顯示actual_fare金額（如果有的話）
+                actual_fare = trip.get('actual_fare')
+                fare_info = f" 💰{actual_fare}" if actual_fare else ""
+                
+                # 🔥 修改：去掉📍圖示，保留#號，縮小字體，加上金額
+                result_text += f"#{trip_id}-{start_point}→{end_point}|{driver_info}{fare_info}\n"
             result_text += "\n"
 
         return {

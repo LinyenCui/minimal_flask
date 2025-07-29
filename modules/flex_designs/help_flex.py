@@ -408,9 +408,18 @@ def get_maintenance_help():
                 
                 {"type": "text", "text": "💰 車資管理", "weight": "bold", "size": "sm", "color": "#8B0000", "margin": "md"},
                 {"type": "text", "text": "• 記錄車資 [ID] [錶價] [加成]", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 修改車資 [ID] [錶價] [加成]", "size": "xs"},
                 {"type": "text", "text": "• 修改類別 [ID] [新類別]", "size": "xs"},
-                {"type": "text", "text": "• 批量加成 - 問答式批量加成", "size": "xs"},
                 {"type": "text", "text": "• 範例: 記錄車資 123 450 50", "size": "xs"},
+                
+                {"type": "text", "text": "💎 批量加成功能", "weight": "bold", "size": "sm", "color": "#FFD700", "margin": "md"},
+                {"type": "text", "text": "問答式批量加成，適用於春節、颱風假等", "size": "xs", "color": "#666666", "wrap": True},
+                {"type": "text", "text": "1️⃣ 輸入: 批量加成", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "2️⃣ 日期: 7/7 或 7/7-7/10", "size": "xs"},
+                {"type": "text", "text": "3️⃣ 類別: 診所/東洋/全部", "size": "xs"},
+                {"type": "text", "text": "4️⃣ 金額: 50 (正整數)", "size": "xs"},
+                {"type": "text", "text": "5️⃣ 原因: 春節假期加成", "size": "xs"},
+                {"type": "text", "text": "6️⃣ 確認: 確認 (執行批量更新)", "size": "xs"},
                 
                 {"type": "text", "text": "⚠️ 注意事項", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
                 {"type": "text", "text": "• 維護工具需謹慎使用", "size": "xs", "margin": "sm"},

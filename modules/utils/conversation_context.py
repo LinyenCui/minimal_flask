@@ -143,31 +143,83 @@ class ConversationContext:
                 result_text += f" | 🚕{driver_id} | {date_str}\n"
                 
         else:
-            # 當前班次 (current_trips)
+            # 當前班次 (current_trips) - 🔥 修正：使用狀態分組顯示
+            # 🔥 修正：按狀態分組顯示，考慮請假情況
+            status_groups = {}
             for trip in page_results:
-                # 支援不同的資料結構
+                # 支援不同的資料結構，統一提取欄位
                 if hasattr(trip, 'trip_id'):
                     # SQLAlchemy Row 對象
-                    trip_id = trip.trip_id
-                    start_point = trip.start_point
-                    end_point = trip.end_point
-                    driver_id = trip.driver_id
-                    driver_name = getattr(trip, 'driver_name', None)
-                    # 🎨 優化顯示：使用小黃車圖示+編號，去掉姓名讓結果更清爽
-                    driver_info = f"🚕{driver_id}" if driver_id else "未指派"
+                    trip_data = {
+                        'trip_id': trip.trip_id,
+                        'start_point': trip.start_point,
+                        'end_point': trip.end_point,
+                        'custom_start_point': getattr(trip, 'custom_start_point', None),
+                        'custom_end_point': getattr(trip, 'custom_end_point', None),
+                        'driver_id': trip.driver_id,
+                        'status': trip.status,
+                        'trip_type': getattr(trip, 'trip_type', 'fixed'),
+                        'passenger_leave_reason': getattr(trip, 'passenger_leave_reason', None),
+                        'actual_fare': getattr(trip, 'actual_fare', None)
+                    }
                 else:
                     # 字典格式
-                    trip_id = trip.get('trip_id', trip.get('id', 'N/A'))
-                    start_point = trip.get('start_point', 'N/A')
-                    end_point = trip.get('end_point', 'N/A')
-                    driver_id = trip.get('driver_id', 'N/A')
-                    driver_name = trip.get('driver_name')
-                    # 🎨 優化顯示：使用小黃車圖示+編號，去掉姓名讓結果更清爽
+                    trip_data = trip
+                
+                # 檢查是否為請假狀態（狀態是準備但有請假原因）
+                if trip_data.get('status') == '準備' and trip_data.get('passenger_leave_reason'):
+                    display_status = '請假'
+                else:
+                    display_status = trip_data.get('status') or '未知'
+                
+                if display_status not in status_groups:
+                    status_groups[display_status] = []
+                status_groups[display_status].append(trip_data)
+            
+            # 按狀態分組顯示
+            for status, status_trips in status_groups.items():
+                # 🔥 新增：根據狀態使用不同圖示，保持一致性
+                if status == '準備':
+                    status_icon = "🟢"
+                elif status == '待派':
+                    status_icon = "🔴"
+                elif status == '已完成':
+                    status_icon = "✅"
+                elif status == '取消':
+                    status_icon = "❌"
+                elif status == '衝突':
+                    status_icon = "🟠"
+                elif status == '請假':
+                    status_icon = "🔵"
+                else:
+                    status_icon = "🎯"
+                
+                result_text += f"{status_icon} {status} ({len(status_trips)}個)：\n"
+                
+                for trip_data in status_trips:
+                    # 統一處理顯示格式
+                    trip_id = trip_data.get('trip_id', 'N/A')
+                    driver_id = trip_data.get('driver_id')
+                    trip_type = trip_data.get('trip_type', 'fixed')
+                    
+                    # 司機信息顯示
                     driver_info = f"🚕{driver_id}" if driver_id else "未指派"
-                        
-                result_text += f"  📍 #{trip_id} - {start_point} → {end_point}"
-                result_text += f" | {driver_info}\n"
-            result_text += "\n"
+                    
+                    # 根據trip_type決定使用哪個起點終點
+                    if trip_type == 'temp':
+                        start_point = trip_data.get('custom_start_point') or trip_data.get('start_point') or '未知'
+                        end_point = trip_data.get('custom_end_point') or trip_data.get('end_point') or '未知'
+                    else:
+                        start_point = trip_data.get('start_point') or '未知'
+                        end_point = trip_data.get('end_point') or '未知'
+                    
+                    # 顯示actual_fare金額（如果有的話）
+                    actual_fare = trip_data.get('actual_fare')
+                    fare_info = f" 💰{actual_fare}" if actual_fare else ""
+                    
+                    # 🔥 修改：使用新格式，去掉📍圖示，加上金額
+                    result_text += f"#{trip_id}-{start_point}→{end_point}|{driver_info}{fare_info}\n"
+                result_text += "\n"
         
         # 計算總頁數
         total_pages = (total_results + page_size - 1) // page_size
