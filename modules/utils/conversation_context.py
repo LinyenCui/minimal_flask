@@ -248,8 +248,8 @@ class ConversationContext:
                 ),
                 QuickReplyItem(
                     action=MessageAction(
-                        label="❌ 取消",
-                        text="取消"
+                        label="❌ 放棄",
+                        text="放棄"
                     )
                 )
             ])

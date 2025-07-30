@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
 Render 資料庫同步到本地的自動化腳本
-混合模式版本 (最終版):
-- completed_trips: 使用日期作為錨點進行增量同步，保留本地歷史。
-- 其他資料表: 完全覆蓋，與 Render 保持一致。
-- 內建序列自動校準，無需外部工具。
+混合模式版本 (採用 minimal_flask_ai 穩定順序 + 時間戳錨點改進):
+- 同步順序: 其他表先同步 → completed_trips 最後同步 (避免外鍵約束衝突)
+- completed_trips: 使用時間戳作為錨點進行增量同步，保留本地歷史數據不受Render刪除影響
+- 其他資料表: 完全覆蓋同步，與 Render 保持一致 (使用 TRUNCATE CASCADE)
+- 內建序列自動校準，無需外部工具
 """
 import os
 import sys
@@ -35,14 +36,15 @@ LOCAL_DB_CONFIG = {
 
 # --- 要同步的資料表 ---
 
-# 增量同步 (只添加新紀錄)
-# 這個列表目前是硬編碼為 completed_trips，由專門的函式處理
+# 增量同步 (只添加新紀錄，保護本地歷史數據)
+# completed_trips 使用專門的ID-based增量同步，確保本地歷史數據不受Render刪除影響
 # INCREMENTAL_SYNC_TABLES = ["completed_trips"]
 
 # 完全覆蓋同步 (清空本地，再從 Render 複製所有資料)
 FULL_SYNC_TABLES = [
+    "database_maintenance",  # 資料庫維護表，需要先同步
     "drivers",
-    "customers",
+    "customers", 
     "fixed_schedules",  # 移到trips之前，因為trips有外鍵參考
     "trips"
     # 移除 "users" 因為本地資料庫沒有這個表
@@ -93,7 +95,20 @@ def truncate_and_copy(local_conn, render_conn, table_name):
             records = render_cur.fetchall()
             
             print(f"   - 正在清空本地 '{table_name}'...")
-            local_cur.execute(f"TRUNCATE TABLE {table_name} RESTART IDENTITY CASCADE;")
+            
+            # 🔥 特殊處理：drivers 表需要避免 CASCADE 影響 completed_trips
+            if table_name == 'drivers':
+                print(f"   - 檢測到 drivers 表，使用安全清空方式避免影響 completed_trips...")
+                # 暫時禁用外鍵約束
+                local_cur.execute("SET session_replication_role = replica;")
+                local_cur.execute(f"DELETE FROM {table_name};")
+                # drivers 表沒有序列，跳過序列重置
+                print(f"   - drivers 表沒有使用序列，跳過序列重置")
+                # 恢復外鍵約束  
+                local_cur.execute("SET session_replication_role = DEFAULT;")
+            else:
+                # 其他表使用標準 TRUNCATE CASCADE
+                local_cur.execute(f"TRUNCATE TABLE {table_name} RESTART IDENTITY CASCADE;")
 
             if not records:
                 print(f"   - '{table_name}' 在 Render 上沒有資料，本地資料表已清空。")
@@ -116,7 +131,7 @@ def truncate_and_copy(local_conn, render_conn, table_name):
             placeholders = "%s, " * len(filtered_cols)
             insert_sql = f"INSERT INTO {table_name} ({', '.join(filtered_cols)}) VALUES ({placeholders.strip(', ')})"
             
-            # 過濾記錄資料，只包含非生成欄位
+            # 過濾記錄資料，只包含非生成欄位  
             filtered_records = [[rec[i] for i in col_indices] for rec in records]
             
             execute_batch(local_cur, insert_sql, filtered_records)
@@ -124,41 +139,53 @@ def truncate_and_copy(local_conn, render_conn, table_name):
             print(f"   ✅ 資料表 '{table_name}' 完全同步成功。")
 
         except Exception as e:
+            # 確保外鍵約束在錯誤情況下也能恢復
+            try:
+                local_cur.execute("SET session_replication_role = DEFAULT;")
+            except:
+                pass
             local_conn.rollback()
             print(f"❌ 同步資料表 '{table_name}' 時發生錯誤: {e}", file=sys.stderr)
             raise
 
 def incremental_sync_completed_trips(local_conn, render_conn):
-    """使用日期作為錨點，增量同步 completed_trips 資料表"""
+    """增量同步 completed_trips 資料表，使用時間戳保護本地歷史數據"""
     table_name = "completed_trips"
-    print(f"--- 開始增量同步資料表: {table_name} ---")
+    print(f"--- 開始增量同步資料表: {table_name} (基於時間戳保護本地歷史數據) ---")
 
     with local_conn.cursor() as local_cur, render_conn.cursor(cursor_factory=DictCursor) as render_cur:
         try:
-            # 1. 獲取本地最新的紀錄日期
-            local_cur.execute(f"SELECT MAX(date) FROM {table_name};")
-            last_local_date = local_cur.fetchone()[0]
+            # 1. 從 Render 的 database_maintenance 表獲取上次同步時間
+            render_cur.execute("SELECT value FROM database_maintenance WHERE key = 'last_completed_trips_sync';")
+            last_sync_result = render_cur.fetchone()
             
-            if last_local_date is None:
-                # 如果本地沒有任何紀錄，就從一個很早的日期開始
-                last_local_date = datetime.date(2000, 1, 1)
-            print(f"   - 本地最新的 '{table_name}' 日期: {last_local_date}")
+            if last_sync_result:
+                last_sync_time = last_sync_result['value']
+                print(f"   - 上次同步時間: {last_sync_time}")
+            else:
+                # 如果沒有記錄，設定一個很早的時間
+                last_sync_time = '2000-01-01 00:00:00'
+                print("   - 沒有找到上次同步記錄，將同步所有數據")
 
-            # 2. 從 Render 讀取所有日期大於等於本地最新日期的資料
-            print(f"   - 正在從 Render 讀取 date >= '{last_local_date}' 的新紀錄...")
-            render_cur.execute(f"SELECT * FROM {table_name} WHERE date >= %s ORDER BY date, id;", (last_local_date,))
+            # 2. 從 Render 讀取所有 created_at > 上次同步時間的資料
+            print(f"   - 正在從 Render 讀取 created_at > '{last_sync_time}' 的新紀錄...")
+            render_cur.execute(f"SELECT * FROM {table_name} WHERE created_at > %s ORDER BY created_at, id;", (last_sync_time,))
             new_records = render_cur.fetchall()
 
             if not new_records:
                 print("   - ✅ 在 Render 上沒有找到需要同步的新紀錄。")
                 return
 
-            print(f"   - 從 Render 找到 {len(new_records)} 筆可能需要同步的紀錄。")
+            print(f"   - 從 Render 找到 {len(new_records)} 筆新紀錄需要同步。")
 
-            # 3. 過濾生成欄位，避免插入錯誤
+            # 3. 過濾生成欄位和本地特有欄位，避免插入錯誤
             all_cols = [desc[0] for desc in render_cur.description]
-            generated_columns = ['actual_fare', 'total_fare']  # completed_trips 也要過濾生成欄位
-            filtered_cols = [col for col in all_cols if col not in generated_columns]
+            # completed_trips: 過濾生成欄位和本地特有欄位
+            if table_name == 'completed_trips':
+                excluded_columns = ['actual_fare', 'total_fare', 'original_trip_id']
+            else:
+                excluded_columns = ['actual_fare', 'total_fare']
+            filtered_cols = [col for col in all_cols if col not in excluded_columns]
             
             print(f"   - 原始欄位: {len(all_cols)} 個，過濾後: {len(filtered_cols)} 個")
             
@@ -168,16 +195,68 @@ def incremental_sync_completed_trips(local_conn, render_conn):
             # 過濾記錄資料，只包含非生成欄位
             filtered_records = [[rec[i] for i in col_indices] for rec in new_records]
 
-            # 4. 使用 ON CONFLICT DO NOTHING 將新資料優雅地寫入本地
-            print(f"   - 正在將新紀錄寫入本地，並自動跳過已存在的紀錄...")
+            # 4. 使用 ON CONFLICT DO UPDATE 覆蓋本地資料
+            print(f"   - 正在將新紀錄寫入本地，覆蓋已存在的記錄...")
             placeholders = "%s, " * len(filtered_cols)
-            # 關鍵：ON CONFLICT (id) DO NOTHING，並且只插入非生成欄位
-            insert_sql = f"INSERT INTO {table_name} ({', '.join(filtered_cols)}) VALUES ({placeholders.strip(', ')}) ON CONFLICT (id) DO NOTHING"
             
-            execute_batch(local_cur, insert_sql, filtered_records)
-            inserted_count = local_cur.rowcount
-            local_conn.commit()
-            print(f"   - ✅ 成功插入 {inserted_count} 筆新紀錄。({len(new_records) - inserted_count} 筆已存在)")
+            # 構建 UPDATE SET 子句（排除 id 欄位）
+            update_cols = [col for col in filtered_cols if col != 'id']
+            update_set = ', '.join([f"{col} = EXCLUDED.{col}" for col in update_cols])
+            
+            insert_sql = f"""INSERT INTO {table_name} ({', '.join(filtered_cols)}) 
+                            VALUES ({placeholders.strip(', ')}) 
+                            ON CONFLICT (id) DO UPDATE SET {update_set}"""
+            
+            print(f"   - 調試：SQL語句前50字符: {insert_sql[:50]}...")
+            print(f"   - 調試：準備插入 {len(filtered_records)} 筆記錄")
+            print(f"   - 調試：欄位列表: {filtered_cols}")
+            
+            try:
+                # 先嘗試插入前5筆記錄進行測試
+                test_records = filtered_records[:5]
+                print(f"   - 調試：測試插入前5筆記錄...")
+                
+                success_count = 0
+                for i, record in enumerate(test_records):
+                    try:
+                        local_cur.execute(insert_sql, record)
+                        success_count += 1
+                        print(f"     測試記錄 {i+1}: 成功")
+                    except Exception as single_error:
+                        print(f"     測試記錄 {i+1}: 失敗 - {single_error}")
+                        # 顯示問題記錄的部分數據
+                        print(f"     問題記錄前3個欄位: {record[:3]}")
+                        local_conn.rollback()
+                        if i == 0:  # 如果第一筆就失敗，停止測試
+                            raise single_error
+                
+                local_conn.commit()
+                print(f"   - 測試結果：{success_count}/5 筆記錄成功插入")
+                
+                if success_count == 5:
+                    # 測試成功，執行批量插入
+                    print(f"   - 測試通過，執行完整批量插入...")
+                    execute_batch(local_cur, insert_sql, filtered_records)
+                    affected_count = local_cur.rowcount
+                    local_conn.commit()
+                    print(f"   - ✅ 批量插入完成，處理 {len(filtered_records)} 筆紀錄。")
+                else:
+                    print(f"   - ⚠️ 測試未完全通過，請檢查數據格式")
+                    
+            except Exception as insert_error:
+                print(f"   - ❌ 插入錯誤: {insert_error}")
+                local_conn.rollback()
+                raise
+            
+            # 5. 更新 Render 的同步時間戳
+            current_time = datetime.datetime.now().isoformat()
+            render_cur.execute("""
+                UPDATE database_maintenance 
+                SET value = %s, timestamp = CURRENT_TIMESTAMP 
+                WHERE key = 'last_completed_trips_sync'
+            """, (current_time,))
+            render_conn.commit()
+            print(f"   - ✅ 已更新同步時間戳: {current_time}")
 
         except Exception as e:
             local_conn.rollback()
@@ -203,12 +282,18 @@ def main():
         if not render_conn or not local_conn:
             return False
 
-        # 步驟 1: 執行完全覆蓋同步
-        for table in FULL_SYNC_TABLES:
+        # 🔥 採用 minimal_flask_ai 的穩定順序：其他表先同步，completed_trips 最後同步
+        
+        # 步驟 1: 執行完全覆蓋同步其他表 (不包含 database_maintenance)
+        sync_tables = [table for table in FULL_SYNC_TABLES if table != 'database_maintenance']
+        for table in sync_tables:
             truncate_and_copy(local_conn, render_conn, table)
         
-        # 步驟 2: 執行增量同步
+        # 步驟 2: 執行增量同步 completed_trips（保護歷史資料，使用時間戳錨點）
         incremental_sync_completed_trips(local_conn, render_conn)
+        
+        # 步驟 3: 最後同步 database_maintenance (包含更新後的時間戳)
+        truncate_and_copy(local_conn, render_conn, 'database_maintenance')
 
         # 步驟 3: 校準所有相關資料表的序列
         print("--- 開始校準本地資料庫序列 ---")
@@ -220,9 +305,11 @@ def main():
         calibrate_sequence(local_conn, "completed_trips")
 
         print("\n🎉 同步成功完成！")
-        print("   - `completed_trips` 已基於日期增量更新。")
-        print("   - 其他指定資料表已與 Render 完全同步。")
-        print("   - 所有本地資料庫序列已自動校準。")
+        print("   - ✅ 採用 minimal_flask_ai 穩定順序：其他表先同步，completed_trips 最後同步")
+        print("   - ✅ 其他指定資料表已與 Render 完全同步（使用 TRUNCATE CASCADE）")
+        print("   - ✅ completed_trips 已使用時間戳錨點增量更新，本地歷史數據完全保護")
+        print("   - ✅ database_maintenance 表已同步，包含最新同步時間戳")
+        print("   - ✅ 所有本地資料庫序列已自動校準")
         return True
 
     except Exception as e:

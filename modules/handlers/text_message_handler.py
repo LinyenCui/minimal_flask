@@ -42,7 +42,7 @@ def handle_ai_fare_result(result, reply_token: str):
     """統一處理AI車資查詢結果，支持quick_reply"""
     try:
         if isinstance(result, dict):
-            if result.get("type") == "text_with_quick_reply":
+            if result.get("type") in ["text_with_quick_reply", "quick_reply"]:
                 # 🔥 修復：使用統一的quick_reply處理方式
                 message_text = result.get("message") or result.get("text") or "處理完成"
                 quick_reply = result.get("quick_reply")
@@ -313,8 +313,8 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                             ),
                             QuickReplyItem(
                                 action=MessageAction(
-                                    label="❌ 取消操作",
-                                    text="取消"
+                                    label="❌ 放棄操作",
+                                    text="放棄"
                                 )
                             )
                         ]
@@ -369,8 +369,8 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                             ),
                             QuickReplyItem(
                                 action=MessageAction(
-                                    label="❌ 取消操作",
-                                    text="取消"
+                                    label="❌ 放棄操作",
+                                    text="放棄"
                                 )
                             )
                         ]
@@ -1720,8 +1720,8 @@ def handle_fare_modification_conversation(conversation, message_text: str, user_
                     ),
                     QuickReplyItem(
                         action=MessageAction(
-                            label="❌ 取消修改",
-                            text="取消修改"
+                            label="❌ 放棄修改",
+                            text="放棄修改"
                         )
                     )
                 ]

@@ -77,8 +77,19 @@ class IncrementalSyncService:
         
         return filtered
     
+    def get_last_sync_id(self, local_conn, table_name: str) -> Optional[int]:
+        """獲取本地最大ID（用於completed_trips的ID-based sync）"""
+        with local_conn.cursor() as cur:
+            try:
+                cur.execute(f"SELECT MAX(id) FROM {table_name}")
+                result = cur.fetchone()[0]
+                return result if result is not None else 0
+            except Exception as e:
+                logger.warning(f"獲取 {table_name} 最大ID失敗: {e}")
+                return 0
+    
     def get_last_sync_date(self, local_conn, table_name: str) -> Optional[date]:
-        """獲取本地最後同步日期"""
+        """獲取本地最後同步日期（用於其他表的date-based sync）"""
         with local_conn.cursor() as cur:
             try:
                 # 嘗試從date欄位獲取
@@ -100,6 +111,8 @@ class IncrementalSyncService:
                               days_overlap: int = 3) -> Dict:
         """
         增量同步指定表
+        - completed_trips: 使用ID-based sync保護本地歷史數據
+        - 其他表: 使用date-based sync
         
         Args:
             local_conn: 本地資料庫連接
@@ -124,30 +137,45 @@ class IncrementalSyncService:
         try:
             with local_conn.cursor() as local_cur, render_conn.cursor(cursor_factory=DictCursor) as render_cur:
                 
-                # 1. 獲取本地最新日期
-                last_local_date = self.get_last_sync_date(local_conn, table_name)
-                
-                if last_local_date is None:
-                    # 如果本地沒有數據，從較早日期開始
-                    sync_from_date = date(2024, 1, 1)
-                    logger.info(f"   - 本地無數據，從 {sync_from_date} 開始同步")
-                else:
-                    # 往前推幾天，確保不遺漏
-                    sync_from_date = last_local_date - timedelta(days=days_overlap)
-                    logger.info(f"   - 本地最新日期: {last_local_date}，從 {sync_from_date} 開始同步")
-                
-                # 2. 獲取表結構
+                # 獲取表結構
                 all_columns = self.get_table_columns(render_conn, table_name)
                 filtered_columns = self.filter_generated_columns(table_name, all_columns)
-                
-                # 3. 從Render讀取新數據
                 columns_str = ', '.join(filtered_columns)
-                render_cur.execute(f"""
-                    SELECT {columns_str} 
-                    FROM {table_name} 
-                    WHERE {date_column} >= %s 
-                    ORDER BY {date_column}, id
-                """, (sync_from_date,))
+                
+                # 1. 根據表名選擇同步策略
+                if table_name == 'completed_trips':
+                    # completed_trips 使用ID-based sync，保護本地歷史數據
+                    last_local_id = self.get_last_sync_id(local_conn, table_name)
+                    logger.info(f"   - 本地最大ID: {last_local_id}")
+                    
+                    # 從Render讀取ID大於本地最大ID的數據
+                    render_cur.execute(f"""
+                        SELECT {columns_str} 
+                        FROM {table_name} 
+                        WHERE id > %s 
+                        ORDER BY id
+                    """, (last_local_id,))
+                    
+                else:
+                    # 其他表使用date-based sync
+                    last_local_date = self.get_last_sync_date(local_conn, table_name)
+                    
+                    if last_local_date is None:
+                        # 如果本地沒有數據，從較早日期開始
+                        sync_from_date = date(2024, 1, 1)
+                        logger.info(f"   - 本地無數據，從 {sync_from_date} 開始同步")
+                    else:
+                        # 往前推幾天，確保不遺漏
+                        sync_from_date = last_local_date - timedelta(days=days_overlap)
+                        logger.info(f"   - 本地最新日期: {last_local_date}，從 {sync_from_date} 開始同步")
+                    
+                    # 從Render讀取新數據
+                    render_cur.execute(f"""
+                        SELECT {columns_str} 
+                        FROM {table_name} 
+                        WHERE {date_column} >= %s 
+                        ORDER BY {date_column}, id
+                    """, (sync_from_date,))
                 
                 new_records = render_cur.fetchall()
                 

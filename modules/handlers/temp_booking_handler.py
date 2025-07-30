@@ -151,7 +151,7 @@ def _handle_ai_input(user_id, message_text):
             logger.error("❌ AI未能提取任何有效信息 (initial) - 可能是API調用失敗、憑證問題或解析失敗")
             from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
             quick_reply = QuickReply(items=[
-                QuickReplyItem(action=MessageAction(label="✘ 取消預約", text="取消")),
+                QuickReplyItem(action=MessageAction(label="✘ 放棄預約", text="放棄")),
                 QuickReplyItem(action=MessageAction(label="🚪 退出", text="退出"))
             ])
             return {"type": "text", "text": "🔧 AI解析服務暫時不可用，請稍後再試或使用完整命令格式。\n\n範例：\n明天下午3點從台北車站到桃園機場", "quick_reply": quick_reply.to_dict()}

@@ -593,9 +593,21 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True, pars
 
 ⚠️ 請說明修改原因（例如：客戶要求調整、等候時間過長等）"""
                         
+                        # 🔥 新增：加入 Quick Reply 放棄按鈕
                         return {
-                            "type": "text",
-                            "message": confirmation_message
+                            "type": "quick_reply", 
+                            "text": confirmation_message,
+                            "quick_reply": {
+                                "items": [
+                                    {
+                                        "action": {
+                                            "type": "message",
+                                            "label": "放棄修改",
+                                            "text": "/取消"
+                                        }
+                                    }
+                                ]
+                            }
                         }
                     else:
                         # 有明確原因，直接執行修改
@@ -963,8 +975,8 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True, pars
                 ),
                 QuickReplyItem(
                     action=MessageAction(
-                        label="❌ 取消查詢",
-                        text="取消"
+                        label="❌ 放棄查詢",
+                        text="放棄"
                     )
                 )
             ]
@@ -1019,7 +1031,7 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True, pars
                 QuickReplyItem(action=MessageAction(label="✅ 確認正確", text="確認")),
                 QuickReplyItem(action=MessageAction(label="❌ 理解錯誤", text="不對")),
                 QuickReplyItem(action=MessageAction(label="🔍 重新查詢", text="重新查詢")),
-                QuickReplyItem(action=MessageAction(label="🚫 取消查詢", text="取消"))
+                QuickReplyItem(action=MessageAction(label="🚫 放棄查詢", text="放棄"))
             ])
             
             return {
@@ -1149,8 +1161,8 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True, pars
                         ),
                         QuickReplyItem(
                             action=MessageAction(
-                                label="❌ 取消修改",
-                                text="取消修改"
+                                label="❌ 放棄修改",
+                                text="放棄修改"
                             )
                         )
                     ]

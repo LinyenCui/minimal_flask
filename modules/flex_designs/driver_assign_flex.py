@@ -72,8 +72,8 @@ def get_driver_assign_flex(trip_id, trip_info=None):
                     "type": "button",
                     "action": {
                         "type": "message",
-                        "label": "取消",
-                        "text": f"取消指派 {trip_id}"
+                        "label": "放棄",
+                        "text": f"放棄指派 {trip_id}"
                     },
                     "style": "secondary",
                     "color": "#999999"

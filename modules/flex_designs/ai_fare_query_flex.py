@@ -555,8 +555,8 @@ def create_ai_modification_confirm_flex(modification_info):
             ),
             QuickReplyItem(
                 action=MessageAction(
-                    label="❌ 取消修改",
-                    text="取消AI修改"
+                    label="❌ 放棄修改",
+                    text="放棄AI修改"
                 )
             ),
             QuickReplyItem(
