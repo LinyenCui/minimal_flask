@@ -1521,9 +1521,11 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                         return
                 
                 else:
-                    # 其他命令暫時保持原有邏輯
+                    # 🔥 修復：其他命令需要繼續處理，而不是直接return
                     reply_text(reply_token, f"🤖 AI理解您的需求：{command}\n正在處理...")
-                    return
+                    # 🔥 關鍵修復：將解析出的command設為用戶輸入，繼續在主處理邏輯中執行
+                    text = command  # 將AI解析的命令替換為用戶輸入，繼續執行後續邏輯
+                    # 不要return，讓程序繼續執行主處理邏輯
                 
             elif smart_result["type"] == "smart_guidance":
                 # 智能助手提供引導
