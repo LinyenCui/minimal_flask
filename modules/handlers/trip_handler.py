@@ -192,10 +192,10 @@ def handle_trip_details(trip_id):
             t.via_point,   -- 使用原始 short_name
             t.end_point,   -- 使用原始 short_name
             t.status,
-            t.custom_start_point, # 新增
-            t.custom_via_point,   # 新增
-            t.custom_end_point,   # 新增
-            t.trip_type,          # <--- 確保選取 trip_type
+            t.custom_start_point, -- 新增
+            t.custom_via_point,   -- 新增
+            t.custom_end_point,   -- 新增
+            t.trip_type,          -- 確保選取 trip_type
             t.category,
             t.meter_fare,
             t.extra_fare,

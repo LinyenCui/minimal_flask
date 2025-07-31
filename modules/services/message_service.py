@@ -35,7 +35,16 @@ def handle_message(message_text, user_id, in_group=False):
         
         # 修改班次狀態命令
         if command in ["修改狀態", "更改狀態"]:
-            return create_text_message(handle_update_trip_status(message_text))
+            result = handle_update_trip_status(message_text)
+            
+            # 🔥 處理新的Quick Reply返回格式（參考車資修改成功模式）
+            if isinstance(result, dict) and result.get("type") == "quick_reply":
+                # 請假功能返回的Quick Reply格式
+                from linebot.v3.messaging import TextMessage
+                return TextMessage(text=result["text"], quick_reply=result["quick_reply"])
+            else:
+                # 其他狀態修改的普通文字回覆
+                return create_text_message(result)
         
         # 確認取消班次命令
         elif command == "確認取消":

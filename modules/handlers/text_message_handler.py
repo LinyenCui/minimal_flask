@@ -1001,8 +1001,24 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                     import traceback
                     logger.error(f"❌ 詳細錯誤: {traceback.format_exc()}")
                 
-                # 提供交互提示（類似乘客請假）
-                reply_text(reply_token, f"固定班次 #{schedule_id} 乘客長期請假\n\n請輸入：[原因] [加成]\n\n例如：\n診所乘客長期住院 -50\n出國一個月 0\n搬家不再需要 -100\n\n💡 提示：先寫原因，最後寫加成金額")
+                # 🔥 新增：提供Quick Reply退出機制（參考車資修改和班次請假成功模式）
+                from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+                
+                # 創建Quick Reply按鈕
+                quick_reply_items = [
+                    QuickReplyItem(
+                        action=MessageAction(
+                            label="❌ 放棄操作",
+                            text="放棄操作"
+                        )
+                    )
+                ]
+                
+                quick_reply = QuickReply(items=quick_reply_items)
+                message_text = f"固定班次 #{schedule_id} 乘客長期請假\n\n請輸入：[原因] [加成]\n\n例如：\n診所乘客長期住院 -50\n出國一個月 0\n搬家不再需要 -100\n\n💡 提示：先寫原因，最後寫加成金額\n\n🚪 退出方式：點擊下方「放棄操作」按鈕"
+                
+                # 使用與車資修改相同的Quick Reply發送機制
+                reply_message_with_quick_reply(reply_token, message_text, quick_reply)
                 return
         
         elif message_text.startswith("固定班次請假"):

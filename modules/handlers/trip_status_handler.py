@@ -165,7 +165,28 @@ def handle_update_trip_status(message_text, user_id=None):
             else:
                 logger.warning(f"無法設置請假模式：未提供 user_id")
             
-            return f"班次 #{trip_id} 乘客請假\n\n請輸入：[原因] [加成]\n\n例如：\n新建路乘客臨時有事 -30\n中華南路乘客身體不適 -50\n\n💡 提示：先寫原因，最後寫加成金額"
+            # 🔥 新增：使用與車資修改相同的Quick Reply機制
+            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+            
+            # 創建Quick Reply按鈕（參考車資修改成功模式）
+            quick_reply_items = [
+                QuickReplyItem(
+                    action=MessageAction(
+                        label="❌ 放棄操作",
+                        text="放棄操作"
+                    )
+                )
+            ]
+            
+            quick_reply = QuickReply(items=quick_reply_items)
+            message_text = f"班次 #{trip_id} 乘客請假\n\n請輸入：[原因] [加成]\n\n例如：\n新建路乘客臨時有事 -30\n中華南路乘客身體不適 -50\n\n💡 提示：先寫原因，最後寫加成金額\n\n🚪 退出方式：點擊下方「放棄操作」按鈕"
+            
+            # 🔥 關鍵：返回與車資修改相同的字典格式
+            return {
+                "type": "quick_reply", 
+                "text": message_text, 
+                "quick_reply": quick_reply
+            }
 
         logger.error(f"Reached unexpected end of handle_update_trip_status logic for trip {trip_id} to {new_status}.")
         return f"試圖將班次 #{trip_id} 狀態改為 '{new_status}'，但此操作未被明確處理。"
