@@ -1,4 +1,5 @@
 # modules/handlers/text_message_handler.py
+# 測試修改 - 觸發自動文檔同步檢查
 import traceback
 import logging
 from flask import current_app
