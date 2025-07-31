@@ -213,12 +213,12 @@ class ConversationContext:
                         start_point = trip_data.get('start_point') or '未知'
                         end_point = trip_data.get('end_point') or '未知'
                     
-                    # 顯示actual_fare金額（如果有的話）
-                    actual_fare = trip_data.get('actual_fare')
-                    fare_info = f" 💰{actual_fare}" if actual_fare else ""
+                    # 🔥 修改：顯示執行時間而非金額（與主查詢保持一致）
+                    trip_time = trip_data.get('time')
+                    time_info = f"⏰{trip_time.strftime('%H:%M')}-" if trip_time else ""
                     
-                    # 🔥 修改：使用新格式，去掉📍圖示，加上金額
-                    result_text += f"#{trip_id}-{start_point}→{end_point}|{driver_info}{fare_info}\n"
+                    # 🔥 修改：使用統一格式，執行時間在id之後起點之前
+                    result_text += f"#{trip_id} {time_info}{start_point}→{end_point}|{driver_info}\n"
                 result_text += "\n"
         
         # 計算總頁數
