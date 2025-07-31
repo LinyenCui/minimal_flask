@@ -497,7 +497,7 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                             from linebot.v3.messaging import FlexMessage, FlexContainer, QuickReply, QuickReplyItem, PostbackAction
                             
                             # 添加Quick Reply
-                            if 'quick_reply' in result:
+                            if 'quick_reply' in result and result['quick_reply'] is not None:
                                 quick_reply_items = []
                                 for item in result['quick_reply']['items']:
                                     action = item['action']

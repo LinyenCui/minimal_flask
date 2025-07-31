@@ -16,18 +16,42 @@ def get_trip_details_flex(trip_id, trip_data):
     can_modify_status = True
     restriction_message = ""
     
+    # 🔥 優化：使用trip_data中的日期和時間，避免重複數據庫查詢
     try:
-        from modules.models.trip import Trip
-        from modules.models.base import db
-        
-        trip = db.session.query(Trip).filter_by(trip_id=trip_id).first()
-        
-        if trip:
-            can_modify_status = trip.can_modify_status()
+        if trip_data.get('date') and trip_data.get('time'):
+            from datetime import datetime, timedelta
+            import pytz
+            
+            # 設置台灣時區
+            taiwan_tz = pytz.timezone('Asia/Taipei')
+            current_time = datetime.now(taiwan_tz)
+            
+            # 組合班次的完整執行時間（台灣時區）
+            trip_date = trip_data['date']
+            trip_time = trip_data['time'] 
+            trip_datetime = datetime.combine(trip_date, trip_time)
+            trip_datetime = taiwan_tz.localize(trip_datetime)
+            
+            # 計算30分鐘前的時間點
+            restriction_start_time = trip_datetime - timedelta(minutes=30)
+            
+            # 檢查是否可以修改
+            can_modify_status = current_time < restriction_start_time
+            
             if not can_modify_status:
-                restriction_message = trip.get_restriction_message()
+                if current_time >= trip_datetime:
+                    restriction_message = f"⚠️ 班次已過執行時間，無法修改狀態 (執行時間: {trip_time.strftime('%H:%M')})"
+                else:
+                    remaining_time = trip_datetime - current_time
+                    remaining_minutes = int(remaining_time.total_seconds() / 60)
+                    restriction_message = f"⏰ 執行前30分鐘內不可修改狀態 (還有 {remaining_minutes} 分鐘執行，{restriction_start_time.strftime('%H:%M')}後即不可修改)"
+        else:
+            logger.warning(f"班次 {trip_id} 缺少日期或時間資訊，預設允許修改")
     except Exception as e:
         logger.error(f"檢查修改權限時出錯: {e}")
+        # 🔥 修復：異常時預設允許修改，避免影響Flex Message生成
+        can_modify_status = True
+        restriction_message = ""
     
     # 格式化日期
     trip_date_obj = trip_data.get('date')
@@ -55,19 +79,25 @@ def get_trip_details_flex(trip_id, trip_data):
     body_contents.append({ "type": "box", "layout": "horizontal", "margin": "md", "contents": [ { "type": "text", "text": "終點", "size": "sm", "color": "#555555", "flex": 2 },{ "type": "text", "text": trip_data.get('display_end_point', trip_data.get('end_point')) or '未指定', "size": "sm", "color": "#111111", "flex": 5, "wrap": True }]})
     
     # 獲取顯示狀態
-    from modules.handlers.passenger_leave_handler import get_display_status
+    try:
+        from modules.handlers.passenger_leave_handler import get_display_status
+        
+        class TempTrip:
+            def __init__(self, trip_data):
+                self.status = trip_data.get('status')
+                self.modification_reason = trip_data.get('modification_reason')
+                self.passenger_leave_reason = trip_data.get('passenger_leave_reason')
+        
+        temp_trip = TempTrip(trip_data)
+        display_status = get_display_status(temp_trip)
+    except Exception as e:
+        logger.error(f"獲取顯示狀態失敗: {e}")
+        # 🔥 修復：回退到基本狀態，確保Flex Message能正常生成
+        display_status = trip_data.get('status', '未指定')
     
-    class TempTrip:
-        def __init__(self, trip_data):
-            self.status = trip_data.get('status')
-            self.modification_reason = trip_data.get('modification_reason')
-            self.passenger_leave_reason = trip_data.get('passenger_leave_reason')
-    
-    temp_trip = TempTrip(trip_data)
-    display_status = get_display_status(temp_trip)
-    
-    status_color_map = { "待派": "#FF6B6E", "準備": "#6CD8A0", "取消": "#888888", "衝突": "#FF9153", "請假": "#A0A0FF", "完成": "#1DB446" }
+    # 🔥 修復：將main_status移到try-catch外面，確保變量作用域正確
     main_status = display_status.split()[0] if display_status else '未指定'
+    status_color_map = { "待派": "#FF6B6E", "準備": "#6CD8A0", "取消": "#888888", "衝突": "#FF9153", "請假": "#A0A0FF", "完成": "#1DB446" }
     status_color = status_color_map.get(main_status, "#111111")
     
     body_contents.append({ "type": "box", "layout": "horizontal", "margin": "md", "contents": [ { "type": "text", "text": "狀態", "size": "sm", "color": "#555555", "flex": 2 },{ "type": "text", "text": display_status, "size": "sm", "color": status_color, "weight": "bold", "flex": 5, "wrap": True }]})
