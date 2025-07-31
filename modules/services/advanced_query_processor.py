@@ -675,12 +675,12 @@ class AdvancedQueryProcessor:
                         start_point = trip.get('start_point') or '未知'
                         end_point = trip.get('end_point') or '未知'
                     
-                    # 🔥 新增：顯示actual_fare金額（如果有的話）
-                    actual_fare = trip.get('actual_fare')
-                    fare_info = f" 💰{actual_fare}" if actual_fare else ""
+                    # 🔥 修改：顯示執行時間而非金額（根據用戶要求），時間排在id之後起點之前
+                    trip_time = trip.get('time')
+                    time_info = f"⏰{trip_time.strftime('%H:%M')}-" if trip_time else ""
                     
-                    # 🔥 修改：去掉📍圖示，保留#號，縮小字體，加上金額
-                    result_text += f"#{trip_id}-{start_point}→{end_point}|{driver_info}{fare_info}\n"
+                    # 🔥 修改：去掉📍圖示，保留#號和時鐘圖示，執行時間在id之後起點之前
+                    result_text += f"#{trip_id} {time_info}{start_point}→{end_point}|{driver_info}\n"
                 result_text += "\n"
             
             result_text += f"\n... 還有 {len(trips) - 10} 筆結果\n"
@@ -766,12 +766,12 @@ class AdvancedQueryProcessor:
                     start_point = trip.get('start_point') or '未知'
                     end_point = trip.get('end_point') or '未知'
                 
-                # 🔥 新增：顯示actual_fare金額（如果有的話）
-                actual_fare = trip.get('actual_fare')
-                fare_info = f" 💰{actual_fare}" if actual_fare else ""
+                # 🔥 修改：顯示執行時間而非金額（根據用戶要求），時間排在id之後起點之前
+                trip_time = trip.get('time')
+                time_info = f"⏰{trip_time.strftime('%H:%M')}-" if trip_time else ""
                 
-                # 🔥 修改：去掉📍圖示，保留#號，縮小字體，加上金額
-                result_text += f"#{trip_id}-{start_point}→{end_point}|{driver_info}{fare_info}\n"
+                # 🔥 修改：去掉📍圖示，保留#號和時鐘圖示，執行時間在id之後起點之前
+                result_text += f"#{trip_id} {time_info}{start_point}→{end_point}|{driver_info}\n"
             result_text += "\n"
 
         return {
