@@ -89,8 +89,8 @@ def query_completed_trips_range(start_date, end_date, driver_id=None, category=N
         # 基本查詢條件
         where_conditions = ["date >= :start_date", "date <= :end_date"]
         params = {
-            "start_date": start_date.strftime("%Y-%m-%d"),
-            "end_date": end_date.strftime("%Y-%m-%d")
+            "start_date": start_date,
+            "end_date": end_date
         }
         
         # 添加司機ID條件
@@ -144,8 +144,8 @@ def query_current_trips_range(start_date, end_date, driver_id=None, category=Non
         # 基本查詢條件
         where_conditions = ["date >= :start_date", "date <= :end_date"]
         params = {
-            "start_date": start_date.strftime("%Y-%m-%d"),
-            "end_date": end_date.strftime("%Y-%m-%d")
+            "start_date": start_date,
+            "end_date": end_date
         }
         
         # 添加司機ID條件
