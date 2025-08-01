@@ -97,6 +97,42 @@ class ToolRegistry:
             handler_function="handle_query_clinic_trips_flex"
         ))
         
+        # 查詢班次範圍（現在態）
+        self.register_tool(ToolDefinition(
+            name="query_current_trips_range",
+            category=ToolCategory.QUERY,
+            description="查詢指定日期範圍內的進行中班次，支援跨日期查詢trips表",
+            parameters=[
+                ToolParameter(
+                    name="date_range", 
+                    type="string", 
+                    description="日期範圍，格式：8/1-8/5, 2025-08-01-2025-08-05", 
+                    required=True
+                ),
+                ToolParameter(
+                    name="driver_id", 
+                    type="integer", 
+                    description="司機ID，用於篩選特定司機的班次", 
+                    required=False
+                ),
+                ToolParameter(
+                    name="category", 
+                    type="string", 
+                    description="班次類別：診所、東洋、臨時", 
+                    required=False
+                )
+            ],
+            returns="日期範圍內的進行中班次列表，按日期和時間排序",
+            examples=[
+                "查詢8/1到8/5的班次",
+                "司機5386在這週的所有班次",
+                "本週診所班次安排",
+                "8/1-8/7東洋班次狀況"
+            ],
+            handler_module="modules.services.date_range_query_service",
+            handler_function="handle_query_current_trips_range"
+        ))
+        
         # 查詢班次詳情
         self.register_tool(ToolDefinition(
             name="get_trip_details",
@@ -237,6 +273,42 @@ class ToolRegistry:
             ],
             handler_module="modules.services.trip_query_service",
             handler_function="handle_query_completed_trips_enhanced"
+        ))
+        
+        # 查詢已完成班次範圍（新增）
+        self.register_tool(ToolDefinition(
+            name="query_completed_trips_range",
+            category=ToolCategory.QUERY,
+            description="查詢指定日期範圍內的已完成班次記錄，支援跨日期查詢",
+            parameters=[
+                ToolParameter(
+                    name="date_range", 
+                    type="string", 
+                    description="日期範圍，格式：7/28-7/30, 2025-07-28-2025-07-30", 
+                    required=True
+                ),
+                ToolParameter(
+                    name="driver_id", 
+                    type="integer", 
+                    description="司機ID，用於篩選特定司機的班次", 
+                    required=False
+                ),
+                ToolParameter(
+                    name="category", 
+                    type="string", 
+                    description="班次類別：診所、東洋、臨時", 
+                    required=False
+                )
+            ],
+            returns="日期範圍內的已完成班次列表，按日期排序",
+            examples=[
+                "查詢7/28到7/30的已完成班次",
+                "司機5386在7/28-7/30的所有班次",
+                "上週診所班次完成情況",
+                "7/25-7/31東洋班次統計"
+            ],
+            handler_module="modules.services.date_range_query_service",
+            handler_function="handle_query_completed_trips_range"
         ))
         
         # 記錄車資
