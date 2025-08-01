@@ -19,33 +19,18 @@ batch_allowance_states = {}
 
 def parse_date_input(date_str):
     """解析日期輸入，支持單日期和日期範圍"""
+    from modules.services.date_range_query_service import parse_date_range
+    
     date_str = date_str.strip()
     
-    # 日期範圍格式：7/7-7/10 或 7/7到7/10
-    range_patterns = [
-        r'^(\d{1,2})/(\d{1,2})\s*[-到]\s*(\d{1,2})/(\d{1,2})$',
-        r'^(\d{1,2})/(\d{1,2})\s*-\s*(\d{1,2})/(\d{1,2})$'
-    ]
+    # 嘗試使用統一的日期範圍解析器
+    start_date, end_date = parse_date_range(date_str)
     
-    for pattern in range_patterns:
-        match = re.match(pattern, date_str)
-        if match:
-            start_month, start_day, end_month, end_day = match.groups()
-            current_year = get_taiwan_time().year
-            
-            try:
-                start_date = f"{current_year}-{int(start_month):02d}-{int(start_day):02d}"
-                end_date = f"{current_year}-{int(end_month):02d}-{int(end_day):02d}"
-                
-                # 驗證日期有效性
-                datetime.strptime(start_date, "%Y-%m-%d")
-                datetime.strptime(end_date, "%Y-%m-%d")
-                
-                return start_date, end_date
-            except ValueError:
-                return None, None
+    if start_date and end_date:
+        # 返回YYYY-MM-DD格式字符串（保持向後兼容）
+        return start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
     
-    # 使用統一日期解析器處理單日期
+    # 回退：使用統一日期解析器處理單日期
     try:
         parsed_date = UnifiedDateParser.parse(date_str)
         single_date = parsed_date.strftime("%Y-%m-%d")
