@@ -9,20 +9,8 @@ from sqlalchemy import text
 from modules.utils.unified_date_parser import UnifiedDateParser
 from modules.utils.taiwan_time import get_taiwan_date
 
-# 延遲導入db避免循環導入
-db = None
-
-def get_db():
-    """獲取資料庫連接"""
-    global db
-    if db is None:
-        try:
-            from database import db as _db
-            db = _db
-        except ImportError:
-            # 測試環境中可能沒有資料庫
-            pass
-    return db
+# 直接導入db，與其他服務保持一致
+from modules.models.base import db
 
 logger = logging.getLogger(__name__)
 
@@ -116,15 +104,20 @@ def query_completed_trips_range(start_date, end_date, driver_id=None, category=N
         ORDER BY date, id
         """
         
-        db_conn = get_db()
-        if not db_conn:
-            return []
+        # 調試日誌
+        logger.info(f"🔍 執行SQL查詢:")
+        logger.info(f"   SQL: {query_sql}")
+        logger.info(f"   參數: {params}")
         
-        results = db_conn.session.execute(text(query_sql), params).fetchall()
+        results = db.session.execute(text(query_sql), params).fetchall()
+        logger.info(f"🔍 查詢結果數量: {len(results)}")
+        
         return results
         
     except Exception as e:
         logger.error(f"查詢已完成班次範圍失敗: {e}")
+        import traceback
+        logger.error(f"詳細錯誤: {traceback.format_exc()}")
         return []
 
 def query_current_trips_range(start_date, end_date, driver_id=None, category=None):
@@ -163,21 +156,26 @@ def query_current_trips_range(start_date, end_date, driver_id=None, category=Non
         query_sql = f"""
         SELECT 
             trip_id, date, time, start_point, end_point, category,
-            driver_id, status, trip_type, client_id
+            driver_id, status, trip_type
         FROM trips 
         WHERE {where_clause}
         ORDER BY date, time, trip_id
         """
         
-        db_conn = get_db()
-        if not db_conn:
-            return []
+        # 調試日誌
+        logger.info(f"🔍 執行現在態SQL查詢:")
+        logger.info(f"   SQL: {query_sql}")
+        logger.info(f"   參數: {params}")
         
-        results = db_conn.session.execute(text(query_sql), params).fetchall()
+        results = db.session.execute(text(query_sql), params).fetchall()
+        logger.info(f"🔍 現在態查詢結果數量: {len(results)}")
+        
         return results
         
     except Exception as e:
         logger.error(f"查詢進行中班次範圍失敗: {e}")
+        import traceback
+        logger.error(f"詳細錯誤: {traceback.format_exc()}")
         return []
 
 def format_completed_trips_range_result(trips, start_date, end_date, driver_id=None, category=None):
@@ -335,7 +333,7 @@ def format_current_trips_range_result(trips, start_date, end_date, driver_id=Non
                 break
                 
             trip_id, date, time, start_point, end_point, category = trip[:6]
-            driver_id_result, status = trip[6:8]
+            driver_id_result, status, trip_type = trip[6:9]
             
             status_emoji = {"待派": "⏳", "準備": "🚀", "已完成": "✅"}.get(status, "❓")
             
@@ -372,8 +370,21 @@ def handle_query_completed_trips_range(message_text):
         for part in parts[2:]:
             if part.isdigit():
                 driver_id = int(part)
+            elif part.startswith("司機") and len(part) > 2:
+                # 處理 "司機5386" 格式
+                driver_str = part[2:]  # 移除"司機"前綴
+                if driver_str.isdigit():
+                    driver_id = int(driver_str)
             elif part in ["診所", "東洋", "臨時"]:
                 category = part
+            else:
+                # 處理複合參數，如 "5386診所班次", "5386東洋班次"
+                import re
+                # 匹配數字+類別的模式
+                match = re.match(r'^(\d+)(診所|東洋|臨時)', part)
+                if match:
+                    driver_id = int(match.group(1))
+                    category = match.group(2)
         
         # 查詢數據
         trips = query_completed_trips_range(start_date, end_date, driver_id, category)
@@ -411,8 +422,21 @@ def handle_query_current_trips_range(message_text):
         for part in parts[2:]:
             if part.isdigit():
                 driver_id = int(part)
+            elif part.startswith("司機") and len(part) > 2:
+                # 處理 "司機5386" 格式
+                driver_str = part[2:]  # 移除"司機"前綴
+                if driver_str.isdigit():
+                    driver_id = int(driver_str)
             elif part in ["診所", "東洋", "臨時"]:
                 category = part
+            else:
+                # 處理複合參數，如 "5386診所班次", "5386東洋班次"
+                import re
+                # 匹配數字+類別的模式
+                match = re.match(r'^(\d+)(診所|東洋|臨時)', part)
+                if match:
+                    driver_id = int(match.group(1))
+                    category = match.group(2)
         
         # 查詢數據
         trips = query_current_trips_range(start_date, end_date, driver_id, category)

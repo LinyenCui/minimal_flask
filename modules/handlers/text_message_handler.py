@@ -852,6 +852,31 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 reply_text(reply_token, f"查詢班次失敗: {str(e)}")
                 return
             
+        # --- 🔥 新增：跨日期範圍查詢處理 ---
+        elif message_text.startswith("查已完成範圍"):
+            try:
+                logger.info(f"🎯 處理查已完成範圍命令: {message_text}")
+                from modules.services.date_range_query_service import handle_query_completed_trips_range
+                result = handle_query_completed_trips_range(message_text)
+                reply_text(reply_token, result)
+                return
+            except Exception as e:
+                logger.error(f"❌ 查已完成範圍處理失敗: {e}")
+                reply_text(reply_token, f"查詢失敗: {str(e)}")
+                return
+                
+        elif message_text.startswith("查班次範圍"):
+            try:
+                logger.info(f"🎯 處理查班次範圍命令: {message_text}")
+                from modules.services.date_range_query_service import handle_query_current_trips_range
+                result = handle_query_current_trips_range(message_text)
+                reply_text(reply_token, result)
+                return
+            except Exception as e:
+                logger.error(f"❌ 查班次範圍處理失敗: {e}")
+                reply_text(reply_token, f"查詢失敗: {str(e)}")
+                return
+
         # --- 🔥 修復：查詢已完成班次使用AI車資服務的Flex Message --- 
         elif message_text.startswith("查已完成"):
             try:
@@ -1345,6 +1370,31 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                         reply_text(reply_token, f"❌ 智能引導失敗：{str(e)}")
                         return
                 
+                # 🔥 新增：智能助手路由的跨日期範圍查詢
+                elif command.startswith("查已完成範圍"):
+                    try:
+                        logger.info(f"🎯 智能助手路由查已完成範圍命令: {command}")
+                        from modules.services.date_range_query_service import handle_query_completed_trips_range
+                        result = handle_query_completed_trips_range(command)
+                        reply_text(reply_token, result)
+                        return
+                    except Exception as e:
+                        logger.error(f"❌ 查已完成範圍處理失敗: {e}")
+                        reply_text(reply_token, f"查詢失敗: {str(e)}")
+                        return
+                        
+                elif command.startswith("查班次範圍"):
+                    try:
+                        logger.info(f"🎯 智能助手路由查班次範圍命令: {command}")
+                        from modules.services.date_range_query_service import handle_query_current_trips_range
+                        result = handle_query_current_trips_range(command)
+                        reply_text(reply_token, result)
+                        return
+                    except Exception as e:
+                        logger.error(f"❌ 查班次範圍處理失敗: {e}")
+                        reply_text(reply_token, f"查詢失敗: {str(e)}")
+                        return
+
                 # 🔥 修復路由邏輯：查已完成命令使用AI車資服務
                 elif command.startswith("查已完成"):
                     # 🔥 關鍵修復：智能助手路由的查已完成也使用AI車資服務，並傳遞parsed_command
