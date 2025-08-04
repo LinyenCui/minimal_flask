@@ -74,8 +74,18 @@ class AdvancedQueryProcessor:
             where_conditions = []
             params = {}
             
-            # 添加日期條件
-            if conditions.get('date'):
+            # 🔥 修復：添加日期條件 - 支援日期範圍
+            if conditions.get('date_range'):
+                # 處理日期範圍
+                date_range = conditions['date_range']
+                where_conditions.append("ct.date >= :start_date AND ct.date <= :end_date")
+                params.update({
+                    'start_date': date_range['start'],
+                    'end_date': date_range['end']
+                })
+                self.logger.info(f"🗓️ 添加日期範圍條件: {date_range['start']} 到 {date_range['end']}")
+            elif conditions.get('date'):
+                # 處理單一日期
                 date_condition, date_params = self._build_date_condition(conditions['date'])
                 where_conditions.append(date_condition)
                 params.update(date_params)
@@ -207,8 +217,17 @@ class AdvancedQueryProcessor:
             where_conditions = []
             params = {}
             
-            # 添加日期條件
-            if conditions.get('date'):
+            # 🔥 修復：添加日期條件 - 支援日期範圍
+            if conditions.get('date_range'):
+                # 處理日期範圍
+                date_range = conditions['date_range']
+                where_conditions.append("t.date >= :start_date AND t.date <= :end_date")
+                params.update({
+                    'start_date': date_range['start'],
+                    'end_date': date_range['end']
+                })
+            elif conditions.get('date'):
+                # 處理單一日期
                 date_condition, date_params = self._build_date_condition(conditions['date'], 't')
                 where_conditions.append(date_condition)
                 params.update(date_params)
@@ -307,35 +326,70 @@ class AdvancedQueryProcessor:
                 date_found = True
                 break
         
-        # 2. 🔥 新增：如果沒找到相對日期，嘗試解析具體日期格式
+        # 2. 🔥 新增：如果沒找到相對日期，檢查是否為日期範圍格式
         if not date_found:
-            # 各種日期格式的正則表達式
-            date_patterns = [
-                r'\d{4}-\d{1,2}-\d{1,2}',  # YYYY-MM-DD
-                r'\d{1,2}/\d{1,2}',         # MM/DD 或 M/D  
-                r'\d{1,2}-\d{1,2}',         # MM-DD 或 M-D
-                r'\d{1,2}月\d{1,2}日?',     # MM月DD日
-                r'(?<!\d)\d{3,4}(?!\d)'     # MMDD格式（避免被司機ID誤判）
+            # 🔥 優先檢查日期範圍格式 (如 7/28-8/2)
+            date_range_patterns = [
+                r'(\d{1,2}/\d{1,2})\s*[-到至~]\s*(\d{1,2}/\d{1,2})',  # MM/DD-MM/DD
+                r'(\d{4}-\d{1,2}-\d{1,2})\s*[-到至~]\s*(\d{4}-\d{1,2}-\d{1,2})',  # YYYY-MM-DD範圍
             ]
             
-            for pattern in date_patterns:
-                matches = re.findall(pattern, command)
-                for match in matches:
+            for pattern in date_range_patterns:
+                range_match = re.search(pattern, command)
+                if range_match:
+                    start_date_str = range_match.group(1)
+                    end_date_str = range_match.group(2)
+                    
                     try:
-                        # 🔥 關鍵：使用統一的日期解析器
-                        parsed_date = parse_date_input(match)
-                        if parsed_date:
-                            # 將解析出的具體日期轉換為字符串格式
-                            conditions['date'] = parsed_date.strftime('%Y-%m-%d')
+                        # 解析開始和結束日期
+                        start_date = parse_date_input(start_date_str)
+                        end_date = parse_date_input(end_date_str)
+                        
+                        if start_date and end_date:
+                            # 確保開始日期不晚於結束日期
+                            if start_date > end_date:
+                                start_date, end_date = end_date, start_date
+                            
+                            conditions['date_range'] = {
+                                'start': start_date.strftime('%Y-%m-%d'),
+                                'end': end_date.strftime('%Y-%m-%d')
+                            }
                             date_found = True
-                            self.logger.info(f"🗓️ 解析具體日期: '{match}' → '{conditions['date']}'")
+                            self.logger.info(f"🗓️ 解析日期範圍: '{start_date_str}' 到 '{end_date_str}' → {start_date.strftime('%Y-%m-%d')} 到 {end_date.strftime('%Y-%m-%d')}")
                             break
                     except Exception as e:
-                        self.logger.warning(f"日期解析失敗: {match}, 錯誤: {e}")
+                        self.logger.warning(f"日期範圍解析失敗: {start_date_str}-{end_date_str}, 錯誤: {e}")
                         continue
+            
+            # 3. 如果不是日期範圍，嘗試解析單一具體日期
+            if not date_found:
+                # 各種日期格式的正則表達式
+                date_patterns = [
+                    r'\d{4}-\d{1,2}-\d{1,2}',  # YYYY-MM-DD
+                    r'\d{1,2}/\d{1,2}',         # MM/DD 或 M/D  
+                    r'\d{1,2}-\d{1,2}',         # MM-DD 或 M-D
+                    r'\d{1,2}月\d{1,2}日?',     # MM月DD日
+                    r'(?<!\d)\d{3,4}(?!\d)'     # MMDD格式（避免被司機ID誤判）
+                ]
                 
-                if date_found:
-                    break
+                for pattern in date_patterns:
+                    matches = re.findall(pattern, command)
+                    for match in matches:
+                        try:
+                            # 🔥 關鍵：使用統一的日期解析器
+                            parsed_date = parse_date_input(match)
+                            if parsed_date:
+                                # 將解析出的具體日期轉換為字符串格式
+                                conditions['date'] = parsed_date.strftime('%Y-%m-%d')
+                                date_found = True
+                                self.logger.info(f"🗓️ 解析具體日期: '{match}' → '{conditions['date']}'")
+                                break
+                        except Exception as e:
+                            self.logger.warning(f"日期解析失敗: {match}, 錯誤: {e}")
+                            continue
+                    
+                    if date_found:
+                        break
         
         # 解析類別條件
         if '診所' in command:
@@ -452,13 +506,29 @@ class AdvancedQueryProcessor:
                 "conditions": conditions
             }
         
+        # 🔥 調試：記錄統計前的詳細信息
+        self.logger.info(f"🔍 統計查詢 - 原始結果數量: {len(trips)}")
+        
+        # 🔥 添加調試：檢查是否有金額為空的班次
+        trips_with_amount = [trip for trip in trips if trip.total_amount and float(trip.total_amount) > 0]
+        trips_without_amount = [trip for trip in trips if not trip.total_amount or float(trip.total_amount or 0) == 0]
+        
+        self.logger.info(f"🔍 有金額班次: {len(trips_with_amount)}, 無金額班次: {len(trips_without_amount)}")
+        
         # 計算總金額
         total_amount = sum(float(trip.total_amount or 0) for trip in trips)
         
-        # 🔥 關鍵：返回簡潔的總和結果，就像用戶期望的那樣
+        # 🔥 修復：統計時應該顯示所有匹配班次，而不僅僅是有金額的
+        # 但分別顯示有金額和無金額的統計
         result_text = f"🔍 AI智能搜索結果\n\n"
         result_text += f"💬 {command}\n"
-        result_text += f"📊 找到 {len(trips)} 個匹配班次，總金額：{total_amount:.0f}元"
+        
+        if trips_without_amount:
+            result_text += f"📊 找到 {len(trips)} 個匹配班次\n"
+            result_text += f"💰 其中 {len(trips_with_amount)} 筆有金額，總計：{total_amount:.0f}元\n"
+            result_text += f"📝 另有 {len(trips_without_amount)} 筆無金額記錄"
+        else:
+            result_text += f"📊 找到 {len(trips)} 個匹配班次，總金額：{total_amount:.0f}元"
         
         return {
             "type": "aggregation_success",
