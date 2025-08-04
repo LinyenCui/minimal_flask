@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 # Known commands (exact match, case-insensitive)
 KNOWN_COMMANDS = {
-    "幫助", "幫助文字", 
+    "幫助", "幫助文字", "完整指令列表", "搜尋幫助", "help_system_check",
     "預約叫車",      # This is our AI booking command
     "預約叫車幫助",  # Help for AI booking
     "東洋班次", "診所班次", "查已完成", "指派司機", "完成班次", "回報問題",
@@ -96,6 +96,12 @@ def should_process(message_text, source_type, user_id):
     if matched_known_command:
         logger.info(f"[should_process] Exact match for KNOWN command: '{matched_known_command}'")
         return True, matched_known_command
+    
+    # --- 🔰 幫助系統動態命令匹配 ---
+    if command_body.startswith(("help_category_", "help_item_", "help_search_", "help_demo_")):
+        logger.info(f"[should_process] Help system command matched: '{command_body}'")
+        return True, command_body
+        
     # --- END KNOWN_COMMANDS CHECK --- 
 
     if source_type in ["group", "room"]:

@@ -14,6 +14,7 @@ from modules.utils.line_bot import (
 )
 from modules.handlers.trip_handler import handle_query_trips, handle_trip_details, handle_change_status, handle_record_fare, handle_modify_category, handle_completed_trip_details
 from modules.flex_designs.help_flex import get_help_flex
+from modules.help_system.help_handler import HelpHandler
 from modules.handlers.temp_booking_handler import (
     handle_temp_booking_start,
     handle_temp_booking_message,
@@ -77,6 +78,9 @@ def handle_ai_fare_result(result, reply_token: str):
     except Exception as e:
         logger.error(f"處理AI車資查詢結果時出錯: {e}")
         reply_text(reply_token, "❌ 處理查詢結果時出現錯誤")
+
+# 初始化幫助系統處理器
+help_handler = HelpHandler()
 
 def process_text_message(event):
     """處理文本消息的主函數"""
@@ -724,55 +728,8 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 reply_text(reply_token, f"處理取消/放棄指派失敗: {str(e)}")
                 return
             
-        # 幫助（Flex Message版本）
-        elif message_text == '幫助':
-            try:
-                logger.info("處理幫助命令")
-                help_flex = get_help_flex()
-                logger.info(f"獲取到幫助Flex: {type(help_flex)}")
-                
-                # 记录完整的flex内容便于调试
-                logger.info(f"幫助Flex內容: {help_flex}")
-                
-                if help_flex:
-                    try:
-                        # 使用正確導入的reply_flex函數
-                        logger.info("嘗試发送Flex消息")
-                        reply_flex(reply_token, "幫助信息", help_flex)
-                        logger.info("Flex消息已发送")
-                        return
-                    except Exception as flex_error:
-                        logger.error(f"發送Flex消息時出錯: {flex_error}")
-                        traceback.print_exc()
-                        # 如果发送Flex失败，使用文本版本
-                        help_text = get_help_text()
-                        reply_text(reply_token, f"無法顯示圖形幫助菜單: {str(flex_error)}\n\n{help_text}")
-                        return
-                else:
-                    # 如果無法獲取Flex消息，使用文本版本
-                    logger.error("獲取幫助Flex失敗，使用文本版本")
-                    help_text = get_help_text()
-                    reply_text(reply_token, help_text)
-                    return
-            except Exception as e:
-                logger.error(f"處理幫助命令時出錯: {e}")
-                traceback.print_exc()
-                # 使用文本版本作為後備
-                help_text = get_help_text()
-                reply_text(reply_token, f"無法顯示圖形幫助菜單，使用文本版本：\n\n{help_text}")
-                return
-            
-        # 幫助（文字版本）
-        elif message_text == '幫助文字':
-            help_text = get_help_text()
-            reply_text(reply_token, help_text)
-            return
-            
-        # 完整指令列表
-        elif message_text == '完整指令':
-            from modules.flex_designs.help_flex import get_complete_commands_help
-            help_flex = get_complete_commands_help()
-            reply_flex(reply_token, "完整指令列表", help_flex)
+        # 🔰 幫助系統處理（使用獨立的 HelpHandler）
+        if help_handler.handle_help_request(message_text, user_id, reply_token):
             return
             
         # 處理匯入固定班次（一整周）
