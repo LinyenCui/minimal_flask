@@ -577,7 +577,6 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True, pars
                             'original_extra': trip['extra_fare']
                         }
                         
-                        from modules.utils.conversation_context import conversation_manager
                         conversation_manager.start_conversation(
                             user_id, "ai_modification_reason", 
                             current_step="waiting_reason",

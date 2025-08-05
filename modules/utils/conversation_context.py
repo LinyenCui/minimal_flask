@@ -367,7 +367,7 @@ class ConversationManager:
         
         # 定義各種對話的取消命令
         cancel_commands_map = {
-            'fare_modification': ['取消修改', '取消', '放棄修改', '退出', '不修改'],
+            'fare_modification': ['取消修改', '取消', '放棄修改', '退出', '不修改', '放棄', '放棄操作'],
             'temp_booking': ['取消預約', '取消', '放棄預約', '退出', '不預約'],
             'passenger_leave': ['取消請假', '取消', '放棄請假', '退出', '不請假', '放棄', '放棄操作'],
             'driver_assign': ['取消指派', '取消', '放棄指派', '退出', '不指派'],

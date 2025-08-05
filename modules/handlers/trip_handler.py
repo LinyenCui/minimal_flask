@@ -413,8 +413,71 @@ def handle_record_fare(message_text, user_id=None):
         extra_changed = current_extra != extra_fare
         has_changes = meter_changed or extra_changed
         
-        # 如果有變更但沒有提供原因，要求說明
+        # 如果有變更但沒有提供原因，啟動詢答模式
         if has_changes and not reason:
+            if user_id:
+                try:
+                    from modules.utils.conversation_context import conversation_manager
+                    # 使用統一對話系統
+                    change_summary = []
+                    if meter_changed:
+                        change_summary.append(f"錶價: {current_meter} → {meter_fare} ({meter_fare - current_meter:+d})")
+                    if extra_changed:
+                        change_summary.append(f"加成: {current_extra} → {extra_fare} ({extra_fare - current_extra:+d})")
+                    
+                    context_data = {
+                        'trip_id': completed_trip_id,
+                        'meter_fare': meter_fare,
+                        'extra_fare': extra_fare,
+                        'old_meter': current_meter,
+                        'old_extra': current_extra,
+                        'table': 'completed_trips',
+                        'changes': change_summary
+                    }
+                    
+                    conversation_manager.start_conversation(
+                        user_id=user_id,
+                        conversation_type='fare_modification',
+                        current_step='waiting_reason',
+                        context_data=context_data,
+                        prompt_message=f"已完成班次 #{completed_trip_id} 修改車資需要說明原因"
+                    )
+                    
+                    from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+                    quick_reply_items = [
+                        QuickReplyItem(
+                            action=MessageAction(
+                                label="❌ 放棄操作",
+                                text="放棄操作"
+                            )
+                        )
+                    ]
+                    
+                    quick_reply = QuickReply(items=quick_reply_items)
+                    message_text = f"""⚠️ 檢測到車資變更，請說明修改原因：
+
+📊 變更記錄：
+• {chr(10).join(change_summary)}
+
+💡 請輸入修改原因，例如：
+• 客戶要求調整價格
+• 收費錯誤更正
+• 路程變更調整
+
+🚪 退出方式：點擊下方「放棄操作」按鈕"""
+                    
+                    return {
+                        "type": "quick_reply", 
+                        "text": message_text, 
+                        "quick_reply": quick_reply
+                    }
+                    
+                except Exception as context_error:
+                    logger.error(f"設置車資修改對話時出錯: {context_error}")
+                    # 如果對話系統失敗，回退到原有邏輯
+                    pass
+            
+            # 回退到原有的錯誤提示
             change_summary = []
             if meter_changed:
                 change_summary.append(f"錶價: {current_meter} → {meter_fare} ({meter_fare - current_meter:+d})")
@@ -604,8 +667,71 @@ def handle_modify_fare(message_text, user_id=None):
             extra_changed = old_extra != extra_fare
             has_changes = meter_changed or extra_changed
             
-            # 如果有變更但沒有提供原因，要求說明
+            # 如果有變更但沒有提供原因，啟動詢答模式
             if has_changes and not reason:
+                if user_id:
+                    try:
+                        from modules.utils.conversation_context import conversation_manager
+                        # 使用統一對話系統
+                        change_summary = []
+                        if meter_changed:
+                            change_summary.append(f"錶價: {old_meter} → {meter_fare} ({meter_fare - old_meter:+d})")
+                        if extra_changed:
+                            change_summary.append(f"加成: {old_extra} → {extra_fare} ({extra_fare - old_extra:+d})")
+                        
+                        context_data = {
+                            'trip_id': trip_id,
+                            'meter_fare': meter_fare,
+                            'extra_fare': extra_fare,
+                            'old_meter': old_meter,
+                            'old_extra': old_extra,
+                            'table': 'trips',
+                            'changes': change_summary
+                        }
+                        
+                        conversation_manager.start_conversation(
+                            user_id=user_id,
+                            conversation_type='fare_modification',
+                            current_step='waiting_reason',
+                            context_data=context_data,
+                            prompt_message=f"班次 #{trip_id} 修改車資需要說明原因"
+                        )
+                        
+                        from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+                        quick_reply_items = [
+                            QuickReplyItem(
+                                action=MessageAction(
+                                    label="❌ 放棄操作",
+                                    text="放棄操作"
+                                )
+                            )
+                        ]
+                        
+                        quick_reply = QuickReply(items=quick_reply_items)
+                        message_text = f"""⚠️ 檢測到車資變更，請說明修改原因：
+
+📊 變更記錄：
+• {chr(10).join(change_summary)}
+
+💡 請輸入修改原因，例如：
+• 客戶要求調整價格
+• 收費錯誤更正
+• 路程變更調整
+
+🚪 退出方式：點擊下方「放棄操作」按鈕"""
+                        
+                        return {
+                            "type": "quick_reply", 
+                            "text": message_text, 
+                            "quick_reply": quick_reply
+                        }
+                        
+                    except Exception as context_error:
+                        logger.error(f"設置車資修改對話時出錯: {context_error}")
+                        # 如果對話系統失敗，回退到原有邏輯
+                        pass
+                
+                # 回退到原有的錯誤提示
                 change_summary = []
                 if meter_changed:
                     change_summary.append(f"錶價: {old_meter} → {meter_fare} ({meter_fare - old_meter:+d})")

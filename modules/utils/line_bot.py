@@ -183,6 +183,13 @@ def reply_message(reply_token, messages):
         import traceback
         traceback.print_exc()
         current_app.logger.error(f"回覆訊息時出錯: {e}")
+        
+        # 🔥 新增：檢查是否為 reply token 失效
+        if "Invalid reply token" in str(e) or "400" in str(e):
+            current_app.logger.warning("⏰ Reply token 已失效，處理時間可能過長")
+            # 這種情況下無法回復，但不應該觸發額外的錯誤處理
+            return True  # 返回 True 避免觸發更多錯誤
+        
         return False
 
 def create_text_message(text):
@@ -237,6 +244,12 @@ def reply_text(reply_token, text):
         import traceback
         traceback.print_exc()
         current_app.logger.error(f"發送回覆訊息時出錯: {e}")
+        
+        # 🔥 新增：檢查是否為 reply token 失效  
+        if "Invalid reply token" in str(e) or "400" in str(e):
+            current_app.logger.warning("⏰ Reply token 已失效，處理時間可能過長")
+            return True  # 返回 True 避免觸發更多錯誤
+        
         return False
 
 # 發送Flex Message
@@ -259,6 +272,12 @@ def reply_flex(reply_token, alt_text, flex_content):
         import traceback
         traceback.print_exc()
         current_app.logger.error(f"發送Flex Message時出錯: {e}")
+        
+        # 🔥 新增：檢查是否為 reply token 失效
+        if "Invalid reply token" in str(e) or "400" in str(e):
+            current_app.logger.warning("⏰ Reply token 已失效，處理時間可能過長")
+            return True  # 返回 True 避免觸發更多錯誤
+        
         return False
 
 def reply_message_with_quick_reply(reply_token, text, quick_reply):

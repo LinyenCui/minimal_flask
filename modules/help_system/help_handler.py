@@ -46,9 +46,29 @@ class HelpHandler:
             
             # 項目幫助
             elif message_text.startswith("help_item_"):
-                parts = message_text.replace("help_item_", "").split("_", 1)
-                if len(parts) >= 2:
-                    category_id, item_id = parts[0], parts[1]
+                # 解析項目幫助命令：help_item_[category]_[item]
+                remaining = message_text.replace("help_item_", "")
+                
+                # 根據已知的分類結構進行解析
+                known_categories = ["quick_start", "time_states", "advanced_features", "troubleshooting"]
+                
+                category_id = None
+                item_id = None
+                
+                # 嘗試匹配已知分類
+                for cat in known_categories:
+                    if remaining.startswith(f"{cat}_"):
+                        category_id = cat
+                        item_id = remaining[len(cat) + 1:]  # 移除 "category_" 前綴
+                        break
+                
+                # 如果沒有匹配到已知分類，使用原有邏輯作為後備
+                if not category_id:
+                    parts = remaining.split("_", 1)
+                    if len(parts) >= 2:
+                        category_id, item_id = parts[0], parts[1]
+                
+                if category_id and item_id:
                     return self._handle_item_help(category_id, item_id, user_id, reply_token)
             
             # 搜尋查詢

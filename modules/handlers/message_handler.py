@@ -23,7 +23,9 @@ KNOWN_COMMANDS = {
     "批量加成", "batch-allowance",   # Batch allowance command
     "資料庫同步", "確認同步", "同步結果", "取消",   # Database sync and maintenance commands
     # 🔥 新增：分頁相關命令
-    "更多", "下一頁", "更多結果", "next", "more"
+    "更多", "下一頁", "更多結果", "next", "more",
+    # 🔥 修復：請假模式的放棄操作
+    "放棄操作"
 }
 
 # Commands that *can* take arguments

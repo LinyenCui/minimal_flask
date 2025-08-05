@@ -5,6 +5,7 @@ import logging
 from flask import current_app
 from modules.utils.taiwan_time import get_taiwan_date
 from modules.utils.unified_date_parser import parse_date_input
+from modules.utils.conversation_context import conversation_manager
 
 from modules.utils.line_bot import (
     reply_text, reply_message, reply_flex,
@@ -102,10 +103,10 @@ def process_text_message(event):
     logger.info(f"Processing text message handed over: '{message_text}' (Normalized: '{message_text}')")
     
     # 🔥 統一對話狀態檢查 - 防止智能助手搶戲
-    from modules.utils.conversation_context import conversation_manager
     
     # 1. 檢查是否有活躍對話
     active_conversation = conversation_manager.get_active_conversation(user_id)
+    logger.info(f"🔍 對話狀態檢查 - 用戶: {user_id}, 活躍對話: {active_conversation}")
     if active_conversation:
         logger.info(f"🎯 用戶在活躍對話中: {active_conversation.conversation_type}, 步驟: {active_conversation.current_step}")
         
@@ -125,6 +126,9 @@ def process_text_message(event):
         elif active_conversation.conversation_type == 'passenger_leave':
             # 乘客請假對話
             return handle_passenger_leave_conversation(active_conversation, message_text, user_id, reply_token)
+        elif active_conversation.conversation_type == 'fare_modification':
+            # 車資修改對話
+            return handle_fare_modification_conversation(active_conversation, message_text, user_id, reply_token)
         elif active_conversation.conversation_type == 'driver_assign':
             # 司機指派對話
             return handle_driver_assign_conversation(active_conversation, message_text, user_id, reply_token)
@@ -532,7 +536,6 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                             
                             # 記錄班次ID到上下文（用於簡單請假格式）
                             try:
-                                from modules.utils.conversation_context import conversation_manager
                                 conversation_manager.set_recent_trip_id(user_id, trip_id)
                             except Exception as context_error:
                                 logger.error(f"記錄班次ID到上下文時出錯: {context_error}")
@@ -923,7 +926,15 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             try:
                 from modules.handlers.trip_handler import handle_modify_fare
                 result = handle_modify_fare(message_text, user_id)
-                reply_text(reply_token, result)
+                
+                # 檢查是否為詢答模式結果（字典格式）
+                if isinstance(result, dict) and result.get("type") == "quick_reply":
+                    quick_reply = result.get("quick_reply")
+                    text = result.get("text")
+                    from modules.utils.line_bot import reply_message_with_quick_reply
+                    reply_message_with_quick_reply(reply_token, text, quick_reply)
+                else:
+                    reply_text(reply_token, result)
                 return
             except Exception as e:
                 logger.error(f"修改車資處理失敗: {e}")
@@ -974,7 +985,6 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 schedule_id = match.group(1)
                 # 記錄固定班次ID到上下文（用於簡化請假格式）
                 try:
-                    from modules.utils.conversation_context import conversation_manager
                     conversation_manager.set_recent_fixed_schedule_id(user_id, int(schedule_id))
                     # 🔧 修正：設置請假模式標記，正確使用 fixed_schedule_id 參數
                     conversation_manager.set_leave_mode(user_id=user_id, fixed_schedule_id=int(schedule_id))
@@ -1021,7 +1031,6 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
         elif message_text.startswith("確認AI修改"):
             try:
                 # 🔥 兼容模式：既支持上下文，也支持命令參數
-                from modules.utils.conversation_context import conversation_manager
                 pending_modification = conversation_manager.get_pending_modification(user_id)
                 
                 # 解析確認命令的參數
@@ -1154,7 +1163,6 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
         elif message_text == "取消AI修改":
             try:
                 # 完全重置用戶的對話上下文
-                from modules.utils.conversation_context import conversation_manager
                 conversation_manager.reset_context(user_id)
                 
                 logger.info(f"用戶 {user_id} 取消AI修改，已重置對話上下文")
@@ -1213,6 +1221,18 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             reply_text(reply_token, f"❌ 未識別的命令: {message_text}\n\n請使用「幫助」查看可用命令")
             return
         
+        # 🔥 修復：先檢查放棄操作命令
+        if message_text.strip() == "放棄操作":
+            logger.info(f"✅ 用戶 {user_id} 執行放棄操作")
+            # 清除請假模式
+            if conversation_manager.is_in_leave_mode(user_id):
+                conversation_manager.clear_leave_mode(user_id)
+                reply_text(reply_token, "❌ 已取消請假操作")
+                return
+            else:
+                reply_text(reply_token, "❌ 目前沒有進行中的操作可以取消")
+                return
+        
         # 🔥 修復：優先檢查簡單請假格式，避免被智能助手攔截
         # 檢測簡單請假格式（原因+數字）並檢查是否在請假模式
         import re
@@ -1223,7 +1243,6 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
         
         if simple_leave_match:
             # 檢查是否在請假模式
-            from modules.utils.conversation_context import conversation_manager
             is_in_leave_mode = conversation_manager.is_in_leave_mode(user_id)
             
             logger.info(f"🔍 用戶 {user_id} 請假模式狀態: {is_in_leave_mode}")
@@ -1464,7 +1483,6 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                         result = handle_passenger_leave_command(command, user_id)
                         
                         # 🔥 請假完成後清除請假模式
-                        from modules.utils.conversation_context import conversation_manager
                         conversation_manager.clear_leave_mode(user_id)
                         
                         reply_text(reply_token, result)
@@ -1571,7 +1589,6 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             # 🔥 移除重複的簡單請假格式檢測邏輯 - 已在智能助手之前優先處理
             
             # 🔥 新增：检查是否有AI上下文需要处理（例如pending_modification）
-            from modules.utils.conversation_context import conversation_manager
             pending_modification = conversation_manager.get_pending_modification(user_id)
             
             if pending_modification:
@@ -1687,7 +1704,6 @@ def get_help_text():
 def handle_fare_modification_conversation(conversation, message_text: str, user_id: str, reply_token: str):
     """處理車資修改對話"""
     # 🔥 修復：導入 conversation_manager
-    from modules.utils.conversation_context import conversation_manager
     
     logger.info(f"🎯 處理車資修改對話: 步驟={conversation.current_step}, 消息='{message_text}'")
     
@@ -1851,7 +1867,6 @@ def handle_temp_booking_conversation(conversation, message_text: str, user_id: s
         reply_text(reply_token, str(response))
     else:
         # 如果沒有回覆，結束對話
-        from modules.utils.conversation_context import conversation_manager
         conversation_manager.end_conversation(user_id, "預約流程結束")
         reply_text(reply_token, "預約流程已結束")
 
@@ -1865,6 +1880,57 @@ def handle_passenger_leave_conversation(conversation, message_text: str, user_id
     
     # 結束對話
     conversation_manager.end_conversation(user_id, "請假處理完成")
+    reply_text(reply_token, result)
+
+def handle_fare_modification_conversation(conversation, message_text: str, user_id: str, reply_token: str):
+    """處理車資修改對話"""
+    logger.info(f"🎯 處理車資修改對話: 步驟={conversation.current_step}, 消息='{message_text}'")
+    
+    # 🔥 處理放棄操作
+    if conversation.can_cancel_with(message_text):
+        logger.info(f"✅ 用戶取消車資修改操作: {message_text}")
+        conversation_manager.end_conversation(user_id, "用戶取消車資修改")
+        reply_text(reply_token, "❌ 已取消車資修改操作")
+        return
+    
+    # 從對話上下文中獲取修改信息
+    context_data = conversation.context_data
+    trip_id = context_data.get('trip_id')
+    meter_fare = context_data.get('meter_fare')
+    extra_fare = context_data.get('extra_fare')
+    table = context_data.get('table', 'trips')
+    
+    if not trip_id or meter_fare is None:
+        logger.error(f"車資修改對話缺少必要信息: {context_data}")
+        conversation_manager.end_conversation(user_id, "缺少修改信息")
+        reply_text(reply_token, "❌ 系統錯誤：缺少修改信息，請重新操作")
+        return
+    
+    # 用戶輸入就是修改原因
+    reason = message_text.strip()
+    
+    if not reason:
+        reply_text(reply_token, "❌ 請提供修改原因\n\n例如：客戶要求調整價格")
+        return
+    
+    # 根據表格類型構建相應的命令
+    if table == 'completed_trips':
+        # 已完成班次使用記錄車資命令
+        full_command = f"記錄車資 {trip_id} {meter_fare} {extra_fare} {reason}"
+        logger.info(f"🎯 構建已完成班次車資修改命令: {full_command}")
+        
+        from modules.handlers.trip_handler import handle_record_fare
+        result = handle_record_fare(full_command, user_id)
+    else:
+        # 進行中班次使用修改車資命令
+        full_command = f"修改車資 {trip_id} {meter_fare} {extra_fare} {reason}"
+        logger.info(f"🎯 構建進行中班次車資修改命令: {full_command}")
+        
+        from modules.handlers.trip_handler import handle_modify_fare
+        result = handle_modify_fare(full_command, user_id)
+    
+    # 結束對話
+    conversation_manager.end_conversation(user_id, "車資修改處理完成")
     reply_text(reply_token, result)
 
 def handle_driver_assign_conversation(conversation, message_text: str, user_id: str, reply_token: str):
@@ -1884,7 +1950,6 @@ def handle_query_clarification_conversation(conversation, message_text: str, use
     logger.info(f"🎯 處理查詢澄清對話: 消息='{message_text}'")
     
     # 🔥 修復：導入conversation_manager
-    from modules.utils.conversation_context import conversation_manager
     
     if conversation.current_step == 'waiting_clarification':
         # 用戶提供了澄清信息，重新處理查詢
@@ -1930,7 +1995,6 @@ def handle_query_confirmation_conversation(conversation, message_text: str, user
     logger.info(f"🎯 處理查詢確認對話: 消息='{message_text}'")
     
     # 🔥 修復：導入conversation_manager
-    from modules.utils.conversation_context import conversation_manager
     
     if conversation.current_step == 'waiting_confirmation':
         # 檢查用戶是否確認
@@ -2016,7 +2080,6 @@ def handle_ai_modification_reason_conversation(conversation, message_text: str, 
     """處理AI車資修改原因對話"""
     logger.info(f"🎯 處理AI修改原因對話: 步驟={conversation.current_step}, 消息='{message_text}'")
     
-    from modules.utils.conversation_context import conversation_manager
     
     if conversation.current_step == 'waiting_reason':
         # 用戶提供了修改原因
