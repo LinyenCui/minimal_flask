@@ -7,7 +7,7 @@ from datetime import datetime
 from flask import current_app
 import traceback
 
-from modules.utils.line_bot import create_text_message, create_flex_message, reply_text, reply_message, reply_flex
+from modules.utils.line_bot import create_text_message, create_flex_message, reply_text, reply_message, reply_flex, reply_message_with_quick_reply
 from modules.handlers.trip_query_handler import (
     handle_query_fixed_trips, handle_query_today_trips
 )
@@ -232,7 +232,7 @@ def handle_postback(event):
                 # 🔥 處理新的Quick Reply返回格式（參考車資修改成功模式）
                 if isinstance(result, dict) and result.get("type") == "quick_reply":
                     # 請假功能返回的Quick Reply格式
-                    from modules.utils.line_bot import reply_message_with_quick_reply
+                    # 使用頂部導入的 reply_message_with_quick_reply
                     reply_message_with_quick_reply(reply_token, result["text"], result["quick_reply"])
                 else:
                     # 其他狀態修改的普通文字回覆

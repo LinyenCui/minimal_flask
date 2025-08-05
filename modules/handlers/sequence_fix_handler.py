@@ -173,17 +173,38 @@ def handle_sequence_fix_start(user_id):
         if not results:
             return {"type": "text", "text": "❌ 無法檢查序列狀態，請稍後再試"}
         
-        # 保存狀態
-        sequence_fix_states[user_id] = {
-            "state": "waiting_confirm",
-            "results": results,
-            "need_fix": need_fix
-        }
-        
         # 生成報告
         report = format_sequence_report(results, need_fix)
         
-        return {"type": "text", "text": report}
+        # 如果需要修復，保存狀態並添加 Quick Reply 按鈕
+        if need_fix:
+            # 保存狀態
+            sequence_fix_states[user_id] = {
+                "state": "waiting_confirm",
+                "results": results,
+                "need_fix": need_fix
+            }
+            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+            
+            quick_reply_items = [
+                QuickReplyItem(
+                    action=MessageAction(
+                        label="✅ 確認修復",
+                        text="確認修復"
+                    )
+                ),
+                QuickReplyItem(
+                    action=MessageAction(
+                        label="❌ 取消",
+                        text="取消"
+                    )
+                )
+            ]
+            
+            quick_reply = QuickReply(items=quick_reply_items)
+            return {"type": "quick_reply", "text": report, "quick_reply": quick_reply}
+        else:
+            return {"type": "text", "text": report}
         
     except Exception as e:
         logger.error(f"序列修復流程啟動失敗: {e}")

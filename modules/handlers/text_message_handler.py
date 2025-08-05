@@ -34,6 +34,7 @@ from modules.handlers.database_sync_handler import (
     handle_sync_result_query
 )
 from modules.services.driver_service import handle_driver_assign_request, handle_driver_assign_select, handle_driver_assign_confirm, handle_driver_assign_cancel
+from modules.services.report_service import handle_generate_weekly_report
 
 # AI功能導入
 from modules.services.smart_assistant import process_with_smart_assistant, format_smart_response
@@ -307,49 +308,18 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             try:
                 response = handle_sequence_fix_start(user_id)
                 
-                if response and response.get("text"):
-                    # 檢查是否需要修復（包含「需要修復」關鍵字）
-                    if "需要修復" in response["text"]:
-                        # 提供 Quick Reply 按鈕
-                        from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
-                        
-                        quick_reply_items = [
-                            QuickReplyItem(
-                                action=MessageAction(
-                                    label="✅ 確認修復",
-                                    text="確認修復"
-                                )
-                            ),
-                            QuickReplyItem(
-                                action=MessageAction(
-                                    label="❌ 放棄操作",
-                                    text="放棄"
-                                )
-                            )
-                        ]
-                        
-                        quick_reply = QuickReply(items=quick_reply_items)
-                        reply_message_with_quick_reply(reply_token, response["text"], quick_reply)
-                    else:
-                        # 序列正常，也提供Quick Reply按鈕
-                        from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
-                        
-                        quick_reply_items = [
-                            QuickReplyItem(
-                                action=MessageAction(
-                                    label="✅ 確定",
-                                    text="取消"
-                                )
-                            )
-                        ]
-                        
-                        quick_reply = QuickReply(items=quick_reply_items)
-                        reply_message_with_quick_reply(reply_token, response["text"], quick_reply)
+                if response:
+                    if response.get("type") == "quick_reply":
+                        # 使用 sequence_fix_handler 返回的 Quick Reply
+                        reply_message_with_quick_reply(reply_token, response["text"], response["quick_reply"])
+                    elif response.get("type") == "text":
+                        # 純文字回覆（序列正常的情況）
+                        reply_text(reply_token, response["text"])
                 else:
-                    reply_text(reply_token, "檢查序列中...")
+                    reply_text(reply_token, "❌ 無法獲取序列狀態")
             except Exception as e:
                 logger.error(f"序列修復命令處理失敗: {e}")
-                reply_text(reply_token, f"❌ 序列檢查失敗: {str(e)}")
+                reply_text(reply_token, f"❌ 序列修復檢查失敗: {str(e)}")
             return
         
         # 資料庫同步命令
@@ -875,7 +845,7 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
         elif message_text.startswith("生成周報表") or message_text.startswith("生成週報表") or message_text.startswith("生成周報") or message_text.startswith("生成週報"):
             try:
                 logger.info(f"處理生成周報表命令: {message_text}")
-                from modules.services.report_service import handle_generate_weekly_report
+                # 使用頂部導入的 handle_generate_weekly_report
                 
                 # 調用報表生成函數
                 result = handle_generate_weekly_report(message_text)
@@ -931,7 +901,7 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 if isinstance(result, dict) and result.get("type") == "quick_reply":
                     quick_reply = result.get("quick_reply")
                     text = result.get("text")
-                    from modules.utils.line_bot import reply_message_with_quick_reply
+                    # 使用頂部導入的 reply_message_with_quick_reply
                     reply_message_with_quick_reply(reply_token, text, quick_reply)
                 else:
                     reply_text(reply_token, result)
@@ -991,7 +961,7 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                     logger.info(f"✅ 設置用戶 {user_id} 進入固定班次請假模式，固定班次 #{schedule_id}")
                 except Exception as context_error:
                     logger.error(f"❌ 記錄固定班次ID到上下文或設置請假模式時出錯: {context_error}")
-                    import traceback
+                    # 使用頂部導入的 traceback
                     logger.error(f"❌ 詳細錯誤: {traceback.format_exc()}")
                 
                 # 🔥 新增：提供Quick Reply退出機制（參考車資修改和班次請假成功模式）
@@ -1287,7 +1257,7 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                         return
                     except Exception as e:
                         logger.error(f"❌ 處理固定班次簡單請假格式時出錯: {e}")
-                        import traceback
+                        # 使用頂部導入的 traceback
                         logger.error(f"❌ 完整錯誤堆疊: {traceback.format_exc()}")
                         # 提供錯誤回饋給用戶
                         reply_text(reply_token, f"❌ 處理固定班次請假時發生錯誤，請稍後再試或聯繫管理員。\n錯誤: {str(e)}")

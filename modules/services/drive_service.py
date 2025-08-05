@@ -46,7 +46,7 @@ def get_drive_service():
                 os.remove(path)
         else:
             # 本地開發使用本地憑證文件
-            service_account_file = 'temp_files/plucky-mile-456412-p0-ad63114b0da5.json'  # 更新為正確路徑
+            service_account_file = 'plucky-mile-456412-p0-ad63114b0da5.json'  # 更新為正確路徑
             if not os.path.exists(service_account_file):
                 logger.error(f"找不到服務帳戶金鑰文件: {service_account_file}")
                 return None
