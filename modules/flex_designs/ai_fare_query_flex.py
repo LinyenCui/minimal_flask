@@ -5,6 +5,7 @@ AI 車資查詢專用 Flex Message 設計
 import logging
 from datetime import datetime
 from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+from modules.utils.quick_reply_manager import QuickReplyManager
 
 logger = logging.getLogger(__name__)
 
@@ -545,34 +546,20 @@ def create_ai_modification_confirm_flex(modification_info):
             }
         }
         
-        # 創建確認/取消 Quick Reply 按鈕
-        quick_reply_items = [
-            QuickReplyItem(
-                action=MessageAction(
-                    label="✅ 確認修改",
-                    text=f"確認AI修改 {trip_id} {new_meter} {new_extra} {reason}"
-                )
-            ),
-            QuickReplyItem(
-                action=MessageAction(
-                    label="❌ 放棄修改",
-                    text="放棄AI修改"
-                )
-            ),
-            QuickReplyItem(
-                action=MessageAction(
-                    label="📋 查看詳情",
-                    text=f"查看 {trip_id}"
-                )
-            )
+        # 使用新的 Quick Reply 標準格式
+        quick_reply_buttons = [
+            {"label": "✅ 確認修改", "text": f"確認AI修改 {trip_id} {new_meter} {new_extra} {reason}", "type": "message"},
+            {"label": "❌ 放棄修改", "text": "放棄AI修改", "type": "message"},
+            {"label": "📋 查看詳情", "text": f"查看 {trip_id}", "type": "message"}
         ]
         
-        quick_reply = QuickReply(items=quick_reply_items)
+        # 使用 QuickReplyManager 建立標準格式的 Quick Reply 數據
+        quick_reply_data = QuickReplyManager._build_quick_reply_data(quick_reply_buttons)
         
         # 🔥 返回字典格式
         return {
             "flex_message": flex_content,
-            "quick_reply": quick_reply,
+            "quick_reply": quick_reply_data,
             "alt_text": f"AI修改確認: 班次#{trip_id}"
         }
         

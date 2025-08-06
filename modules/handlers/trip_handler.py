@@ -12,6 +12,7 @@ from modules.models.driver import Driver
 from modules.models.customer import Customer
 from modules.utils.unified_date_parser import parse_date_input
 from modules.utils.line_bot import reply_text, reply_flex, get_user_display_name  # 添加必要的LINE Bot工具函数
+from modules.utils.quick_reply_manager import QuickReplyManager
 from modules.utils.taiwan_time import get_taiwan_time
 
 logger = logging.getLogger(__name__)
@@ -443,17 +444,8 @@ def handle_record_fare(message_text, user_id=None):
                         prompt_message=f"已完成班次 #{completed_trip_id} 修改車資需要說明原因"
                     )
                     
-                    from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
-                    quick_reply_items = [
-                        QuickReplyItem(
-                            action=MessageAction(
-                                label="❌ 放棄操作",
-                                text="放棄操作"
-                            )
-                        )
-                    ]
-                    
-                    quick_reply = QuickReply(items=quick_reply_items)
+                    # 使用新的 Quick Reply 標準格式
+                    abandon_buttons = QuickReplyManager.create_common_buttons()["abandon_operation"]
                     message_text = f"""⚠️ 檢測到車資變更，請說明修改原因：
 
 📊 變更記錄：
@@ -466,11 +458,7 @@ def handle_record_fare(message_text, user_id=None):
 
 🚪 退出方式：點擊下方「放棄操作」按鈕"""
                     
-                    return {
-                        "type": "quick_reply", 
-                        "text": message_text, 
-                        "quick_reply": quick_reply
-                    }
+                    return QuickReplyManager.create_text_response(message_text, abandon_buttons)
                     
                 except Exception as context_error:
                     logger.error(f"設置車資修改對話時出錯: {context_error}")
@@ -697,17 +685,8 @@ def handle_modify_fare(message_text, user_id=None):
                             prompt_message=f"班次 #{trip_id} 修改車資需要說明原因"
                         )
                         
-                        from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
-                        quick_reply_items = [
-                            QuickReplyItem(
-                                action=MessageAction(
-                                    label="❌ 放棄操作",
-                                    text="放棄操作"
-                                )
-                            )
-                        ]
-                        
-                        quick_reply = QuickReply(items=quick_reply_items)
+                        # 使用新的 Quick Reply 標準格式
+                        abandon_buttons = QuickReplyManager.create_common_buttons()["abandon_operation"]
                         message_text = f"""⚠️ 檢測到車資變更，請說明修改原因：
 
 📊 變更記錄：
@@ -720,11 +699,7 @@ def handle_modify_fare(message_text, user_id=None):
 
 🚪 退出方式：點擊下方「放棄操作」按鈕"""
                         
-                        return {
-                            "type": "quick_reply", 
-                            "text": message_text, 
-                            "quick_reply": quick_reply
-                        }
+                        return QuickReplyManager.create_text_response(message_text, abandon_buttons)
                         
                     except Exception as context_error:
                         logger.error(f"設置車資修改對話時出錯: {context_error}")

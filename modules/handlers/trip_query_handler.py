@@ -15,6 +15,7 @@ from linebot.v3.messaging import (
     PostbackAction,
     TextMessage
 )
+from modules.utils.quick_reply_manager import QuickReplyManager
 from modules.services.trip_service import get_trips_by_date, get_trip_details
 from modules.views.trip_view import format_trips_flex
 from linebot.models import TextSendMessage
@@ -268,47 +269,17 @@ def create_query_fixed_trips_quick_reply():
         QuickReply: Quick Reply對象
     """
     try:
-        # 創建Quick Reply選項列表
-        items = []
+        # 使用新的 Quick Reply 標準格式
+        buttons = [
+            {"label": "今天", "text": "查詢固定班次 今天", "type": "postback", "data": "action=query_fixed_trips&date=today"},
+            {"label": "明天", "text": "查詢固定班次 明天", "type": "postback", "data": "action=query_fixed_trips&date=tomorrow"},
+            {"label": "後天", "text": "查詢固定班次 後天", "type": "postback", "data": "action=query_fixed_trips&date=day_after_tomorrow"},
+            {"label": "本週", "text": "查詢固定班次 本週", "type": "postback", "data": "action=query_fixed_trips&date=this_week"}
+        ]
         
-        # 今天
-        items.append(QuickReplyItem(
-            action=PostbackAction(
-                label="今天",
-                text="查詢固定班次 今天",
-                data="action=query_fixed_trips&date=today"
-            )
-        ))
-        
-        # 明天
-        items.append(QuickReplyItem(
-            action=PostbackAction(
-                label="明天",
-                text="查詢固定班次 明天",
-                data="action=query_fixed_trips&date=tomorrow"
-            )
-        ))
-        
-        # 後天
-        items.append(QuickReplyItem(
-            action=PostbackAction(
-                label="後天",
-                text="查詢固定班次 後天",
-                data="action=query_fixed_trips&date=day_after_tomorrow"
-            )
-        ))
-        
-        # 本週
-        items.append(QuickReplyItem(
-            action=PostbackAction(
-                label="本週",
-                text="查詢固定班次 本週",
-                data="action=query_fixed_trips&date=this_week"
-            )
-        ))
-        
-        # 創建Quick Reply對象
-        quick_reply = QuickReply(items=items)
+        # 建立 Quick Reply 數據並轉換為 LINE SDK 格式
+        quick_reply_data = QuickReplyManager._build_quick_reply_data(buttons)
+        quick_reply = QuickReplyManager.convert_to_line_sdk_object(quick_reply_data)
         
         return quick_reply
     

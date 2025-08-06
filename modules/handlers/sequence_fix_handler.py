@@ -6,6 +6,7 @@ LINE Bot 序列修復處理模塊
 import logging
 from sqlalchemy import text
 from modules.models.base import db
+from modules.utils.quick_reply_manager import QuickReplyManager
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +185,6 @@ def handle_sequence_fix_start(user_id):
                 "results": results,
                 "need_fix": need_fix
             }
-            from modules.utils.quick_reply_manager import QuickReplyManager
             
             # 使用標準化的按鈕
             buttons = [

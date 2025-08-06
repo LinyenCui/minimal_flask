@@ -114,6 +114,26 @@ class SmartAssistant:
         
         return f"""你是一個專業的派班系統AI專家。你擁有完整的系統知識，能夠理解複雜的自然語言查詢並生成準確的系統命令。
 
+🚨 **關鍵警告：非命令性表達識別**
+在分析用戶輸入時，必須嚴格區分：
+1. **功能命令** - 用戶希望系統執行的操作（信心度可以較高）
+2. **描述性陳述** - 用戶的感想、說明、註解等（信心度必須很低，通常<0.3）
+
+❌ **常見錯誤範例**：
+- "忘記取消此班次" → 這是描述/註解，NOT命令，信心度應<0.3
+- "班次被取消了" → 這是陳述事實，NOT查詢命令，信心度應<0.3  
+- "應該沒問題" → 這是個人想法，NOT系統操作，信心度應<0.3
+
+✅ **真正的命令範例**：
+- "查詢班次" → 明確的功能請求，信心度可>0.6
+- "修改班次2014車資" → 明確的操作請求，信心度可>0.6
+
+⚠️ **信心度標準**：
+- 明確功能請求：0.7-0.95
+- 模糊但有意圖：0.4-0.6  
+- 描述性/註解性：0.1-0.3
+- 完全無關：0.0-0.1
+
 🗓️ **重要時間背景信息**：
 當前年份: {today.year}年
 當前月份: {today.year}年{today.month}月
@@ -693,10 +713,9 @@ class SmartAssistant:
         if self.ai_enabled:
             ai_result = self._analyze_with_ai(user_input, user_id)  # 🔥 傳遞user_id
         
-        if ai_result and ai_result.get('confidence', 0) > 0.3:  # 🔥 降低門檻從0.6到0.3
+        if ai_result and ai_result.get('confidence', 0) > 0.6:  # 🔥 提高門檻到0.6，避免錯誤解析低質量輸入
             logger.info(f"✅ AI分析成功，信心度: {ai_result['confidence']}")
             
-            # 🔥 移除澄清邏輯，直接執行！
             # AI理解成功，執行標準命令
             if ai_result.get('standard_command'):
                 return {
@@ -707,6 +726,18 @@ class SmartAssistant:
                     "ai_reasoning": ai_result.get('reasoning', ''),
                     "entities": ai_result.get('entities', {})
                 }
+        
+        # 🔥 新增：處理中等信心度情況（0.3-0.6）- 提供澄清對話
+        elif ai_result and 0.3 <= ai_result.get('confidence', 0) <= 0.6:
+            logger.info(f"⚠️ AI信心度中等: {ai_result['confidence']}，提供澄清選項")
+            return {
+                "type": "ai_clarification_needed",
+                "original_input": user_input,
+                "confidence": ai_result['confidence'],
+                "possible_command": ai_result.get('standard_command', ''),
+                "clarification_message": f"🤔 我理解您可能想要：「{ai_result.get('standard_command', '未知操作')}」\n\n是否正確？",
+                "ai_reasoning": ai_result.get('reasoning', '')
+            }
         
         # 步驟2: AI失敗時，回退到傳統智能解析
         logger.info("回退到傳統智能解析")
@@ -783,6 +814,15 @@ class SmartAssistant:
 {chr(10).join(f"• {action}" for action in process_result.get('suggestions', []))}
 
 信心度：{process_result.get('confidence', 0):.1%}"""
+            
+        elif response_type == "ai_clarification_needed":
+            return f"""🤔 AI需要確認
+
+💬 您的輸入：「{process_result['original_input']}」
+{process_result['clarification_message']}
+
+💡 如果不正確，請嘗試更明確的表達方式
+📊 AI信心度：{process_result.get('confidence', 0):.1%}"""
             
         elif response_type == "smart_guidance":
             return self._format_guidance_response(process_result["guidance"])

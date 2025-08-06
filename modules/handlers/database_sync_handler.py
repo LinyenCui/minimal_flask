@@ -94,14 +94,15 @@ def handle_database_sync_request(event, line_bot_api):
     response_text += "• 其他資料表將被完全覆蓋。\n\n"
     response_text += "確定要執行同步嗎？"
     
-    from modules.utils.line_bot import QuickReply, QuickReplyItem, MessageAction
+    from modules.utils.quick_reply_manager import QuickReplyManager
     
-    quick_reply = QuickReply(items=[
-        QuickReplyItem(action=MessageAction(label="✅ 確認同步", text="確認同步")),
-        QuickReplyItem(action=MessageAction(label="❌ 放棄操作", text="放棄"))
-    ])
+    # 使用新的 Quick Reply 標準格式
+    confirm_buttons = [
+        {"label": "✅ 確認同步", "text": "確認同步", "type": "message"},
+        {"label": "❌ 放棄操作", "text": "放棄", "type": "message"}
+    ]
     
-    return {"type": "text", "text": response_text, "quick_reply": quick_reply.to_dict()}
+    return QuickReplyManager.create_text_response(response_text, confirm_buttons)
 
 def handle_database_sync_confirm(event, line_bot_api_passed=None):
     """處理資料庫同步確認，執行新的 sync_from_render.py 腳本"""
