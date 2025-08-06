@@ -127,7 +127,9 @@ def update_single_trip(app, trip_id):
                     _, week_number, _ = trip_info.get('date').isocalendar()
                     unique_code = f"{trip_info.get('fixed_trip_id')}_{day_of_year}_{week_number}"
                 else:
-                    unique_code = f"T_{trip_id}"
+                    # 臨時班次：加入日期信息避免 trip_id 重複問題
+                    date_str = trip_info.get('date').strftime('%Y%m%d')
+                    unique_code = f"T_{trip_id}_{date_str}"
                     # 對於非固定班次，也需要計算週數
                     _, week_number, _ = trip_info.get('date').isocalendar()
                 
@@ -324,7 +326,9 @@ def update_completed_trips():
                         _, week_number, _ = trip_info.get('date').isocalendar()
                         unique_code = f"{trip_info.get('fixed_trip_id')}_{day_of_year}_{week_number}"
                     else:
-                        unique_code = f"T_{trip_id}"
+                        # 臨時班次：加入日期信息避免 trip_id 重複問題
+                        date_str = trip_info.get('date').strftime('%Y%m%d')
+                        unique_code = f"T_{trip_id}_{date_str}"
                         # 對於非固定班次，也需要計算週數
                         _, week_number, _ = trip_info.get('date').isocalendar()
                     
@@ -508,7 +512,9 @@ def initialize_unique_codes():
                 if fixed_trip_id:
                     unique_code = f"{fixed_trip_id}_{day_of_year}_{week_number}"
                 else:
-                    unique_code = f"T_{trip_id}"
+                    # 臨時班次：加入日期信息避免 trip_id 重複問題
+                    date_str = date_obj.strftime('%Y%m%d')
+                    unique_code = f"T_{trip_id}_{date_str}"
                 
                 # 更新班次的唯一識別碼和週數
                 update_query = """

@@ -86,10 +86,19 @@ class UnifiedDateParser:
         """處理短日期格式的年份推斷邏輯"""
         try:
             parsed_date = date(current_year, month, day)
-            # 如果日期已過去超過30天，假設是明年的日期
+            
+            # 改進的年份推斷邏輯
             days_difference = (today - parsed_date).days
-            if days_difference > 30:
+            
+            # 如果日期已過去超過180天（約6個月），假設是明年的日期
+            # 如果日期在未來超過180天，假設是去年的日期
+            if days_difference > 180:
+                # 過去超過180天，推斷為明年
                 parsed_date = date(current_year + 1, month, day)
+            elif days_difference < -180:
+                # 未來超過180天，推斷為去年
+                parsed_date = date(current_year - 1, month, day)
+            
             return parsed_date
         except ValueError as e:
             raise ValueError(f"無效的日期: {month:02d}/{day:02d}")

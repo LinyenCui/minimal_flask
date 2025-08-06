@@ -97,7 +97,14 @@ def query_completed_trips_range(start_date, end_date, driver_id=None, category=N
         SELECT 
             id, date, start_point, end_point, category,
             meter_fare, extra_fare, 
-            COALESCE(meter_fare, 0) + COALESCE(extra_fare, 0) as total_fare,
+            CASE 
+                WHEN meter_fare IS NULL AND extra_fare IS NULL THEN NULL
+                WHEN meter_fare IS NULL THEN extra_fare
+                WHEN extra_fare IS NULL THEN meter_fare
+                ELSE meter_fare + extra_fare
+            END as calculated_total,
+            COALESCE(meter_fare, 0) + COALESCE(extra_fare, 0) as coalesced_total,
+            actual_fare as original_total,
             driver_id, modification_reason, trip_type
         FROM completed_trips 
         WHERE {where_clause}
@@ -203,7 +210,27 @@ def format_completed_trips_range_result(trips, start_date, end_date, driver_id=N
 
     # 統計信息
     total_trips = len(trips)
-    total_fare = sum(trip[7] for trip in trips if trip[7] is not None)  # total_fare欄位
+    
+    # 使用最準確的金額計算方式
+    total_fare = 0
+    problematic_trips = []
+    
+    for trip in trips:
+        # 新查詢結構：calculated_total=7, coalesced_total=8, original_total=9
+        calculated_total = trip[7]  # 智能計算（NULL處理）
+        coalesced_total = trip[8]   # 強制COALESCE處理
+        original_total = trip[9]    # 原始數據庫total_fare
+        
+        # 優先使用original_total，如果為NULL則使用calculated_total
+        if original_total is not None:
+            trip_amount = original_total
+        elif calculated_total is not None:
+            trip_amount = calculated_total
+        else:
+            trip_amount = 0
+            problematic_trips.append(trip[0])  # 記錄問題班次ID
+            
+        total_fare += trip_amount
     
     # 按日期分組
     trips_by_date = {}
@@ -250,15 +277,37 @@ def format_completed_trips_range_result(trips, start_date, end_date, driver_id=N
                 break
                 
             trip_id, date, start_point, end_point, category = trip[:5]
-            meter_fare, extra_fare, total_fare = trip[5:8]
-            driver_id_result, modification_reason = trip[8:10]
+            meter_fare, extra_fare = trip[5:7]
+            calculated_total, coalesced_total, original_total = trip[7:10]
+            driver_id_result, modification_reason = trip[10:12]
             
-            lines.append(f"#{trip_id} 🚗{driver_id_result} {start_point}→{end_point} ${total_fare}")
+            # 使用與統計相同的邏輯決定顯示金額
+            if original_total is not None:
+                display_amount = original_total
+            elif calculated_total is not None:
+                display_amount = calculated_total
+            else:
+                display_amount = 0
+            
+            # 添加問題標記
+            problem_indicator = ""
+            if trip_id in problematic_trips:
+                problem_indicator = " ⚠️"
+            elif original_total != calculated_total and original_total is not None and calculated_total is not None:
+                problem_indicator = " 🔄"  # 金額不一致
+            
+            lines.append(f"#{trip_id} 🚗{driver_id_result} {start_point}→{end_point} ${display_amount}{problem_indicator}")
             displayed_count += 1
     
     if total_trips > max_display:
         lines.append(f"...")
         lines.append(f"還有 {total_trips - max_display} 筆班次未顯示")
+    
+    # 添加診斷信息
+    if problematic_trips:
+        lines.append("")
+        lines.append(f"⚠️ 發現 {len(problematic_trips)} 筆問題班次（無金額或計算異常）")
+        lines.append("🔄 標記表示原始金額與計算金額不一致")
     
     return "\n".join(lines)
 

@@ -64,7 +64,14 @@ class AdvancedQueryProcessor:
                     ct.driver_id,
                     ct.meter_fare,
                     ct.extra_fare,
-                    (ct.meter_fare + ct.extra_fare) as total_amount,
+                    CASE 
+                        WHEN ct.meter_fare IS NULL AND ct.extra_fare IS NULL THEN NULL
+                        WHEN ct.meter_fare IS NULL THEN ct.extra_fare
+                        WHEN ct.extra_fare IS NULL THEN ct.meter_fare
+                        ELSE ct.meter_fare + ct.extra_fare
+                    END as total_amount,
+                    COALESCE(ct.meter_fare, 0) + COALESCE(ct.extra_fare, 0) as coalesced_total,
+                    ct.actual_fare as original_total,
                     d.name as driver_name
                 FROM completed_trips ct
                 LEFT JOIN drivers d ON ct.driver_id = d.id
@@ -119,7 +126,7 @@ class AdvancedQueryProcessor:
             else:
                 full_query = base_query
                 
-            full_query += " ORDER BY ct.date DESC, ct.id DESC LIMIT 50"
+            full_query += " ORDER BY ct.date DESC, ct.id DESC"
             
             self.logger.info(f"📊 完整SQL查詢: {full_query}")
             self.logger.info(f"📊 查詢參數: {params}")
@@ -156,6 +163,8 @@ class AdvancedQueryProcessor:
                     'meter_fare': trip.meter_fare,
                     'extra_fare': trip.extra_fare,
                     'total_amount': trip.total_amount,
+                    'coalesced_total': trip.coalesced_total,
+                    'original_total': trip.original_total,
                     'driver_name': trip.driver_name
                 }
                 trips_dict_list.append(trip_dict)
@@ -480,17 +489,17 @@ class AdvancedQueryProcessor:
         
         if operator == '>':
             return {
-                'sql': "(ct.meter_fare + ct.extra_fare) > :amount",
+                'sql': "CASE WHEN ct.meter_fare IS NULL AND ct.extra_fare IS NULL THEN NULL WHEN ct.meter_fare IS NULL THEN ct.extra_fare WHEN ct.extra_fare IS NULL THEN ct.meter_fare ELSE ct.meter_fare + ct.extra_fare END > :amount",
                 'params': {'amount': amount}
             }
         elif operator == '<':
             return {
-                'sql': "(ct.meter_fare + ct.extra_fare) < :amount", 
+                'sql': "CASE WHEN ct.meter_fare IS NULL AND ct.extra_fare IS NULL THEN NULL WHEN ct.meter_fare IS NULL THEN ct.extra_fare WHEN ct.extra_fare IS NULL THEN ct.meter_fare ELSE ct.meter_fare + ct.extra_fare END < :amount", 
                 'params': {'amount': amount}
             }
         elif operator == '=':
             return {
-                'sql': "(ct.meter_fare + ct.extra_fare) = :amount",
+                'sql': "CASE WHEN ct.meter_fare IS NULL AND ct.extra_fare IS NULL THEN NULL WHEN ct.meter_fare IS NULL THEN ct.extra_fare WHEN ct.extra_fare IS NULL THEN ct.meter_fare ELSE ct.meter_fare + ct.extra_fare END = :amount",
                 'params': {'amount': amount}
             }
         

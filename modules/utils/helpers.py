@@ -193,8 +193,9 @@ def generate_unique_code(trip_id, date_obj, fixed_trip_id=None):
         # 固定班次：固定班次ID_太陽日_周數
         return f"{fixed_trip_id}_{day_of_year}_{week_number}"
     else:
-        # 臨時班次：T_班次ID
-        return f"T_{trip_id}"
+        # 臨時班次：T_班次ID_日期 (避免 trip_id 重複問題)
+        date_str = date_obj.strftime('%Y%m%d')
+        return f"T_{trip_id}_{date_str}"
 
 def should_process_message(message_text, source_type):
     """

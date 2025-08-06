@@ -184,27 +184,17 @@ def handle_sequence_fix_start(user_id):
                 "results": results,
                 "need_fix": need_fix
             }
-            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+            from modules.utils.quick_reply_manager import QuickReplyManager
             
-            quick_reply_items = [
-                QuickReplyItem(
-                    action=MessageAction(
-                        label="✅ 確認修復",
-                        text="確認修復"
-                    )
-                ),
-                QuickReplyItem(
-                    action=MessageAction(
-                        label="❌ 取消",
-                        text="取消"
-                    )
-                )
+            # 使用標準化的按鈕
+            buttons = [
+                {"label": "✅ 確認修復", "text": "確認修復", "type": "message"},
+                {"label": "❌ 取消", "text": "取消", "type": "message"}
             ]
             
-            quick_reply = QuickReply(items=quick_reply_items)
-            return {"type": "quick_reply", "text": report, "quick_reply": quick_reply}
+            return QuickReplyManager.create_text_response(report, buttons)
         else:
-            return {"type": "text", "text": report}
+            return QuickReplyManager.create_text_response(report)
         
     except Exception as e:
         logger.error(f"序列修復流程啟動失敗: {e}")

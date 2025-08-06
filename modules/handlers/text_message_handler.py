@@ -13,6 +13,7 @@ from modules.utils.line_bot import (
     create_flex_message, get_line_bot_api,
     reply_message_with_quick_reply
 )
+from modules.utils.response_handler import ResponseHandler
 from modules.handlers.trip_handler import handle_query_trips, handle_trip_details, handle_change_status, handle_record_fare, handle_modify_category, handle_completed_trip_details
 from modules.flex_designs.help_flex import get_help_flex
 from modules.help_system.help_handler import HelpHandler
@@ -43,40 +44,15 @@ from modules.services.smart_assistant import process_with_smart_assistant, forma
 logger = logging.getLogger(__name__)
 
 def handle_ai_fare_result(result, reply_token: str):
-    """統一處理AI車資查詢結果，支持quick_reply"""
+    """統一處理AI車資查詢結果，使用新的響應處理器"""
     try:
-        if isinstance(result, dict):
-            if result.get("type") in ["text_with_quick_reply", "quick_reply"]:
-                # 🔥 修復：使用統一的quick_reply處理方式
-                message_text = result.get("message") or result.get("text") or "處理完成"
-                quick_reply = result.get("quick_reply")
-                
-                if quick_reply:
-                    # 使用統一的reply_message_with_quick_reply函數
-                    reply_message_with_quick_reply(reply_token, message_text, quick_reply)
-                else:
-                    reply_text(reply_token, message_text)
-            elif result.get("type") == "text":
-                # 🔥 純文字消息
-                message_text = result.get("message") or result.get("text") or "處理完成"
-                reply_text(reply_token, message_text)
-            elif 'flex_message' in result:
-                # 原有的Flex消息處理
-                from linebot.v3.messaging import FlexMessage, FlexContainer
-                flex_message = FlexMessage(
-                    alt_text=result.get("alt_text", "AI智能結果"),
-                    contents=FlexContainer.from_dict(result['flex_message']),
-                    quick_reply=result.get('quick_reply')
-                )
-                reply_message(reply_token, [flex_message])
-            else:
-                # 🔥 修復：兜底處理，檢查所有可能的文字字段
-                message_text = result.get("message") or result.get("text") or str(result)
-                reply_text(reply_token, message_text)
-        elif isinstance(result, str):
-            reply_text(reply_token, result)
-        else:
-            reply_text(reply_token, str(result))
+        # 使用統一的響應處理器
+        success = ResponseHandler.handle_legacy_format(reply_token, result)
+        
+        if not success:
+            logger.warning("使用響應處理器失敗，回退到基本文字回覆")
+            reply_text(reply_token, "❌ 處理查詢結果時出現錯誤")
+            
     except Exception as e:
         logger.error(f"處理AI車資查詢結果時出錯: {e}")
         reply_text(reply_token, "❌ 處理查詢結果時出現錯誤")
@@ -234,12 +210,11 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                             else:
                                 reply_text(reply_token, "處理中...")
                     else:
-                        # 🔥 修復：處理帶有 Quick Reply 的文字消息
-                        text_content = response.get("text", "處理中...")
-                        if "quick_reply" in response:
-                            logger.info(f"發送帶有QuickReply的文字消息: {response.get('quick_reply')}")
-                            reply_message_with_quick_reply(reply_token, text_content, response.get("quick_reply"))
-                        else:
+                        # 使用統一響應處理器
+                        success = ResponseHandler.handle_legacy_format(reply_token, response)
+                        if not success:
+                            # 回退處理
+                            text_content = response.get("text", "處理中...")
                             reply_text(reply_token, text_content)
             return
         
@@ -293,12 +268,11 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                         else:
                             reply_text(reply_token, "開始臨時預約流程...")
                 else:
-                    # 🔥 修復：處理帶有 Quick Reply 的文字消息
-                    text_content = response.get("text", "開始臨時預約流程...")
-                    if "quick_reply" in response:
-                        logger.info(f"預約叫車開始發送帶有QuickReply的文字消息")
-                        reply_message_with_quick_reply(reply_token, text_content, response.get("quick_reply"))
-                    else:
+                    # 使用統一響應處理器
+                    success = ResponseHandler.handle_legacy_format(reply_token, response)
+                    if not success:
+                        # 回退處理
+                        text_content = response.get("text", "開始臨時預約流程...")
                         reply_text(reply_token, text_content)
             return
         
@@ -309,12 +283,10 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 response = handle_sequence_fix_start(user_id)
                 
                 if response:
-                    if response.get("type") == "quick_reply":
-                        # 使用 sequence_fix_handler 返回的 Quick Reply
-                        reply_message_with_quick_reply(reply_token, response["text"], response["quick_reply"])
-                    elif response.get("type") == "text":
-                        # 純文字回覆（序列正常的情況）
-                        reply_text(reply_token, response["text"])
+                    # 使用統一響應處理器
+                    success = ResponseHandler.handle_legacy_format(reply_token, response)
+                    if not success:
+                        reply_text(reply_token, "❌ 處理序列修復響應時出錯")
                 else:
                     reply_text(reply_token, "❌ 無法獲取序列狀態")
             except Exception as e:
@@ -337,25 +309,16 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 if result and result.get("text"):
                     # 如果檢查成功，提供Quick Reply按鈕
                     if "❌" not in result["text"]:  # 沒有錯誤
-                        from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+                        from modules.utils.quick_reply_manager import QuickReplyManager
+                        from modules.utils.response_handler import send_text_response
                         
-                        quick_reply_items = [
-                            QuickReplyItem(
-                                action=MessageAction(
-                                    label="✅ 確認同步",
-                                    text="確認同步"
-                                )
-                            ),
-                            QuickReplyItem(
-                                action=MessageAction(
-                                    label="❌ 放棄操作",
-                                    text="放棄"
-                                )
-                            )
+                        # 使用標準化的按鈕
+                        buttons = [
+                            {"label": "✅ 確認同步", "text": "確認同步", "type": "message"},
+                            {"label": "❌ 放棄操作", "text": "放棄", "type": "message"}
                         ]
                         
-                        quick_reply = QuickReply(items=quick_reply_items)
-                        reply_message_with_quick_reply(reply_token, result["text"], quick_reply)
+                        send_text_response(reply_token, result["text"], buttons)
                     else:
                         # 有錯誤，只顯示文字
                         reply_text(reply_token, result["text"])

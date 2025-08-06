@@ -399,7 +399,9 @@ def handle_confirm_input(user_id, message_text):
             new_trip_id = result.fetchone()[0]
             
             # Update unique code and week number
-            unique_code = f"T_{new_trip_id}"
+            # 臨時班次：加入日期信息避免 trip_id 重複問題
+            date_str = booking_data["date"].strftime('%Y%m%d')
+            unique_code = f"T_{new_trip_id}_{date_str}"
             _, week_number, _ = booking_data["date"].isocalendar()
             update_query = "UPDATE trips SET unique_code = :unique_code, week_number = :week_number WHERE trip_id = :trip_id"
             db.session.execute(sql_text(update_query), {"unique_code": unique_code, "week_number": week_number, "trip_id": new_trip_id})

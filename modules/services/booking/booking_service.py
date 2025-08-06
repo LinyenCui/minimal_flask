@@ -182,7 +182,9 @@ def process_booking_input(user_id, message_text):
                 new_trip_id = result.fetchone()[0]
                 
                 # 生成唯一識別碼
-                unique_code = f"T_{new_trip_id}"
+                # 臨時班次：加入日期信息避免 trip_id 重複問題
+                date_str = booking_data['date'].strftime('%Y%m%d')
+                unique_code = f"T_{new_trip_id}_{date_str}"
                 
                 # 計算一年中的第幾周
                 _, week_number, _ = booking_data['date'].isocalendar()
