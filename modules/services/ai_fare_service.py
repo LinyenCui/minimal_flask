@@ -655,6 +655,29 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True, pars
         if pending_modification:
             logger.info(f"🔍 檢測到待執行修改，檢查用戶是否在回答原因: {message_text}")
             
+            # 🎯 語意衝突已解決：trips狀態已改為「註銷」，可以自然使用「取消」命令
+            cancel_commands = ['取消修改', '取消AI修改', '取消', '退出', '不修改']
+            
+            # 檢查是否為取消命令
+            is_cancel_command = any(cmd in message_text for cmd in cancel_commands)
+            
+            if is_cancel_command:
+                logger.info(f"🚫 用戶取消AI修改: {message_text}")
+                # 清除待執行修改
+                conversation_manager.clear_pending_modification(user_id)
+                
+                # 返回取消確認界面
+                from modules.flex_designs.ai_fare_query_flex import create_ai_modification_cancel_flex
+                cancel_result = create_ai_modification_cancel_flex()
+                
+                if cancel_result:
+                    return cancel_result
+                else:
+                    return {
+                        "type": "text",
+                        "message": "✅ AI修改已取消，數據庫未被修改。"
+                    }
+            
             # 檢查用戶輸入是否是修改原因的回答
             reason_indicators = ['原因', '因為', '由於', '要求', '調整', '客戶', '等候', '等待', '夜班', '加班', '延誤', '來不及', '臨時', '不適', '有事', '路況', '塞車']
             

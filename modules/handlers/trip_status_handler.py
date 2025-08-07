@@ -6,7 +6,6 @@ from sqlalchemy.sql import text
 import logging
 import re
 from modules.models.base import db
-from modules.utils.quick_reply_manager import QuickReplyManager
 
 # 建立日誌記錄器
 logger = logging.getLogger(__name__)
@@ -39,7 +38,7 @@ def handle_update_trip_status(message_text, user_id=None):
     try:
         parts = message_text.split()
         if len(parts) < 3:
-            return "命令格式不正確。正確格式：修改狀態 [班次ID] [新狀態]\n\n可用狀態：準備、取消、衝突、請假"
+            return "命令格式不正確。正確格式：修改狀態 [班次ID] [新狀態]\n\n可用狀態：準備、註銷、衝突、請假"
         
         trip_id = parts[1]
         new_status = parts[2]
@@ -53,9 +52,9 @@ def handle_update_trip_status(message_text, user_id=None):
         trip_date, trip_time, current_status, fixed_trip_id, driver_id = trip_info.date, trip_info.time, trip_info.status, trip_info.fixed_trip_id, trip_info.driver_id
 
         # --- 狀態有效性預先檢查 ---
-        valid_statuses_for_manual_change = ["準備", "取消", "衝突", "請假"]
+        valid_statuses_for_manual_change = ["準備", "註銷", "衝突", "請假"]
         if new_status not in valid_statuses_for_manual_change:
-            return f"無效的目標狀態：{new_status}。可用選項：準備、取消、衝突、請假。"
+            return f"無效的目標狀態：{new_status}。可用選項：準備、註銷、衝突、請假。"
 
         # --- 通用時間限制判斷 ---
         # 對於非「準備」狀態且要改變狀態時，執行時間檢查
@@ -134,13 +133,13 @@ def handle_update_trip_status(message_text, user_id=None):
                 # 狀態相同且沒有請假原因，無需修改
                 return f"班次 #{trip_id} 目前狀態已是「{current_status}」，無需修改。"
 
-        if new_status == "取消":
-            # 直接執行取消操作
+        if new_status == "註銷":
+            # 直接執行註銷操作
             update_query = "UPDATE trips SET status = :new_status WHERE trip_id = :trip_id RETURNING trip_id"
             result = db.session.execute(text(update_query), {"trip_id": trip_id, "new_status": new_status})
             db.session.commit()
             if result.fetchone():
-                return f"✅ 已成功將班次 #{trip_id} 的狀態從「{current_status}」更改為「取消」。"
+                return f"✅ 已成功將班次 #{trip_id} 的狀態從「{current_status}」更改為「註銷」。"
             else:
                 return f"取消班次 #{trip_id} 時出錯。"
 
@@ -166,13 +165,29 @@ def handle_update_trip_status(message_text, user_id=None):
             else:
                 logger.warning(f"無法設置請假模式：未提供 user_id")
             
-            # 🔥 新增：使用與車資修改相同的Quick Reply機制
-            # 使用新的 Quick Reply 標準格式
-            abandon_buttons = QuickReplyManager.create_common_buttons()["abandon_operation"]
-            message_text = f"班次 #{trip_id} 乘客請假\n\n請輸入：[原因] [加成]\n\n例如：\n新建路乘客臨時有事 -30\n中華南路乘客身體不適 -50\n\n💡 提示：先寫原因，最後寫加成金額\n\n🚪 退出方式：點擊下方「放棄操作」按鈕"
+            # 🔄 恢復傳統實現：包含Quick Reply取消按鈕但保持簡單
+            from modules.utils.line_bot import reply_message_with_quick_reply
+            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
             
-            # 🔥 關鍵：返回與車資修改相同的字典格式
-            return QuickReplyManager.create_text_response(message_text, abandon_buttons)
+            # 傳統模式的Quick Reply - 學習未來態請假功能的完美設計
+            quick_reply_items = [
+                QuickReplyItem(
+                    action=MessageAction(
+                        label="❌ 放棄操作",  # 顯示文字：清晰通用的操作說明
+                        text="放棄操作"      # 實際發送：明確無歧義，不會被AI誤解
+                    )
+                )
+            ]
+            
+            quick_reply = QuickReply(items=quick_reply_items)
+            message_text = f"班次 #{trip_id} 乘客請假\n\n請輸入：[原因] [加成]\n\n例如：\n新建路乘客臨時有事 -30\n中華南路乘客身體不適 -50\n\n💡 提示：先寫原因，最後寫加成金額"
+            
+            # 🔥 返回特殊格式，告知postback_service.py使用Quick Reply
+            return {
+                "type": "text_with_quick_reply_traditional",
+                "text": message_text,
+                "quick_reply": quick_reply
+            }
 
         logger.error(f"Reached unexpected end of handle_update_trip_status logic for trip {trip_id} to {new_status}.")
         return f"試圖將班次 #{trip_id} 狀態改為 '{new_status}'，但此操作未被明確處理。"
@@ -217,7 +232,7 @@ def handle_confirm_cancel_trip(message_text):
         # 更新數據庫中的班次狀態
         update_query = """
         UPDATE trips
-        SET status = '取消'
+        SET status = '註銷'
         WHERE trip_id = :trip_id
         RETURNING trip_id
         """
@@ -234,9 +249,9 @@ def handle_confirm_cancel_trip(message_text):
         
         # 如果是固定班次，詢問是否也要修改後續週期的固定班次
         if fixed_trip_id:
-            return f"已成功將班次 #{trip_id} 的狀態從「{current_status}」更改為「取消」。\n\n要將後續週期的此固定班次也設為請假狀態嗎？\n如果是，請回覆「固定請假 {fixed_trip_id}」，否則無需回覆。"
+            return f"已成功將班次 #{trip_id} 的狀態從「{current_status}」更改為「註銷」。\n\n要將後續週期的此固定班次也設為請假狀態嗎？\n如果是，請回覆「固定請假 {fixed_trip_id}」，否則無需回覆。"
         else:
-            return f"已成功將班次 #{trip_id} 的狀態從「{current_status}」更改為「取消」。"
+            return f"已成功將班次 #{trip_id} 的狀態從「{current_status}」更改為「註銷」。"
     
     except Exception as e:
         logger.error(f"處理確認取消班次時出錯: {e}")
@@ -277,7 +292,7 @@ def handle_confirm_leave_trip(message_text):
         
         # 檢查是否是固定班次
         if not fixed_trip_id:
-            return f"班次 #{trip_id} 不是固定班次，無法設為請假狀態。如要取消，請使用「確認取消 {trip_id}」命令。"
+            return f"班次 #{trip_id} 不是固定班次，無法設為請假狀態。如要註銷，請使用「修改狀態 {trip_id} 註銷」命令。"
         
         # 更新數據庫中的班次狀態
         update_query = """

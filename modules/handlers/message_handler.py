@@ -17,7 +17,7 @@ KNOWN_COMMANDS = {
     "預約叫車",      # This is our AI booking command
     "預約叫車幫助",  # Help for AI booking
     "東洋班次", "診所班次", "查已完成", "指派司機", "完成班次", "回報問題",
-    "取消預約", "取消指派", "更新已完成班次", "取消AI修改",
+    "取消預約", "取消指派", "更新已完成班次", "取消AI修改",  # 語意衝突已解決，統一使用「取消」
     "確認修改", "取消修改",  # 🔥 新增：車資修改確認框回覆
     "fix-sequence",   # Database sequence repair command
     "批量加成", "batch-allowance",   # Batch allowance command
@@ -26,7 +26,14 @@ KNOWN_COMMANDS = {
     "更多", "下一頁", "更多結果", "next", "more",
     # 🔥 修復：請假模式的放棄操作
     "放棄操作"
+    # 🔥 移除：emoji不應該在KNOWN_COMMANDS中，應該只通過postback處理
+    # "🟢", "❌", "⚠️", "🔵", "🎯"
 }
+
+# 🔥 新增：postback displayText 模式匹配
+POSTBACK_DISPLAY_TEXT_PATTERNS = [
+    r"將班次\s+\d+\s+狀態修改為\s+(準備|註銷|衝突|請假)",  # 狀態修改 displayText
+]
 
 # Commands that *can* take arguments
 COMMANDS_WITH_ARGS = {
@@ -126,7 +133,13 @@ def should_process(message_text, source_type, user_id):
         # 特殊處理「固定班次#ID請假」格式
         if re.match(r"固定班次#\d+請假", command_body):
             logger.info(f"[should_process] Group message matches '固定班次#ID請假' pattern")
-            return True, command_body 
+            return True, command_body
+        
+        # 🔥 新增：檢查 postback displayText 模式
+        for pattern in POSTBACK_DISPLAY_TEXT_PATTERNS:
+            if re.match(pattern, command_body):
+                logger.info(f"[should_process] Group message matches postback displayText pattern: '{pattern}'")
+                return True, command_body
                   
         logger.info("[should_process] Group/Room: Not a KNOWN command (already checked), mention, or command+arg pattern, ignoring.")
         return False, command_body 

@@ -145,7 +145,7 @@ def generate_trips_flex(trips_data, date_str=None, is_fixed_trips=False):
             status_emoji = {
                 "準備": "🟢",
                 "完成": "✅",
-                "取消": "❌",
+                "註銷": "❌",
                 "衝突": "⚠️",
                 "請假": "🔵",
                 "待派": "🟠"

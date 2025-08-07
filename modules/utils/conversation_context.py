@@ -185,7 +185,7 @@ class ConversationContext:
                     status_icon = "🔴"
                 elif status == '已完成':
                     status_icon = "✅"
-                elif status == '取消':
+                elif status == '註銷':
                     status_icon = "❌"
                 elif status == '衝突':
                     status_icon = "🟠"
@@ -366,12 +366,15 @@ class ConversationManager:
         expires_at = now + timedelta(minutes=duration_minutes)
         
         # 定義各種對話的取消命令
+        # 🎯 語意衝突已解決：trips狀態已從「取消」改為「註銷」，現在可以自然使用「取消」命令
+        # 現在態狀態有：「待派」、「請假」、「衝突」、「註銷」、「準備」
+        # 「取消修改」不再與任何資料庫狀態產生語意混淆
         cancel_commands_map = {
-            'fare_modification': ['取消修改', '取消', '放棄修改', '退出', '不修改', '放棄', '放棄操作'],
-            'temp_booking': ['取消預約', '取消', '放棄預約', '退出', '不預約'],
-            'passenger_leave': ['取消請假', '取消', '放棄請假', '退出', '不請假', '放棄', '放棄操作'],
-            'driver_assign': ['取消指派', '取消', '放棄指派', '退出', '不指派'],
-            'fixed_schedule': ['取消', '放棄', '退出', '放棄操作']
+            'fare_modification': ['取消修改', '取消', '取消AI修改', '退出', '不修改'],
+            'temp_booking': ['取消預約', '取消', '退出', '不預約'],
+            'passenger_leave': ['取消請假', '取消', '退出', '不請假', '放棄操作'],  # 學習未來態設計
+            'driver_assign': ['取消指派', '取消', '退出', '不指派'],
+            'fixed_schedule': ['取消', '退出', '放棄操作']  # 未來態已使用此設計
         }
         
         conversation = ActiveConversation(
