@@ -97,7 +97,7 @@ def get_trip_details_flex(trip_id, trip_data):
     
     # 🔥 修復：將main_status移到try-catch外面，確保變量作用域正確
     main_status = display_status.split()[0] if display_status else '未指定'
-    status_color_map = { "待派": "#FF6B6E", "準備": "#6CD8A0", "取消": "#888888", "衝突": "#FF9153", "請假": "#A0A0FF", "完成": "#1DB446" }
+    status_color_map = { "待派": "#FF6B6E", "準備": "#6CD8A0", "註銷": "#888888", "衝突": "#FF9153", "請假": "#A0A0FF", "完成": "#1DB446" }
     status_color = status_color_map.get(main_status, "#111111")
     
     body_contents.append({ "type": "box", "layout": "horizontal", "margin": "md", "contents": [ { "type": "text", "text": "狀態", "size": "sm", "color": "#555555", "flex": 2 },{ "type": "text", "text": display_status, "size": "sm", "color": status_color, "weight": "bold", "flex": 5, "wrap": True }]})
@@ -194,7 +194,7 @@ def get_trip_details_flex(trip_id, trip_data):
     
     if can_modify_status:
         actionable_statuses = {
-            "取消": "❌ 取消", 
+            "註銷": "❌ 註銷", 
             "衝突": "⚠️ 衝突", 
             "請假": "🔵 請假"
         }
@@ -208,9 +208,11 @@ def get_trip_details_flex(trip_id, trip_data):
             quick_reply_items.append({
                 "type": "action",
                 "action": {
-                    "type": "postback", "label": "🟢 改回準備",
+                    "type": "postback", 
+                    "label": "🟢 改回準備",
+                    "text": "🟢",  # 🔥 修復：簡短的 text 避免觸發命令處理
                     "data": f"action=update_status&trip_id={trip_id}&status=準備",
-                    "displayText": f"將班次 {trip_id} 狀態修改為 準備"
+                    "displayText": "⏸️"  # 🔥 使用不在 KNOWN_COMMANDS 中的符號
                 }
             })
         elif current_trip_status != "完成":
@@ -219,20 +221,28 @@ def get_trip_details_flex(trip_id, trip_data):
                 quick_reply_items.append({
                     "type": "action",
                     "action": {
-                        "type": "postback", "label": "🟢 改回準備",
+                        "type": "postback", 
+                        "label": "🟢 改回準備",
+                        "text": "🟢",  # 🔥 修復：簡短的 text 避免觸發命令處理
                         "data": f"action=update_status&trip_id={trip_id}&status=準備",
-                        "displayText": f"將班次 {trip_id} 狀態修改為 準備"
+                        "displayText": "⏸️"  # 🔥 使用不在 KNOWN_COMMANDS 中的符號
                     }
                 })
             
             for status_value, status_label in actionable_statuses.items():
                 if status_value != current_trip_status:
+                    # 為不同狀態使用不同的簡短 emoji
+                    emoji_map = {"註銷": "❌", "衝突": "⚠️", "請假": "🔵"}
+                    text_emoji = emoji_map.get(status_value, "🎯")
+                    
                     quick_reply_items.append({
                         "type": "action",
                         "action": {
-                            "type": "postback", "label": status_label,
+                            "type": "postback", 
+                            "label": status_label,
+                            "text": text_emoji,  # 🔥 修復：簡短的 emoji 避免觸發命令處理
                             "data": f"action=update_status&trip_id={trip_id}&status={status_value}",
-                            "displayText": f"將班次 {trip_id} 狀態修改為 {status_value}"
+                            "displayText": "⏸️"  # 🔥 使用不在 KNOWN_COMMANDS 中的符號
                         }
                     })
     

@@ -17,12 +17,12 @@ DATABASE_SCHEMA = {
             "end_point": {"type": "string", "description": "終點位置"},
             "category": {"type": "string", "description": "班次類別：東洋、診所、臨時"},
             "driver_id": {"type": "integer", "description": "司機編號"},
-            "status": {"type": "string", "description": "班次狀態：待派、準備、已完成、取消"},
+            "status": {"type": "string", "description": "班次狀態：待派、準備、已完成、註銷"},
             "passenger_count": {"type": "integer", "description": "乘客人數"},
             "created_at": {"type": "timestamp", "description": "創建時間"}
         },
         "business_rules": {
-            "status_flow": "待派 → 準備 → 已完成 (或取消)",
+            "status_flow": "待派 → 準備 → 已完成 (或註銷)",
             "categories": ["東洋", "診所", "臨時"],
             "search_fields": ["driver_id", "category", "status", "date"]
         }

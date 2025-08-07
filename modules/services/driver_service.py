@@ -41,8 +41,8 @@ def handle_driver_assign_request(trip_id):
             return None, f"找不到ID為 {trip_id} 的班次"
         
         # 檢查班次狀態
-        if trip[5] == "取消":
-            return None, f"班次 {trip_id} 已取消，無法指派司機"
+        if trip[5] == "註銷":
+            return None, f"班次 {trip_id} 已註銷，無法指派司機"
         
         if trip[5] == "已完成":
             return None, f"班次 {trip_id} 已完成，無法修改司機指派"

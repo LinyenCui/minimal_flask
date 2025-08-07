@@ -160,7 +160,7 @@ def handle_query_trips(message_text=None):
             status_emoji = {
                 "準備": "🟢",
                 "完成": "✅",
-                "取消": "❌",
+                "註銷": "❌",
                 "衝突": "⚠️",
                 "請假": "🔵",
                 "待派": "🟠"
@@ -314,7 +314,7 @@ def handle_change_status(message_text):
         new_status = parts[2]
         
         # 檢查狀態是否有效
-        user_modifiable_statuses = ['準備', '待派', '取消', '衝突', '請假']
+        user_modifiable_statuses = ['準備', '待派', '註銷', '衝突', '請假']
         if new_status not in user_modifiable_statuses:
             return f"無效的狀態: {new_status}。用戶可修改的狀態: {', '.join(user_modifiable_statuses)}\n註：「完成」狀態由系統自動更新。"
         

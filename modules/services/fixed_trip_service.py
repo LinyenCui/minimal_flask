@@ -170,7 +170,7 @@ def handle_query_fixed_trips_flex(message_text=None):
             status_emoji = {
                 "準備": "🟢",
                 "完成": "✅",
-                "取消": "❌",
+                "註銷": "❌",
                 "衝突": "⚠️",
                 "請假": "🔵",
                 "待派": "🟠"
@@ -297,7 +297,7 @@ def handle_query_fixed_trips(message_text=None):
             status_emoji = {
                 "準備": "🟢",
                 "完成": "✅",
-                "取消": "❌",
+                "註銷": "❌",
                 "衝突": "⚠️",
                 "請假": "🔵"
             }.get(status, "⚪")
