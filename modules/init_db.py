@@ -3,6 +3,7 @@
 """
 import os
 import logging
+from modules.utils.security import MaskSecretsFilter, mask_db_url
 import psycopg2
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.sql import text
@@ -13,6 +14,14 @@ from modules.models.models import Base, Person, Customer, Driver, FixedSchedule,
 from modules.config import DATABASE_URL
 
 logger = logging.getLogger(__name__)
+_mask_filter = MaskSecretsFilter()
+for handler in logger.handlers or []:
+    handler.addFilter(_mask_filter)
+if not logger.handlers:
+    sh = logging.StreamHandler()
+    sh.setLevel(logging.INFO)
+    sh.addFilter(_mask_filter)
+    logger.addHandler(sh)
 
 def create_database():
     """
@@ -30,7 +39,7 @@ def create_database():
         # 創建所有表
         with app.app_context():
             db.create_all()
-            logger.info("成功創建所有數據表")
+            logger.info("成功創建所有數據表，連線: %s", mask_db_url(DATABASE_URL))
     except Exception as e:
         logger.error(f"創建數據庫時出錯: {e}")
         raise

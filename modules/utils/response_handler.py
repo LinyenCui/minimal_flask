@@ -3,6 +3,7 @@
 處理所有類型的響應格式，並統一發送給 LINE Bot API
 """
 import logging
+from modules.utils.security import MaskSecretsFilter
 from typing import Dict, Any
 from linebot.v3.messaging import TextMessage, FlexMessage, FlexContainer, ReplyMessageRequest
 from modules.utils.line_bot import reply_text, reply_message, get_line_bot_api
@@ -10,6 +11,14 @@ from modules.utils.quick_reply_manager import QuickReplyManager
 from modules.utils.conversation_context import conversation_manager
 
 logger = logging.getLogger(__name__)
+_mask_filter = MaskSecretsFilter()
+for handler in logger.handlers or []:
+    handler.addFilter(_mask_filter)
+if not logger.handlers:
+    sh = logging.StreamHandler()
+    sh.setLevel(logging.INFO)
+    sh.addFilter(_mask_filter)
+    logger.addHandler(sh)
 
 class ResponseHandler:
     """
