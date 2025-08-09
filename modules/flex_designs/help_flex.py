@@ -292,7 +292,7 @@ def get_leave_status_help():
                 
                 {"type": "text", "text": "🔄 狀態修改", "weight": "bold", "size": "sm", "color": "#008B8B", "margin": "md"},
                 {"type": "text", "text": "• 班次詳情 [ID] - 查看並修改", "size": "xs", "margin": "sm"},
-                {"type": "text", "text": "• 可改為：準備/取消/衝突/請假", "size": "xs"},
+                {"type": "text", "text": "• 可改為：準備/註銷/衝突/請假", "size": "xs"},
                 
                 {"type": "text", "text": "⏰ 30分鐘限制", "weight": "bold", "size": "sm", "color": "#008B8B", "margin": "md"},
                 {"type": "text", "text": "執行前30分鐘內不可修改狀態", "size": "xs", "color": "#666666", "wrap": True},
@@ -470,7 +470,7 @@ def get_production_line_help():
                 
                 {"type": "text", "text": "👨‍🔧 工作人員干預", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
                 {"type": "text", "text": "• 請假：標記瑕疵但繼續流程", "size": "xs", "margin": "sm"},
-                {"type": "text", "text": "• 取消/衝突：從生產線拿掉", "size": "xs"},
+                {"type": "text", "text": "• 註銷/衝突：從生產線拿掉", "size": "xs"},
                 {"type": "text", "text": "• 指派司機：分配工作人員", "size": "xs"},
                 
                 {"type": "text", "text": "🤖 AI智能理解", "weight": "bold", "size": "sm", "color": "#FF6347", "margin": "md"},
@@ -541,7 +541,7 @@ def get_quick_reference_help():
                 {"type": "text", "text": "• 待派：紅色 🔴 需要指派司機", "size": "xs", "margin": "sm"},
                 {"type": "text", "text": "• 準備：綠色 🟢 已準備好執行", "size": "xs"},
                 {"type": "text", "text": "• 請假：黃色 🟡 請假(原因)", "size": "xs"},
-                {"type": "text", "text": "• 取消：灰色 ⚫ 不執行", "size": "xs"},
+                {"type": "text", "text": "• 註銷：灰色 ⚫ 不執行", "size": "xs"},
                 {"type": "text", "text": "• 衝突：橙色 🟠 時間衝突", "size": "xs"}
             ]
         },

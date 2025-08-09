@@ -11,6 +11,7 @@ from modules.models.base import db
 from modules.utils.taiwan_time import get_taiwan_time, get_taiwan_date
 from modules.utils.unified_date_parser import UnifiedDateParser  # 🔥 使用統一日期解析器
 from modules.utils.conversation_context import conversation_manager  # 🔥 重新啟用：對話上下文管理
+from modules.utils.quick_reply_manager import QuickReplyManager  # 🔥 新增：統一Quick Reply管理
 # from modules.utils.enhanced_date_parser import EnhancedDateParser
 from sqlalchemy import text
 import traceback
@@ -997,8 +998,8 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True, pars
                 ),
                 QuickReplyItem(
                     action=MessageAction(
-                        label="❌ 放棄查詢",
-                        text="放棄"
+                        label="🚫 取消",
+                        text="取消"
                     )
                 )
             ]
@@ -1047,20 +1048,16 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True, pars
                 duration_minutes=3
             )
             
-            # 🔥 統一格式：使用標準的Quick Reply按鈕
-            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
-            quick_reply = QuickReply(items=[
-                QuickReplyItem(action=MessageAction(label="✅ 確認正確", text="確認")),
-                QuickReplyItem(action=MessageAction(label="❌ 理解錯誤", text="不對")),
-                QuickReplyItem(action=MessageAction(label="🔍 重新查詢", text="重新查詢")),
-                QuickReplyItem(action=MessageAction(label="🚫 放棄查詢", text="放棄"))
-            ])
+            # 🔥 統一格式：使用QuickReplyManager創建標準格式
+            quick_reply_buttons = [
+                {"label": "✅ 確認正確", "text": "確認", "type": "message"},
+                {"label": "🚫 取消", "text": "取消", "type": "message"}
+            ]
             
-            return {
-                "type": "text_with_quick_reply",
-                "message": confirmation_message,
-                "quick_reply": quick_reply
-            }
+            return QuickReplyManager.create_text_response(
+                confirmation_message,
+                quick_reply_buttons
+            )
         
         # 信心度足夠，直接執行查詢
         # 搜索匹配的班次

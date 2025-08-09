@@ -7,6 +7,7 @@ from typing import Dict, Any
 from linebot.v3.messaging import TextMessage, FlexMessage, FlexContainer, ReplyMessageRequest
 from modules.utils.line_bot import reply_text, reply_message, get_line_bot_api
 from modules.utils.quick_reply_manager import QuickReplyManager
+from modules.utils.conversation_context import conversation_manager
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,12 @@ class ResponseHandler:
     def _send_text_only(reply_token: str, response: Dict[str, Any]) -> bool:
         """發送純文字消息"""
         try:
-            reply_text(reply_token, response["text"])
+            # 如有一次性提示，合併到回覆最前面
+            notice = conversation_manager.pop_transient_notice(reply_token)
+            text = response["text"]
+            if notice:
+                text = f"{notice}\n\n{text}" if text else notice
+            reply_text(reply_token, text)
             logger.info("✅ 純文字消息發送成功")
             return True
         except Exception as e:
@@ -72,6 +78,12 @@ class ResponseHandler:
     def _send_text_with_quick_reply(reply_token: str, response: Dict[str, Any]) -> bool:
         """發送帶 Quick Reply 的文字消息"""
         try:
+            # 如有一次性提示，合併到回覆最前面
+            notice = conversation_manager.pop_transient_notice(reply_token)
+            text = response["text"]
+            if notice:
+                text = f"{notice}\n\n{text}" if text else notice
+            response = {**response, "text": text}
             # 轉換為 LINE SDK 格式
             quick_reply_obj = QuickReplyManager.convert_to_line_sdk_object(response["quick_reply"])
             
@@ -101,14 +113,19 @@ class ResponseHandler:
     def _send_flex_only(reply_token: str, response: Dict[str, Any]) -> bool:
         """發送純 Flex 消息"""
         try:
-            # 創建 FlexMessage
+            # 如有一次性提示，與 Flex 一起發送
+            notice = conversation_manager.pop_transient_notice(reply_token)
+            messages = []
+            if notice:
+                messages.append(TextMessage(text=notice))
+            # 創建 FlexMessage 並加入列表
             flex_message = FlexMessage(
                 alt_text=response.get("alt_text", "Flex Message"),
                 contents=FlexContainer.from_dict(response["flex_message"])
             )
-            
-            # 發送消息
-            reply_message(reply_token, [flex_message])
+            messages.append(flex_message)
+            # 發送消息（可同時包含文字+Flex）
+            reply_message(reply_token, messages)
             
             logger.info("✅ Flex 消息發送成功")
             return True
@@ -121,6 +138,8 @@ class ResponseHandler:
     def _send_flex_with_quick_reply(reply_token: str, response: Dict[str, Any]) -> bool:
         """發送帶 Quick Reply 的 Flex 消息"""
         try:
+            # 如有一次性提示，與 Flex 一起發送
+            notice = conversation_manager.pop_transient_notice(reply_token)
             # 轉換為 LINE SDK 格式
             quick_reply_obj = QuickReplyManager.convert_to_line_sdk_object(response["quick_reply"])
             
@@ -130,9 +149,13 @@ class ResponseHandler:
                 contents=FlexContainer.from_dict(response["flex_message"]),
                 quick_reply=quick_reply_obj
             )
-            
-            # 發送消息
-            reply_message(reply_token, [flex_message])
+            # 構造要發送的消息列表
+            messages = []
+            if notice:
+                messages.append(TextMessage(text=notice))
+            messages.append(flex_message)
+            # 發送消息（文字提示 + Flex 一次送出）
+            reply_message(reply_token, messages)
             
             logger.info("✅ 帶 Quick Reply 的 Flex 消息發送成功")
             return True

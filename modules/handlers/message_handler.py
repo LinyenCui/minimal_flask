@@ -39,7 +39,7 @@ POSTBACK_DISPLAY_TEXT_PATTERNS = [
 COMMANDS_WITH_ARGS = {
     "東洋班次", "診所班次", "查已完成", "班次詳情", "指派司機", "指派", 
     "記錄車資", "修改類別", "生成周報表", "生成週報表", "生成周報", "生成週報",
-    "確認指派", "取消指派", "確認AI修改", "取消AI修改", "查看", "修改班次",
+    "確認指派", "取消指派", "確認AI修改", "確認修改", "取消AI修改", "查看", "修改班次",
     "固定班次請假", "固定班次恢復",  # 固定班次請假相關命令
     "固定班表"  # 新增固定班表查詢命令（去掉前綴，因為前綴會被預處理掉）
 }
@@ -74,13 +74,6 @@ def should_process(message_text, source_type, user_id):
             logger.info("[should_process] User in batch allowance state, returning True")
             return True, message_text
     
-    # 🔥 新增：檢查用戶是否在活躍對話狀態中（如車資修改、請假等）
-    if user_id in conversation_manager.active_conversations:
-        active_conv = conversation_manager.active_conversations[user_id]
-        if not active_conv.is_expired() and not active_conv.can_cancel_with(message_text):
-            logger.info(f"[should_process] User in active conversation ({active_conv.conversation_type}), returning True")
-            return True, message_text
-             
     prefix = None
     command_body = message_text 
     for p in ["!", "#", "/"]:
@@ -91,7 +84,27 @@ def should_process(message_text, source_type, user_id):
             if command_body: return True, command_body 
             else: 
                  logger.info("[should_process] Prefix found but command body is empty, ignoring.")
-                 return False, message_text 
+                 return False, message_text
+
+    # 🔥 修復：活躍對話優先，但要檢查消息是否為對話回應
+    if user_id in conversation_manager.active_conversations:
+        active_conv = conversation_manager.active_conversations[user_id]
+        if not active_conv.is_expired() and not active_conv.can_cancel_with(message_text):
+            # 檢查是否為對話相關的回應（確認、不對、重新查詢、放棄等）
+            conversation_responses = ['確認', '不對', '重新查詢', '放棄', '確認正確', '理解錯誤']
+            if message_text in conversation_responses or active_conv.conversation_type in ['query_confirmation', 'fare_modification']:
+                logger.info(f"[should_process] User in active conversation ({active_conv.conversation_type}), processing response: '{message_text}'")
+                return True, message_text
+            # 乘客請假對話：即使在群組且無前綴，也要交給處理器，讓其檢查格式並決定是否取消對話
+            if active_conv.conversation_type == 'passenger_leave':
+                logger.info(f"[should_process] Active passenger_leave conversation, forwarding message without prefix: '{message_text}'")
+                return True, message_text
+            # 群組中的非對話回應仍需前綴
+            elif source_type == "group" and prefix is None:
+                logger.info(f"[should_process] Group message without prefix not related to active conversation, ignoring: '{message_text}'")
+                return False, message_text
+            logger.info(f"[should_process] User in active conversation ({active_conv.conversation_type}), returning True")
+            return True, message_text 
 
     logger.info(f"[should_process] No prefix or prefix stripped, evaluating: '{command_body}'")
     command_lower = command_body.strip().lower()

@@ -8,15 +8,15 @@ def handle_update_trip_status(message_text):
         # 解析命令格式：修改狀態 [班次ID] [新狀態]
         parts = message_text.split()
         if len(parts) < 3:
-            return "命令格式不正確。正確格式：修改狀態 [班次ID] [新狀態]\n\n可用狀態：取消、衝突、請假"
+            return "命令格式不正確。正確格式：修改狀態 [班次ID] [新狀態]\n\n可用狀態：註銷、衝突、請假"
         
         trip_id = parts[1]
         new_status = parts[2]
         
         # 檢查狀態是否有效
-        valid_statuses = ["準備", "取消", "衝突", "請假"]
+        valid_statuses = ["準備", "註銷", "衝突", "請假"]
         if new_status not in valid_statuses:
-            return f"無效的狀態：{new_status}\n\n可用狀態：取消、衝突、請假\n\n如需改回準備狀態，請使用文字命令：修改狀態 {trip_id} 準備"
+            return f"無效的狀態：{new_status}\n\n可用狀態：註銷、衝突、請假\n\n如需改回準備狀態，請使用文字命令：修改狀態 {trip_id} 準備"
         
         # 查詢當前班次信息
         query = """
@@ -47,7 +47,7 @@ def handle_update_trip_status(message_text):
         trip_time = trip[2]
         
         # 檢查時間限制（取消和請假需要在距離執行時間一個小時以上）
-        if new_status in ["取消", "請假"]:
+        if new_status in ["註銷", "請假"]:
             from datetime import datetime, timedelta
             
             # 獲取當前時間
@@ -67,10 +67,10 @@ def handle_update_trip_status(message_text):
         if new_status == "準備" and current_status == "待派" and not driver_id:
             return f"無法將班次 #{trip_id} 的狀態從「{current_status}」更改為「{new_status}」。\n班次必須先指派司機才能設為準備狀態。"
         
-        if new_status == "取消":
+        if new_status == "註銷":
             # 確認取消操作
             # 使用更適合的確認格式：在回覆中不加前綴，系統會自動添加必要的前綴
-            return f"您確定要取消班次 #{trip_id} 嗎？\n請回覆「確認取消 {trip_id}」進行確認，或回覆其他內容取消操作。\n\n注意：在群組聊天中需要加前綴（!確認取消 {trip_id}）"
+            return f"您確定要註銷班次 #{trip_id} 嗎？\n請回覆「確認取消 {trip_id}」進行確認，或回覆其他內容取消操作。\n\n注意：在群組聊天中需要加前綴（!確認取消 {trip_id}）"
         
         if new_status == "衝突":
             # 確認衝突操作
@@ -174,10 +174,10 @@ def handle_confirm_cancel_trip(message_text):
         if not trip:
             return f"找不到ID為 {trip_id} 的班次。"
         
-        # 更新數據庫中的班次狀態為取消
+        # 更新數據庫中的班次狀態為註銷
         update_query = """
         UPDATE trips
-        SET status = '取消'
+        SET status = '註銷'
         WHERE trip_id = :trip_id
         RETURNING trip_id
         """
@@ -198,7 +198,7 @@ def handle_confirm_cancel_trip(message_text):
         date_str = trip[1]
         time_str = trip[2]
         
-        reply_text = f"✅ 班次 #{trip_id} 已取消。\n\n日期：{date_str}\n時間：{time_str}"
+        reply_text = f"✅ 班次 #{trip_id} 已註銷。\n\n日期：{date_str}\n時間：{time_str}"
         
         # 構建帶有 Quick Reply 的回覆
         reply = {

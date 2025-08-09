@@ -21,6 +21,7 @@ from flask import current_app
 from linebot.v3 import WebhookParser
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 from dotenv import load_dotenv
+from modules.utils.conversation_context import conversation_manager
 
 # 設置日誌
 logger = logging.getLogger(__name__)
@@ -232,6 +233,14 @@ def create_message_action(label, text):
 def reply_text(reply_token, text):
     """發送文字回覆"""
     try:
+        # 如果存在一次性提示，合併到回覆文字最前面
+        try:
+            notice = conversation_manager.pop_transient_notice(reply_token)
+            if notice:
+                text = f"{notice}\n\n{text}" if text else notice
+        except Exception as _e:
+            logger.warning(f"讀取一次性提示失敗: {_e}")
+        
         messaging_api = get_line_bot_api()
         messaging_api.reply_message(
             ReplyMessageRequest(

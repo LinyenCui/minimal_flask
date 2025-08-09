@@ -14,6 +14,7 @@ from modules.utils.line_bot import (
     reply_message_with_quick_reply
 )
 from modules.utils.response_handler import ResponseHandler
+from modules.utils.quick_reply_manager import QuickReplyManager
 from modules.handlers.trip_handler import handle_query_trips, handle_trip_details, handle_change_status, handle_record_fare, handle_modify_category, handle_completed_trip_details
 from modules.flex_designs.help_flex import get_help_flex
 from modules.help_system.help_handler import HelpHandler
@@ -101,8 +102,35 @@ def process_text_message(event):
             # 預約叫車對話
             return handle_temp_booking_conversation(active_conversation, message_text, user_id, reply_token)
         elif active_conversation.conversation_type == 'passenger_leave':
-            # 乘客請假對話
-            return handle_passenger_leave_conversation(active_conversation, message_text, user_id, reply_token)
+            # 乘客請假對話 - 先檢查格式，不符合就自動取消
+            parts = message_text.split()
+            is_valid_leave_format = False
+            
+            if len(parts) == 2:
+                try:
+                    int(parts[1])  # 第二部分必須是數字
+                    reason = parts[0]
+                    if reason and not any(char.isdigit() for char in reason):
+                        is_valid_leave_format = True
+                except ValueError:
+                    pass
+            
+            if not is_valid_leave_format:
+                # 格式不正確，自動取消請假對話並直接回覆提示（不再處理本次輸入的其他命令）
+                logger.info(f"🚫 請假格式不正確，自動取消: '{message_text}'")
+                conversation_manager.end_conversation(user_id, "格式不正確自動取消")
+                cancel_msg = (
+                    "🚫 已取消請假操作\n\n"
+                    "💡 輸入格式不正確，請重新點擊請假按鈕\n"
+                    "• 正確格式：[原因] [加成]\n"
+                    "• 範例：臨時有事 -30\n\n"
+                    "⚠️ 群組對話請記得加前綴 '/'"
+                )
+                reply_text(reply_token, cancel_msg)
+                return
+            else:
+                # 格式正確，處理請假
+                return handle_passenger_leave_conversation(active_conversation, message_text, user_id, reply_token)
         elif active_conversation.conversation_type == 'fare_modification':
             # 車資修改對話
             return handle_fare_modification_conversation(active_conversation, message_text, user_id, reply_token)
@@ -309,7 +337,7 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 if result and result.get("text"):
                     # 如果檢查成功，提供Quick Reply按鈕
                     if "❌" not in result["text"]:  # 沒有錯誤
-                        from modules.utils.quick_reply_manager import QuickReplyManager
+                        # 使用QuickReplyManager處理快速回覆
                         from modules.utils.response_handler import send_text_response
                         
                         # 使用標準化的按鈕
@@ -842,19 +870,7 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 return
         # --- 結束新增 ---
         
-        # --- 🔥 修改：記錄車資統一使用智能引導模式 --- 
-        elif message_text.startswith("記錄車資"):
-            # 統一使用智能引導模式，而不是直接處理
-            try:
-                from modules.services.ai_fare_service import handle_smart_fare_query
-                result = handle_smart_fare_query(message_text, user_id, use_flex=True, parsed_command=message_text)
-                handle_ai_fare_result(result, reply_token)
-                return
-            except Exception as e:
-                logger.error(f"智能車資處理失敗: {e}")
-                reply_text(reply_token, f"❌ 車資處理失敗：{str(e)}")
-                return
-        # --- 結束修改 ---
+        # --- 移除：記錄車資早期AI攔截，改用後面的雙軌制處理 ---
         
         # --- 新增：固定班表查詢功能 ---
         elif message_text.startswith("固定班表"):
@@ -1134,22 +1150,30 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 return
         
         # 🔥 修復：優先檢查簡單請假格式，避免被智能助手攔截
-        # 檢測簡單請假格式（原因+數字）並檢查是否在請假模式
-        import re
-        simple_leave_pattern = r'^(.+)\s+(-?\d+)$'
-        simple_leave_match = re.match(simple_leave_pattern, message_text.strip())
+        # 嚴格檢測簡單請假格式：必須恰好2個部分，且第一部分不含數字
+        parts = message_text.split()
+        is_valid_simple_leave = False
         
-        logger.info(f"🔍 檢查簡單請假格式: '{message_text}' → 匹配結果: {simple_leave_match is not None}")
+        if len(parts) == 2:
+            try:
+                int(parts[1])  # 第二部分必須是數字
+                reason = parts[0]
+                if reason and not any(char.isdigit() for char in reason):
+                    is_valid_simple_leave = True
+            except ValueError:
+                pass
         
-        if simple_leave_match:
+        logger.info(f"🔍 檢查簡單請假格式: '{message_text}' → 匹配結果: {is_valid_simple_leave}")
+        
+        if is_valid_simple_leave:
             # 檢查是否在請假模式
             is_in_leave_mode = conversation_manager.is_in_leave_mode(user_id)
             
             logger.info(f"🔍 用戶 {user_id} 請假模式狀態: {is_in_leave_mode}")
             
             if is_in_leave_mode:
-                reason = simple_leave_match.group(1).strip()
-                amount = simple_leave_match.group(2).strip()
+                reason = parts[0]
+                amount = parts[1]
                 
                 recent_trip_id = conversation_manager.get_recent_trip_id(user_id)
                 recent_fixed_schedule_id = conversation_manager.get_recent_fixed_schedule_id(user_id)
@@ -1188,13 +1212,130 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                     except Exception as e:
                         logger.error(f"❌ 處理固定班次簡單請假格式時出錯: {e}")
                         # 使用頂部導入的 traceback
-                        logger.error(f"❌ 完整錯誤堆疊: {traceback.format_exc()}")
-                        # 提供錯誤回饋給用戶
-                        reply_text(reply_token, f"❌ 處理固定班次請假時發生錯誤，請稍後再試或聯繫管理員。\n錯誤: {str(e)}")
-                else:
-                    # 如果找不到最近的班次ID，提示用戶
-                    reply_text(reply_token, f"檢測到請假資料（{reason} {amount}），但找不到對應的班次。\n\n請使用完整格式：\n• 乘客請假 [班次ID] {amount} {reason}\n• 固定班次請假 [固定班次ID] {amount} {reason}")
+        else:
+            # 不符合簡單請假格式。如果仍處於請假模式，直接取消並提示，不再處理本次輸入
+            if conversation_manager.is_in_leave_mode(user_id):
+                logger.info(f"🚫 非請假格式且正在請假模式，自動取消。輸入: '{message_text}'")
+                conversation_manager.end_conversation(user_id, "格式不正確自動取消")
+                conversation_manager.clear_leave_mode(user_id)
+                reply_text(reply_token, """🚫 已取消請假操作
+
+💡 輸入格式不正確，請重新點擊請假按鈕
+• 正確格式：[原因] [加成]
+• 範例：臨時有事 -30
+
+⚠️ 群組對話請記得加前綴 "/"""
+                )
+                return
+
+        # 🔥 傳統過去態命令處理（在AI之前，作為穩定的後備機制）
+        
+        # 記錄車資傳統命令
+        if message_text.startswith("記錄車資"):
+            try:
+                parts = message_text.split()
+                
+                # 檢查基本參數（至少需要：記錄車資 ID 錶價）
+                if len(parts) < 3:
+                    reply_text(reply_token, "❌ 命令格式不正確\n\n✅ 正確格式：\n• 記錄車資 [ID] [錶價] [加成] [原因]\n• 記錄車資 [ID] [錶價] [加成]\n\n💡 如果沒有提供原因，系統會引導您輸入")
                     return
+                
+                # 檢查是否缺少原因（少於5個參數表示沒有原因）
+                if len(parts) < 5:
+                    # 解析已有的參數
+                    try:
+                        trip_id = int(parts[1])
+                        meter_fare = int(parts[2])
+                        extra_fare = int(parts[3]) if len(parts) >= 4 else 0
+                    except ValueError:
+                        reply_text(reply_token, "❌ 參數格式錯誤\n\n• ID、錶價、加成必須是數字\n• 請檢查格式：記錄車資 2014 280 50")
+                        return
+                    
+                    # 啟動對話要求用戶輸入原因
+                    conversation_manager.start_conversation(
+                        user_id, 
+                        'fare_modification',
+                        'waiting_reason',
+                        {
+                            'trip_id': trip_id,
+                            'meter_fare': meter_fare,
+                            'extra_fare': extra_fare,
+                            'operation': 'traditional_record_fare'
+                        },
+                        f"✅ 車資資料已準備：\n班次 #{trip_id}\n錶價：{meter_fare}元\n加成：{extra_fare}元\n\n❓ 請提供修改原因："
+                    )
+                    
+                    # 使用標準化的響應處理器
+                    
+                    # 創建標準化的Quick Reply按鈕
+                    quick_reply_buttons = [
+                        {"label": "❌ 取消修改", "text": "取消修改", "type": "message"}
+                    ]
+                    
+                    # 創建標準化響應
+                    response = QuickReplyManager.create_text_response(
+                        f"✅ 車資資料已準備：\n班次 #{trip_id}\n錶價：{meter_fare}元\n加成：{extra_fare}元\n\n❓ 請提供修改原因：",
+                        quick_reply_buttons
+                    )
+                    
+                    # 發送響應
+                    if not ResponseHandler.send_response(reply_token, response):
+                        # 如果新格式失敗，回退到基本文字
+                        reply_text(reply_token, f"✅ 車資資料已準備：\n班次 #{trip_id}\n錶價：{meter_fare}元\n加成：{extra_fare}元\n\n❓ 請提供修改原因：\n\n💡 請直接輸入修改原因，或輸入「取消修改」取消操作")
+                    return
+                
+                # 有完整參數，直接處理
+                from modules.handlers.trip_handler import handle_record_fare
+                result = handle_record_fare(message_text, user_id)
+                reply_text(reply_token, result)
+                return
+                
+            except Exception as e:
+                logger.error(f"傳統記錄車資命令處理失敗: {e}")
+                reply_text(reply_token, f"❌ 處理記錄車資命令時出錯：{str(e)}")
+                return
+        
+        # 查已完成傳統命令
+        if message_text.startswith("查已完成"):
+            try:
+                from modules.services.ai_fare_service import handle_smart_fare_query
+                # 使用現有的查詢服務，但標記為傳統命令
+                result = handle_smart_fare_query(message_text, user_id, use_flex=True)
+                handle_ai_fare_result(result, reply_token)
+                return
+            except Exception as e:
+                logger.error(f"傳統查已完成命令處理失敗: {e}")
+                reply_text(reply_token, f"❌ 處理查已完成命令時出錯：{str(e)}")
+                return
+        
+        # 完成記錄傳統命令（直接查詢已完成班次）
+        if message_text.startswith("完成記錄"):
+            try:
+                from modules.services.trip_query_service import handle_query_completed_trips
+                
+                # 簡單轉換為適合的格式
+                if message_text == "完成記錄":
+                    # 默認查詢今天的
+                    converted_query = "查已完成 今天"
+                else:
+                    # 將"完成記錄 XXX"轉換為"查已完成 XXX"
+                    converted_query = message_text.replace("完成記錄", "查已完成", 1)
+                
+                logger.info(f"🔄 完成記錄命令轉換: '{message_text}' → '{converted_query}'")
+                
+                # 使用現有的已完成班次查詢函數
+                result = handle_query_completed_trips(converted_query)
+                
+                if result:
+                    reply_text(reply_token, result)
+                else:
+                    reply_text(reply_token, "📋 未找到符合條件的已完成班次")
+                
+                return
+            except Exception as e:
+                logger.error(f"傳統完成記錄命令處理失敗: {e}")
+                reply_text(reply_token, f"❌ 處理完成記錄命令時出錯：{str(e)}")
+                return
 
         # 優先嘗試智能助手處理
         try:
@@ -1273,7 +1414,8 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
 
                 elif command.startswith("查已完成"):
                     from modules.services.ai_fare_service import handle_smart_fare_query
-                    result = handle_smart_fare_query(command, user_id, use_flex=True)
+                    # 🔥 CRITICAL修復：傳遞parsed_command，避免確認對話中parsed_command為None
+                    result = handle_smart_fare_query(command, user_id, use_flex=True, parsed_command=command)
                     handle_ai_fare_result(result, reply_token)
                     return
                 
@@ -1584,7 +1726,36 @@ def handle_passenger_leave_conversation(conversation, message_text: str, user_id
     """處理乘客請假對話"""
     logger.info(f"🎯 處理乘客請假對話: 步驟={conversation.current_step}")
     
-    # 使用現有的passenger_leave_handler邏輯
+    # 🔥 嚴格的請假格式檢查：必須是 [原因] [數字] 格式，其他一律取消
+    parts = message_text.split()
+    is_valid_format = False
+    
+    # 必須恰好2個部分：原因 + 數字
+    if len(parts) == 2:
+        try:
+            # 第二部分必須是數字（加成）
+            int(parts[1])
+            # 第一部分必須是純文字原因（不能包含數字）
+            reason = parts[0]
+            if reason and not any(char.isdigit() for char in reason):
+                is_valid_format = True
+        except ValueError:
+            pass
+    
+    if not is_valid_format:
+        # 🔥 格式不對，直接取消並回覆提示；不再處理本次輸入
+        logger.info(f"🚫 請假格式不正確，直接取消: '{message_text}'")
+        conversation_manager.end_conversation(user_id, "格式不正確取消請假")
+        reply_text(reply_token, """🚫 已取消請假操作
+
+💡 輸入格式不正確，請重新點擊請假按鈕
+• 正確格式：[原因] [加成]
+• 範例：臨時有事 -30
+
+⚠️ 群組對話請記得加前綴 "/"  """)
+        return
+    
+    # 🔥 格式正確，執行請假
     from modules.handlers.passenger_leave_handler import handle_passenger_leave_command
     result = handle_passenger_leave_command(message_text, user_id)
     
@@ -1609,6 +1780,7 @@ def handle_fare_modification_conversation(conversation, message_text: str, user_
     meter_fare = context_data.get('meter_fare')
     extra_fare = context_data.get('extra_fare')
     table = context_data.get('table', 'trips')
+    operation = context_data.get('operation', 'default')
     
     if not trip_id or meter_fare is None:
         logger.error(f"車資修改對話缺少必要信息: {context_data}")
@@ -1623,9 +1795,61 @@ def handle_fare_modification_conversation(conversation, message_text: str, user_
         reply_text(reply_token, "❌ 請提供修改原因\n\n例如：客戶要求調整價格")
         return
     
-    # 根據表格類型構建相應的命令
-    if table == 'completed_trips':
-        # 已完成班次使用記錄車資命令
+    # 根據操作類型和表格類型構建相應的命令
+    if operation == 'traditional_record_fare':
+        # 傳統記錄車資：改為顯示確認框，與AI修改一致
+        change_summary = []
+        change_summary.append(f"錶價: {context_data.get('old_meter', '未知')} → {meter_fare}")
+        change_summary.append(f"加成: {context_data.get('old_extra', '未知')} → {extra_fare}")
+        # 結束當前對話，轉入確認流程由 AI 確認框共用
+        conversation_manager.end_conversation(user_id, "原因已收集，等待確認")
+        try:
+            # 構建 trip 資料以便重用 AI 確認 Flex
+            from modules.services.trip_service import get_completed_trip_details
+            # 取得摘要文本後，無法直接得到完整trip物件；這裡改用簡單查詢 completed_trips當前值
+            from modules.handlers.trip_handler import db, sql_text
+            row = db.session.execute(sql_text("SELECT id, start_point, end_point, category, driver_id, meter_fare, extra_fare FROM completed_trips WHERE id = :id"), {"id": trip_id}).fetchone()
+            if row:
+                trip = {
+                    'id': row[0],
+                    'start_point': row[1],
+                    'end_point': row[2],
+                    'category': row[3],
+                    'driver_id': row[4],
+                    'meter_fare': row[5],
+                    'extra_fare': row[6],
+                }
+            else:
+                # 找不到已完成班次時，仍提供確認框（使用最小必要資訊），避免中斷備用流程
+                trip = {
+                    'id': trip_id,
+                    'start_point': '未知',
+                    'end_point': '未知',
+                    'category': '未分類',
+                    'driver_id': 'N/A',
+                    'meter_fare': 0,
+                    'extra_fare': 0,
+                }
+            modification_intent = {
+                'trip_id': trip_id,
+                'meter_fare': meter_fare,
+                'extra_fare': extra_fare,
+                'reason': reason
+            }
+            from modules.services.ai_fare_service import execute_fare_modification
+            result = execute_fare_modification(trip, modification_intent, user_id)
+            handle_ai_fare_result(result, reply_token)
+            return
+        except Exception as e:
+            logger.error(f"生成傳統記錄車資確認界面失敗，回退直接寫入: {e}")
+            # 回退：直接落庫
+            full_command = f"記錄車資 {trip_id} {meter_fare} {extra_fare} {reason}"
+            from modules.handlers.trip_handler import handle_record_fare
+            result = handle_record_fare(full_command, user_id)
+            reply_text(reply_token, result)
+            return
+    elif table == 'completed_trips':
+        # 已完成班次使用記錄車資命令（AI修改）
         full_command = f"記錄車資 {trip_id} {meter_fare} {extra_fare} {reason}"
         logger.info(f"🎯 構建已完成班次車資修改命令: {full_command}")
         
@@ -1682,11 +1906,13 @@ def handle_query_clarification_conversation(conversation, message_text: str, use
                 # 🔥 統一命令執行邏輯
                 if command.startswith("記錄車資"):
                     from modules.services.ai_fare_service import handle_smart_fare_query
-                    result = handle_smart_fare_query(message_text, user_id, use_flex=True)
+                    # 🔥 CRITICAL修復：傳遞parsed_command，避免確認對話中parsed_command為None
+                    result = handle_smart_fare_query(message_text, user_id, use_flex=True, parsed_command=command)
                     handle_ai_fare_result(result, reply_token)
                 elif command.startswith("查已完成"):
                     from modules.services.ai_fare_service import handle_smart_fare_query
-                    result = handle_smart_fare_query(command, user_id, use_flex=True)
+                    # 🔥 CRITICAL修復：傳遞parsed_command，避免確認對話中parsed_command為None
+                    result = handle_smart_fare_query(command, user_id, use_flex=True, parsed_command=command)
                     handle_ai_fare_result(result, reply_token)
                 else:
                     reply_text(reply_token, f"收到澄清後的命令：{command}")
@@ -1703,13 +1929,29 @@ def handle_query_confirmation_conversation(conversation, message_text: str, user
     # 🔥 修復：導入conversation_manager
     
     if conversation.current_step == 'waiting_confirmation':
-        # 檢查用戶是否確認
-        confirmation_keywords = ['確認', '對的', '正確', 'yes', '是', '對', 'ok', '好']
-        rejection_keywords = ['不對', '錯誤', '不是', 'no', '錯', '不正確']
+        # 檢查用戶的回覆類型
+        confirmation_keywords = ['確認', '對的', '正確', 'yes', '是', '對', 'ok', '好', '確認正確']
+        rejection_keywords = ['不對', '錯誤', '不是', 'no', '錯', '不正確', '理解錯誤']
+        cancel_keywords = ['放棄', '取消', '退出', '放棄查詢']
         
         message_lower = message_text.lower().strip()
         
-        if any(keyword in message_lower for keyword in confirmation_keywords):
+        # 🔥 修復：檢查用戶是否要取消操作
+        if any(keyword in message_lower for keyword in cancel_keywords):
+            # 用戶要取消查詢
+            logger.info(f"🚫 用戶取消查詢操作")
+            
+            # 結束確認對話
+            conversation_manager.end_conversation(user_id, "用戶取消查詢")
+            
+            reply_text(reply_token, """🚫 已取消查詢操作
+            
+💡 您可以重新發起查詢，或使用以下方式：
+• 傳統命令：查已完成 昨天 司機5386
+• 別名命令：完成記錄
+• 自然語言：/昨天5386班次""")
+            
+        elif any(keyword in message_lower for keyword in confirmation_keywords):
             # 用戶確認理解正確，執行原查詢
             logger.info(f"✅ 用戶確認理解正確，執行查詢")
             
@@ -1749,35 +1991,37 @@ def handle_query_confirmation_conversation(conversation, message_text: str, user
                         else:
                             reply_text(reply_token, "❌ 查詢執行失敗")
                 else:
-                    # 降級：如果沒有已解析命令，使用AI車資服務（可能觸發循環，但至少有回退）
-                    logger.warning("⚠️ 沒有已解析命令，降級使用AI車資服務")
-                    from modules.services.ai_fare_service import handle_smart_fare_query
-                    result = handle_smart_fare_query(original_query, user_id, use_flex=True)
-                    handle_ai_fare_result(result, reply_token)
+                    # 🔥 CRITICAL修復：避免無限循環，如果沒有已解析命令，直接使用AdvancedQueryProcessor
+                    logger.warning("⚠️ 沒有已解析命令，使用AdvancedQueryProcessor避免循環")
+                    from modules.services.advanced_query_processor import AdvancedQueryProcessor
+                    processor = AdvancedQueryProcessor()
+                    result = processor.process_complex_query(original_query, user_id)
+                    
+                    if result.get('type') == 'success':
+                        reply_text(reply_token, result['message'])
+                    elif result.get('type') == 'success_with_pagination':
+                        reply_message_with_quick_reply(reply_token, result['message'], result['quick_reply'])
+                    elif result.get('type') == 'no_results':
+                        reply_text(reply_token, result['message'])
+                    else:
+                        reply_text(reply_token, "❌ 查詢執行失敗")
                 
             except Exception as e:
                 logger.error(f"執行確認後的查詢失敗: {e}")
                 reply_text(reply_token, f"❌ 執行查詢時出現錯誤: {str(e)}")
-        elif any(keyword in message_lower for keyword in rejection_keywords):
-            # 用戶認為理解不正確
-            logger.info(f"❌ 用戶認為理解不正確，請求重新描述")
+        else:
+            # 🔥 新增：用戶行為不可測，輸入其他內容時直接取消對話
+            logger.info(f"🚫 用戶輸入其他內容，直接取消對話: '{message_text}'")
             
             # 結束確認對話
-            conversation_manager.end_conversation(user_id, "用戶否認理解")
+            conversation_manager.end_conversation(user_id, "用戶輸入其他內容，自動取消")
             
-            reply_text(reply_token, """💭 理解，請提供更準確的描述
-
-💡 請嘗試：
-• 使用具體的日期格式（如 7/15）
-• 明確指定司機號碼（如 司機533）
-• 包含班次類別（如 診所、東洋）
-• 如果要修改，請說明具體的錶價和加成
-
-或使用「查已完成」查看完整列表後再選擇。""")
-        else:
-            # 用戶回覆不明確，請求明確回答
-            status_message = conversation_manager.get_conversation_status_message(user_id)
-            reply_text(reply_token, f"💭 請明確回答「確認」或「不對」\n\n{status_message}")
+            reply_text(reply_token, """🚫 已取消查詢操作
+            
+💡 您可以重新發起查詢，或使用以下方式：
+• 傳統命令：查已完成 昨天 司機5386
+• 別名命令：完成記錄
+• 自然語言：/昨天5386班次""")
     else:
         logger.warning(f"未處理的查詢確認對話步驟: {conversation.current_step}")
         conversation_manager.end_conversation(user_id, "未知步驟")
