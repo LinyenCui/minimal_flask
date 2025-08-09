@@ -10,9 +10,14 @@ from datetime import datetime, timedelta, date
 from .gemini_client import call_gemini_api
 from .knowledge_base import load_db_schema
 from .utils import NaturalQueryParser # New import
+from modules.utils.security import MaskSecretsFilter
 
 # 配置日誌
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+_mask_filter = MaskSecretsFilter()
+for handler in logging.getLogger().handlers or []:
+    handler.addFilter(_mask_filter)
+
 
 def get_classification_prompt(user_query: str, db_schema: dict, extracted_entities: dict) -> str:
     """

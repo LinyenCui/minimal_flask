@@ -22,9 +22,19 @@ from linebot.v3 import WebhookParser
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 from dotenv import load_dotenv
 from modules.utils.conversation_context import conversation_manager
+from modules.utils.security import mask_value, MaskSecretsFilter
 
 # 設置日誌
 logger = logging.getLogger(__name__)
+# 確保該模組 logger 的所有 handler 套用遮罩過濾器
+_mask_filter = MaskSecretsFilter()
+for handler in logger.handlers or []:
+    handler.addFilter(_mask_filter)
+if not logger.handlers:
+    sh = logging.StreamHandler()
+    sh.setLevel(logging.INFO)
+    sh.addFilter(_mask_filter)
+    logger.addHandler(sh)
 
 def get_parser():
     """獲取LINE Webhook解析器"""
@@ -44,13 +54,13 @@ def get_parser():
     logger.info(f"Channel Secret length: {len(channel_secret)}")
     if current_app.config.get('LINE_CHANNEL_SECRET'):
         cs_config = current_app.config.get('LINE_CHANNEL_SECRET')
-        logger.info(f"Channel Secret from config: {cs_config[:6]}...{cs_config[-4:]}")
+        logger.info("Channel Secret from config: %s", mask_value(cs_config))
     else:
         logger.info("Channel Secret from config: 未设置")
     
     if os.environ.get('LINE_CHANNEL_SECRET'):
         cs_env = os.environ.get('LINE_CHANNEL_SECRET')
-        logger.info(f"Channel Secret from env: {cs_env[:6]}...{cs_env[-4:]}")
+        logger.info("Channel Secret from env: %s", mask_value(cs_env))
     else:
         logger.info("Channel Secret from env: 未设置")
     
@@ -74,7 +84,7 @@ def get_line_bot_api():
         logger.error("LINE_CHANNEL_TOKEN not found in config or environment variables")
         raise ValueError("LINE_CHANNEL_TOKEN not found in config or environment variables")
         
-    logger.info(f"Using Channel Token: {token[:6]}...{token[-4:]}" if token else "未设置")
+    logger.info("Using Channel Token: %s", mask_value(token) if token else "未设置")
     
     configuration = Configuration(access_token=token)
     api_client = ApiClient(configuration)

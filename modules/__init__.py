@@ -45,9 +45,15 @@ def create_app():
     
     # 設定日誌
     import logging
+    from modules.utils.security import MaskSecretsFilter
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
+    # 掛載全域遮罩過濾器到 root logger handlers
+    _mask_filter = MaskSecretsFilter()
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers or []:
+        handler.addFilter(_mask_filter)
     
     return app

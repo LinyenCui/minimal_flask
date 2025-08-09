@@ -25,13 +25,15 @@ else:
     print("Render 環境：使用 Render 環境變量")
 
 # 驗證配置
+from modules.utils.security import mask_value  # for early masking in startup prints
 secret = os.environ.get('LINE_CHANNEL_SECRET')
 token = os.environ.get('LINE_CHANNEL_TOKEN')
-print(f"使用的 Channel Secret: {secret[:6]}...{secret[-4:]}" if secret else "未设置")
-print(f"使用的 Channel Token: {token[:6]}...{token[-4:]}" if token else "未设置")
+print(f"使用的 Channel Secret: {mask_value(secret)}" if secret else "未设置")
+print(f"使用的 Channel Token: {mask_value(token)}" if token else "未设置")
 
 # 其他的 import
 import logging
+from modules.utils.security import mask_value, mask_db_url, MaskSecretsFilter
 from modules import create_app
 from flask import request, abort
 from flask_apscheduler import APScheduler
@@ -58,15 +60,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Attach global secrets masking filter to all handlers (root and current)
+_mask_filter = MaskSecretsFilter()
+root_logger = logging.getLogger()
+for handler in root_logger.handlers or []:
+    handler.addFilter(_mask_filter)
+if not root_logger.handlers:
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.INFO)
+    stream_handler.addFilter(_mask_filter)
+    root_logger.addHandler(stream_handler)
+
+for handler in logger.handlers or []:
+    handler.addFilter(_mask_filter)
+
 # 顯示配置信息
 def show_config():
     token = app.config.get('LINE_CHANNEL_TOKEN')
     secret = app.config.get('LINE_CHANNEL_SECRET')
     db_url = app.config.get('SQLALCHEMY_DATABASE_URI')
-    
-    logger.info(f"Channel token: {token[:6]}...{token[-4:]}" if token else "未设置")
-    logger.info(f"Database URL: {'*'*10}" if db_url else "未设置")
-    logger.info(f"Channel Secret: {secret[:6]}...{secret[-4:]}" if secret else "未设置")
+
+    logger.info("Channel token: %s", mask_value(token))
+    logger.info("Database URL: %s", mask_db_url(db_url))
+    logger.info("Channel Secret: %s", mask_value(secret))
 
 # 在應用啟動前執行配置顯示
 with app.app_context():
