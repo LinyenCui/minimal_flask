@@ -2,9 +2,13 @@
 import os
 import json
 import logging
+from modules.utils.security import MaskSecretsFilter
 
 # 配置日誌
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+_mask_filter = MaskSecretsFilter()
+for handler in logging.getLogger().handlers or []:
+    handler.addFilter(_mask_filter)
 
 # --- 常數定義 ---
 DB_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), 'db_schema.json')
