@@ -193,7 +193,7 @@ class AdvancedQueryProcessor:
             # 檢查是否有無效狀態
             if conditions.get('invalid_status'):
                 invalid_status = conditions['invalid_status']
-                known_statuses = ['待派', '準備', '已完成', '取消']
+                known_statuses = ['待派', '準備', '已完成', '註銷']
                 return {
                     "type": "invalid_status",
                     "message": f"❌ 狀態「{invalid_status}」不存在\n\n💡 可用的狀態：\n• {', '.join(known_statuses)}\n\n🔍 建議查詢：\n• 狀態為準備的班次\n• 狀態為已完成的班次",
@@ -414,7 +414,7 @@ class AdvancedQueryProcessor:
             conditions['driver_id'] = int(driver_match.group(1))
         
         # 解析狀態條件 - 先嘗試精確匹配已知狀態
-        known_statuses = ['待派', '準備', '已完成', '取消', '衝突']  # 🔥 新增：添加衝突狀態
+        known_statuses = ['待派', '準備', '已完成', '註銷', '衝突']  # 🔥 新增：添加衝突狀態
         status_found = False
         
         for status in known_statuses:
@@ -672,7 +672,7 @@ class AdvancedQueryProcessor:
             status_counts[display_status] = status_counts.get(display_status, 0) + 1
         
         # 按指定順序顯示狀態統計
-        status_order = ['準備', '待派', '已完成', '取消', '衝突', '請假']
+        status_order = ['準備', '待派', '已完成', '註銷', '衝突', '請假']
         status_stats = []
         for status in status_order:
             if status in status_counts:
@@ -683,8 +683,8 @@ class AdvancedQueryProcessor:
                     status_stats.append(f"🔴待派{count}筆")
                 elif status == '已完成':
                     status_stats.append(f"✅已完成{count}筆")
-                elif status == '取消':
-                    status_stats.append(f"❌取消{count}筆")
+                elif status == '註銷':
+                    status_stats.append(f"❌註銷{count}筆")
                 elif status == '衝突':
                     status_stats.append(f"🟠衝突{count}筆")
                 elif status == '請假':
@@ -723,7 +723,7 @@ class AdvancedQueryProcessor:
                     status_icon = "🔴"
                 elif status == '已完成':
                     status_icon = "✅"
-                elif status == '取消':
+                elif status == '註銷':
                     status_icon = "❌"
                 elif status == '衝突':
                     status_icon = "🟠"
@@ -815,7 +815,7 @@ class AdvancedQueryProcessor:
                 status_icon = "🔴"
             elif status == '已完成':
                 status_icon = "✅"
-            elif status == '取消':
+            elif status == '註銷':
                 status_icon = "❌"
             elif status == '衝突':
                 status_icon = "🟠"

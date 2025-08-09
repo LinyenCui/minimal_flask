@@ -547,9 +547,10 @@ def create_ai_modification_confirm_flex(modification_info):
         }
         
         # 使用新的 Quick Reply 標準格式
+        # 🎯 現在可以安全使用「取消」一詞：trips狀態已從「取消」改為「註銷」，語意衝突已解決
         quick_reply_buttons = [
             {"label": "✅ 確認修改", "text": f"確認AI修改 {trip_id} {new_meter} {new_extra} {reason}", "type": "message"},
-            {"label": "❌ 放棄修改", "text": "放棄AI修改", "type": "message"},
+            {"label": "❌ 取消修改", "text": "取消AI修改", "type": "message"},  # 現在可以自然使用「取消」
             {"label": "📋 查看詳情", "text": f"查看 {trip_id}", "type": "message"}
         ]
         

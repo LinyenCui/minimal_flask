@@ -185,7 +185,7 @@ class ConversationContext:
                     status_icon = "🔴"
                 elif status == '已完成':
                     status_icon = "✅"
-                elif status == '取消':
+                elif status == '註銷':
                     status_icon = "❌"
                 elif status == '衝突':
                     status_icon = "🟠"
@@ -355,6 +355,8 @@ class ConversationManager:
         self.pending_modifications = {}
         # 🔥 新增：活躍對話狀態
         self.active_conversations = {}
+        # 🔔 短暫提示：用於在下一次回覆前附加簡短通知（例如：自動取消說明）
+        self.transient_notices = {}
     
     # === 🔥 統一對話狀態管理 ===
     
@@ -366,12 +368,15 @@ class ConversationManager:
         expires_at = now + timedelta(minutes=duration_minutes)
         
         # 定義各種對話的取消命令
+        # 🎯 語意衝突已解決：trips狀態已從「取消」改為「註銷」，現在可以自然使用「取消」命令
+        # 現在態狀態有：「待派」、「請假」、「衝突」、「註銷」、「準備」
+        # 「取消修改」不再與任何資料庫狀態產生語意混淆
         cancel_commands_map = {
-            'fare_modification': ['取消修改', '取消', '放棄修改', '退出', '不修改', '放棄', '放棄操作'],
-            'temp_booking': ['取消預約', '取消', '放棄預約', '退出', '不預約'],
-            'passenger_leave': ['取消請假', '取消', '放棄請假', '退出', '不請假', '放棄', '放棄操作'],
-            'driver_assign': ['取消指派', '取消', '放棄指派', '退出', '不指派'],
-            'fixed_schedule': ['取消', '放棄', '退出', '放棄操作']
+            'fare_modification': ['取消修改', '取消', '取消AI修改', '退出', '不修改'],
+            'temp_booking': ['取消預約', '取消', '退出', '不預約'],
+            'passenger_leave': ['取消請假', '取消', '退出', '不請假', '放棄操作', '完成記錄', '查已完成', '班次詳情'],  # 學習未來態設計，添加常見的非請假命令
+            'driver_assign': ['取消指派', '取消', '退出', '不指派'],
+            'fixed_schedule': ['取消', '退出', '放棄操作']  # 未來態已使用此設計
         }
         
         conversation = ActiveConversation(
@@ -441,6 +446,20 @@ class ConversationManager:
         # 同時清理舊的狀態
         self.clear_pending_modification(user_id)
         self.clear_leave_mode(user_id)
+
+    # === 短暫提示（Transient Notice）API ===
+    def set_transient_notice(self, reply_token: str, message: str):
+        """為當前回覆token設置一次性提示訊息（隨下一次回覆一起發送，之後自動清除）"""
+        if not reply_token or not message:
+            return
+        self.transient_notices[reply_token] = message
+        logger.info(f"設置一次性提示（reply_token尾碼={reply_token[-6:] if isinstance(reply_token, str) else 'N/A'}）: {message[:30]}...")
+
+    def pop_transient_notice(self, reply_token: str) -> Optional[str]:
+        """讀取並清除與reply_token綁定的一次性提示"""
+        if not reply_token:
+            return None
+        return self.transient_notices.pop(reply_token, None)
     
     def can_user_cancel_with_message(self, user_id: str, message: str) -> bool:
         """檢查用戶消息是否可以取消當前對話"""
