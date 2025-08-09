@@ -5,9 +5,13 @@ import vertexai
 from vertexai.generative_models import GenerativeModel, GenerationConfig
 from google.oauth2 import service_account
 from google.auth import exceptions as auth_exceptions
+from modules.utils.security import MaskSecretsFilter, mask_value
 
 # 配置日誌
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+_mask_filter = MaskSecretsFilter()
+for handler in logging.getLogger().handlers or []:
+    handler.addFilter(_mask_filter)
 
 # --- 全局變數 ---
 MODEL = None
@@ -40,11 +44,11 @@ def configure_gemini():
         env_key_file_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
         if env_key_file_path and os.path.exists(env_key_file_path):
             credentials = service_account.Credentials.from_service_account_file(env_key_file_path)
-            logging.info(f"Loaded credentials from GOOGLE_APPLICATION_CREDENTIALS: {env_key_file_path}")
+            logging.info("Loaded credentials from GOOGLE_APPLICATION_CREDENTIALS: %s", mask_value(env_key_file_path))
         # 2. 如果環境變數未設定或檔案不存在，嘗試從 temp_files 目錄載入
         elif os.path.exists(TEMP_FILES_KEY_FILE):
             credentials = service_account.Credentials.from_service_account_file(TEMP_FILES_KEY_FILE)
-            logging.info(f"Loaded credentials from temp_files: {TEMP_FILES_KEY_FILE}")
+            logging.info("Loaded credentials from temp_files: %s", mask_value(TEMP_FILES_KEY_FILE))
         else:
             logging.warning("服務帳號金鑰檔案未找到。Vertex AI 將嘗試使用預設憑證 (例如：gcloud 認證或 Compute Engine 服務帳號)。")
 
@@ -59,6 +63,7 @@ def configure_gemini():
     except Exception as e:
         logging.error(f"配置 Gemini API 時發生錯誤: {e}", exc_info=True)
         raise RuntimeError("無法配置 Gemini API，請檢查憑證和網路連線。")
+
 
 def call_gemini_api(prompt: str) -> str | None:
     """
