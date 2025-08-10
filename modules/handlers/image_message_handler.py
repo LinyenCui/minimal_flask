@@ -4,7 +4,8 @@
 import logging
 import requests
 from modules.services.ai_service_enhanced import extract_booking_info_from_image
-from modules.handlers.temp_booking_handler import temp_booking_states, _update_booking_data, _check_missing_fields, _generate_confirm_response, _generate_followup_prompt, STATE_WAITING_AI_INPUT, STATE_WAITING_AI_FOLLOWUP, STATE_WAITING_CONFIRM
+from modules.handlers.temp_booking_handler import _update_booking_data, _check_missing_fields, _generate_confirm_response, _generate_followup_prompt, STATE_WAITING_AI_INPUT, STATE_WAITING_AI_FOLLOWUP, STATE_WAITING_CONFIRM
+from modules.handlers.temp_booking_session import is_booking_active
 from modules.utils.line_bot import reply_text, get_line_bot_api
 
 logger = logging.getLogger(__name__)
@@ -17,7 +18,8 @@ def process_image_message(event):
     logger.info(f"Processing image message for user {user_id}, message_id: {message_id}")
     
     # 檢查用戶是否在預約流程中
-    if user_id not in temp_booking_states:
+    from modules.handlers.temp_booking_handler import temp_booking_states  # lazy import for internal state access
+    if not is_booking_active(user_id):
         logger.info(f"User {user_id} not in booking state, ignoring image")
         return
     

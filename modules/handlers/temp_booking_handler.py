@@ -22,6 +22,7 @@ from modules.flex_designs.temp_booking_flex import (
 from modules.services.ai_service import extract_booking_info_with_gemini
 from modules.utils.quick_reply_manager import QuickReplyManager
 from modules.utils.response_handler import ResponseHandler
+from modules.utils.conversation_context import conversation_manager
 
 # State definitions for clarity
 STATE_WAITING_AI_INPUT = "waiting_for_ai_input"
@@ -72,6 +73,11 @@ def handle_temp_booking_message(user_id, message_text):
     if message_text.lower() in ["放棄", "取消", "取消預約", "cancel", "退出", "exit"]:
         logger.info(f"用戶 {user_id} 取消預約流程。")
         del temp_booking_states[user_id]
+        # 額外：結束鏡射的活躍對話，避免殘留
+        try:
+            conversation_manager.end_conversation(user_id, "用戶取消臨時預約")
+        except Exception:
+            pass
         
         # 🔥 修復：取消後提供 Quick Reply 按鈕
         booking_action_buttons = QuickReplyManager.create_common_buttons()["booking_actions"]
@@ -328,6 +334,10 @@ def handle_confirm_input(user_id, message_text):
     try:
         if message_text.lower() not in ["確認", "confirm", "yes", "是", "確定", "ok"]:
             if user_id in temp_booking_states: del temp_booking_states[user_id]
+            try:
+                conversation_manager.end_conversation(user_id, "用戶取消臨時預約（確認步驟）")
+            except Exception:
+                pass
             return QuickReplyManager.create_text_response("您已取消臨時預約。")
         
         booking_data = temp_booking_states[user_id]["data"]
@@ -391,6 +401,10 @@ def handle_confirm_input(user_id, message_text):
             db.session.commit()
             logger.info(f"成功創建臨時班次: ID={new_trip_id}, Data={booking_data}")
             del temp_booking_states[user_id]
+            try:
+                conversation_manager.end_conversation(user_id, "臨時預約完成")
+            except Exception:
+                pass
             
             # Build success message
             success_message = (

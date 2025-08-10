@@ -121,7 +121,9 @@ class HelpNavigationBuilder:
                             self._create_category_button("quick_start", "🚀 快速入門", "新手必看，5分鐘掌握基本操作"),
                             self._create_category_button("time_states", "⏰ 三時間態系統", "理解未來、現在、過去的派班邏輯"),
                             self._create_category_button("advanced_features", "🎯 進階功能", "提升效率的專業工具"),
-                            self._create_category_button("troubleshooting", "🔧 故障排除", "常見問題快速解決")
+                            self._create_category_button("troubleshooting", "🔧 故障排除", "常見問題快速解決"),
+                            # 新增：帳務處理分類（直接進入分類）
+                            self._create_category_button("accounting", "💰 帳務處理", "帳戶餘額與入金/週扣款")
                         ],
                         "spacing": "md"
                     }
@@ -210,6 +212,15 @@ class HelpNavigationBuilder:
                         "text": "help_demo_reports"
                     }
                 }
+                ,
+                {
+                    "type": "action",
+                    "action": {
+                        "type": "message",
+                        "label": "💼 帳務處理",
+                        "text": "帳務處理"
+                    }
+                }
             ]
         }
     
@@ -287,12 +298,25 @@ class HelpNavigationBuilder:
         
         # 添加項目快捷按鈕
         for item in items[:self.max_quick_reply_items - 2]:  # 保留2個位置給導航
+            # 若為帳務處理分類，改為直接觸發可用命令
+            if category_id == "accounting":
+                if item['id'] == 'balance':
+                    text_value = "帳務處理"
+                elif item['id'] == 'deposit':
+                    text_value = "➕ 記錄入金"
+                elif item['id'] == 'weekly_charge':
+                    text_value = "💵 記錄上週扣款"
+                else:
+                    text_value = f"help_item_{category_id}_{item['id']}"
+            else:
+                text_value = f"help_item_{category_id}_{item['id']}"
+
             quick_items.append({
                 "type": "action",
                 "action": {
                     "type": "message",
                     "label": f"📖 {item['title'][:8]}",
-                    "text": f"help_item_{category_id}_{item['id']}"
+                    "text": text_value
                 }
             })
         
@@ -481,6 +505,19 @@ class HelpNavigationBuilder:
     
     def _create_item_button(self, category_id: str, item_id: str, title: str, description: str) -> Dict[str, Any]:
         """創建項目按鈕"""
+        # 若為帳務處理分類，按鈕直接觸發可用命令
+        if category_id == "accounting":
+            if item_id == 'balance':
+                action_text = "帳務處理"
+            elif item_id == 'deposit':
+                action_text = "➕ 記錄入金"
+            elif item_id == 'weekly_charge':
+                action_text = "💵 記錄上週扣款"
+            else:
+                action_text = f"help_item_{category_id}_{item_id}"
+        else:
+            action_text = f"help_item_{category_id}_{item_id}"
+
         return {
             "type": "box",
             "layout": "horizontal",
@@ -516,7 +553,7 @@ class HelpNavigationBuilder:
                             "action": {
                                 "type": "message",
                                 "label": "查看",
-                                "text": f"help_item_{category_id}_{item_id}"
+                                "text": action_text
                             },
                             "style": "secondary",
                             "height": "sm"
@@ -531,7 +568,7 @@ class HelpNavigationBuilder:
             "cornerRadius": "sm",
             "action": {
                 "type": "message",
-                "text": f"help_item_{category_id}_{item_id}"
+                "text": action_text
             }
         }
     

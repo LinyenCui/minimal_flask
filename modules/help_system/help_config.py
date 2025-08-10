@@ -46,6 +46,38 @@ class HelpSystemConfig:
                     }
                 ]
             },
+            # 新增：帳務處理分類（僅作為幫助入口，按鈕直接觸發文字命令）
+            "accounting": {
+                "title": "💰 帳務處理",
+                "icon": "💼",
+                "description": "查餘額、記錄入金與週扣款",
+                "priority": 2,
+                "items": [
+                    {
+                        "id": "balance",
+                        "title": "查看帳戶餘額",
+                        "description": "點擊主項或輸入『帳務處理』",
+                        "content_type": "feature_guide",
+                        "features": {
+                            "balance": "顯示目前帳戶餘額，附快速操作按鈕"
+                        }
+                    },
+                    {
+                        "id": "deposit",
+                        "title": "記錄入金",
+                        "description": "依序輸入日期、金額、銀行、末4碼",
+                        "content_type": "interactive_guide",
+                        "examples": ["➕ 記錄入金"]
+                    },
+                    {
+                        "id": "weekly_charge",
+                        "title": "記錄上週扣款",
+                        "description": "輸入金額，系統自動設為最近週日23:59",
+                        "content_type": "interactive_guide",
+                        "examples": ["💵 記錄上週扣款"]
+                    }
+                ]
+            },
             
             "time_states": {
                 "title": "⏰ 三時間態系統",

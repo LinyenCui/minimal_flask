@@ -376,7 +376,10 @@ class ConversationManager:
             'temp_booking': ['取消預約', '取消', '退出', '不預約'],
             'passenger_leave': ['取消請假', '取消', '退出', '不請假', '放棄操作', '完成記錄', '查已完成', '班次詳情'],  # 學習未來態設計，添加常見的非請假命令
             'driver_assign': ['取消指派', '取消', '退出', '不指派'],
-            'fixed_schedule': ['取消', '退出', '放棄操作']  # 未來態已使用此設計
+            'fixed_schedule': ['取消', '退出', '放棄操作'],  # 未來態已使用此設計
+            # 🔥 新增：帳務處理對話的取消命令
+            'accounting_deposit': ['放棄操作', '取消', '退出'],
+            'accounting_weekly_charge': ['放棄操作', '取消', '退出']
         }
         
         conversation = ActiveConversation(
