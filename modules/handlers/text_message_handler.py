@@ -19,10 +19,12 @@ from modules.handlers.trip_handler import handle_query_trips, handle_trip_detail
 from modules.flex_designs.help_flex import get_help_flex
 from modules.help_system.help_handler import HelpHandler
 from modules.handlers.temp_booking_handler import (
-    handle_temp_booking_start,
-    handle_temp_booking_message,
-    temp_booking_states,
     handle_temp_booking_help
+)
+from modules.handlers.temp_booking_session import (
+    is_booking_active,
+    start_booking,
+    handle_booking_message
 )
 from modules.handlers.sequence_fix_handler import (
     handle_sequence_fix_start,
@@ -137,6 +139,14 @@ def process_text_message(event):
         elif active_conversation.conversation_type == 'driver_assign':
             # 司機指派對話
             return handle_driver_assign_conversation(active_conversation, message_text, user_id, reply_token)
+        elif active_conversation.conversation_type == 'accounting_deposit':
+            # 記錄入金對話（新帳務處理）
+            from modules.handlers.accounting import handle_deposit_input
+            return handle_deposit_input(active_conversation, message_text, user_id, reply_token)
+        elif active_conversation.conversation_type == 'accounting_weekly_charge':
+            # 記錄上週扣款對話（新帳務處理）
+            from modules.handlers.accounting import handle_weekly_input
+            return handle_weekly_input(active_conversation, message_text, user_id, reply_token)
         elif active_conversation.conversation_type == 'query_clarification':
             # 查詢澄清對話
             return handle_query_clarification_conversation(active_conversation, message_text, user_id, reply_token)
@@ -197,11 +207,11 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 reply_text(reply_token, response.get("text", "處理中..."))
             return
         
-        # 檢查用戶是否在臨時預約流程中
-        if user_id in temp_booking_states:
+        # 檢查用戶是否在臨時預約流程中（改用外觀層）
+        if is_booking_active(user_id):
             # 處理臨時預約消息
             logger.info(f"用戶 {user_id} 在臨時預約流程中，處理消息: {message_text}")
-            response = handle_temp_booking_message(user_id, message_text)
+            response = handle_booking_message(user_id, message_text)
             
             if response:
                 # 根據回傳的消息類型發送回覆
@@ -239,11 +249,19 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                                 reply_text(reply_token, "處理中...")
                     else:
                         # 使用統一響應處理器
-                        success = ResponseHandler.handle_legacy_format(reply_token, response)
-                        if not success:
-                            # 回退處理
-                            text_content = response.get("text", "處理中...")
-                            reply_text(reply_token, text_content)
+                        sent = ResponseHandler.handle_legacy_format(reply_token, response)
+                        if not sent:
+                            # If it's a plain flex dict (alt_text/contents),發送 Flex
+                            if "alt_text" in response and "contents" in response:
+                                try:
+                                    reply_flex(reply_token, response.get("alt_text", "預約流程"), response.get("contents"))
+                                except Exception as e:
+                                    logger.error(f"臨時預約回覆Flex失敗: {e}")
+                                    reply_text(reply_token, response.get("text", "處理中..."))
+                            else:
+                                # 回退文字
+                                text_content = response.get("text", "處理中...")
+                                reply_text(reply_token, text_content)
             return
         
         # 檢查用戶是否在批量加成流程中
@@ -257,10 +275,47 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 reply_text(reply_token, response.get("text", "處理中..."))
             return
         
+        # 帳務處理功能入口與流程
+        if message_text in ["帳務處理", "help_category_accounting"]:
+            from modules.handlers.accounting import show_accounting_menu
+            show_accounting_menu(reply_token)
+            return
+        if message_text == "acct_deposit_start":
+            from modules.handlers.accounting import handle_deposit_start
+            handle_deposit_start(user_id, reply_token)
+            return
+        if message_text == "acct_weekly_start":
+            from modules.handlers.accounting import handle_weekly_start
+            handle_weekly_start(user_id, reply_token)
+            return
+        if message_text == "acct_ledger_start":
+            from modules.handlers.accounting import start_ledger
+            start_ledger(reply_token, user_id)
+            return
+        if message_text.startswith("acct_ledger_next:"):
+            # 格式：acct_ledger_next:<last_ts>:<last_id>:<from_date>:<to_date>
+            try:
+                payload = message_text[len("acct_ledger_next:"):]
+                parts = payload.rsplit(":", 3)
+                # 可能只有 last_ts:last_id
+                if len(parts) == 2:
+                    last_ts, last_id = parts[0], int(parts[1])
+                    from_date = None
+                    to_date = None
+                elif len(parts) == 4:
+                    last_ts, last_id, from_date, to_date = parts[0], int(parts[1] or 0), (parts[2] or None), (parts[3] or None)
+                else:
+                    raise ValueError("parts len")
+                from modules.handlers.accounting import next_ledger
+                next_ledger(reply_token, last_ts, last_id, from_date, to_date, page_no=0)
+            except Exception as _:
+                reply_text(reply_token, "格式錯誤，請重新操作")
+            return
+
         # 臨時預約命令
         if message_text.startswith("預約叫車"):
             logger.info(f"用戶 {user_id} 請求 預約叫車 (AI流程)")
-            response = handle_temp_booking_start(user_id)
+            response = start_booking(user_id)
             
             if response:
                 if response.get("type") == "flex":
@@ -322,83 +377,10 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 reply_text(reply_token, f"❌ 序列修復檢查失敗: {str(e)}")
             return
         
-        # 資料庫同步命令
-        elif message_text == "資料庫同步":
-            logger.info(f"用戶 {user_id} 請求資料庫同步檢查")
-            try:
-                # 創建模擬的event對象來適配原函數
-                class MockEvent:
-                    def __init__(self, user_id):
-                        self.source = type('', (), {'user_id': user_id})()
-                
-                mock_event = MockEvent(user_id)
-                result = handle_database_sync_request(mock_event, None)
-                
-                if result and result.get("text"):
-                    # 如果檢查成功，提供Quick Reply按鈕
-                    if "❌" not in result["text"]:  # 沒有錯誤
-                        # 使用QuickReplyManager處理快速回覆
-                        from modules.utils.response_handler import send_text_response
-                        
-                        # 使用標準化的按鈕
-                        buttons = [
-                            {"label": "✅ 確認同步", "text": "確認同步", "type": "message"},
-                            {"label": "❌ 放棄操作", "text": "放棄", "type": "message"}
-                        ]
-                        
-                        send_text_response(reply_token, result["text"], buttons)
-                    else:
-                        # 有錯誤，只顯示文字
-                        reply_text(reply_token, result["text"])
-                else:
-                    reply_text(reply_token, "❌ 無法獲取資料庫狀態")
-            except Exception as e:
-                logger.error(f"資料庫同步命令處理失敗: {e}")
-                reply_text(reply_token, f"❌ 資料庫同步檢查失敗: {str(e)}")
-            return
-        
-        # 確認同步命令
-        elif message_text == "確認同步":
-            logger.info(f"用戶 {user_id} 確認執行資料庫同步")
-            try:
-                # 創建模擬的event對象來適配原函數
-                class MockEvent:
-                    def __init__(self, user_id, reply_token):
-                        self.source = type('', (), {'user_id': user_id})()
-                        self.reply_token = reply_token
-                
-                mock_event = MockEvent(user_id, reply_token)
-                
-                # 使用免費版兼容的同步函數
-                from modules.handlers.database_sync_handler import handle_database_sync_confirm_free
-                result = handle_database_sync_confirm_free(mock_event, None)
-                
-                # handle_database_sync_confirm_free 自己處理回覆邏輯，返回None是正常的
-                # 不需要額外的回覆處理
-                
-            except Exception as e:
-                logger.error(f"確認同步命令處理失敗: {e}")
-                reply_text(reply_token, f"❌ 同步執行失敗: {str(e)}")
-            return
-        
-        # 同步結果查詢命令
-        elif message_text == "同步結果":
-            logger.info(f"用戶 {user_id} 查詢同步結果")
-            try:
-                # 創建模擬的event對象
-                class MockEvent:
-                    def __init__(self, user_id, reply_token):
-                        self.source = type('', (), {'user_id': user_id})()
-                        self.reply_token = reply_token
-                
-                mock_event = MockEvent(user_id, reply_token)
-                result = handle_sync_result_query(mock_event, None)
-                
-                # handle_sync_result_query 自己處理回覆邏輯
-                
-            except Exception as e:
-                logger.error(f"同步結果查詢失敗: {e}")
-                reply_text(reply_token, f"❌ 查詢同步結果失敗: {str(e)}")
+        # 資料庫同步相關命令（委派給輕路由）
+        from modules.handlers.sync_router import handle_sync_commands
+        handled = handle_sync_commands(message_text, user_id, reply_token)
+        if handled:
             return
         
         # 批量加成命令
@@ -447,253 +429,30 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 reply_text(reply_token, f"Flex消息處理錯誤，使用文本版本：\n{result}")
                 return
             
-        # 班次詳情
+        # 班次詳情（委派輕路由）
         elif message_text.startswith("班次詳情"):
-            parts = message_text.split()
-            if len(parts) >= 2:
-                try:
-                    trip_id = int(parts[1])
-                    # 使用原有的美麗Flex Message服務
-                    logger.info(f"處理班次詳情Flex Message: {trip_id}")
-                    from modules.services.trip_detail_service import handle_trip_details_flex
-                    
-                    result, error_message = handle_trip_details_flex(trip_id)
-                    
-                    if result and 'flex_message' in result:
-                        logger.info("獲取到Flex內容，準備發送")
-                        
-                        try:
-                            # 使用Flex版本回複
-                            from linebot.v3.messaging import FlexMessage, FlexContainer, QuickReply, QuickReplyItem, PostbackAction
-                            
-                            # 添加Quick Reply
-                            if 'quick_reply' in result and result['quick_reply'] is not None:
-                                quick_reply_items = []
-                                for item in result['quick_reply']['items']:
-                                    action = item['action']
-                                    quick_reply_items.append(
-                                        QuickReplyItem(
-                                            action=PostbackAction(
-                                                label=action['label'],
-                                                text=action.get('text', action['displayText']),
-                                                data=action['data']
-                                            )
-                                        )
-                                    )
-                                
-                                quick_reply = QuickReply(items=quick_reply_items)
-                                flex_message = FlexMessage(
-                                    alt_text=f"班次 #{trip_id} 詳細信息",
-                                    contents=FlexContainer.from_dict(result['flex_message']),
-                                    quick_reply=quick_reply
-                                )
-                            else:
-                                flex_message = FlexMessage(
-                                    alt_text=f"班次 #{trip_id} 詳細信息",
-                                    contents=FlexContainer.from_dict(result['flex_message'])
-                                )
-                            
-                            reply_message(reply_token, [flex_message])
-                            
-                            # 記錄班次ID到上下文（用於簡單請假格式）
-                            try:
-                                conversation_manager.set_recent_trip_id(user_id, trip_id)
-                            except Exception as context_error:
-                                logger.error(f"記錄班次ID到上下文時出錯: {context_error}")
-                            
-                        except Exception as flex_error:
-                            logger.error(f"發送Flex Message失敗: {flex_error}")
-                            # 回退到文本版本
-                            from modules.handlers.trip_handler import handle_trip_details
-                            text_result = handle_trip_details(trip_id)
-                            reply_text(reply_token, text_result)
-                    else:
-                        reply_text(reply_token, error_message or f"找不到班次 #{trip_id}")
-                except ValueError:
-                    reply_text(reply_token, "班次ID必須是數字。")
-                except Exception as e:
-                    logger.error(f"處理班次詳情失敗: {e}")
-                    traceback.print_exc()
-                    reply_text(reply_token, f"班次查詢失敗: {str(e)}")
-            else:
-                reply_text(reply_token, "請提供班次ID，例如：班次詳情 123")
-            return
+            from modules.handlers.view_router import handle_view_commands
+            if handle_view_commands(message_text, user_id, reply_token):
+                return
 
-        # 🔥 新增：查看已完成班次詳情
+        # 查看已完成班次詳情（委派輕路由）
         elif message_text.startswith("查看"):
-            parts = message_text.split()
-            if len(parts) >= 2:
-                try:
-                    completed_trip_id = int(parts[1])
-                    logger.info(f"處理查看已完成班次詳情: {completed_trip_id}")
-                    from modules.handlers.trip_handler import handle_completed_trip_details
-                    result = handle_completed_trip_details(completed_trip_id)
-                    reply_text(reply_token, result)
-                except ValueError:
-                    reply_text(reply_token, "班次ID必須是數字。")
-                except Exception as e:
-                    logger.error(f"處理查看已完成班次失敗: {e}")
-                    traceback.print_exc()
-                    reply_text(reply_token, f"查看班次失敗: {str(e)}")
-            else:
-                reply_text(reply_token, "請提供班次ID，例如：查看 2207")
+            from modules.handlers.view_router import handle_view_commands
+            if handle_view_commands(message_text, user_id, reply_token):
+                return
+
+
+        
+        # 司機指派相關命令（委派給輕路由）
+        from modules.handlers.driver_router import handle_driver_commands
+        handled = handle_driver_commands(message_text, user_id, reply_token)
+        if handled:
             return
-
-
-        
-        # 司機指派相關命令
-        # 指派司機請求
-        elif message_text.startswith('指派司機') and len(message_text.split()) == 2:
-            try:
-                trip_id = int(message_text.split()[1])
-                logger.info(f"處理指派司機請求: {trip_id}")
-                
-                # 修改：調用 handle_driver_assign_request，預期返回消息字典或 None
-                message_to_send, error_message = handle_driver_assign_request(trip_id)
-                
-                if message_to_send and error_message is None:
-                    # 發送帶 Quick Reply 的文本消息
-                    # 假設 reply_message 能處理字典格式的消息
-                    logger.info(f"準備發送司機選擇 Quick Reply 消息: {message_to_send}")
-                    reply_message(reply_token, [message_to_send])
-                    logger.info("司機選擇 Quick Reply 消息已發送")
-                else:
-                    # 發送錯誤消息
-                    reply_text(reply_token, error_message or "無法載入司機列表")
-                
-                return
-            except ValueError:
-                reply_text(reply_token, "班次ID必須是數字。")
-                return
-            except Exception as e:
-                logger.error(f"處理指派司機請求時出錯: {e}")
-                traceback.print_exc()
-                reply_text(reply_token, f"處理指派司機請求失敗: {str(e)}")
-                return
-        
-        # 簡化版指派司機指令 - 支持"指派 2307"格式
-        elif message_text.startswith('指派 ') and len(message_text.split()) == 2:
-            try:
-                trip_id = int(message_text.split()[1])
-                logger.info(f"處理簡化指派司機請求: {trip_id}")
-                
-                # 修改：調用 handle_driver_assign_request，預期返回消息字典或 None
-                message_to_send, error_message = handle_driver_assign_request(trip_id)
-                
-                if message_to_send and error_message is None:
-                    # 發送帶 Quick Reply 的文本消息
-                    logger.info(f"準備發送司機選擇 Quick Reply 消息 (簡化): {message_to_send}")
-                    reply_message(reply_token, [message_to_send])
-                    logger.info("司機選擇 Quick Reply 消息已發送 (簡化)")
-                else:
-                    # 發送錯誤消息
-                    reply_text(reply_token, error_message or "無法載入司機列表")
-                
-                return
-            except ValueError:
-                reply_text(reply_token, "班次ID必須是數字。")
-                return
-            except Exception as e:
-                logger.error(f"處理簡化指派司機請求時出錯: {e}")
-                traceback.print_exc()
-                reply_text(reply_token, f"處理指派司機請求失敗: {str(e)}")
-                return
-        
-        # 選擇司機
-        elif message_text.startswith('指派司機 ') and len(message_text.split()) == 3:
-            try:
-                parts = message_text.split()
-                trip_id = int(parts[1])
-                driver_id = int(parts[2])
-                
-                logger.info(f"處理司機選擇: 班次={trip_id}, 司機={driver_id}")
-                
-                result, error_message = handle_driver_assign_select(trip_id, driver_id)
-                
-                if result and error_message is None:
-                    # 檢查返回結果是否包含 flex_message 和 quick_reply
-                    if isinstance(result, dict) and 'flex_message' in result and 'quick_reply' in result:
-                        # 發送包含 Quick Reply 的確認界面
-                        try:
-                            from linebot.v3.messaging import FlexMessage, FlexContainer
-                            
-                            flex_message = FlexMessage(
-                                alt_text="確認指派司機",
-                                contents=FlexContainer.from_dict(result['flex_message']),
-                                quick_reply=result['quick_reply']
-                            )
-                            
-                            reply_message(reply_token, [flex_message])
-                            logger.info("成功發送確認指派司機的 Flex Message 與 Quick Reply")
-                        except Exception as flex_error:
-                            logger.error(f"發送確認指派司機 Flex Message 時出錯: {flex_error}")
-                            traceback.print_exc()
-                            # 發送文本版本作為後備
-                            reply_text(reply_token, "無法顯示確認界面，請直接輸入：確認指派 [班次ID] [司機ID] 或 取消指派 [班次ID] 或 放棄指派 [班次ID]")
-                    else:
-                        # 兼容舊格式，直接發送 Flex Message
-                        reply_flex(reply_token, "確認指派司機", result)
-                else:
-                    # 發送錯誤消息
-                    reply_text(reply_token, error_message or "無法載入確認界面")
-                
-                return
-            except ValueError:
-                reply_text(reply_token, "班次ID和司機ID必須是數字。")
-                return
-            except Exception as e:
-                logger.error(f"處理司機選擇時出錯: {e}")
-                traceback.print_exc()
-                reply_text(reply_token, f"處理司機選擇失敗: {str(e)}")
-                return
-        
-        # 確認指派
-        elif message_text.startswith('確認指派 ') and len(message_text.split()) == 3:
-            try:
-                parts = message_text.split()
-                trip_id = int(parts[1])
-                driver_id = int(parts[2])
-                
-                logger.info(f"處理確認指派: 班次={trip_id}, 司機={driver_id}")
-                
-                result = handle_driver_assign_confirm(trip_id, driver_id)
-                reply_text(reply_token, result)
-                return
-            except ValueError:
-                reply_text(reply_token, "班次ID和司機ID必須是數字。")
-                return
-            except Exception as e:
-                logger.error(f"處理確認指派時出錯: {e}")
-                traceback.print_exc()
-                reply_text(reply_token, f"處理確認指派失敗: {str(e)}")
-                return
-        
-        # 取消指派/放棄指派
-        elif message_text.startswith('取消指派 ') or message_text.startswith('放棄指派 '):
-            try:
-                parts = message_text.split()
-                if len(parts) == 2:
-                    trip_id = int(parts[1])
-                    
-                    logger.info(f"處理取消/放棄指派: 班次={trip_id}")
-                    
-                    result = handle_driver_assign_cancel(trip_id)
-                    reply_text(reply_token, result)
-                    return
-                else:
-                    reply_text(reply_token, "取消/放棄指派命令格式不正確。正確格式：取消指派 [班次ID] 或 放棄指派 [班次ID]")
-                    return
-            except ValueError:
-                reply_text(reply_token, "班次ID必須是數字。")
-                return
-            except Exception as e:
-                logger.error(f"處理取消/放棄指派時出錯: {e}")
-                traceback.print_exc()
-                reply_text(reply_token, f"處理取消/放棄指派失敗: {str(e)}")
-                return
             
         # 🔰 幫助系統處理（使用獨立的 HelpHandler）
-        if help_handler.handle_help_request(message_text, user_id, reply_token):
+        from modules.handlers.help_router import handle_help_commands
+        handled = handle_help_commands(message_text, user_id, reply_token)
+        if handled:
             return
             
         # 處理匯入固定班次（一整周）
@@ -710,36 +469,11 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             reply_text(reply_token, result_text)
             return
             
-        # 診所班次 (Handles "診所班次" and "診所班次 [date]")
-        elif message_text.startswith("診所班次"):
-            try:
-                parts = message_text.split()
-                if len(parts) > 1:
-                    logger.info(f"處理診所班次命令 (帶日期): {message_text}")
-                    from modules.services.trip_query_service import handle_query_clinic_trips_flex
-                    
-                    flex_content, message = handle_query_clinic_trips_flex(message_text) 
-
-                    if flex_content: # Trips found, send Flex
-                        logger.info(f"找到診所班次，發送 Flex Message")
-                        reply_flex(reply_token, "診所班次查詢結果", flex_content)
-                    else: # No trips found OR error occurred
-                         logger.info(f"診所班次查詢無結果或發生錯誤，發送消息: {message}")
-                         reply_text(reply_token, message or "查詢診所班次時發生未知錯誤。")
-
-                else: # "診所班次" without date
-                    logger.info(f"處理診所班次命令 (觸發日期選擇): {message_text}")
-                    from modules.services.trip_query_service import request_clinic_trip_date_selection
-                    reply_msg, error_message = request_clinic_trip_date_selection()
-                    if reply_msg and error_message is None:
-                        reply_message(reply_token, [reply_msg]) 
-                    else:
-                        reply_text(reply_token, error_message or "無法生成日期選擇")
-                return 
-            except Exception as e:
-                logger.error(f"處理診所班次命令時出錯: {e}", exc_info=True)
-                reply_text(reply_token, f"處理請求時出錯: {str(e)}")
-                return
+        # 查詢相關命令（委派給輕路由）
+        from modules.handlers.query_router import handle_query_commands
+        handled = handle_query_commands(message_text, user_id, reply_token)
+        if handled:
+            return
         
         # 更新已完成班次
         elif message_text == "更新已完成班次":
@@ -799,38 +533,30 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 return
 
             
-        # 生成周報表
-        elif message_text.startswith("生成周報表") or message_text.startswith("生成週報表") or message_text.startswith("生成周報") or message_text.startswith("生成週報"):
-            try:
-                logger.info(f"處理生成周報表命令: {message_text}")
-                # 使用頂部導入的 handle_generate_weekly_report
-                
-                # 調用報表生成函數
-                result = handle_generate_weekly_report(message_text)
-                reply_text(reply_token, result)
-                return
-            except Exception as e:
-                logger.error(f"處理生成周報表時出錯: {e}")
-                traceback.print_exc()
-                reply_text(reply_token, f"生成報表失敗: {str(e)}")
-                return
+        # 帳務處理（委派輕路由）
+        from modules.handlers.accounting_router import handle_accounting_commands
+        handled = handle_accounting_commands(message_text, user_id, reply_token)
+        if handled:
+            return
+
+        # 報表相關命令（委派給輕路由）
+        from modules.handlers.report_router import handle_report_commands
+        handled = handle_report_commands(message_text, user_id, reply_token)
+        if handled:
+            return
         
-        # 生成月報表
-        elif message_text.startswith("生成月報表") or message_text.startswith("生成月報"):
-            try:
-                logger.info(f"處理生成月報表命令: {message_text}")
-                from modules.services.report_service import handle_generate_monthly_report
-                
-                # 調用報表生成函數
-                result = handle_generate_monthly_report(message_text)
-                reply_text(reply_token, result)
-                return
-            except Exception as e:
-                logger.error(f"處理生成月報表時出錯: {e}")
-                traceback.print_exc()
-                reply_text(reply_token, f"生成月報表失敗: {str(e)}")
-                return
-        
+        # 修改/記錄/類別 相關（委派）
+        from modules.handlers.modification_router import handle_modification_commands
+        handled = handle_modification_commands(message_text, user_id, reply_token)
+        if handled:
+            return
+
+        # 固定班表/固定請假 相關（委派）
+        from modules.handlers.fixed_router import handle_fixed_commands
+        handled = handle_fixed_commands(message_text, user_id, reply_token)
+        if handled:
+            return
+
         # 班次詳情的簡寫命令
         elif message_text.startswith("班次"):
             parts = message_text.split()
@@ -842,33 +568,13 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 message_text = f"班次詳情 {trip_id}"
                 # 不要return，讓代碼繼續執行
             
-        # --- 新增：修改類別 --- 
-        elif message_text.startswith("修改類別"):
-             result = handle_modify_category(message_text)
-             reply_text(reply_token, result)
-             return
-        # --- 結束新增 ---
-            
-        # --- 🔥 新增：修改車資命令處理 --- 
-        elif message_text.startswith("修改車資"):
-            try:
-                from modules.handlers.trip_handler import handle_modify_fare
-                result = handle_modify_fare(message_text, user_id)
-                
-                # 檢查是否為詢答模式結果（字典格式）
-                if isinstance(result, dict) and result.get("type") == "quick_reply":
-                    quick_reply = result.get("quick_reply")
-                    text = result.get("text")
-                    # 使用頂部導入的 reply_message_with_quick_reply
-                    reply_message_with_quick_reply(reply_token, text, quick_reply)
-                else:
-                    reply_text(reply_token, result)
-                return
-            except Exception as e:
-                logger.error(f"修改車資處理失敗: {e}")
-                reply_text(reply_token, f"❌ 修改車資失敗：{str(e)}")
-                return
-        # --- 結束新增 ---
+        # 分頁命令（委派）
+        from modules.handlers.pagination_router import handle_pagination_commands
+        handled = handle_pagination_commands(message_text, user_id, reply_token)
+        if handled:
+            return
+
+        # 已委派：修改/記錄/類別（modification_router）
         
         # --- 移除：記錄車資早期AI攔截，改用後面的雙軌制處理 ---
         
@@ -1295,47 +1001,13 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 reply_text(reply_token, f"❌ 處理記錄車資命令時出錯：{str(e)}")
                 return
         
-        # 查已完成傳統命令
-        if message_text.startswith("查已完成"):
-            try:
-                from modules.services.ai_fare_service import handle_smart_fare_query
-                # 使用現有的查詢服務，但標記為傳統命令
-                result = handle_smart_fare_query(message_text, user_id, use_flex=True)
-                handle_ai_fare_result(result, reply_token)
-                return
-            except Exception as e:
-                logger.error(f"傳統查已完成命令處理失敗: {e}")
-                reply_text(reply_token, f"❌ 處理查已完成命令時出錯：{str(e)}")
-                return
+        # 查已完成/完成記錄（委派歷史路由）
+        from modules.handlers.history_router import handle_history_commands
+        handled = handle_history_commands(message_text, user_id, reply_token)
+        if handled:
+            return
         
-        # 完成記錄傳統命令（直接查詢已完成班次）
-        if message_text.startswith("完成記錄"):
-            try:
-                from modules.services.trip_query_service import handle_query_completed_trips
-                
-                # 簡單轉換為適合的格式
-                if message_text == "完成記錄":
-                    # 默認查詢今天的
-                    converted_query = "查已完成 今天"
-                else:
-                    # 將"完成記錄 XXX"轉換為"查已完成 XXX"
-                    converted_query = message_text.replace("完成記錄", "查已完成", 1)
-                
-                logger.info(f"🔄 完成記錄命令轉換: '{message_text}' → '{converted_query}'")
-                
-                # 使用現有的已完成班次查詢函數
-                result = handle_query_completed_trips(converted_query)
-                
-                if result:
-                    reply_text(reply_token, result)
-                else:
-                    reply_text(reply_token, "📋 未找到符合條件的已完成班次")
-                
-                return
-            except Exception as e:
-                logger.error(f"傳統完成記錄命令處理失敗: {e}")
-                reply_text(reply_token, f"❌ 處理完成記錄命令時出錯：{str(e)}")
-                return
+        # 完成記錄已委派
 
         # 優先嘗試智能助手處理
         try:
@@ -1702,25 +1374,51 @@ def handle_temp_booking_conversation(conversation, message_text: str, user_id: s
     """處理預約叫車對話"""
     logger.info(f"🎯 處理預約叫車對話: 步驟={conversation.current_step}")
     
-    # 使用現有的temp_booking_handler邏輯
-    from modules.handlers.temp_booking_handler import handle_temp_booking_message
-    response = handle_temp_booking_message(user_id, message_text)
+    # 使用外觀層邏輯，確保成功/取消時結束對話
+    from modules.handlers.temp_booking_session import handle_booking_message
+    response = handle_booking_message(user_id, message_text)
     
-    if response and response.get("type") == "text":
-        # 🔥 修復：處理帶有 Quick Reply 的文字消息
-        text_content = response.get("text", "處理中...")
-        if "quick_reply" in response:
-            logger.info(f"對話模式發送帶有QuickReply的文字消息")
-            reply_message_with_quick_reply(reply_token, text_content, response.get("quick_reply"))
+    if response:
+        # 依據回傳類型正確發送（避免將Flex字典當文字印出）
+        if response.get("type") == "flex":
+            try:
+                if "quick_reply" in response:
+                    # 以字典形式交由 reply_message 生成 FlexMessage + QuickReply
+                    flex_message = {
+                        "type": "flex",
+                        "altText": response.get("alt_text", "預約流程"),
+                        "contents": response.get("contents"),
+                        "quickReply": response.get("quick_reply")
+                    }
+                    reply_message(reply_token, [flex_message])
+                else:
+                    reply_flex(reply_token, response.get("alt_text", "預約流程"), response.get("contents"))
+            except Exception as e:
+                logger.error(f"預約叫車對話發送Flex失敗: {e}")
+                # 降級為文字
+                if "text" in response:
+                    reply_text(reply_token, response.get("text"))
+                else:
+                    reply_text(reply_token, "處理中...")
+            return
+        elif response.get("type") == "text":
+            text_content = response.get("text", "處理中...")
+            if "quick_reply" in response:
+                logger.info("對話模式發送帶有QuickReply的文字消息")
+                reply_message_with_quick_reply(reply_token, text_content, response.get("quick_reply"))
+            else:
+                reply_text(reply_token, text_content)
+            return
         else:
-            reply_text(reply_token, text_content)
-    elif response:
-        # 處理其他類型的回覆
-        reply_text(reply_token, str(response))
-    else:
-        # 如果沒有回覆，結束對話
-        conversation_manager.end_conversation(user_id, "預約流程結束")
-        reply_text(reply_token, "預約流程已結束")
+            # 嘗試使用統一響應處理器；若仍無法處理，再降級為文字
+            handled = ResponseHandler.handle_legacy_format(reply_token, response)
+            if not handled:
+                reply_text(reply_token, str(response))
+            return
+    
+    # 如果沒有回覆，結束對話
+    conversation_manager.end_conversation(user_id, "預約流程結束")
+    reply_text(reply_token, "預約流程已結束")
 
 def handle_passenger_leave_conversation(conversation, message_text: str, user_id: str, reply_token: str):
     """處理乘客請假對話"""

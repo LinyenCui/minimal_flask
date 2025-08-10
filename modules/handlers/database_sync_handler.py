@@ -53,7 +53,9 @@ class DatabaseSyncHandler:
             SELECT 'trips: ' || COUNT(*) FROM trips UNION ALL
             SELECT 'completed_trips: ' || COUNT(*) FROM completed_trips UNION ALL
             SELECT 'customers: ' || COUNT(*) FROM customers UNION ALL
-            SELECT 'drivers: ' || COUNT(*) FROM drivers;
+            SELECT 'drivers: ' || COUNT(*) FROM drivers UNION ALL
+            SELECT 'account_ledger: ' || COUNT(*) FROM account_ledger UNION ALL
+            SELECT 'payments: ' || COUNT(*) FROM payments;
             """
             command_args.extend(['-c', sql])
             

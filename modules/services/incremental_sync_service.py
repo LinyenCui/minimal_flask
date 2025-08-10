@@ -42,7 +42,11 @@ class IncrementalSyncService:
             'completed_trips': ['actual_fare', 'total_fare'],
             'fixed_schedules': [],
             'drivers': [],
-            'customers': []
+            'customers': [],
+            # 🔥 新增：帳務處理流水帳（無需過濾生成欄位）
+            'account_ledger': [],
+            # 🔥 新增：payments（無需過濾生成欄位）
+            'payments': []
         }
         
     def get_connection(self, config: Dict, name: str):
@@ -261,7 +265,7 @@ class IncrementalSyncService:
             同步結果統計
         """
         if tables is None:
-            tables = ['drivers', 'customers', 'fixed_schedules', 'trips', 'completed_trips']
+            tables = ['drivers', 'customers', 'fixed_schedules', 'trips', 'completed_trips', 'account_ledger', 'payments']
         
         logger.info("🚀 開始智能增量同步流程")
         logger.info("=" * 60)
@@ -292,7 +296,7 @@ class IncrementalSyncService:
                     results['total_new_records'] += result['new_records']
                     
                     # 同步序列
-                    if table in ['trips', 'completed_trips', 'drivers', 'customers', 'fixed_schedules']:
+                    if table in ['trips', 'completed_trips', 'drivers', 'customers', 'fixed_schedules', 'account_ledger', 'payments']:
                         self.sync_sequence(local_conn, table)
                 else:
                     results['errors'].append(result['error'])

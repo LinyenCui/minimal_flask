@@ -32,6 +32,11 @@ def get_help_flex():
                     "action": {"type": "message", "label": "📝 預約叫車", "text": "預約叫車"},
                     "style": "primary", "color": "#FF6B6E", "margin": "sm", "height": "sm"
                 },
+                {
+                    "type": "button",
+                    "action": {"type": "message", "label": "💼 帳務處理", "text": "帳務處理"},
+                    "style": "primary", "color": "#2F4F4F", "margin": "sm", "height": "sm"
+                },
                 
                 # 新增：系統指南
                 {"type": "text", "text": "📖 系統指南", "weight": "bold", "size": "sm", "color": "#FF8C00", "margin": "md"},

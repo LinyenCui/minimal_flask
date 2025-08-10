@@ -46,7 +46,10 @@ FULL_SYNC_TABLES = [
     "drivers",
     "customers", 
     "fixed_schedules",  # 移到trips之前，因為trips有外鍵參考
-    "trips"
+    "trips",
+    # 🔥 新增：帳務處理流水帳與金流紀錄
+    "account_ledger",
+    "payments"
     # 移除 "users" 因為本地資料庫沒有這個表
     # ... 請根據您的需求，將其他需要完全同步的資料表加到這裡
 ]

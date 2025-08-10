@@ -5,7 +5,7 @@ prefixes = ["!", "#", "/"]
 from modules.config import COMMAND_PREFIXES
 import re
 import logging
-from modules.handlers.temp_booking_handler import temp_booking_states
+from modules.handlers.temp_booking_session import is_booking_active
 from modules.handlers.batch_allowance_handler import batch_allowance_states
 from modules.utils.conversation_context import conversation_manager
 
@@ -25,9 +25,13 @@ KNOWN_COMMANDS = {
     # 🔥 新增：分頁相關命令
     "更多", "下一頁", "更多結果", "next", "more",
     # 🔥 修復：請假模式的放棄操作
-    "放棄操作"
-    # 🔥 移除：emoji不應該在KNOWN_COMMANDS中，應該只通過postback處理
-    # "🟢", "❌", "⚠️", "🔵", "🎯"
+    "放棄操作",
+    # 帳務處理主選單與快捷入口
+    "帳務處理", "➕ 記錄入金", "記錄入金", "💵 記錄上週扣款", "記錄上週扣款",
+    # 帳務處理事件代碼
+    "acct_deposit_start", "acct_weekly_start", "acct_ledger_start",
+    # 分頁與區間事件（文字命令也需放行）
+    "acct_ledger_range"
 }
 
 # 🔥 新增：postback displayText 模式匹配
@@ -63,7 +67,7 @@ def should_process(message_text, source_type, user_id):
         return True, message_text
 
     cancel_commands = ["取消", "取消預約", "cancel", "退出", "exit"]
-    if user_id in temp_booking_states and not any(cmd in message_text.lower() for cmd in cancel_commands):
+    if is_booking_active(user_id) and not any(cmd in message_text.lower() for cmd in cancel_commands):
         if not any(message_text.startswith(f"{p}{cmd}") for p in ["!", "#", "/"] for cmd in cancel_commands):
             logger.info("[should_process] User in booking state, returning True")
             return True, message_text
@@ -85,6 +89,18 @@ def should_process(message_text, source_type, user_id):
             else: 
                  logger.info("[should_process] Prefix found but command body is empty, ignoring.")
                  return False, message_text
+
+    # 忽略可能是 Postback displayText 的文字，避免被當指令重複處理
+    for pattern in POSTBACK_DISPLAY_TEXT_PATTERNS:
+        if re.match(pattern, command_body):
+            logger.info(f"[should_process] Treat as displayText from postback and ignore: '{command_body}'")
+            return False, message_text
+
+    # 忽略來自按鈕 postback 的單個表情 text（避免再次當指令處理）
+    postback_emojis = {"🟢", "❌", "🔵", "⚠️", "⏸️", "✅"}
+    if command_body.strip() in postback_emojis:
+        logger.info(f"[should_process] Ignore postback emoji echo: '{command_body}'")
+        return False, message_text
 
     # 🔥 修復：活躍對話優先，但要檢查消息是否為對話回應
     if user_id in conversation_manager.active_conversations:
@@ -122,6 +138,10 @@ def should_process(message_text, source_type, user_id):
     # --- 🔰 幫助系統動態命令匹配 ---
     if command_body.startswith(("help_category_", "help_item_", "help_search_", "help_demo_")):
         logger.info(f"[should_process] Help system command matched: '{command_body}'")
+        return True, command_body
+    # 🔥 新增：帳務處理明細分頁事件（keyset）
+    if command_body.startswith("acct_ledger_next"):
+        logger.info("[should_process] Ledger pagination command detected")
         return True, command_body
         
     # --- END KNOWN_COMMANDS CHECK --- 
