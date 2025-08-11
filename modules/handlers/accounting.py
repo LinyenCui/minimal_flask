@@ -79,7 +79,11 @@ def handle_deposit_start(user_id: str, reply_token: str) -> None:
 
 
 def _parse_deposit_input(text: str) -> Tuple[date, int, str, str]:
-    parts = text.strip().split()
+    # 允許群組前綴（/, !, #）
+    text = text.strip()
+    if text and text[0] in {'/', '!', '#'}:
+        text = text[1:].strip()
+    parts = text.split()
     if len(parts) < 4:
         raise ValueError("格式錯誤")
     date_str, amount_str, bank_name, last4 = parts[0], parts[1], parts[2], parts[3]
@@ -125,7 +129,7 @@ def handle_deposit_input(conversation: ActiveConversation, message_text: str, us
         return
 
     try:
-        with db.session.begin():
+        with db.session.begin_nested():
             # 1) payments
             insert_payments = sql_text(
                 """
@@ -157,7 +161,7 @@ def handle_deposit_input(conversation: ActiveConversation, message_text: str, us
                 'last4': last4,
                 'ref': str(pay_id),
             })
-
+        db.session.commit()
         conversation_manager.end_conversation(user_id, "入金完成")
         success = f"✅ 已記錄入金 NT$ {amount:,}（{d.isoformat()} {bank_name} {last4}）"
         ResponseHandler.send_response(reply_token, QuickReplyManager.create_text_response(success))
@@ -165,6 +169,10 @@ def handle_deposit_input(conversation: ActiveConversation, message_text: str, us
         show_accounting_menu(reply_token)
     except Exception as e:
         logger.error(f"入金寫入失敗: {e}")
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         ResponseHandler.send_response(reply_token, QuickReplyManager.create_text_response("❌ 入金寫入失敗，請稍後再試"))
 
 
@@ -203,20 +211,24 @@ def handle_weekly_input(conversation: ActiveConversation, message_text: str, use
     occurred_at = last_saturday_2359()
     memo = f"週末 {occurred_at.date().isoformat()} 扣款"
     try:
-        with db.session.begin():
+        with db.session.begin_nested():
             db.session.execute(sql_text(
                 """
                 INSERT INTO account_ledger(occurred_at, type, counterparty, amount_in, amount_out, bank_name, bank_account_last4, reference_no, memo, created_at)
                 VALUES (:occurred_at, 'weekly_charge', '車資扣款', 0, :amount_out, NULL, NULL, NULL, :memo, NOW())
                 """
             ), {"occurred_at": occurred_at, "amount_out": amount, "memo": memo})
-
+        db.session.commit()
         conversation_manager.end_conversation(user_id, "週扣款完成")
         success = f"✅ 已記錄週扣款 NT$ {amount:,}（週末 {occurred_at.date().isoformat()}）"
         ResponseHandler.send_response(reply_token, QuickReplyManager.create_text_response(success))
         show_accounting_menu(reply_token)
     except Exception as e:
         logger.error(f"週扣款寫入失敗: {e}")
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         ResponseHandler.send_response(reply_token, QuickReplyManager.create_text_response("❌ 寫入失敗，請稍後再試"))
 
 
