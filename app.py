@@ -40,6 +40,16 @@ from flask_apscheduler import APScheduler
 import flask
 import sqlalchemy
 
+# PATCH START: app.py logging & mem middleware
+import os as _os
+from time import perf_counter as _perf_counter
+try:
+    import psutil as _psutil
+except Exception:
+    _psutil = None
+from flask import g as _g, request as _request
+# PATCH END: app.py logging & mem middleware
+
 # 版本檢查
 flask_version = flask.__version__
 sqlalchemy_version = sqlalchemy.__version__
@@ -71,8 +81,43 @@ if not root_logger.handlers:
     stream_handler.addFilter(_mask_filter)
     root_logger.addHandler(stream_handler)
 
+# Also attach filter to the root logger itself (avoid duplicates)
+if not any(isinstance(f, MaskSecretsFilter) for f in getattr(root_logger, "filters", [])):
+    root_logger.addFilter(_mask_filter)
+
 for handler in logger.handlers or []:
     handler.addFilter(_mask_filter)
+
+# PATCH START: app.py logging & mem middleware
+# tune noisy loggers
+logging.getLogger("modules.utils.line_bot").setLevel(logging.WARNING)
+logging.getLogger("modules.utils.response_handler").setLevel(logging.WARNING)
+
+# lightweight memory/latency metrics (DEBUG only)
+_proc = None
+if _psutil:
+    try:
+        _proc = _psutil.Process(_os.getpid())
+    except Exception:
+        _proc = None
+_memlog = logging.getLogger("mem")
+
+@app.before_request
+def _req_t0():
+    _g._t0 = _perf_counter()
+
+@app.after_request
+def _req_metrics(resp):
+    try:
+        if _memlog.isEnabledFor(logging.DEBUG) and _proc is not None:
+            rss_mb = _proc.memory_info().rss / (1024 * 1024)
+            dt_ms = int((_perf_counter() - getattr(_g, "_t0", _perf_counter())) * 1000)
+            _memlog.debug("RSS=%.1fMB %s %s %dms", rss_mb, _request.method, _request.path, dt_ms)
+    except Exception:
+        # Never fail the request on metrics errors
+        pass
+    return resp
+# PATCH END: app.py logging & mem middleware
 
 # 顯示配置信息
 def show_config():

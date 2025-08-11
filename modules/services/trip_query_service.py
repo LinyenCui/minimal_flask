@@ -97,7 +97,17 @@ def handle_query_trips_flex(message_text=None):
         all_trips = []
         
         for query_date in query_dates:
-            query = f"""
+            # PATCH START: limit & pagination for day trips
+            page = 0
+            page_size = 100
+            try:
+                from flask import request as _req
+                page = max(int(_req.args.get("page", 0)), 0)
+                page_size = min(max(int(_req.args.get("page_size", 100)), 1), 200)
+            except Exception:
+                pass
+            query = sql_text(
+                """
             SELECT 
                 t.trip_id, t.date, t.time, 
                 t.start_point, t.end_point, 
@@ -110,15 +120,16 @@ def handle_query_trips_flex(message_text=None):
             LEFT JOIN
                 fixed_schedules fs ON t.fixed_trip_id = fs.id
             WHERE 
-                t.date = '{query_date}'
+                t.date = :query_date
                 AND t.status != '已完成'
                 AND t.category IN ('東洋', '臨時')
             ORDER BY 
                 t.date, t.time
-            """
-            
-            current_app.logger.info(f"執行SQL查詢: {query}")
-            trips = db.session.execute(sql_text(query)).fetchall()
+            LIMIT :limit OFFSET :offset
+                """
+            )
+            trips = db.session.execute(query, {"query_date": query_date, "limit": page_size, "offset": page * page_size}).fetchall()
+            # PATCH END
             current_app.logger.info(f"查詢結果: {len(trips)} 條記錄")
             all_trips.extend(trips)
         
@@ -159,8 +170,17 @@ def handle_query_fixed_trips_flex(message_text=None):
             # 默認使用今天的日期
             query_date = date.today()
         
-        # 查詢指定日期的固定班次
-        query = f"""
+        # 查詢指定日期的固定班次（加上 LIMIT/OFFSET）
+        page = 0
+        page_size = 100
+        try:
+            from flask import request as _req
+            page = max(int(_req.args.get("page", 0)), 0)
+            page_size = min(max(int(_req.args.get("page_size", 100)), 1), 200)
+        except Exception:
+            pass
+        query = sql_text(
+            """
         SELECT 
             t.trip_id, 
             t.date,
@@ -176,15 +196,15 @@ def handle_query_fixed_trips_flex(message_text=None):
         JOIN
             fixed_schedules fs ON t.fixed_trip_id = fs.id
         WHERE 
-            t.date = '{query_date}'
+            t.date = :query_date
             AND t.status != '已完成'
             AND t.trip_type = 'fixed'
         ORDER BY 
             t.time
+        LIMIT :limit OFFSET :offset
         """
-        
-        current_app.logger.info(f"執行查詢固定班次SQL: {query}")
-        trips = db.session.execute(sql_text(query)).fetchall()
+        )
+        trips = db.session.execute(query, {"query_date": query_date, "limit": page_size, "offset": page * page_size}).fetchall()
         current_app.logger.info(f"查詢到 {len(trips)} 條固定班次記錄")
         
         if not trips:
@@ -265,7 +285,17 @@ def handle_query_trips(message_text=None):
         all_trips = []
         
         for query_date in query_dates:
-            query = f"""
+            # PATCH START: limit & pagination for day trips (text)
+            page = 0
+            page_size = 100
+            try:
+                from flask import request as _req
+                page = max(int(_req.args.get("page", 0)), 0)
+                page_size = min(max(int(_req.args.get("page_size", 100)), 1), 200)
+            except Exception:
+                pass
+            query = sql_text(
+                """
             SELECT 
                 t.trip_id, t.date, t.time, 
                 t.start_point, t.end_point, 
@@ -278,14 +308,17 @@ def handle_query_trips(message_text=None):
             LEFT JOIN
                 fixed_schedules fs ON t.fixed_trip_id = fs.id
             WHERE 
-                t.date = '{query_date}'
+                t.date = :query_date
                 AND t.status != '已完成'
                 AND t.category IN ('東洋', '臨時')
             ORDER BY 
                 t.date, t.time
+            LIMIT :limit OFFSET :offset
             """
+            )
             
-            trips = db.session.execute(sql_text(query)).fetchall()
+            trips = db.session.execute(query, {"query_date": query_date, "limit": page_size, "offset": page * page_size}).fetchall()
+            # PATCH END
             all_trips.extend(trips)
         
         if not all_trips:
@@ -596,11 +629,21 @@ def handle_query_completed_trips(message_text=None):
             query_base += " AND category = :category "
             query_params["category"] = category_filter
             
-        query_base += " ORDER BY id "
+        query_base += " ORDER BY id LIMIT :limit OFFSET :offset "
         
+        # PATCH START: limit & pagination for completed trips listing
+        page = 0
+        page_size = 100
+        try:
+            from flask import request as _req
+            page = max(int(_req.args.get("page", 0)), 0)
+            page_size = min(max(int(_req.args.get("page_size", 100)), 1), 200)
+        except Exception:
+            pass
+        query_params.update({"limit": page_size, "offset": page * page_size})
         query = sql_text(query_base)
-        
         completed_trips = db.session.execute(query, query_params).fetchall()
+        # PATCH END
         
         if not completed_trips:
             category_text = f" ({category_filter}類)" if category_filter else ""
@@ -783,7 +826,17 @@ def handle_query_clinic_trips_flex(message_text=None):
         # --- 使用 query_dates 列表進行查詢 --- 
         all_clinic_trips = []
         for query_date in query_dates:
-            query = sql_text(f"""
+            # PATCH START: limit & pagination for clinic trips (flex)
+            page = 0
+            page_size = 100
+            try:
+                from flask import request as _req
+                page = max(int(_req.args.get("page", 0)), 0)
+                page_size = min(max(int(_req.args.get("page_size", 100)), 1), 200)
+            except Exception:
+                pass
+            query = sql_text(
+                f"""
             SELECT 
                 t.trip_id, t.date, t.time, 
                 t.start_point, t.end_point, 
@@ -798,8 +851,11 @@ def handle_query_clinic_trips_flex(message_text=None):
                 AND t.status != '已完成'
                 AND t.category = '診所' 
             ORDER BY t.time
-            """)
-            trips = db.session.execute(query, {"query_date": query_date}).fetchall()
+            LIMIT :limit OFFSET :offset
+            """
+            )
+            trips = db.session.execute(query, {"query_date": query_date, "limit": page_size, "offset": page * page_size}).fetchall()
+            # PATCH END
             all_clinic_trips.extend(trips)
             
         current_app.logger.info(f"查詢到 {len(all_clinic_trips)} 條診所班次記錄")

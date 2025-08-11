@@ -81,11 +81,17 @@ def handle_temp_booking_message(user_id, message_text):
         
         # 🔥 修復：取消後提供 Quick Reply 按鈕
         booking_action_buttons = QuickReplyManager.create_common_buttons()["booking_actions"]
-        
-        return QuickReplyManager.create_text_response(
+        response_payload = QuickReplyManager.create_text_response(
             "✅ 已取消預約流程\n\n💡 您可以重新開始預約或查看其他功能",
             booking_action_buttons
         )
+        # PATCH START: reset conversation context after flow completes
+        try:
+            conversation_manager.reset_context(user_id)
+        except Exception:
+            pass
+        # PATCH END
+        return response_payload
 
     current_state = temp_booking_states[user_id]["state"]
     booking_data = temp_booking_states[user_id]["data"].copy() 
@@ -338,7 +344,14 @@ def handle_confirm_input(user_id, message_text):
                 conversation_manager.end_conversation(user_id, "用戶取消臨時預約（確認步驟）")
             except Exception:
                 pass
-            return QuickReplyManager.create_text_response("您已取消臨時預約。")
+            response_payload = QuickReplyManager.create_text_response("您已取消臨時預約。")
+            # PATCH START: reset conversation context after flow completes
+            try:
+                conversation_manager.reset_context(user_id)
+            except Exception:
+                pass
+            # PATCH END
+            return response_payload
         
         booking_data = temp_booking_states[user_id]["data"]
         logger.info(f"用戶 {user_id} 確認預約，數據: {booking_data}")
@@ -432,7 +445,14 @@ def handle_confirm_input(user_id, message_text):
                  f"狀態：待派\n\n"
                  "我們會盡快為您指派司機。"
             )
-            return QuickReplyManager.create_text_response(success_message)
+            response_payload = QuickReplyManager.create_text_response(success_message)
+            # PATCH START: reset conversation context after flow completes
+            try:
+                conversation_manager.reset_context(user_id)
+            except Exception:
+                pass
+            # PATCH END
+            return response_payload
         
         except Exception as db_error:
              logger.error(f"保存臨時預約到數據庫時出錯: {db_error}", exc_info=True)
