@@ -163,7 +163,9 @@ def query_current_trips_range(start_date, end_date, driver_id=None, category=Non
         query_sql = f"""
         SELECT 
             trip_id, date, time, start_point, end_point, category,
-            driver_id, status, trip_type
+            driver_id, status, trip_type,
+            custom_start_point, custom_end_point, custom_via_point,
+            passenger_leave_reason, modification_reason
         FROM trips 
         WHERE {where_clause}
         ORDER BY date, time, trip_id
@@ -381,12 +383,32 @@ def format_current_trips_range_result(trips, start_date, end_date, driver_id=Non
             if displayed_count >= max_display:
                 break
                 
-            trip_id, date, time, start_point, end_point, category = trip[:6]
-            driver_id_result, status, trip_type = trip[6:9]
+            trip_id = trip[0]
+            date_val = trip[1]
+            time_val = trip[2]
+            start_point = trip[3]
+            end_point = trip[4]
+            category_val = trip[5]
+            driver_id_result = trip[6]
+            status = trip[7]
+            trip_type = trip[8]
+            custom_start_point = trip[9] if len(trip) > 9 else None
+            custom_end_point = trip[10] if len(trip) > 10 else None
+            # custom_via_point = trip[11] if len(trip) > 11 else None
+            # passenger_leave_reason = trip[12] if len(trip) > 12 else None
             
+            # 顯示地點：temp 使用 custom 欄位
+            if trip_type == 'temp':
+                loc_start = custom_start_point or start_point
+                loc_end = custom_end_point or end_point
+            else:
+                loc_start = start_point
+                loc_end = end_point
+            
+            time_str = time_val.strftime('%H:%M') if time_val else '--:--'
             status_emoji = {"待派": "⏳", "準備": "🚀", "已完成": "✅"}.get(status, "❓")
             
-            lines.append(f"#{trip_id} {time} 🚗{driver_id_result} {start_point}→{end_point} {status_emoji}{status}")
+            lines.append(f"#{trip_id} {time_str} 🚗{driver_id_result} {loc_start}→{loc_end} {status_emoji}{status}")
             displayed_count += 1
     
     if total_trips > max_display:
@@ -417,23 +439,40 @@ def handle_query_completed_trips_range(message_text):
         category = None
         
         for part in parts[2:]:
-            if part.isdigit():
-                driver_id = int(part)
-            elif part.startswith("司機") and len(part) > 2:
-                # 處理 "司機5386" 格式
-                driver_str = part[2:]  # 移除"司機"前綴
-                if driver_str.isdigit():
-                    driver_id = int(driver_str)
-            elif part in ["診所", "東洋", "臨時"]:
-                category = part
-            else:
-                # 處理複合參數，如 "5386診所班次", "5386東洋班次"
-                import re
-                # 匹配數字+類別的模式
-                match = re.match(r'^(\d+)(診所|東洋|臨時)', part)
-                if match:
-                    driver_id = int(match.group(1))
-                    category = match.group(2)
+            token = part.strip()
+            if not token:
+                continue
+            if token.isdigit():
+                driver_id = int(token)
+                continue
+            if token in ["診所", "東洋", "臨時"]:
+                category = token
+                continue
+            # 更彈性的解析：支援「司機5386」「司機5386所有班次」「5386診所班次」等
+            import re
+            # 1) 司機前綴，抓取數字
+            if token.startswith("司機"):
+                m = re.search(r"司機(\d+)", token)
+                if m:
+                    driver_id = int(m.group(1))
+                    # 也檢查是否帶有類別關鍵字
+                    if "診所" in token:
+                        category = "診所"
+                    elif "東洋" in token:
+                        category = "東洋"
+                    elif "臨時" in token:
+                        category = "臨時"
+                    continue
+            # 2) 數字+類別的組合，如 "5386診所班次"
+            m2 = re.match(r'^(\d+)(診所|東洋|臨時)', token)
+            if m2:
+                driver_id = int(m2.group(1))
+                category = m2.group(2)
+                continue
+            # 3) 任意含數字的token（抓第一段連續數字作為司機ID），忽略尾綴
+            m3 = re.search(r"(\d+)", token)
+            if m3 and driver_id is None:
+                driver_id = int(m3.group(1))
         
         # 查詢數據
         trips = query_completed_trips_range(start_date, end_date, driver_id, category)
@@ -469,31 +508,58 @@ def handle_query_current_trips_range(message_text):
         category = None
         
         for part in parts[2:]:
-            if part.isdigit():
-                driver_id = int(part)
-            elif part.startswith("司機") and len(part) > 2:
-                # 處理 "司機5386" 格式
-                driver_str = part[2:]  # 移除"司機"前綴
-                if driver_str.isdigit():
-                    driver_id = int(driver_str)
-            elif part in ["診所", "東洋", "臨時"]:
-                category = part
-            else:
-                # 處理複合參數，如 "5386診所班次", "5386東洋班次"
-                import re
-                # 匹配數字+類別的模式
-                match = re.match(r'^(\d+)(診所|東洋|臨時)', part)
-                if match:
-                    driver_id = int(match.group(1))
-                    category = match.group(2)
+            token = part.strip()
+            if not token:
+                continue
+            if token.isdigit():
+                driver_id = int(token)
+                continue
+            if token in ["診所", "東洋", "臨時"]:
+                category = token
+                continue
+            # 更彈性的解析：支援「司機5386」「司機5386所有班次」「5386診所班次」等
+            import re
+            # 1) 司機前綴，抓取數字
+            if token.startswith("司機"):
+                m = re.search(r"司機(\d+)", token)
+                if m:
+                    driver_id = int(m.group(1))
+                    if "診所" in token:
+                        category = "診所"
+                    elif "東洋" in token:
+                        category = "東洋"
+                    elif "臨時" in token:
+                        category = "臨時"
+                    continue
+            # 2) 數字+類別的組合，如 "5386診所班次"
+            m2 = re.match(r'^(\d+)(診所|東洋|臨時)', token)
+            if m2:
+                driver_id = int(m2.group(1))
+                category = m2.group(2)
+                continue
+            # 3) 任意含數字的token（抓第一段連續數字作為司機ID），忽略尾綴
+            m3 = re.search(r"(\d+)", token)
+            if m3 and driver_id is None:
+                driver_id = int(m3.group(1))
         
-        # 查詢數據
-        trips = query_current_trips_range(start_date, end_date, driver_id, category)
-        
-        # 格式化結果
-        result = format_current_trips_range_result(trips, start_date, end_date, driver_id, category)
-        
-        return result
+        # 判斷是否為「混合範圍」（跨過去與今天/未來）
+        today = get_taiwan_date()
+        if start_date < today <= end_date:
+            # 1) 過去部分：完成倉庫
+            past_end = today - timedelta(days=1)
+            completed_part = query_completed_trips_range(start_date, past_end, driver_id, category)
+            completed_text = format_completed_trips_range_result(completed_part, start_date, past_end, driver_id, category)
+            # 2) 現在/未來部分：生產線
+            current_part = query_current_trips_range(today, end_date, driver_id, category)
+            current_text = format_current_trips_range_result(current_part, today, end_date, driver_id, category)
+            # 合併輸出（清楚標註兩部分）
+            header = "🔀 混合日期範圍（已完成 + 現在/未來）\n" + "─"*30
+            return f"{header}\n\n【已完成（過去）】\n{completed_text}\n\n【現在/未來（trips）】\n{current_text}"
+        else:
+            # 純現在/未來範圍
+            trips = query_current_trips_range(start_date, end_date, driver_id, category)
+            result = format_current_trips_range_result(trips, start_date, end_date, driver_id, category)
+            return result
         
     except Exception as e:
         logger.error(f"處理進行中班次範圍查詢失敗: {e}")

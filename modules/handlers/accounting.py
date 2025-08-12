@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, date, time as dt_time, timedelta
+from datetime import datetime, date, time as dt_time, timedelta, timezone
 from typing import Tuple
 
 from sqlalchemy import text as sql_text
@@ -243,24 +243,24 @@ def _fetch_ledger_page(from_date: str | None, to_date: str | None, last_ts: str 
             SELECT (COALESCE(a.amount_in,0) - COALESCE(a.amount_out,0)) AS delta
             FROM account_ledger a
             WHERE (:last_ts IS NOT NULL)
-              AND (:from_date IS NULL OR a.occurred_at::date >= CAST(:from_date AS date))
-              AND (:to_date   IS NULL OR a.occurred_at::date <= CAST(:to_date AS date))
-              AND (a.occurred_at, a.id) <= (CAST(:last_ts AS timestamptz), :last_id)
+              AND (:from_date IS NULL OR (a.occurred_at AT TIME ZONE 'UTC')::date >= CAST(:from_date AS date))
+              AND (:to_date   IS NULL OR (a.occurred_at AT TIME ZONE 'UTC')::date <= CAST(:to_date AS date))
+              AND ((a.occurred_at AT TIME ZONE 'UTC'), a.id) <= ((CAST(:last_ts AS timestamptz) AT TIME ZONE 'UTC'), :last_id)
         ), baseline AS (
             SELECT COALESCE(SUM(delta),0) AS start_balance FROM baseline_rows
         ), rows AS (
             SELECT a.id,
-                   a.occurred_at,
+                   a.occurred_at AT TIME ZONE 'UTC' AS occurred_at,
                    a.type,
                    a.counterparty,
                    COALESCE(a.amount_in,0)  AS amount_in,
                    COALESCE(a.amount_out,0) AS amount_out,
                    (COALESCE(a.amount_in,0) - COALESCE(a.amount_out,0)) AS delta
             FROM account_ledger a
-            WHERE (:from_date IS NULL OR a.occurred_at::date >= CAST(:from_date AS date))
-              AND (:to_date   IS NULL OR a.occurred_at::date <= CAST(:to_date AS date))
-              AND (:last_ts IS NULL OR (a.occurred_at, a.id) > (CAST(:last_ts AS timestamptz), :last_id))
-            ORDER BY a.occurred_at ASC, a.id ASC
+            WHERE (:from_date IS NULL OR (a.occurred_at AT TIME ZONE 'UTC')::date >= CAST(:from_date AS date))
+              AND (:to_date   IS NULL OR (a.occurred_at AT TIME ZONE 'UTC')::date <= CAST(:to_date AS date))
+              AND (:last_ts IS NULL OR ((a.occurred_at AT TIME ZONE 'UTC'), a.id) > ((CAST(:last_ts AS timestamptz) AT TIME ZONE 'UTC'), :last_id))
+            ORDER BY (a.occurred_at AT TIME ZONE 'UTC') ASC, a.id ASC
             LIMIT :limit
         )
         SELECT r.*, (b.start_balance + SUM(delta) OVER (ORDER BY r.occurred_at, r.id)) AS running_balance
@@ -297,7 +297,16 @@ def _fmt_type(t: str) -> str:
 
 
 def _fmt_line(row) -> str:
-    ts = row.occurred_at.strftime('%Y-%m-%d %H:%M') if row.occurred_at else '----'
+    if row.occurred_at:
+        dt = row.occurred_at
+        try:
+            if getattr(dt, 'tzinfo', None) is not None:
+                dt = dt.astimezone(timezone(timedelta(hours=8)))
+        except Exception:
+            pass
+        ts = dt.strftime('%Y-%m-%d %H:%M')
+    else:
+        ts = '----'
     if (row.amount_in or 0) > 0:
         delta = f"📥 {_fmt_amount(row.amount_in)}"
     else:
@@ -344,7 +353,7 @@ def start_ledger(reply_token: str, user_id: str) -> None:
     next_cursor = None
     if has_more:
         last = page_rows[-1]
-        next_cursor = (last.occurred_at.isoformat(), last.id)
+        next_cursor = (last.occurred_at.replace(tzinfo=timezone.utc).isoformat(), last.id)
     resp = {
         "type": QuickReplyManager.ResponseType.TEXT_WITH_QUICK_REPLY,
         "text": text,
@@ -364,7 +373,7 @@ def next_ledger(reply_token: str, cursor_ts: str, cursor_id: int, from_date: str
     next_cursor = None
     if has_more:
         last = page_rows[-1]
-        next_cursor = (last.occurred_at.isoformat(), last.id)
+        next_cursor = (last.occurred_at.replace(tzinfo=timezone.utc).isoformat(), last.id)
     resp = {
         "type": QuickReplyManager.ResponseType.TEXT_WITH_QUICK_REPLY,
         "text": text,
@@ -402,7 +411,7 @@ def handle_range_input(conversation: ActiveConversation, message_text: str, user
     next_cursor = None
     if has_more:
         last = page_rows[-1]
-        next_cursor = (last.occurred_at.isoformat(), last.id)
+        next_cursor = (last.occurred_at.replace(tzinfo=timezone.utc).isoformat(), last.id)
     resp = {
         "type": QuickReplyManager.ResponseType.TEXT_WITH_QUICK_REPLY,
         "text": text,

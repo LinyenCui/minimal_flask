@@ -10,12 +10,22 @@ Render 資料庫同步到本地的自動化腳本
 import os
 import sys
 import datetime
+import time
 import psycopg2
 from psycopg2.extras import DictCursor, execute_batch
 from dotenv import load_dotenv
 
 # --- 設定 ---
 load_dotenv()
+
+# --- 時區設定：固定此腳本以台北時區執行，避免跨環境顯示差異 ---
+os.environ['TZ'] = 'Asia/Taipei'
+try:
+    # macOS/Linux 提供 tzset，可立即生效
+    time.tzset()
+except AttributeError:
+    # Windows 無 tzset，忽略即可，連線端仍會提供正確的帶時區時間
+    pass
 
 # Render 資料庫連線資訊
 RENDER_DB_CONFIG = {
@@ -62,12 +72,71 @@ def get_db_connection(config, db_type=""):
     try:
         print(f"🔌 正在連接到 {db_type} 資料庫 ({config.get('host')})...")
         conn = psycopg2.connect(**config)
-        print(f"✅ 成功連接到 {db_type} 資料庫。")
+        # 統一連線會話時區，避免顯示早/晚 8 小時
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SET TIME ZONE 'Asia/Taipei';")
+                cur.execute("SHOW TIMEZONE;")
+                tz = cur.fetchone()[0]
+            conn.commit()
+            print(f"✅ 成功連接到 {db_type} 資料庫。🕒 會話時區: {tz}")
+        except Exception as tz_err:
+            # 不阻斷主流程，但提示可能的時區問題
+            print(f"⚠️ 設定 {db_type} 連線時區失敗: {tz_err}")
+            print("   將繼續以資料庫預設時區執行。")
         return conn
     except psycopg2.OperationalError as e:
         print(f"❌ 無法連接到 {db_type} 資料庫: {e}", file=sys.stderr)
         print("   請檢查您的 .env 設定以及資料庫服務是否正在運行。", file=sys.stderr)
         return None
+
+
+def get_column_types(conn, table_name: str, columns: list[str]) -> dict:
+    """回傳指定資料表欄位型別（例如 timestamp with time zone）"""
+    types: dict[str, str] = {}
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT column_name, data_type
+            FROM information_schema.columns
+            WHERE table_name = %s AND column_name = ANY(%s)
+            """,
+            (table_name, columns),
+        )
+        for name, typ in cur.fetchall():
+            types[name] = typ
+    return types
+
+
+def ensure_account_ledger_timestamptz(local_conn) -> None:
+    """確保本地 account_ledger 的時間欄位為 timestamptz。
+
+    若為 timestamp without time zone，轉換為 timestamptz，
+    並以 Asia/Taipei 解讀原始值，避免產生 8 小時位移。
+    """
+    table = "account_ledger"
+    time_columns = ["occurred_at", "created_at"]
+    types = get_column_types(local_conn, table, time_columns)
+
+    to_fix: list[str] = [col for col in time_columns if types.get(col) == "timestamp without time zone"]
+    if not to_fix:
+        print("🔎 account_ledger 欄位型別檢查：OK (timestamptz)")
+        return
+
+    print(f"🛠️ 偵測到本地 {table} 欄位型別需修正: {to_fix}")
+    with local_conn.cursor() as cur:
+        for col in to_fix:
+            print(f"   - 正在轉換 {col} 為 TIMESTAMP WITH TIME ZONE（以 Asia/Taipei 解讀現有值）…")
+            cur.execute(
+                f"""
+                ALTER TABLE {table}
+                ALTER COLUMN {col}
+                TYPE TIMESTAMP WITH TIME ZONE
+                USING ({col} AT TIME ZONE 'Asia/Taipei');
+                """
+            )
+    local_conn.commit()
+    print("   ✅ 欄位型別轉換完成。")
 
 def calibrate_sequence(conn, table_name, id_column='id'):
     """校準指定資料表的序列計數器"""
@@ -284,6 +353,12 @@ def main():
 
         if not render_conn or not local_conn:
             return False
+
+        # 確保本地 account_ledger 的時間欄位型別正確，避免 8 小時位移
+        try:
+            ensure_account_ledger_timestamptz(local_conn)
+        except Exception as fix_err:
+            print(f"⚠️ 檢查/修正 account_ledger 欄位型別時出錯：{fix_err}")
 
         # 🔥 採用 minimal_flask_ai 的穩定順序：其他表先同步，completed_trips 最後同步
         

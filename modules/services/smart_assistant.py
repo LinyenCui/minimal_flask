@@ -749,6 +749,149 @@ class SmartAssistant:
             logger.error(f"❌ AI分析失敗: {e}")
             return None
     
+    def _enforce_time_routing(self, original_input: str, suggested_command: str) -> str:
+        """強制套用日期 vs {today} 的分流規則，防止AI/提示詞誤導。
+
+        規則：
+        - 過去日期(<today)：一律使用『查已完成』
+        - 今天(=today)：含『已完成』→『查已完成』；否則→『查詢班次』
+        - 未來日期(>today)：一律使用『查詢班次』
+        """
+        try:
+            # 延遲匯入避免循環
+            from modules.utils.unified_date_parser import parse_date_input
+            from modules.utils.taiwan_time import get_taiwan_date
+            from modules.services.date_range_query_service import parse_date_range
+        except Exception:
+            return suggested_command
+
+        tokens = (suggested_command or "").split()
+        if not tokens:
+            return suggested_command
+
+        # 嘗試先處理「日期範圍」情境
+        separators = ['-', '到', '至', '~', 'to']
+        range_token = None
+        for tok in tokens:
+            norm = tok.lstrip('/#!')
+            if any(sep in norm for sep in separators):
+                range_token = tok
+                break
+        if range_token is None:
+            for tok in original_input.split():
+                norm = tok.lstrip('/#!')
+                if any(sep in norm for sep in separators):
+                    range_token = tok
+                    break
+
+        today = None
+        try:
+            today = get_taiwan_date()
+        except Exception:
+            pass
+
+        if range_token and today is not None:
+            start_date, end_date = parse_date_range(range_token.lstrip('/#!'))
+            if start_date and end_date:
+                # 依範圍與 today 比較決定前綴
+                def to_completed_range(cmd: str) -> str:
+                    if cmd.startswith("查已完成範圍"):
+                        return cmd
+                    for s in ("查已完成範圍", "查已完成", "查詢班次範圍", "查詢班次", "查班次範圍"):
+                        if cmd.startswith(s):
+                            return cmd.replace(s, "查已完成範圍", 1)
+                    return f"查已完成範圍 {cmd}"
+
+                def to_trips_range(cmd: str) -> str:
+                    if cmd.startswith("查班次範圍"):
+                        return cmd
+                    for s in ("查已完成範圍", "查已完成", "查詢班次範圍", "查詢班次"):
+                        if cmd.startswith(s):
+                            return cmd.replace(s, "查班次範圍", 1)
+                    return f"查班次範圍 {cmd}"
+
+                if end_date < today:
+                    corrected = to_completed_range(suggested_command)
+                elif start_date >= today:
+                    corrected = to_trips_range(suggested_command)
+                else:
+                    # 混合範圍：優先使用查班次範圍，由服務層自動分段合併
+                    logging.getLogger(__name__).info(
+                        f"⚠️ 混合日期範圍（跨過去與今天/未來）→ 路由為 '查班次範圍' 並由服務層分段: {range_token}"
+                    )
+                    corrected = to_trips_range(suggested_command)
+
+                if corrected != suggested_command:
+                    logging.getLogger(__name__).info(
+                        f"⛳ 範圍護欄覆寫: {suggested_command} → {corrected} (原始輸入: '{original_input}')"
+                    )
+                return corrected
+
+        # 嘗試從標準命令中找出第一個能解析的『單日』日期
+        query_date = None
+        for tok in tokens:
+            norm = tok.lstrip('/#!')
+            try:
+                query_date = parse_date_input(norm)
+                if query_date:
+                    break
+            except Exception:
+                continue
+
+        if not query_date:
+            # 從原始輸入嘗試解析（處理AI命令未帶日期但用戶有日期）
+            for tok in original_input.split():
+                norm = tok.lstrip('/#!')
+                try:
+                    query_date = parse_date_input(norm)
+                    if query_date:
+                        break
+                except Exception:
+                    continue
+
+        if not query_date:
+            return suggested_command
+
+        if today is None:
+            try:
+                today = get_taiwan_date()
+            except Exception:
+                return suggested_command
+
+        has_completed_kw = "已完成" in original_input
+        starts_completed = suggested_command.startswith("查已完成")
+        starts_trips = suggested_command.startswith("查詢班次")
+
+        def to_completed(cmd: str) -> str:
+            if cmd.startswith("查詢班次"):
+                return cmd.replace("查詢班次", "查已完成", 1)
+            if not cmd.startswith("查已完成"):
+                return f"查已完成 {cmd}"
+            return cmd
+
+        def to_trips(cmd: str) -> str:
+            if cmd.startswith("查已完成"):
+                return cmd.replace("查已完成", "查詢班次", 1)
+            if not cmd.startswith("查詢班次"):
+                return f"查詢班次 {cmd}"
+            return cmd
+
+        try:
+            if query_date < today:
+                corrected = to_completed(suggested_command)
+            elif query_date > today:
+                corrected = to_trips(suggested_command)
+            else:  # 今天
+                corrected = to_completed(suggested_command) if has_completed_kw else to_trips(suggested_command)
+
+            if corrected != suggested_command:
+                logging.getLogger(__name__).info(
+                    f"⛳ 時間態護欄覆寫: {suggested_command} → {corrected} (原始輸入: '{original_input}')"
+                )
+            return corrected
+        except Exception:
+            return suggested_command
+
     def process_user_message(self, user_input: str, user_id: str) -> Dict:
         """智能處理用戶消息 - AI增強版"""
         logger.info(f"🤖 智能助手處理: {user_input}")
@@ -763,9 +906,10 @@ class SmartAssistant:
             
             # AI理解成功，執行標準命令
             if ai_result.get('standard_command'):
+                corrected_cmd = self._enforce_time_routing(user_input, ai_result['standard_command'])
                 return {
                     "type": "execute_command",
-                    "command": ai_result['standard_command'],
+                    "command": corrected_cmd,
                     "original_input": user_input,
                     "confidence": ai_result['confidence'],
                     "ai_reasoning": ai_result.get('reasoning', ''),
@@ -804,7 +948,7 @@ class SmartAssistant:
             else:
                 return {
                     "type": "execute_command", 
-                    "command": parse_result["standard_command"],
+                    "command": self._enforce_time_routing(user_input, parse_result["standard_command"]),
                     "original_input": user_input,
                     "confidence": parse_result["confidence"]
                 }

@@ -23,7 +23,12 @@ def create_app():
     app.config['DEBUG'] = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
         'pool_pre_ping': True,
-        'pool_recycle': 1800
+        'pool_recycle': 1800,
+        # 統一顯示與排序邏輯，使用 UTC 作為會話時區，
+        # 與 Render 端一致，避免 8 小時差異
+        'connect_args': {
+            'options': "-c timezone=UTC"
+        }
     }
     
     # 初始化數據庫
