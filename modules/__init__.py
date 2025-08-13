@@ -26,6 +26,9 @@ def create_app():
         'pool_recycle': 1800,
         # 統一顯示與排序邏輯，使用 UTC 作為會話時區，
         # 與 Render 端一致，避免 8 小時差異
+        'pool_size': 3,
+        'max_overflow': 0,
+        'pool_timeout': 30,
         'connect_args': {
             'options': "-c timezone=UTC"
         }
@@ -33,6 +36,16 @@ def create_app():
     
     # 初始化數據庫
     init_db_app(app)
+    # 確保新表存在（無 migration，使用 create_all）
+    try:
+        from modules.models import clinic_location  # noqa: F401 引入模型
+        from modules.models import chat_settings   # noqa: F401 引入模型
+        from modules.models import group_location_meta  # noqa: F401 引入模型
+        from modules.models.base import db
+        with app.app_context():
+            db.create_all()
+    except Exception as e:
+        app.logger.error(f"創建資料表失敗（可忽略不阻擋啟動）：{e}")
     
     # Initialize Vertex AI
     try:

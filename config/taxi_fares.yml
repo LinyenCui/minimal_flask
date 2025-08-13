@@ -1,0 +1,29 @@
+---
+default:
+  rounding_to: 5                # 四捨五入到最接近「5元」
+  minimum_fare: 0               # >0 時強制最低車資
+  waiting_granularity_sec: 60   # 一般以分鐘計價，先設 60；此值僅作 UI 顯示參考
+  night:
+    type: "multiplier"          # 夜間用倍數
+    value: 1.2                  # 23:00–06:00 加 20%
+
+tainan:
+  # == 里程計費（台南市政府公告）==
+  base_distance_km: 1.25        # 起跳距離 (km)
+  base_fare: 85                 # 起跳價 (元)
+  step_distance_m: 200          # 每跳距離 (公尺)
+  step_fare: 5                  # 每跳金額 (元)
+
+  # == 低速停等 ==
+  waiting_step_sec: 100         # 每 100 秒
+  waiting_step_fare: 5          # 加 5 元
+  waiting_from_speed_kmh: 5     # 5 km/h 以下（純試算以輸入之停等分鐘為主）
+
+  # == 夜間/節慶/天災加成 ==
+  use_default_night: true       # 使用 default.night（1.2 倍）
+  holiday_flat_extra: 50        # 春節期間每趟 +50（實際期間由市府公告）
+  disaster_flat_extra: 50       # 颱風/豪雨假（市府公告全市停班為條件）+50
+
+  # == 其他備註 ==
+  trunk_fee_enabled: false      # 台南已取消行李箱 +10
+---

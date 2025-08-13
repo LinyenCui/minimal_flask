@@ -48,6 +48,19 @@ def callback():
                 else:
                     logger.info(f"Skipping message from {source_type} due to handler rules: {original_message_text}")
                     continue 
+
+            # 處理位置消息（LocationMessage）
+            if event.type == "message" and getattr(event.message, 'type', None) == "location":
+                try:
+                    from modules.handlers.location_message_handler import handle_location_message
+                    handle_location_message(event)
+                except Exception as e:
+                    logger.error(f"處理位置消息失敗: {e}")
+                    try:
+                        reply_text(event.reply_token, "❌ 無法處理位置訊息，請稍後再試")
+                    except Exception:
+                        pass
+                continue
                 
     except InvalidSignatureError:
         logger.error("無效的簽名")

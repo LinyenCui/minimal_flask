@@ -71,6 +71,20 @@ def process_text_message(event):
     
     # 🚨 修復：安全獲取user_id，避免Source沒有user_id屬性的錯誤
     try:
+        # 🚕 車資試算（配置驅動，安全插入點）
+        # 在進入大量路由前，先快速匹配以避免被其他處理攔截
+        try:
+            from modules.handlers.fare_calc_handler import is_fare_calc_command, looks_like_fare_calc, handle_fare_calc
+            # 嚴格匹配或寬鬆判斷都先攔截，避免落入AI
+            if is_fare_calc_command(message_text) or looks_like_fare_calc(message_text):
+                try:
+                    reply_text(reply_token, handle_fare_calc(message_text))
+                except Exception as calc_err:
+                    logger.error(f"車資試算處理失敗：{calc_err}")
+                    reply_text(reply_token, "❌ 車資試算失敗，請稍後再試\n用法：車資試算 <公里> [停等分鐘] [日間|夜間]")
+                return
+        except Exception as fare_cmd_err:
+            logger.error(f"車資試算命令處理失敗或未載入：{fare_cmd_err}")
         user_id = event.source.user_id if hasattr(event.source, 'user_id') else None
         if not user_id:
             logger.warning(f"無法獲取user_id，Source類型: {type(event.source)}")
@@ -279,6 +293,56 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
         if message_text in ["帳務處理", "help_category_accounting"]:
             from modules.handlers.accounting import show_accounting_menu
             show_accounting_menu(reply_token)
+            return
+        # 🏥 診所座標/平均車速/到院訊息 相關命令
+        if (
+            message_text.startswith("設定診所") or
+            message_text in ["查看診所座標", "清除診所座標", "查看平均車速", "查看到院設定", "恢復預設到院訊息"] or
+            message_text.startswith("設定平均車速") or
+            message_text.startswith("設定地點名稱") or
+            message_text.startswith("設定到院訊息")
+        ):
+            try:
+                from modules.handlers.clinic_commands_handler import handle_clinic_commands
+                from modules.services.group_location_meta_service import set_name as _set_name, set_template as _set_tpl, get as _get_meta
+                # 取 chat_id（群組優先，否則用 userId）
+                chat_id = getattr(event.source, 'group_id', None) or getattr(event.source, 'room_id', None) or getattr(event.source, 'user_id', None)
+                # 地點名稱/到院訊息專屬命令
+                if message_text.startswith("設定地點名稱"):
+                    name = message_text[len("設定地點名稱"):].strip().replace("\u3000", " ")
+                    if not name:
+                        reply_text(reply_token, "❌ 請提供名稱，例如：設定地點名稱 診所")
+                        return
+                    _set_name(chat_id, name)
+                    reply_text(reply_token, f"✅ 已設定地點名稱：{name}")
+                    return
+                if message_text.startswith("設定到院訊息"):
+                    tpl = message_text[len("設定到院訊息"):].lstrip()
+                    _set_tpl(chat_id, tpl)
+                    reply_text(reply_token, f"✅ 已更新到院訊息（長度 {len(tpl)}）")
+                    return
+                if message_text == "查看到院設定":
+                    meta = _get_meta(chat_id)
+                    name = (meta.place_name if meta else None) or "（未設定，預設：診所）"
+                    has_tpl = bool(meta and meta.message_template)
+                    length = len(meta.message_template) if has_tpl else 0
+                    tpl_desc = f"自訂模板：{'有' if has_tpl else '無'}（長度 {length}）"
+                    reply_text(reply_token, f"🏷️ 到院設定\n名稱：{name}\n{tpl_desc}")
+                    return
+                if message_text == "恢復預設到院訊息":
+                    _set_tpl(chat_id, None)
+                    reply_text(reply_token, "✅ 已恢復預設到院訊息")
+                    return
+
+                # 其他既有診所/平均車速命令
+                resp = handle_clinic_commands(message_text, chat_id)
+                if resp:
+                    reply_text(reply_token, resp)
+                else:
+                    reply_text(reply_token, "❌ 指令格式錯誤，請使用：設定診所 <緯度> <經度> 或輸入『設定診所』再傳位置")
+            except Exception as e:
+                logger.error(f"診所座標命令處理失敗: {e}")
+                reply_text(reply_token, "❌ 無法處理診所座標指令，請稍後再試")
             return
         if message_text == "acct_deposit_start":
             from modules.handlers.accounting import handle_deposit_start
@@ -1042,6 +1106,17 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                         reply_text(reply_token, f"❌ 統計金額執行失敗：{str(e)}")
                         return
                 
+                # 🚕 新增：車資試算（AI產生標準命令的情況下也支援）
+                elif command.startswith("車資試算"):
+                    try:
+                        from modules.handlers.fare_calc_handler import handle_fare_calc
+                        reply_text(reply_token, handle_fare_calc(command))
+                        return
+                    except Exception as e:
+                        logger.error(f"車資試算(來自AI)處理失敗: {e}")
+                        reply_text(reply_token, "❌ 車資試算失敗，請稍後再試\n用法：車資試算 <公里> [停等分鐘] [日間|夜間]")
+                        return
+
                 # 🔥 修復無限遞歸：直接執行命令而不是改變message_text
                 logger.info(f"🎯 智能助手生成命令: {command}")
                 logger.info(f"✅ 智能助手解析成功，執行命令: {command}")
