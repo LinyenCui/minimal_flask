@@ -152,6 +152,19 @@ class HelpSystemConfig:
                         }
                     },
                     {
+                        "id": "group_location_arrival",
+                        "title": "📍 群組地點與到院提醒",
+                        "description": "以群組固定地點計算距離與ETA（支援括號座標）",
+                        "content_type": "feature_guide",
+                        "features": {
+                            "set_place": "設定地點 名稱 緯度 經度 或 名稱 (緯度, 經度)",
+                            "set_name": "設定地點名稱 名稱",
+                            "set_template": "設定到院訊息 模板（支援 {name}/{distance_km}/{eta_min}/{provider}/{speed}）",
+                            "view_meta": "查看到院設定（僅顯示名稱與模板長度）",
+                            "reset_template": "恢復預設到院訊息"
+                        }
+                    },
+                    {
                         "id": "reporting_system",
                         "title": "📊 報表系統",
                         "description": "數據分析與業務洞察",

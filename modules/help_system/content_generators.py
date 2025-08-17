@@ -402,6 +402,13 @@ class HelpContentGenerator:
             "bulk_import": "使用「匯入固定班次」命令批量導入班次",
             "schedule_recovery": "使用「固定班次恢復」命令恢復請假班次",
             "cross_time_management": "系統自動處理跨時間態的班次轉換"
+            ,
+            # === 群組地點與到院提醒：簡明使用方法（給一般用戶） ===
+            "set_place": "／設定 [類別/地點] [座標]\n例：／設定 診所 22.9983,120.2002 或 ／設定 東洋 (22.9983, 120.2002)",
+            "set_name": "／設定地點名稱 [名稱]\n例：／設定地點名稱 診所",
+            "set_template": "／設定到院訊息 [模板]\n可用：{name}/{distance_km}/{eta_min}/{provider}/{speed}",
+            "view_meta": "／查看到院設定（顯示名稱與是否有自訂模板）",
+            "reset_template": "／恢復預設到院訊息（清除自訂模板）"
         }
         
         return usage_guide.get(feature_name, "使用方法待補充")
@@ -423,6 +430,23 @@ class HelpContentGenerator:
                 "出國度假 -50",
                 "住院治療 0",
                 "家庭事務 -20"
+            ],
+            # === 群組地點與到院提醒：範例 ===
+            "set_place": [
+                "／設定 診所 22.9983,120.2002",
+                "／設定 東洋 (22.9983, 120.2002)"
+            ],
+            "set_name": [
+                "／設定地點名稱 診所"
+            ],
+            "set_template": [
+                "／設定到院訊息 🧑‍🦽 請準備輪椅\n距離：{distance_km} 公里，約 {eta_min} 分鐘（{provider}）"
+            ],
+            "view_meta": [
+                "／查看到院設定"
+            ],
+            "reset_template": [
+                "／恢復預設到院訊息"
             ]
         }
         
