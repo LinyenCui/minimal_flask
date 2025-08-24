@@ -294,105 +294,14 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             from modules.handlers.accounting import show_accounting_menu
             show_accounting_menu(reply_token)
             return
-        # 🏥 診所座標/平均車速/到院訊息 相關命令
-        if (
-            message_text.startswith("設定診所") or
-            message_text in ["查看診所座標", "清除診所座標", "查看平均車速", "查看到院設定", "恢復預設到院訊息"] or
-            message_text.startswith("設定平均車速") or
-            message_text.startswith("設定地點") or
-            message_text.startswith("設定地點名稱") or
-            message_text.startswith("設定到院訊息")
-        ):
-            try:
-                from modules.handlers.clinic_commands_handler import handle_clinic_commands
-                from modules.services.group_location_meta_service import set_name as _set_name, set_template as _set_tpl, get as _get_meta
-                from modules.services.clinic_location_service import set_for_chat as _set_location
-                # 取 chat_id（群組優先，否則用 userId）
-                chat_id = getattr(event.source, 'group_id', None) or getattr(event.source, 'room_id', None) or getattr(event.source, 'user_id', None)
-                # 通用地點設定：設定地點 <名稱> <緯度> <經度> | 設定地點 <名稱> (緯度, 經度)
-                if message_text.startswith("設定地點"):
-                    import re
-                    text = message_text.replace("　", " ")
-                    text = re.sub(r"\s+", " ", text).strip()
-                    # 1) 名稱 (lat, lng) 支援全形括號與逗號
-                    m = re.match(r"^設定地點\s+(.+?)\s*[（(]\s*([+-]?\d+(?:\.\d+)?)\s*[,，]\s*([+-]?\d+(?:\.\d+)?)\s*[)）]\s*$", text)
-                    if m:
-                        name = m.group(1).strip()
-                        try:
-                            lat = float(m.group(2)); lng = float(m.group(3))
-                        except ValueError:
-                            reply_text(reply_token, "❌ 座標格式錯誤，請確認緯度與經度是數字")
-                            return
-                    else:
-                        # 2) 回退：名稱 緯度 經度（以空白分隔，名稱可含空白）
-                        parts = text.split(" ")
-                        if len(parts) >= 4:
-                            name = " ".join(parts[1:-2]).strip()
-                            try:
-                                lat = float(parts[-2]); lng = float(parts[-1])
-                            except ValueError:
-                                reply_text(reply_token, "❌ 格式錯誤，請用：設定地點 名稱 緯度 經度\n例如：設定地點 東洋 23.0380103 120.1498142")
-                                return
-                        else:
-                            reply_text(reply_token, "❌ 格式錯誤，請用：設定地點 名稱 緯度 經度\n也可用括號：設定地點 東洋 (23.0380103, 120.1498142)")
-                            return
-                    # 寫入座標與名稱（兩個表）
-                    _set_location(chat_id, lat, lng)
-                    _set_name(chat_id, name or "診所")
-                    reply_text(reply_token, f"✅ 已設定地點：{name or '診所'}（{lat}, {lng}）")
-                    return
-                # 舊命令等同：設定診所 <緯度> <經度>
-                if message_text.startswith("設定診所 "):
-                    norm = message_text.replace("　", " ")
-                    parts = [p for p in norm.split() if p]
-                    if len(parts) >= 3:
-                        try:
-                            lat = float(parts[-2]); lng = float(parts[-1])
-                        except ValueError:
-                            # 交由舊處理器繼續處理（可能是不帶座標的引導）
-                            pass
-                        else:
-                            _set_location(chat_id, lat, lng)
-                            _set_name(chat_id, "診所")
-                            reply_text(reply_token, f"✅ 已設定地點：診所（{lat}, {lng}）")
-                            return
-                # 地點名稱/到院訊息專屬命令
-                if message_text.startswith("設定地點名稱"):
-                    name = message_text[len("設定地點名稱"):].strip().replace("\u3000", " ")
-                    if not name:
-                        reply_text(reply_token, "❌ 請提供名稱，例如：設定地點名稱 診所")
-                        return
-                    _set_name(chat_id, name)
-                    reply_text(reply_token, f"✅ 已設定地點名稱：{name}")
-                    return
-                if message_text.startswith("設定到院訊息"):
-                    tpl = message_text[len("設定到院訊息"):].lstrip()
-                    _set_tpl(chat_id, tpl)
-                    reply_text(reply_token, f"✅ 已更新到院訊息（長度 {len(tpl)}）")
-                    return
-                if message_text == "查看到院設定":
-                    meta = _get_meta(chat_id)
-                    name = (meta.place_name if meta else None) or "（未設定，預設：診所）"
-                    has_tpl = bool(meta and meta.message_template)
-                    length = len(meta.message_template) if has_tpl else 0
-                    tpl_desc = f"自訂模板：{'有' if has_tpl else '無'}（長度 {length}）"
-                    reply_text(reply_token, f"🏷️ 到院設定\n名稱：{name}\n{tpl_desc}")
-                    return
-                if message_text == "恢復預設到院訊息":
-                    _set_tpl(chat_id, None)
-                    reply_text(reply_token, "✅ 已恢復預設到院訊息")
-                    return
-
-                # 其他既有診所/平均車速命令
-                resp = handle_clinic_commands(message_text, chat_id)
-                if resp:
-                    reply_text(reply_token, resp)
-                else:
-                    reply_text(reply_token, "❌ 指令格式錯誤，請使用：設定診所 <緯度> <經度> 或輸入『設定診所』再傳位置")
-            except Exception as e:
-                logger.error(f"診所座標命令處理失敗: {e}")
-                reply_text(reply_token, "❌ 無法處理診所座標指令，請稍後再試")
-            return
+        # 🏥 診所座標/平均車速/到院訊息 相關命令 → 輕路由（不影響其他功能）
+        try:
+            from modules.handlers.clinic_commands_router import handle_clinic_meta_commands
+            chat_id = getattr(event.source, 'group_id', None) or getattr(event.source, 'room_id', None) or getattr(event.source, 'user_id', None)
+            if handle_clinic_meta_commands(message_text, chat_id, reply_token):
+                return
+        except Exception as _router_err:
+            logger.error(f"clinic_meta_commands 路由失敗: {_router_err}")
         if message_text == "acct_deposit_start":
             from modules.handlers.accounting import handle_deposit_start
             handle_deposit_start(user_id, reply_token)
@@ -895,7 +804,7 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             return
         
         # 取消AI修改
-        elif message_text == "取消AI修改":
+        elif message_text in ["取消AI修改", "放棄AI修改", "放棄修改"]:
             try:
                 # 完全重置用戶的對話上下文
                 conversation_manager.reset_context(user_id)
@@ -903,11 +812,11 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 logger.info(f"用戶 {user_id} 取消AI修改，已重置對話上下文")
                 
                 # 🔥 簡化：直接使用可靠的文字反饋，確保用戶一定能看到
-                reply_text(reply_token, "✅ 取消修改流程\n\n🔒 數據庫未被修改，您可以重新發起命令。")
+                reply_text(reply_token, "✅ 已放棄AI修改\n\n🔒 數據庫未被修改，您可以重新發起命令。")
                     
             except Exception as e:
                 logger.error(f"處理取消AI修改時出錯: {e}")
-                reply_text(reply_token, "✅ 取消修改流程")
+                reply_text(reply_token, "✅ 已放棄AI修改")
             return
         # --- 結束新增 ---
             
@@ -1086,10 +995,8 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                     
                     # 使用標準化的響應處理器
                     
-                    # 創建標準化的Quick Reply按鈕
-                    quick_reply_buttons = [
-                        {"label": "❌ 取消修改", "text": "取消修改", "type": "message"}
-                    ]
+                    # 創建標準化的Quick Reply按鈕（統一用語：放棄AI修改）
+                    quick_reply_buttons = QuickReplyManager.create_common_buttons()["abandon_ai_modification"]
                     
                     # 創建標準化響應
                     response = QuickReplyManager.create_text_response(
@@ -1100,7 +1007,7 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                     # 發送響應
                     if not ResponseHandler.send_response(reply_token, response):
                         # 如果新格式失敗，回退到基本文字
-                        reply_text(reply_token, f"✅ 車資資料已準備：\n班次 #{trip_id}\n錶價：{meter_fare}元\n加成：{extra_fare}元\n\n❓ 請提供修改原因：\n\n💡 請直接輸入修改原因，或輸入「取消修改」取消操作")
+                        reply_text(reply_token, f"✅ 車資資料已準備：\n班次 #{trip_id}\n錶價：{meter_fare}元\n加成：{extra_fare}元\n\n❓ 請提供修改原因：\n\n💡 請直接輸入修改原因，或輸入「放棄AI修改」取消操作")
                     return
                 
                 # 有完整參數，直接處理

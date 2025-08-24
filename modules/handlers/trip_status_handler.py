@@ -12,6 +12,22 @@ from linebot.v3.messaging import QuickReply, QuickReplyItem, PostbackAction
 # 建立日誌記錄器
 logger = logging.getLogger(__name__)
 
+def _ensure_clean_session():
+    """確保當前資料庫會話處於乾淨狀態。
+    若前一次操作失敗造成事務中止，這裡會先行 rollback，避免後續任何 SELECT/UPDATE
+    直接觸發 InFailedSqlTransaction。
+    """
+    try:
+        # SQLAlchemy 2.x：in_transaction() 為 True 代表目前有交易（成功或失敗狀態）
+        if db.session.in_transaction():
+            db.session.rollback()
+    except Exception:
+        # 保底處理，關閉會話避免殘留
+        try:
+            db.session.close()
+        except Exception:
+            pass
+
 def remove_leave_from_modification_reason(modification_reason):
     """
     從 modification_reason 中移除請假相關的記錄，保留其他修改記錄
@@ -38,6 +54,8 @@ def remove_leave_from_modification_reason(modification_reason):
 def handle_update_trip_status(message_text, user_id=None):
     """處理修改班次狀態的請求"""
     try:
+        # 進入時確保清乾淨，避免上一個請求留下的錯誤事務影響本次查詢
+        _ensure_clean_session()
         parts = message_text.split()
         if len(parts) < 3:
             return "命令格式不正確。正確格式：修改狀態 [班次ID] [新狀態]\n\n可用狀態：準備、註銷、衝突、請假"
@@ -106,6 +124,7 @@ def handle_update_trip_status(message_text, user_id=None):
                 WHERE trip_id = :trip_id 
                 RETURNING trip_id, extra_fare
                 """
+                _ensure_clean_session()
                 result = db.session.execute(text(update_query), {
                     "trip_id": trip_id,
                     "cleaned_reason": cleaned_modification_reason
@@ -130,6 +149,7 @@ def handle_update_trip_status(message_text, user_id=None):
                 WHERE trip_id = :trip_id 
                 RETURNING trip_id, extra_fare
                 """
+                _ensure_clean_session()
                 result = db.session.execute(text(update_query), {"trip_id": trip_id})
                 db.session.commit()
                 
@@ -143,6 +163,7 @@ def handle_update_trip_status(message_text, user_id=None):
             elif current_status != new_status:
                 # 這是一般的狀態修改
                 update_query = "UPDATE trips SET status = :new_status WHERE trip_id = :trip_id RETURNING trip_id"
+                _ensure_clean_session()
                 result = db.session.execute(text(update_query), {"trip_id": trip_id, "new_status": new_status})
                 db.session.commit()
                 if result.fetchone():
@@ -219,6 +240,7 @@ def handle_update_trip_status(message_text, user_id=None):
 def handle_confirm_cancel_trip(message_text):
     """處理確認取消班次的請求"""
     try:
+        _ensure_clean_session()
         # 解析命令格式：確認取消 [班次ID]
         parts = message_text.split()
         if len(parts) < 2:
@@ -256,6 +278,7 @@ def handle_confirm_cancel_trip(message_text):
         RETURNING trip_id
         """
         
+        _ensure_clean_session()
         result = db.session.execute(text(update_query), {"trip_id": trip_id})
         
         # 提交事務
@@ -280,6 +303,7 @@ def handle_confirm_cancel_trip(message_text):
 def handle_confirm_leave_trip(message_text):
     """處理確認請假班次的請求"""
     try:
+        _ensure_clean_session()
         # 解析命令格式：確認請假 [班次ID]
         parts = message_text.split()
         if len(parts) < 2:
@@ -321,6 +345,7 @@ def handle_confirm_leave_trip(message_text):
         RETURNING trip_id
         """
         
+        _ensure_clean_session()
         result = db.session.execute(text(update_query), {"trip_id": trip_id})
         
         # 提交事務
@@ -342,6 +367,7 @@ def handle_confirm_leave_trip(message_text):
 def handle_confirm_conflict_trip(message_text):
     """處理確認衝突班次的請求"""
     try:
+        _ensure_clean_session()
         # 解析命令格式：確認衝突 [班次ID]
         parts = message_text.split()
         if len(parts) < 2:
@@ -381,6 +407,7 @@ def handle_confirm_conflict_trip(message_text):
         RETURNING trip_id
         """
         
+        _ensure_clean_session()
         result = db.session.execute(text(update_query), {"trip_id": trip_id})
         
         # 提交事務

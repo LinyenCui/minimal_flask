@@ -11,7 +11,8 @@ from app import generate_weekly_report, db
 
 # 創建一個測試用的 Flask 應用
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:0720@localhost:5432/dispatch_db'
+# 使用與正式環境一致的 psycopg 驅動
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql+psycopg://postgres:0720@localhost:5432/dispatch_db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # 初始化數據庫

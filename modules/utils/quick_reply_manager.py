@@ -178,6 +178,9 @@ class QuickReplyManager:
             "abandon_operation": [
                 {"label": "🚫 放棄操作", "text": "放棄操作", "type": "message"}
             ],
+            "abandon_ai_modification": [
+                {"label": "❌ 放棄修改", "text": "放棄AI修改", "type": "message"}
+            ],
             "confirm_abandon": [
                 {"label": "✅ 確認", "text": "確認", "type": "message"},
                 {"label": "🚫 放棄操作", "text": "放棄操作", "type": "message"}

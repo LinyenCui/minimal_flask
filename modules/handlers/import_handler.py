@@ -13,25 +13,53 @@ from modules.utils.week_utils import (
 )
 
 def handle_import_fixed_trips_week(message_text):
-    """處理匯入固定班次的命令 - 支援周次選擇和覆蓋選項"""
+    """處理匯入固定班次的命令
+
+    規則調整：
+    - 預設只匯入「診所」類別
+    - 如需匯入其他類別（例如：東洋），需加上類別參數
+      例：匯入固定班次 東洋 本週 〔可加 覆蓋〕
+    """
     try:
         # 解析命令參數
         parts = message_text.strip().split()
-        
-        if len(parts) == 1:
-            # 只有「匯入固定班次」，顯示可用選項
-            return show_available_weeks()
-        
-        week_param = parts[1].strip()
-        
-        # 檢查是否有覆蓋選項
+        known_categories = {"診所", "東洋", "臨時"}
+        selected_category = "診所"  # 預設只匯入診所
+
+        # 移除命令本體
+        args = parts[1:]
+
+        # 早退：無任何參數 → 顯示周次選項（提示預設為診所）
+        if not args:
+            return show_available_weeks(default_category=selected_category)
+
+        # 解析覆蓋參數（允許出現在任意位置）
         force_overwrite = False
-        if len(parts) >= 3:
-            overwrite_param = parts[2].strip()
-            if overwrite_param == '覆蓋':
+        args_cleaned = []
+        for token in args:
+            if token == "覆蓋":
                 force_overwrite = True
             else:
-                return f"❌ 無效的選項: {overwrite_param}\n\n{show_available_weeks()}"
+                args_cleaned.append(token)
+
+        # 解析類別參數（允許出現在任意位置）
+        args_after_category = []
+        for token in args_cleaned:
+            if token in known_categories and selected_category == "診所":
+                selected_category = token
+            else:
+                args_after_category.append(token)
+
+        # 剩餘第一個參數應為週次
+        if not args_after_category:
+            # 沒提供週次，顯示可用選項（保留已選類別提示）
+            return show_available_weeks(default_category=selected_category)
+
+        week_param = args_after_category[0].strip()
+        # 若還有多餘未識別參數，回報錯誤
+        if len(args_after_category) > 1:
+            extra = " ".join(args_after_category[1:])
+            return f"❌ 無法識別的參數: {extra}\n\n{show_available_weeks(default_category=selected_category)}"
         
         # 解析周次參數
         try:
@@ -47,16 +75,16 @@ def handle_import_fixed_trips_week(message_text):
         if is_week_in_past(dates, today):
             return f"❌ 不允許匯入過去時間態：{week_name} ({week_desc})\n\n{show_available_weeks()}"
         
-        # 執行匯入
-        return import_week_trips(week_start, dates, week_name, week_desc, force_overwrite)
+        # 執行匯入（加上類別過濾）
+        return import_week_trips(week_start, dates, week_name, week_desc, force_overwrite, selected_category)
         
     except Exception as e:
         current_app.logger.error(f"處理匯入固定班次命令失敗: {str(e)}")
         traceback.print_exc()
         return f"處理匯入固定班次命令失敗: {str(e)}"
 
-def show_available_weeks():
-    """顯示可用的周次選項"""
+def show_available_weeks(default_category: str = "診所"):
+    """顯示可用的周次選項（預設僅匯入診所類別）"""
     try:
         weeks = get_available_weeks()
         
@@ -67,10 +95,18 @@ def show_available_weeks():
         
         result += "\n🔄 覆蓋選項：\n"
         result += "• 匯入固定班次 [周次] 覆蓋\n"
-        
-        result += "\n💡 輸入格式：匯入固定班次 [周次] [覆蓋]\n"
-        result += "例如：匯入固定班次 下周\n"
-        result += "例如：匯入固定班次 本周 覆蓋"
+
+        result += "\n💡 類別規則：\n"
+        result += f"• 預設僅匯入「{default_category}」類別\n"
+        result += "• 如需匯入其他類別，請加入類別參數（例如：東洋）\n"
+
+        result += "\n🧭 指令格式：\n"
+        result += "• 匯入固定班次 [周次] [覆蓋]\n"
+        result += "• 匯入固定班次 東洋 [周次] [覆蓋]\n"
+        result += "\n範例：\n"
+        result += "• 匯入固定班次 本週\n"
+        result += "• 匯入固定班次 下週 覆蓋\n"
+        result += "• 匯入固定班次 東洋 本週\n"
         
         return result
         
@@ -78,27 +114,29 @@ def show_available_weeks():
         current_app.logger.error(f"顯示可用周次失敗: {str(e)}")
         return f"顯示可用周次失敗: {str(e)}"
 
-def import_week_trips(week_start, dates, week_name, week_desc, force_overwrite=False):
-    """執行周次固定班次匯入 - 優化版本"""
+def import_week_trips(week_start, dates, week_name, week_desc, force_overwrite=False, category: str = "診所"):
+    """執行周次固定班次匯入 - 僅匯入指定類別（預設診所）"""
     start_time = time.time()
     
     try:
         current_app.logger.info(f"🚀 開始匯入{week_name}固定班次: {week_desc}")
         
-        # 檢查是否已經匯入過 - 優化查詢
+        # 檢查是否已經匯入過（按類別分開檢查）
         check_query = """
         SELECT COUNT(*) FROM trips 
-        WHERE date >= :start_date AND date <= :end_date AND fixed_trip_id IS NOT NULL
+        WHERE date >= :start_date AND date <= :end_date 
+          AND fixed_trip_id IS NOT NULL
+          AND category = :category
         """
         
         existing_count = db.session.execute(
             sql_text(check_query), 
-            {"start_date": dates[0], "end_date": dates[6]}
+            {"start_date": dates[0], "end_date": dates[6], "category": category}
         ).fetchone()[0]
         
         if existing_count > 0 and not force_overwrite:
             # 提供覆蓋選項的提示
-            return f"⚠️ {week_name} ({week_desc}) 的固定班次已經匯入過了（共 {existing_count} 筆）。\n\n如需覆蓋，請使用：\n🔄 匯入固定班次 {week_name} 覆蓋\n\n⚠️ 注意：如選覆蓋資料，原先對班次的修改會失效"
+            return f"⚠️ {week_name} ({week_desc}) 的固定班次（類別：{category}）已經匯入過了（共 {existing_count} 筆）。\n\n如需覆蓋，請使用：\n🔄 匯入固定班次 {category} {week_name} 覆蓋\n\n⚠️ 注意：如選覆蓋資料，原先對班次的修改會失效"
         
         # 如果是覆蓋模式，先清除該周次的固定班次 - 優化DELETE
         if force_overwrite and existing_count > 0:
@@ -106,11 +144,13 @@ def import_week_trips(week_start, dates, week_name, week_desc, force_overwrite=F
             
             delete_query = """
             DELETE FROM trips 
-            WHERE date >= :start_date AND date <= :end_date AND fixed_trip_id IS NOT NULL
+            WHERE date >= :start_date AND date <= :end_date 
+              AND fixed_trip_id IS NOT NULL
+              AND category = :category
             """
             delete_result = db.session.execute(
                 sql_text(delete_query), 
-                {"start_date": dates[0], "end_date": dates[6]}
+                {"start_date": dates[0], "end_date": dates[6], "category": category}
             )
             deleted_count = delete_result.rowcount
             current_app.logger.info(f"✅ 已刪除 {deleted_count} 筆原有固定班次")
@@ -171,7 +211,7 @@ def import_week_trips(week_start, dates, week_name, week_desc, force_overwrite=F
             # 獲取星期幾（1-7，其中1是星期一）
             weekday = import_date.isoweekday()
             
-            # 查詢符合當天星期的固定班次（包含狀態和說明）
+            # 查詢符合當天星期且類別相符的固定班次（包含狀態和說明）
             query = """
             SELECT 
                 id, route_number, departure_time, start_point, via_point, end_point, 
@@ -180,11 +220,12 @@ def import_week_trips(week_start, dates, week_name, week_desc, force_overwrite=F
             FROM fixed_schedules
             WHERE route_number LIKE :weekday_pattern
                 AND (status IS NULL OR status != '停用')
+                AND (category = :category)
             """
             
             fixed_trips = db.session.execute(
                 sql_text(query), 
-                {"weekday_pattern": f"%{weekday}%"}
+                {"weekday_pattern": f"%{weekday}%", "category": category}
             ).fetchall()
             
             current_app.logger.info(f"📦 找到 {len(fixed_trips)} 筆固定班次")
@@ -317,7 +358,7 @@ def import_week_trips(week_start, dates, week_name, week_desc, force_overwrite=F
         current_app.logger.info(f"🎉 成功匯入{total_inserted}筆固定班次，耗時 {total_time:.2f} 秒")
         
         # 生成匯入結果報告
-        result = f"✅ 成功匯入 {week_name} ({week_desc}) {total_inserted} 筆固定班次"
+        result = f"✅ 成功匯入 {week_name} ({week_desc}) {total_inserted} 筆固定班次（類別：{category}）"
         
         # 如果是覆蓋模式，添加覆蓋信息
         if force_overwrite and existing_count > 0:

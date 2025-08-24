@@ -657,7 +657,7 @@ def handle_smart_fare_query(message_text: str, user_id: str, use_flex=True, pars
             logger.info(f"🔍 檢測到待執行修改，檢查用戶是否在回答原因: {message_text}")
             
             # 🎯 語意衝突已解決：trips狀態已改為「註銷」，可以自然使用「取消」命令
-            cancel_commands = ['取消修改', '取消AI修改', '取消', '退出', '不修改']
+            cancel_commands = ['取消修改', '取消AI修改', '放棄AI修改', '放棄修改', '取消', '退出', '不修改']
             
             # 檢查是否為取消命令
             is_cancel_command = any(cmd in message_text for cmd in cancel_commands)
