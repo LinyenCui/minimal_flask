@@ -241,10 +241,14 @@ class AdvancedQueryProcessor:
                 where_conditions.append(date_condition)
                 params.update(date_params)
             
-            # 添加狀態條件
+            # 添加狀態條件（請假是語意狀態：status=準備 且 有請假原因）
             if conditions.get('status'):
-                where_conditions.append("t.status = :status")
-                params['status'] = conditions['status']
+                if conditions['status'] == '請假':
+                    where_conditions.append("(t.status = '準備' AND (t.passenger_leave_reason IS NOT NULL OR (t.modification_reason ILIKE :leave_kw)))")
+                    params['leave_kw'] = '%請假%'
+                else:
+                    where_conditions.append("t.status = :status")
+                    params['status'] = conditions['status']
             
             # 添加類別條件
             if conditions.get('category'):
@@ -414,7 +418,7 @@ class AdvancedQueryProcessor:
             conditions['driver_id'] = int(driver_match.group(1))
         
         # 解析狀態條件 - 先嘗試精確匹配已知狀態
-        known_statuses = ['待派', '準備', '已完成', '註銷', '衝突']  # 🔥 新增：添加衝突狀態
+        known_statuses = ['待派', '準備', '已完成', '註銷', '衝突', '請假']  # 支援語意狀態「請假」
         status_found = False
         
         for status in known_statuses:
