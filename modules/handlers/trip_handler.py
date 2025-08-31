@@ -871,10 +871,13 @@ def handle_completed_trip_details(completed_trip_id):
         if passenger_leave_reason:
             result_text += f"🔵 請假原因: {passenger_leave_reason}\n"
         
-        # 🔥 新增：顯示修改原因（如果有且不是請假相關）
+        # 🔥 顯示修改原因（僅顯示非請假相關的部分）
         modification_reason = trip.get('modification_reason')
-        if modification_reason and not passenger_leave_reason:  # 避免重複顯示請假原因
-            result_text += f"🟠 修改原因: {modification_reason}\n"
+        if modification_reason:
+            parts = [p.strip() for p in modification_reason.split(';') if p and p.strip()]
+            non_leave_parts = [p for p in parts if ('請假' not in p and '乘客請假' not in p)]
+            if non_leave_parts:
+                result_text += f"🟠 修改原因: {'; '.join(non_leave_parts)}\n"
         
         # 記錄時間
         created_at = trip.get('created_at')

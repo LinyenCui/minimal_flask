@@ -16,7 +16,7 @@ def schedule_all_trip_updates(app):
             now = get_taiwan_time()
             taiwan_tz = timezone(timedelta(hours=8))
             
-            # 查詢所有狀態為"準備"且時間在未來的班次
+            # 查詢所有狀態為"準備"且時間在未來的班次（請假為障眼法，仍為準備）
             query = """
             SELECT 
                 t.trip_id, 
@@ -86,14 +86,15 @@ def update_single_trip(app, trip_id):
             # 獲取當前日期和時間
             now = get_taiwan_time()
             
-            # 查詢班次詳細信息，確保包含 trip_type, custom_start_point, custom_end_point, custom_via_point
+            # 查詢班次詳細信息，確保包含 trip_type, custom_*, passenger_name/leave/modification 欄位
             query = """
             SELECT 
                 t.trip_id, t.date, t.time, 
                 t.start_point, t.via_point, t.end_point, 
                 t.meter_fare, t.extra_fare, t.category, t.driver_id,
                 t.status, t.unique_code, t.fixed_trip_id,
-                t.trip_type, t.custom_start_point, t.custom_end_point, t.custom_via_point
+                t.trip_type, t.custom_start_point, t.custom_end_point, t.custom_via_point,
+                t.passenger_name, t.passenger_leave_reason, t.modification_reason
             FROM 
                 trips t
             WHERE 
@@ -112,7 +113,7 @@ def update_single_trip(app, trip_id):
                 current_app.logger.error(f"找不到班次 #{trip_id}")
                 return
             
-            # 如果班次狀態不是"準備"，跳過
+            # 如果班次狀態不是可轉移狀態（準備），跳過
             if trip_info.get('status') != '準備':
                 current_app.logger.info(f"班次 #{trip_id} 狀態不是「準備」，跳過更新")
                 return
@@ -253,7 +254,7 @@ def update_completed_trips():
         current_time = now.time()
         current_app.logger.info(f"當前日期: {current_date}, 當前時間: {current_time}")
         
-        # 查詢所有狀態為"準備"且時間已過的班次
+        # 查詢所有狀態為"準備"且時間已過的班次（請假為障眼法，仍為準備）
         query = """
         SELECT 
             t.trip_id
@@ -619,12 +620,12 @@ def init_scheduler(app):
         replace_existing=True
     )
 
-    # hourly_update_completed 任務定義 (使用包裝函數)
+    # 半小時補掃：每小時的 00 與 30 分執行一次
     app.scheduler.add_job(
         id='hourly_update_completed',
-        func=update_completed_wrapper, # <--- 使用包裝函數
+        func=update_completed_wrapper,  # 使用包裝函數
         trigger='cron',
-        hour='*', minute=0, timezone='Asia/Taipei',
+        hour='*', minute='0,30', timezone='Asia/Taipei',
         replace_existing=True
     )
 
