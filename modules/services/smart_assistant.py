@@ -769,6 +769,15 @@ class SmartAssistant:
         if not tokens:
             return suggested_command
 
+        # 🚨 重要：車資修改命令不應該進行時間態轉換
+        # 車資修改命令應該直接執行，不需要查詢班次
+        fare_commands = ["記錄車資", "修改車資", "車資"]
+        if any(suggested_command.startswith(cmd) for cmd in fare_commands):
+            logging.getLogger(__name__).info(
+                f"💰 車資命令跳過時間態護欄: {suggested_command} (原始輸入: '{original_input}')"
+            )
+            return suggested_command
+
         # 嘗試先處理「日期範圍」情境
         separators = ['-', '到', '至', '~', 'to']
         range_token = None

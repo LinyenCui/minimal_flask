@@ -1264,12 +1264,25 @@ def execute_fare_modification(trip: Dict, modification_intent: Dict, user_id: st
     """準備車資修改確認界面（參考預約叫車邏輯 - 收集信息，暫停等待確認）"""
     try:
         trip_id = trip['id']
-        current_meter = trip['meter_fare']
-        current_extra = trip['extra_fare']
+        # 歸一化舊值避免 None 相加錯誤
+        try:
+            current_meter = int((trip.get('meter_fare') if isinstance(trip, dict) else trip['meter_fare']) or 0)
+        except Exception:
+            current_meter = 0
+        try:
+            current_extra = int((trip.get('extra_fare') if isinstance(trip, dict) else trip['extra_fare']) or 0)
+        except Exception:
+            current_extra = 0
         
-        # 從修改意圖中獲取新的費用
-        new_meter = modification_intent.get('meter_fare', current_meter)
-        new_extra = modification_intent.get('extra_fare', current_extra)
+        # 從修改意圖中獲取新的費用並轉為整數，缺失則沿用舊值
+        try:
+            new_meter = int(modification_intent.get('meter_fare', current_meter))
+        except Exception:
+            new_meter = current_meter
+        try:
+            new_extra = int(modification_intent.get('extra_fare', current_extra))
+        except Exception:
+            new_extra = current_extra
         reason = modification_intent.get('reason', '透過AI智能修改')
         
         # 🔥 确保原因不为空
@@ -1300,7 +1313,7 @@ def execute_fare_modification(trip: Dict, modification_intent: Dict, user_id: st
             'new_meter': new_meter,
             'new_extra': new_extra,
             'reason': reason,
-            'total_change': (new_meter + new_extra) - (current_meter + current_extra)
+            'total_change': (int(new_meter) + int(new_extra)) - (int(current_meter) + int(current_extra))
         }
         
         from modules.flex_designs.ai_fare_query_flex import create_ai_modification_confirm_flex
@@ -1312,13 +1325,14 @@ def execute_fare_modification(trip: Dict, modification_intent: Dict, user_id: st
             return flex_result
         else:
             # 如果Flex Message創建失敗，使用文本備用
+            total_change = (int(new_meter) + int(new_extra)) - (int(current_meter) + int(current_extra))
             confirmation_text = f"""🤖 AI智能修改確認
 
 📊 修改詳情：
 • 班次：#{trip_id} ({trip['category']})
 • 路線：{trip['start_point']} → {trip['end_point']}
 • 費用變更：{current_meter}+{current_extra} → {new_meter}+{new_extra}
-• 總計變化：{(new_meter + new_extra) - (current_meter + current_extra):+d} 元
+• 總計變化：{total_change:+d} 元
 • 修改原因：{reason}
 
 ⚠️ 請確認是否執行此修改？
