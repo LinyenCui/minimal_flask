@@ -85,23 +85,28 @@ def build_monthly_statement_cover(month: date) -> StatementData:
         raise
 
 def _get_monthly_total(start_datetime: datetime, end_datetime: datetime) -> int:
-    """獲取月總額 (account_ledger weekly_charge)"""
+    """獲取月總額 (使用與現有診所班次加總完全一致的邏輯)"""
     try:
+        # 使用與現有診所班次加總完全一致的查詢邏輯
         query = text("""
-            SELECT COALESCE(SUM(amount_out), 0) as total
-            FROM account_ledger 
-            WHERE type = 'weekly_charge' 
-              AND occurred_at >= :start_time 
-              AND occurred_at <= :end_time
+            SELECT COALESCE(SUM(COALESCE(ct.meter_fare, 0) + COALESCE(ct.extra_fare, 0)), 0) as total
+            FROM completed_trips ct
+            WHERE ct.date >= :start_date 
+              AND ct.date <= :end_date
+              AND ct.category = '診所'
         """)
         
+        # 轉換為日期格式（去掉時區信息）
+        start_date = start_datetime.date()
+        end_date = end_datetime.date()
+        
         result = db.session.execute(query, {
-            'start_time': start_datetime,
-            'end_time': end_datetime
+            'start_date': start_date,
+            'end_date': end_date
         }).fetchone()
         
         total = int(result[0]) if result and result[0] else 0
-        logger.info(f"月總額 (weekly_charge): {total:,}")
+        logger.info(f"月總額 (診所班次加總): {total:,}")
         return total
         
     except Exception as e:
