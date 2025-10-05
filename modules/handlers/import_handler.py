@@ -158,7 +158,9 @@ def import_week_trips(week_start, dates, week_name, week_desc, force_overwrite=F
         # 周次選擇邏輯：
         # - 本周：在現有基礎上追加（不清空）
         # - 下周：可以清空（因為是未來規劃）
-        week_offset = (week_start - date.today()).days // 7
+        # 修復week_offset計算：使用目標周次與當前日期的關係
+        today = date.today()
+        week_offset = (week_start - today).days // 7
         
         if week_offset == 0:
             # 本周：追加模式（不清空現有班次）
@@ -184,19 +186,25 @@ def import_week_trips(week_start, dates, week_name, week_desc, force_overwrite=F
                     current_app.logger.error(f"❌ 處理未完成班次失敗: {str(e)}")
                     # 不中斷流程，繼續匯入
                 
-                # 優化：清空班次總覽表時添加條件，避免全表刪除
-                current_app.logger.info("🗑️ 清空現有班次，準備匯入新周次")
+                # 🚨 修復：只清空前一周的班次，保留本周已存在的預約班次(temp)
+                current_app.logger.info("🗑️ 清空前一周班次，保留本周預約班次")
                 
-                # 只刪除非固定班次，或者添加更安全的條件
+                # 計算前一周的日期範圍
+                from datetime import timedelta
+                prev_week_start = dates[0] - timedelta(days=7)
+                prev_week_end = dates[6] - timedelta(days=7)
+                
+                # 只刪除前一周的班次，不影響本周已存在的預約班次
                 delete_query = """
                 DELETE FROM trips 
-                WHERE date < :start_date OR date > :end_date OR fixed_trip_id IS NULL
+                WHERE date >= :prev_week_start AND date <= :prev_week_end
                 """
-                db.session.execute(
+                delete_result = db.session.execute(
                     sql_text(delete_query), 
-                    {"start_date": dates[0], "end_date": dates[6]}
+                    {"prev_week_start": prev_week_start, "prev_week_end": prev_week_end}
                 )
-                current_app.logger.info("✅ 已清空現有班次")
+                deleted_count = delete_result.rowcount
+                current_app.logger.info(f"✅ 已清空前一周 {deleted_count} 筆班次，保留本周預約班次")
         
         current_app.logger.info("📊 開始讀取固定班次資料...")
         
