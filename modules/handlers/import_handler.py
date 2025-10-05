@@ -166,45 +166,12 @@ def import_week_trips(week_start, dates, week_name, week_desc, force_overwrite=F
             # 本周：追加模式（不清空現有班次）
             current_app.logger.info("📝 本周匯入模式：追加到現有班次")
         else:
-            # 未來周次：規劃模式（可以清空重新規劃）
-            current_app.logger.info(f"📅 未來周次匯入模式：{week_name}")
+            # 未來周次：追加模式（不清空任何現有班次）
+            current_app.logger.info(f"📅 未來周次匯入模式：{week_name} - 追加到現有班次")
             
-            # 如果不是覆蓋模式，在匯入新班次之前，先將所有未完成的班次移到已完成班次表
-            if not force_overwrite:
-                current_app.logger.info("📦 正在處理未完成班次...")
-                
-                # 優化：添加超時控制
-                timeout_start = time.time()
-                try:
-                    from modules.services.scheduler_service import update_completed_trips
-                    update_completed_trips()
-                    
-                    # 檢查是否超時
-                    if time.time() - timeout_start > 30:  # 30秒超時
-                        current_app.logger.warning("⚠️ 處理未完成班次超時，繼續匯入流程")
-                except Exception as e:
-                    current_app.logger.error(f"❌ 處理未完成班次失敗: {str(e)}")
-                    # 不中斷流程，繼續匯入
-                
-                # 🚨 修復：只清空前一周的班次，保留本周已存在的預約班次(temp)
-                current_app.logger.info("🗑️ 清空前一周班次，保留本周預約班次")
-                
-                # 計算前一周的日期範圍
-                from datetime import timedelta
-                prev_week_start = dates[0] - timedelta(days=7)
-                prev_week_end = dates[6] - timedelta(days=7)
-                
-                # 只刪除前一周的班次，不影響本周已存在的預約班次
-                delete_query = """
-                DELETE FROM trips 
-                WHERE date >= :prev_week_start AND date <= :prev_week_end
-                """
-                delete_result = db.session.execute(
-                    sql_text(delete_query), 
-                    {"prev_week_start": prev_week_start, "prev_week_end": prev_week_end}
-                )
-                deleted_count = delete_result.rowcount
-                current_app.logger.info(f"✅ 已清空前一周 {deleted_count} 筆班次，保留本周預約班次")
+            # 🚨 重要修復：未來周次匯入時也不清空任何現有班次
+            # 預約班次(temp)和固定班次都應該被保留
+            current_app.logger.info("💡 保留所有現有班次，只追加新的固定班次")
         
         current_app.logger.info("📊 開始讀取固定班次資料...")
         

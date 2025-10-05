@@ -754,7 +754,7 @@ def handle_generate_monthly_report(text):
     處理生成月報表命令
     
     Args:
-        text: 用戶輸入的文本命令
+        text: 用戶輸入的文本命令 (格式: /生成月報表 診所 [YYYY-MM])
         
     Returns:
         str: 處理結果消息
@@ -762,9 +762,30 @@ def handle_generate_monthly_report(text):
     # 解析命令參數
     parts = text.strip().split()
     category = None
+    target_month = None
     
     if len(parts) > 1:
         category = parts[1]
+    
+    # 檢查是否有指定年月參數
+    if len(parts) > 2:
+        try:
+            from datetime import datetime
+            month_str = parts[2]
+            target_month = datetime.strptime(month_str, '%Y-%m').date()
+            logger.info(f"指定目標月份: {target_month}")
+        except ValueError:
+            logger.warning(f"無效的月份格式: {parts[2]}, 使用預設月份")
+    
+    # 如果沒有指定月份，使用上一個完整月份
+    if not target_month:
+        from modules.utils.taiwan_time import get_taiwan_date
+        today = get_taiwan_date()
+        if today.month == 1:
+            target_month = today.replace(year=today.year-1, month=12, day=1)
+        else:
+            target_month = today.replace(month=today.month-1, day=1)
+        logger.info(f"使用預設月份: {target_month}")
     
     # 類別與文件夾 ID 的映射（與週報表相同）
     CATEGORY_FOLDER_MAPPING = {
@@ -780,24 +801,61 @@ def handle_generate_monthly_report(text):
         logger.info(f"使用類別: {category}, 對應文件夾ID: {folder_id}")
     
     try:
-        logger.info(f"開始生成月報表，類別: {category}")
-        # 生成報表
-        result, filename = generate_monthly_report(category)
+        logger.info(f"開始生成月報表，類別: {category}, 月份: {target_month}")
         
-        if not filename:
-            logger.warning("沒有生成報表文件")
-            return result
-        
-        # 上傳到Google Drive
-        logger.info(f"月報表生成成功，準備上傳到Google Drive: {filename}")
-        drive_url = upload_to_google_drive(filename, folder_id)
-        
-        if drive_url and not drive_url.startswith("上傳到Google Drive失敗"):
-            logger.info(f"月報表已成功上傳: {drive_url}")
-            return f"{result}\n報表已上傳到Google Drive: {drive_url}"
+        # 如果是診所類別，嘗試使用新的月結單功能
+        if category == "診所":
+            try:
+                from modules.services.google_sheets_service import create_monthly_statement_sheet
+                
+                # 創建月結單Google Sheets
+                sheets_url = create_monthly_statement_sheet(target_month, category)
+                
+                if sheets_url:
+                    logger.info(f"月結單試算表創建成功: {sheets_url}")
+                    return f"✅ 月結單已生成完成！\n\n📊 試算表連結: {sheets_url}\n\n💡 包含月結單封面、司機統計、車資趨勢等詳細資訊"
+                else:
+                    logger.warning("月結單試算表創建失敗，降級到Excel報表")
+                    raise Exception("Google Sheets創建失敗")
+                    
+            except Exception as e:
+                logger.warning(f"月結單功能不可用，降級到Excel報表: {str(e)}")
+                # 降級到原有的Excel報表功能
+                result, filename = generate_monthly_report(category)
+                
+                if not filename:
+                    logger.warning("沒有生成報表文件")
+                    return result
+                
+                # 上傳到Google Drive
+                logger.info(f"月報表生成成功，準備上傳到Google Drive: {filename}")
+                drive_url = upload_to_google_drive(filename, folder_id)
+                
+                if drive_url and not drive_url.startswith("上傳到Google Drive失敗"):
+                    logger.info(f"月報表已成功上傳: {drive_url}")
+                    return f"{result}\n報表已上傳到Google Drive: {drive_url}\n\n⚠️ 注意：Google Sheets API未啟用，已降級到Excel報表"
+                else:
+                    logger.warning(f"月報表上傳失敗: {drive_url}")
+                    return f"{result}\n報表已生成，但上傳到Google Drive失敗: {drive_url}\n\n⚠️ 注意：Google Sheets API未啟用，已降級到Excel報表"
         else:
-            logger.warning(f"月報表上傳失敗: {drive_url}")
-            return f"{result}\n報表已生成，但上傳到Google Drive失敗: {drive_url}"
+            # 其他類別使用原有的Excel報表功能
+            result, filename = generate_monthly_report(category)
+            
+            if not filename:
+                logger.warning("沒有生成報表文件")
+                return result
+            
+            # 上傳到Google Drive
+            logger.info(f"月報表生成成功，準備上傳到Google Drive: {filename}")
+            drive_url = upload_to_google_drive(filename, folder_id)
+            
+            if drive_url and not drive_url.startswith("上傳到Google Drive失敗"):
+                logger.info(f"月報表已成功上傳: {drive_url}")
+                return f"{result}\n報表已上傳到Google Drive: {drive_url}"
+            else:
+                logger.warning(f"月報表上傳失敗: {drive_url}")
+                return f"{result}\n報表已生成，但上傳到Google Drive失敗: {drive_url}"
+                
     except Exception as e:
         logger.error(f"處理生成月報表命令時出錯: {str(e)}", exc_info=True)
         return f"生成月報表時出錯: {str(e)}" 
