@@ -341,7 +341,7 @@ def generate_monthly_report(category=None):
                     workbook.remove(workbook["月結單（封面）"])
                 cover_sheet = workbook.create_sheet("月結單（封面）", 0)
             
-            # 組裝meta數據
+            # 組裝meta數據（直接使用已查詢的df數據）
             meta = _build_statement_meta(last_month_start, last_month_end, category, df)
             
             # 渲染月結單封面
@@ -465,6 +465,11 @@ def _build_statement_meta(start_date: date, end_date: date, category: str, df) -
         # 計算總金額（使用與現有月報表完全一致的邏輯）
         # 這確保與聊天指令 MM/DD–MM/DD 診所班次加總 完全一致
         total_amount = int(df['實收'].sum()) if not df.empty else 0
+        
+        # 調試日誌
+        logger.info(f"月結單封面調試 - DataFrame形狀: {df.shape}")
+        logger.info(f"月結單封面調試 - 實收列統計: min={df['實收'].min()}, max={df['實收'].max()}, sum={df['實收'].sum()}")
+        logger.info(f"月結單封面調試 - 計算的總金額: {total_amount:,}")
         
         # 司機統計（前3名）
         drivers_top3 = []
