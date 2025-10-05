@@ -3,7 +3,8 @@
 """
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
+from typing import Dict, Any
 import pandas as pd
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
@@ -323,8 +324,29 @@ def generate_monthly_report(category=None):
         
         # 創建月結單封面（診所類別）
         if category == "診所":
-            from modules.services.monthly_statement_generator import create_monthly_statement_cover
-            stats = create_monthly_statement_cover(workbook, last_month_start, last_month_end, category)
+            from modules.services.monthly_statement_generator import render_statement_cover, _get_monthly_statistics, _get_deposits_and_bank_info
+            
+            # 獲取或創建月結單封面工作表
+            if "月結單（封面）" in workbook.sheetnames:
+                cover_sheet = workbook["月結單（封面）"]
+                cover_sheet.delete_rows(1, cover_sheet.max_row)
+            else:
+                cover_sheet = workbook.create_sheet("月結單（封面）")
+            
+            # 將封面工作表移到第一位
+            try:
+                workbook.move(cover_sheet, 0)
+            except AttributeError:
+                if "月結單（封面）" in workbook.sheetnames:
+                    workbook.remove(workbook["月結單（封面）"])
+                cover_sheet = workbook.create_sheet("月結單（封面）", 0)
+            
+            # 組裝meta數據
+            meta = _build_statement_meta(last_month_start, last_month_end, category, df)
+            
+            # 渲染月結單封面
+            render_statement_cover(cover_sheet, meta)
+            
             # 繼續創建其他工作表
             _create_additional_monthly_sheets(workbook, df, last_month_start, last_month_end, category)
         else:
@@ -433,6 +455,60 @@ def _save_workbook(workbook, filename):
     except Exception as e:
         logger.error(f"保存工作簿失敗: {str(e)}")
         return f"保存月報表失敗: {str(e)}", None
+
+def _build_statement_meta(start_date: date, end_date: date, category: str, df) -> Dict[str, Any]:
+    """組裝月結單封面的meta數據（使用與現有月報表完全一致的邏輯）"""
+    try:
+        from modules.services.monthly_statement_generator import _get_deposits_and_bank_info
+        from modules.utils.taiwan_time import get_taiwan_date
+        
+        # 計算總金額（使用與現有月報表完全一致的邏輯）
+        # 這確保與聊天指令 MM/DD–MM/DD 診所班次加總 完全一致
+        total_amount = int(df['實收'].sum()) if not df.empty else 0
+        
+        # 司機統計（前3名）
+        drivers_top3 = []
+        if not df.empty:
+            driver_stats = df.groupby('司機編號')['實收'].sum().sort_values(ascending=False)
+            drivers_top3 = [(f"司機{driver_id}", int(amount)) for driver_id, amount in driver_stats.head(3).items()]
+        
+        # 獲取入金記錄和銀行資訊
+        deposits, bank_name, last4_mask = _get_deposits_and_bank_info(start_date, end_date)
+        
+        # 生成結單號碼
+        statement_no = f"STMT-{start_date.strftime('%Y%m')}"
+        
+        # 組裝meta數據
+        meta = {
+            'month_start': start_date,
+            'month_end': end_date,
+            'statement_no': statement_no,
+            'total_amount': total_amount,
+            'bank_name': bank_name,
+            'last4_mask': last4_mask,
+            'payee_name': '—',  # 可從系統設定讀取
+            'printed_on': get_taiwan_date(),
+            'deposits': deposits,
+            'drivers_top3': drivers_top3
+        }
+        
+        logger.info(f"月結單meta數據組裝完成，總金額: {total_amount:,} (與現有月報表邏輯一致)")
+        return meta
+        
+    except Exception as e:
+        logger.error(f"組裝月結單meta數據失敗: {str(e)}")
+        return {
+            'month_start': start_date,
+            'month_end': end_date,
+            'statement_no': f"STMT-{start_date.strftime('%Y%m')}",
+            'total_amount': 0,
+            'bank_name': '',
+            'last4_mask': '＊＊＊＊',
+            'payee_name': '—',
+            'printed_on': get_taiwan_date(),
+            'deposits': [],
+            'drivers_top3': []
+        }
 
 
 def _create_monthly_statistics_report(workbook, df, filename, start_date, end_date, category):
