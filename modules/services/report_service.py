@@ -321,12 +321,118 @@ def generate_monthly_report(category=None):
         # 刪除默認工作表，重新創建
         workbook.remove(workbook.active)
         
-        # 創建統計報表
-        return _create_monthly_statistics_report(workbook, df, filename, last_month_start, last_month_end, category)
+        # 創建月結單封面（診所類別）
+        if category == "診所":
+            from modules.services.monthly_statement_generator import create_monthly_statement_cover
+            stats = create_monthly_statement_cover(workbook, last_month_start, last_month_end, category)
+            # 繼續創建其他工作表
+            _create_additional_monthly_sheets(workbook, df, last_month_start, last_month_end, category)
+        else:
+            # 其他類別使用原有邏輯
+            _create_monthly_statistics_report(workbook, df, filename, last_month_start, last_month_end, category)
+        
+        return _save_workbook(workbook, filename)
         
     except Exception as e:
         logger.error(f"生成月報表失敗: {str(e)}", exc_info=True)
         return f"生成月報表失敗: {str(e)}", None
+
+def _create_additional_monthly_sheets(workbook, df, start_date, end_date, category):
+    """創建月報表的其他工作表"""
+    try:
+        # 創建司機統計工作表
+        driver_sheet = workbook.create_sheet("司機統計")
+        _populate_driver_statistics_sheet(driver_sheet, df, start_date, end_date, category)
+        
+        # 創建車資趨勢工作表
+        trend_sheet = workbook.create_sheet("車資趨勢")
+        _populate_fare_trends_sheet(trend_sheet, df, start_date, end_date, category)
+        
+        logger.info("月報表其他工作表創建完成")
+        
+    except Exception as e:
+        logger.error(f"創建月報表其他工作表失敗: {str(e)}")
+
+def _populate_driver_statistics_sheet(sheet, df, start_date, end_date, category):
+    """填充司機統計工作表"""
+    try:
+        # 標題
+        sheet['A1'] = '司機統計報表'
+        sheet['A1'].font = Font(name='微軟正黑體', size=16, bold=True)
+        
+        # 基本資訊
+        sheet['A2'] = '月份'
+        sheet['B2'] = f"{start_date.year}年{start_date.month}月"
+        sheet['A3'] = '類別'
+        sheet['B3'] = category
+        
+        # 司機統計
+        if not df.empty:
+            driver_stats = df.groupby('司機編號')['實收'].sum().sort_values(ascending=False)
+            
+            # 表頭
+            sheet['A5'] = '排名'
+            sheet['B5'] = '司機編號'
+            sheet['C5'] = '總金額'
+            
+            # 數據
+            for i, (driver_id, amount) in enumerate(driver_stats.items(), 6):
+                sheet[f'A{i}'] = i - 5
+                sheet[f'B{i}'] = driver_id
+                sheet[f'C{i}'] = amount
+        
+        # 格式化
+        for row in range(5, 5 + len(driver_stats) + 1):
+            for col in ['A', 'B', 'C']:
+                cell = sheet[f'{col}{row}']
+                if row == 5:  # 表頭
+                    cell.font = Font(name='微軟正黑體', size=12, bold=True)
+                else:
+                    cell.font = Font(name='微軟正黑體', size=11)
+                cell.alignment = Alignment(horizontal='center')
+        
+    except Exception as e:
+        logger.error(f"填充司機統計工作表失敗: {str(e)}")
+
+def _populate_fare_trends_sheet(sheet, df, start_date, end_date, category):
+    """填充車資趨勢工作表"""
+    try:
+        # 標題
+        sheet['A1'] = '車資趨勢分析'
+        sheet['A1'].font = Font(name='微軟正黑體', size=16, bold=True)
+        
+        # 基本資訊
+        sheet['A2'] = '月份'
+        sheet['B2'] = f"{start_date.year}年{start_date.month}月"
+        sheet['A3'] = '類別'
+        sheet['B3'] = category
+        
+        # 趨勢分析
+        if not df.empty:
+            sheet['A5'] = '趨勢分析功能開發中...'
+            sheet['A5'].font = Font(name='微軟正黑體', size=12)
+        
+    except Exception as e:
+        logger.error(f"填充車資趨勢工作表失敗: {str(e)}")
+
+def _save_workbook(workbook, filename):
+    """保存工作簿"""
+    try:
+        import os
+        
+        # 確保temp_files目錄存在
+        os.makedirs("temp_files", exist_ok=True)
+        
+        # 保存到文件
+        file_path = f"temp_files/{filename}"
+        workbook.save(file_path)
+        
+        logger.info(f"月報表已保存: {file_path}")
+        return f"月報表生成成功: {filename}", file_path
+        
+    except Exception as e:
+        logger.error(f"保存工作簿失敗: {str(e)}")
+        return f"保存月報表失敗: {str(e)}", None
 
 
 def _create_monthly_statistics_report(workbook, df, filename, start_date, end_date, category):
