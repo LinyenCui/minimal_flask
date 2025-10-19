@@ -1,27 +1,3 @@
-import time
-import random
-from functools import wraps
-
-def retry_on_conflict(max_retries=3, delay=0.1):
-    """重試裝飾器，處理資料庫衝突"""
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            for attempt in range(max_retries):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    if "conflict" in str(e).lower() or "duplicate" in str(e).lower():
-                        if attempt < max_retries - 1:
-                            wait_time = delay * (2 ** attempt) + random.uniform(0, 0.1)
-                            current_app.logger.warning(f"資料庫衝突，{wait_time:.2f}秒後重試 (嘗試 {attempt + 1}/{max_retries})")
-                            time.sleep(wait_time)
-                            continue
-                    raise
-            return None
-        return wrapper
-    return decorator
-
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import text, Row
 from sqlalchemy.engine import ResultProxy
@@ -379,11 +355,28 @@ def update_completed_trips():
                         current_app.logger.error(f"更新班次 #{trip_id} 的唯一識別碼時出錯: {e}")
                         raise
                 
-                # 原子性 UPSERT 不需要重複檢查
-                # 直接執行插入，資料庫會處理重複問題
+                # 檢查是否已經在completed_trips表中
+                check_query = """
+                SELECT COUNT(*) FROM completed_trips 
+                WHERE unique_code = :unique_code
+                """
                 
-                # --- 原子性 UPSERT 修復 ---
-                # 使用原子性操作，避免競態條件
+                try:
+                    existing_count = db.session.execute(
+                        text(check_query), 
+                        {"unique_code": unique_code}
+                    ).fetchone()[0]
+                except Exception as e:
+                    current_app.logger.error(f"檢查班次 #{trip_id} 是否已在已完成班次表中時出錯: {e}")
+                    raise
+                
+                if existing_count > 0:
+                    current_app.logger.info(f"班次 #{trip_id} 已經在已完成班次表中，跳過更新")
+                    skipped_count += 1
+                    continue
+                
+                # --- 修改插入 completed_trips 的邏輯 ---
+                # 使用 UPSERT 語法防止重複插入
                 insert_query = """
                 INSERT INTO completed_trips
                 (date, start_point, via_point, end_point,
@@ -395,19 +388,7 @@ def update_completed_trips():
                  :meter_fare, :extra_fare, :category, :driver_id,
                  :unique_code, :trip_type, :passenger_name,
                  :passenger_leave_reason, :modification_reason)
-                ON CONFLICT (unique_code) DO UPDATE SET
-                    date = EXCLUDED.date,
-                    start_point = EXCLUDED.start_point,
-                    via_point = EXCLUDED.via_point,
-                    end_point = EXCLUDED.end_point,
-                    meter_fare = EXCLUDED.meter_fare,
-                    extra_fare = EXCLUDED.extra_fare,
-                    category = EXCLUDED.category,
-                    driver_id = EXCLUDED.driver_id,
-                    trip_type = EXCLUDED.trip_type,
-                    passenger_name = EXCLUDED.passenger_name,
-                    passenger_leave_reason = EXCLUDED.passenger_leave_reason,
-                    modification_reason = EXCLUDED.modification_reason
+                ON CONFLICT (unique_code) DO NOTHING
                 """
 
                 params = {
@@ -651,11 +632,11 @@ def init_scheduler(app):
     )
 
     # hourly_update_unique_codes 任務定義 (使用包裝函數)
-    # 修復：改為每小時 45 分執行，完全避免與 update_completed_trips 衝突
+    # 修復：改為每小時 35 分執行，避免與 update_completed_trips 衝突
     app.scheduler.add_job(
         id='hourly_update_unique_codes',
         func=initialize_codes_wrapper, # <--- 使用包裝函數
         trigger='cron',
-        hour='*', minute=45, timezone='Asia/Taipei',
+        hour='*', minute=35, timezone='Asia/Taipei',
         replace_existing=True
     ) 

@@ -3,8 +3,7 @@
 """
 import os
 import logging
-from datetime import datetime, timedelta, date
-from typing import Dict, Any
+from datetime import datetime, timedelta
 import pandas as pd
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
@@ -322,198 +321,12 @@ def generate_monthly_report(category=None):
         # 刪除默認工作表，重新創建
         workbook.remove(workbook.active)
         
-        # 創建月結單封面（診所類別）
-        if category == "診所":
-            from modules.services.monthly_statement_generator import render_statement_cover, _get_monthly_statistics, _get_deposits_and_bank_info
-            
-            # 獲取或創建月結單封面工作表
-            if "月結單（封面）" in workbook.sheetnames:
-                cover_sheet = workbook["月結單（封面）"]
-                cover_sheet.delete_rows(1, cover_sheet.max_row)
-            else:
-                cover_sheet = workbook.create_sheet("月結單（封面）")
-            
-            # 將封面工作表移到第一位
-            try:
-                workbook.move(cover_sheet, 0)
-            except AttributeError:
-                if "月結單（封面）" in workbook.sheetnames:
-                    workbook.remove(workbook["月結單（封面）"])
-                cover_sheet = workbook.create_sheet("月結單（封面）", 0)
-            
-            # 組裝meta數據（直接使用已查詢的df數據）
-            meta = _build_statement_meta(last_month_start, last_month_end, category, df)
-            
-            # 渲染月結單封面
-            render_statement_cover(cover_sheet, meta)
-            
-            # 繼續創建其他工作表
-            _create_additional_monthly_sheets(workbook, df, last_month_start, last_month_end, category)
-        else:
-            # 其他類別使用原有邏輯
-            _create_monthly_statistics_report(workbook, df, filename, last_month_start, last_month_end, category)
-        
-        return _save_workbook(workbook, filename)
+        # 創建統計報表
+        return _create_monthly_statistics_report(workbook, df, filename, last_month_start, last_month_end, category)
         
     except Exception as e:
         logger.error(f"生成月報表失敗: {str(e)}", exc_info=True)
         return f"生成月報表失敗: {str(e)}", None
-
-def _create_additional_monthly_sheets(workbook, df, start_date, end_date, category):
-    """創建月報表的其他工作表"""
-    try:
-        # 創建司機統計工作表
-        driver_sheet = workbook.create_sheet("司機統計")
-        _populate_driver_statistics_sheet(driver_sheet, df, start_date, end_date, category)
-        
-        # 創建車資趨勢工作表
-        trend_sheet = workbook.create_sheet("車資趨勢")
-        _populate_fare_trends_sheet(trend_sheet, df, start_date, end_date, category)
-        
-        logger.info("月報表其他工作表創建完成")
-        
-    except Exception as e:
-        logger.error(f"創建月報表其他工作表失敗: {str(e)}")
-
-def _populate_driver_statistics_sheet(sheet, df, start_date, end_date, category):
-    """填充司機統計工作表"""
-    try:
-        # 標題
-        sheet['A1'] = '司機統計報表'
-        sheet['A1'].font = Font(name='微軟正黑體', size=16, bold=True)
-        
-        # 基本資訊
-        sheet['A2'] = '月份'
-        sheet['B2'] = f"{start_date.year}年{start_date.month}月"
-        sheet['A3'] = '類別'
-        sheet['B3'] = category
-        
-        # 司機統計
-        if not df.empty:
-            driver_stats = df.groupby('司機編號')['實收'].sum().sort_values(ascending=False)
-            
-            # 表頭
-            sheet['A5'] = '排名'
-            sheet['B5'] = '司機編號'
-            sheet['C5'] = '總金額'
-            
-            # 數據
-            for i, (driver_id, amount) in enumerate(driver_stats.items(), 6):
-                sheet[f'A{i}'] = i - 5
-                sheet[f'B{i}'] = driver_id
-                sheet[f'C{i}'] = amount
-        
-        # 格式化
-        for row in range(5, 5 + len(driver_stats) + 1):
-            for col in ['A', 'B', 'C']:
-                cell = sheet[f'{col}{row}']
-                if row == 5:  # 表頭
-                    cell.font = Font(name='微軟正黑體', size=12, bold=True)
-                else:
-                    cell.font = Font(name='微軟正黑體', size=11)
-                cell.alignment = Alignment(horizontal='center')
-        
-    except Exception as e:
-        logger.error(f"填充司機統計工作表失敗: {str(e)}")
-
-def _populate_fare_trends_sheet(sheet, df, start_date, end_date, category):
-    """填充車資趨勢工作表"""
-    try:
-        # 標題
-        sheet['A1'] = '車資趨勢分析'
-        sheet['A1'].font = Font(name='微軟正黑體', size=16, bold=True)
-        
-        # 基本資訊
-        sheet['A2'] = '月份'
-        sheet['B2'] = f"{start_date.year}年{start_date.month}月"
-        sheet['A3'] = '類別'
-        sheet['B3'] = category
-        
-        # 趨勢分析
-        if not df.empty:
-            sheet['A5'] = '趨勢分析功能開發中...'
-            sheet['A5'].font = Font(name='微軟正黑體', size=12)
-        
-    except Exception as e:
-        logger.error(f"填充車資趨勢工作表失敗: {str(e)}")
-
-def _save_workbook(workbook, filename):
-    """保存工作簿"""
-    try:
-        import os
-        
-        # 確保temp_files目錄存在
-        os.makedirs("temp_files", exist_ok=True)
-        
-        # 保存到文件
-        file_path = f"temp_files/{filename}"
-        workbook.save(file_path)
-        
-        logger.info(f"月報表已保存: {file_path}")
-        return f"月報表生成成功: {filename}", file_path
-        
-    except Exception as e:
-        logger.error(f"保存工作簿失敗: {str(e)}")
-        return f"保存月報表失敗: {str(e)}", None
-
-def _build_statement_meta(start_date: date, end_date: date, category: str, df) -> Dict[str, Any]:
-    """組裝月結單封面的meta數據（使用與現有月報表完全一致的邏輯）"""
-    try:
-        from modules.services.monthly_statement_generator import _get_deposits_and_bank_info
-        from modules.utils.taiwan_time import get_taiwan_date
-        
-        # 計算總金額（使用與現有月報表完全一致的邏輯）
-        # 這確保與聊天指令 MM/DD–MM/DD 診所班次加總 完全一致
-        total_amount = int(df['實收'].sum()) if not df.empty else 0
-        
-        # 調試日誌
-        logger.info(f"月結單封面調試 - DataFrame形狀: {df.shape}")
-        logger.info(f"月結單封面調試 - 實收列統計: min={df['實收'].min()}, max={df['實收'].max()}, sum={df['實收'].sum()}")
-        logger.info(f"月結單封面調試 - 計算的總金額: {total_amount:,}")
-        
-        # 司機統計（前3名）
-        drivers_top3 = []
-        if not df.empty:
-            driver_stats = df.groupby('司機編號')['實收'].sum().sort_values(ascending=False)
-            drivers_top3 = [(f"司機{driver_id}", int(amount)) for driver_id, amount in driver_stats.head(3).items()]
-        
-        # 獲取入金記錄和銀行資訊
-        deposits, bank_name, last4_mask = _get_deposits_and_bank_info(start_date, end_date)
-        
-        # 生成結單號碼
-        statement_no = f"STMT-{start_date.strftime('%Y%m')}"
-        
-        # 組裝meta數據
-        meta = {
-            'month_start': start_date,
-            'month_end': end_date,
-            'statement_no': statement_no,
-            'total_amount': total_amount,
-            'bank_name': bank_name,
-            'last4_mask': last4_mask,
-            'payee_name': '—',  # 可從系統設定讀取
-            'printed_on': get_taiwan_date(),
-            'deposits': deposits,
-            'drivers_top3': drivers_top3
-        }
-        
-        logger.info(f"月結單meta數據組裝完成，總金額: {total_amount:,} (與現有月報表邏輯一致)")
-        return meta
-        
-    except Exception as e:
-        logger.error(f"組裝月結單meta數據失敗: {str(e)}")
-        return {
-            'month_start': start_date,
-            'month_end': end_date,
-            'statement_no': f"STMT-{start_date.strftime('%Y%m')}",
-            'total_amount': 0,
-            'bank_name': '',
-            'last4_mask': '＊＊＊＊',
-            'payee_name': '—',
-            'printed_on': get_taiwan_date(),
-            'deposits': [],
-            'drivers_top3': []
-        }
 
 
 def _create_monthly_statistics_report(workbook, df, filename, start_date, end_date, category):
@@ -523,58 +336,62 @@ def _create_monthly_statistics_report(workbook, df, filename, start_date, end_da
     from openpyxl.chart import PieChart, BarChart, Reference
     from openpyxl.chart.series import DataPoint
     
-    # === 第一個工作表：總覽摘要 ===
-    summary_sheet = workbook.create_sheet("月度總覽")
-    
-    # 標題
-    if category == "東洋":
-        title_prefix = "東洋班次月度統計報表"
-    elif category == "診所":
-        title_prefix = "診所班次月度統計報表"
+    # === 第一個工作表：月結單封面（診所類別）或總覽摘要（其他類別） ===
+    if category == "診所":
+        # 診所類別：創建月結單封面
+        summary_sheet = workbook.create_sheet("月結單（封面）")
+        _create_statement_cover(summary_sheet, df, start_date, end_date, category)
     else:
-        title_prefix = "班次月度統計報表"
-    
-    title = f"{title_prefix} ({start_date.strftime('%Y/%m/%d')} - {end_date.strftime('%Y/%m/%d')})"
-    summary_sheet.cell(row=1, column=1).value = title
-    summary_sheet.merge_cells('A1:J1')
-    
-    # 設置標題樣式
-    title_cell = summary_sheet.cell(row=1, column=1)
-    title_cell.font = Font(name='微軟正黑體', size=16, bold=True, color='FFFFFF')
-    title_cell.alignment = Alignment(horizontal='center', vertical='center')
-    title_cell.fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
-    
-    # 基本統計數據
-    total_trips = len(df)
-    total_revenue = df['實收'].sum()
-    avg_fare = df['實收'].mean()
-    unique_drivers = df['司機編號'].nunique()
-    
-    # 統計摘要表格
-    summary_data = [
-        ["統計項目", "數值", ""],
-        ["總班次數", total_trips, "趟"],
-        ["總車資", total_revenue, "元"],
-        ["平均車資", round(avg_fare, 0), "元"],
-        ["參與司機數", unique_drivers, "人"],
-        ["日均班次", round(total_trips / (end_date - start_date).days, 1), "趟/日"]
-    ]
-    
-    # 填入摘要數據
-    for row_idx, row_data in enumerate(summary_data, 3):
-        for col_idx, cell_value in enumerate(row_data, 1):
-            cell = summary_sheet.cell(row=row_idx, column=col_idx)
-            cell.value = cell_value
-            
-            if row_idx == 3:  # 表頭
-                cell.font = Font(name='微軟正黑體', size=12, bold=True, color='FFFFFF')
-                cell.fill = PatternFill(start_color='5B9BD5', end_color='5B9BD5', fill_type='solid')
-                cell.alignment = Alignment(horizontal='center', vertical='center')
-            else:
-                cell.font = Font(name='微軟正黑體', size=11)
-                cell.alignment = Alignment(horizontal='center', vertical='center')
-                if col_idx == 2 and isinstance(cell_value, (int, float)):  # 數值列
-                    cell.number_format = '#,##0'
+        # 其他類別：創建總覽摘要
+        summary_sheet = workbook.create_sheet("月度總覽")
+        
+        # 標題
+        if category == "東洋":
+            title_prefix = "東洋班次月度統計報表"
+        else:
+            title_prefix = "班次月度統計報表"
+        
+        title = f"{title_prefix} ({start_date.strftime('%Y/%m/%d')} - {end_date.strftime('%Y/%m/%d')})"
+        summary_sheet.cell(row=1, column=1).value = title
+        summary_sheet.merge_cells('A1:J1')
+        
+        # 設置標題樣式
+        title_cell = summary_sheet.cell(row=1, column=1)
+        title_cell.font = Font(name='微軟正黑體', size=16, bold=True, color='FFFFFF')
+        title_cell.alignment = Alignment(horizontal='center', vertical='center')
+        title_cell.fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+        
+        # 基本統計數據
+        total_trips = len(df)
+        total_revenue = df['實收'].sum()
+        avg_fare = df['實收'].mean()
+        unique_drivers = df['司機編號'].nunique()
+        
+        # 統計摘要表格
+        summary_data = [
+            ["統計項目", "數值", ""],
+            ["總班次數", total_trips, "趟"],
+            ["總車資", total_revenue, "元"],
+            ["平均車資", round(avg_fare, 0), "元"],
+            ["參與司機數", unique_drivers, "人"],
+            ["日均班次", round(total_trips / (end_date - start_date).days, 1), "趟/日"]
+        ]
+        
+        # 填入摘要數據
+        for row_idx, row_data in enumerate(summary_data, 3):
+            for col_idx, cell_value in enumerate(row_data, 1):
+                cell = summary_sheet.cell(row=row_idx, column=col_idx)
+                cell.value = cell_value
+                
+                if row_idx == 3:  # 表頭
+                    cell.font = Font(name='微軟正黑體', size=12, bold=True, color='FFFFFF')
+                    cell.fill = PatternFill(start_color='5B9BD5', end_color='5B9BD5', fill_type='solid')
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                else:
+                    cell.font = Font(name='微軟正黑體', size=11)
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                    if col_idx == 2 and isinstance(cell_value, (int, float)):  # 數值列
+                        cell.number_format = '#,##0'
     
     # === 第二個工作表：司機統計圖表 ===
     driver_sheet = workbook.create_sheet("司機統計")
@@ -941,7 +758,7 @@ def handle_generate_monthly_report(text):
     處理生成月報表命令
     
     Args:
-        text: 用戶輸入的文本命令 (格式: /生成月報表 診所 [YYYY-MM])
+        text: 用戶輸入的文本命令
         
     Returns:
         str: 處理結果消息
@@ -949,30 +766,9 @@ def handle_generate_monthly_report(text):
     # 解析命令參數
     parts = text.strip().split()
     category = None
-    target_month = None
     
     if len(parts) > 1:
         category = parts[1]
-    
-    # 檢查是否有指定年月參數
-    if len(parts) > 2:
-        try:
-            from datetime import datetime
-            month_str = parts[2]
-            target_month = datetime.strptime(month_str, '%Y-%m').date()
-            logger.info(f"指定目標月份: {target_month}")
-        except ValueError:
-            logger.warning(f"無效的月份格式: {parts[2]}, 使用預設月份")
-    
-    # 如果沒有指定月份，使用上一個完整月份
-    if not target_month:
-        from modules.utils.taiwan_time import get_taiwan_date
-        today = get_taiwan_date()
-        if today.month == 1:
-            target_month = today.replace(year=today.year-1, month=12, day=1)
-        else:
-            target_month = today.replace(month=today.month-1, day=1)
-        logger.info(f"使用預設月份: {target_month}")
     
     # 類別與文件夾 ID 的映射（與週報表相同）
     CATEGORY_FOLDER_MAPPING = {
@@ -988,61 +784,199 @@ def handle_generate_monthly_report(text):
         logger.info(f"使用類別: {category}, 對應文件夾ID: {folder_id}")
     
     try:
-        logger.info(f"開始生成月報表，類別: {category}, 月份: {target_month}")
+        logger.info(f"開始生成月報表，類別: {category}")
+        # 生成報表
+        result, filename = generate_monthly_report(category)
         
-        # 如果是診所類別，嘗試使用新的月結單功能
-        if category == "診所":
-            try:
-                from modules.services.google_sheets_service import create_monthly_statement_sheet
-                
-                # 創建月結單Google Sheets
-                sheets_url = create_monthly_statement_sheet(target_month, category)
-                
-                if sheets_url:
-                    logger.info(f"月結單試算表創建成功: {sheets_url}")
-                    return f"✅ 月結單已生成完成！\n\n📊 試算表連結: {sheets_url}\n\n💡 包含月結單封面、司機統計、車資趨勢等詳細資訊"
-                else:
-                    logger.warning("月結單試算表創建失敗，降級到Excel報表")
-                    raise Exception("Google Sheets創建失敗")
-                    
-            except Exception as e:
-                logger.warning(f"月結單功能不可用，降級到Excel報表: {str(e)}")
-                # 降級到原有的Excel報表功能
-                result, filename = generate_monthly_report(category)
-                
-                if not filename:
-                    logger.warning("沒有生成報表文件")
-                    return result
-                
-                # 上傳到Google Drive
-                logger.info(f"月報表生成成功，準備上傳到Google Drive: {filename}")
-                drive_url = upload_to_google_drive(filename, folder_id)
-                
-                if drive_url and not drive_url.startswith("上傳到Google Drive失敗"):
-                    logger.info(f"月報表已成功上傳: {drive_url}")
-                    return f"{result}\n報表已上傳到Google Drive: {drive_url}\n\n⚠️ 注意：Google Sheets API未啟用，已降級到Excel報表"
-                else:
-                    logger.warning(f"月報表上傳失敗: {drive_url}")
-                    return f"{result}\n報表已生成，但上傳到Google Drive失敗: {drive_url}\n\n⚠️ 注意：Google Sheets API未啟用，已降級到Excel報表"
+        if not filename:
+            logger.warning("沒有生成報表文件")
+            return result
+        
+        # 上傳到Google Drive
+        logger.info(f"月報表生成成功，準備上傳到Google Drive: {filename}")
+        drive_url = upload_to_google_drive(filename, folder_id)
+        
+        if drive_url and not drive_url.startswith("上傳到Google Drive失敗"):
+            logger.info(f"月報表已成功上傳: {drive_url}")
+            return f"{result}\n報表已上傳到Google Drive: {drive_url}"
         else:
-            # 其他類別使用原有的Excel報表功能
-            result, filename = generate_monthly_report(category)
-            
-            if not filename:
-                logger.warning("沒有生成報表文件")
-                return result
-            
-            # 上傳到Google Drive
-            logger.info(f"月報表生成成功，準備上傳到Google Drive: {filename}")
-            drive_url = upload_to_google_drive(filename, folder_id)
-            
-            if drive_url and not drive_url.startswith("上傳到Google Drive失敗"):
-                logger.info(f"月報表已成功上傳: {drive_url}")
-                return f"{result}\n報表已上傳到Google Drive: {drive_url}"
-            else:
-                logger.warning(f"月報表上傳失敗: {drive_url}")
-                return f"{result}\n報表已生成，但上傳到Google Drive失敗: {drive_url}"
-                
+            logger.warning(f"月報表上傳失敗: {drive_url}")
+            return f"{result}\n報表已生成，但上傳到Google Drive失敗: {drive_url}"
     except Exception as e:
         logger.error(f"處理生成月報表命令時出錯: {str(e)}", exc_info=True)
-        return f"生成月報表時出錯: {str(e)}" 
+        return f"生成月報表時出錯: {str(e)}"
+
+def _create_statement_cover(sheet, df, start_date, end_date, category):
+    """創建月結單封面（A4直向列印格式）"""
+    try:
+        from openpyxl.worksheet.page import PageMargins
+        
+        # 設定頁面格式（A4直向列印）
+        sheet.page_margins = PageMargins(
+            left=0.5, right=0.5, top=0.5, bottom=0.5,  # 1.27cm邊界
+            header=0.3, footer=0.3
+        )
+        sheet.print_area = 'A1:F40'
+        sheet.sheet_view.showGridLines = False
+        sheet.page_setup.fitToWidth = 1
+        sheet.page_setup.fitToHeight = 0
+        sheet.page_setup.paperSize = 9  # A4
+        sheet.page_setup.orientation = 'portrait'
+        sheet.page_setup.scale = 100
+        
+        # 設定列寬
+        column_widths = {'A': 28, 'B': 20, 'C': 8, 'D': 24, 'E': 12, 'F': 24}
+        for col, width in column_widths.items():
+            sheet.column_dimensions[col].width = width
+        
+        # 計算總金額
+        total_amount = int(df['實收'].sum()) if not df.empty else 0
+        
+        # 生成結單號碼
+        statement_no = f"STMT-{start_date.strftime('%Y%m')}"
+        
+        # 標題
+        sheet['A1'] = '派班系統 月結單'
+        sheet.merge_cells('A1:C1')
+        sheet['A1'].font = Font(name='Calibri', size=22, bold=True, color='000000')
+        sheet['A1'].alignment = Alignment(horizontal='left', vertical='center')
+        
+        sheet['F1'] = f'結單號碼：{statement_no}'
+        sheet['F1'].font = Font(name='Calibri', size=11, color='666666')
+        sheet['F1'].alignment = Alignment(horizontal='right', vertical='center')
+        
+        # 左側資訊
+        sheet['A3'] = '付款人'
+        sheet['B3'] = '達恩診所'
+        sheet['A4'] = '受款人'
+        sheet['B4'] = '—'
+        sheet['A5'] = '帳戶'
+        sheet['B5'] = '＊＊＊＊'
+        sheet['A6'] = '期間'
+        period_text = f'{start_date.year}年{start_date.month}月1日 – {end_date.year}年{end_date.month}月{end_date.day}日'
+        sheet['B6'] = period_text
+        sheet.merge_cells('B6:F6')  # 合併B6到F6，確保期間文字完整顯示
+        
+        # 格式化左側標籤（期間之前）
+        for row in range(3, 7):
+            sheet[f'A{row}'].font = Font(name='Calibri', size=11, color='666666')
+            sheet[f'B{row}'].font = Font(name='Calibri', size=12)
+        
+        # 備註（期間後面直接接備註）
+        sheet['A7'] = '備註'
+        sheet['B7'] = '金額將自上列受款帳戶扣除'
+        
+        # 格式化備註
+        sheet['A7'].font = Font(name='Calibri', size=11, color='666666')
+        sheet['B7'].font = Font(name='Calibri', size=11, color='666666')
+        
+        # 在底部添加每日車資趨勢圖
+        _add_daily_fare_trend_chart(sheet, df, start_date, end_date)
+        
+        # 右側金額
+        sheet['D3'] = '總金額 (TWD)'
+        sheet['D3'].font = Font(name='Calibri', size=12, color='666666')
+        
+        total_text = f'NT$ {total_amount:,}'
+        sheet['D4'] = total_text
+        sheet.merge_cells('D4:F7')
+        sheet['D4'].font = Font(name='Calibri', size=32, bold=True, color='000000')
+        sheet['D4'].alignment = Alignment(horizontal='center', vertical='center')
+        
+        # 分隔線
+        for col in ['D', 'E', 'F']:
+            sheet[f'{col}8'].border = Border(bottom=Side(style='thin', color='E0E0E0'))
+        
+        # 月份和列印日期（強制左對齊）
+        sheet['D9'] = '月份'
+        sheet['E9'] = f'{start_date.year}年{start_date.month}月'
+        sheet['D10'] = '列印日期'
+        today = get_taiwan_date()
+        sheet['E10'] = today.strftime('%Y/%m/%d')
+        
+        # 強制左對齊設定
+        left_align = Alignment(horizontal='left', vertical='center')
+        
+        sheet['D9'].font = Font(name='Calibri', size=11, color='666666')
+        sheet['D9'].alignment = left_align
+        sheet['E9'].font = Font(name='Calibri', size=12)
+        sheet['E9'].alignment = left_align
+        sheet['D10'].font = Font(name='Calibri', size=11, color='666666')
+        sheet['D10'].alignment = left_align
+        sheet['E10'].font = Font(name='Calibri', size=12)
+        sheet['E10'].alignment = left_align
+        
+        logger.info(f"月結單封面創建完成，總金額: {total_amount:,}")
+        
+    except Exception as e:
+        logger.error(f"創建月結單封面失敗: {str(e)}")
+        raise
+
+def _add_daily_fare_trend_chart(sheet, df, start_date, end_date):
+    """在月結單封面中添加每日車資趨勢圖"""
+    try:
+        import pandas as pd
+        from openpyxl.chart import LineChart, Reference
+        from openpyxl.chart.axis import DateAxis
+        from openpyxl.chart.series import DataPoint
+        from openpyxl.drawing.fill import PatternFillProperties, SolidColorFillProperties
+        from openpyxl.drawing.colors import RGBPercent
+        
+        if df.empty:
+            return
+        
+        # 準備每日車資數據
+        df['日期'] = pd.to_datetime(df['日期'])
+        print(f"DEBUG: 原始df有 {len(df)} 條記錄")
+        print(f"DEBUG: 日期範圍: {df['日期'].min()} 到 {df['日期'].max()}")
+        
+        daily_fares = df.groupby('日期')['實收'].sum().reset_index()
+        daily_fares = daily_fares.sort_values('日期')
+        
+        # 確保有數據
+        if daily_fares.empty:
+            return
+        
+        # 直接使用所有數據，不需要分段
+        
+        # 在A12:C42區域創建圖表數據（一欄30天數據）
+        chart_data_start_row = 12
+        
+        # 寫入標題行（第12行）
+        sheet[f'A{chart_data_start_row}'] = "日期"
+        sheet[f'B{chart_data_start_row}'] = "班次數"
+        sheet[f'C{chart_data_start_row}'] = "總金額"
+        
+        # 寫入所有30天數據（一欄，從第13行開始）
+        for i, (_, row) in enumerate(daily_fares.iterrows()):
+            row_num = chart_data_start_row + 1 + i
+            sheet[f'A{row_num}'] = row['日期'].strftime('%m/%d')
+            sheet[f'B{row_num}'] = 1  # 班次數（簡化為1）
+            sheet[f'C{row_num}'] = float(row['實收'])  # 總金額
+        
+        # 創建車資趨勢長條圖（完全照抄Sheet3）
+        from openpyxl.chart import BarChart
+        bar_chart = BarChart()
+        bar_chart.title = "每日車資趨勢圖"
+        bar_chart.x_axis.title = "日期"
+        bar_chart.y_axis.title = "車資金額"
+        
+        # 數據範圍（完全照抄Sheet3）
+        data_range = Reference(sheet, min_col=3, min_row=chart_data_start_row, max_row=chart_data_start_row + len(daily_fares), max_col=3)
+        labels_range = Reference(sheet, min_col=1, min_row=chart_data_start_row + 1, max_row=chart_data_start_row + len(daily_fares))
+        
+        bar_chart.add_data(data_range, titles_from_data=True)
+        bar_chart.set_categories(labels_range)
+        
+        # 設置圖表樣式（拉長蓋住露出的5行）
+        bar_chart.width = 20
+        bar_chart.height = 15
+        
+        # 添加圖表到工作表（完全照抄Sheet3）
+        sheet.add_chart(bar_chart, "A12")
+        
+        logger.info(f"每日車資趨勢圖添加完成，數據點數: {len(daily_fares)}")
+        
+    except Exception as e:
+        logger.error(f"添加每日車資趨勢圖失敗: {str(e)}")
+        # 不拋出異常，讓封面繼續生成 
