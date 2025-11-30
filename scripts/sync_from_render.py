@@ -138,6 +138,94 @@ def ensure_account_ledger_timestamptz(local_conn) -> None:
     local_conn.commit()
     print("   ✅ 欄位型別轉換完成。")
 
+def get_sequence_info(conn, table_name, id_column='id'):
+    """獲取序列的當前信息"""
+    sequence_name = f"{table_name}_{id_column}_seq"
+    with conn.cursor() as cur:
+        try:
+            # 使用 last_value 替代 currval，避免序列未使用時的錯誤
+            cur.execute(f"SELECT last_value, is_called FROM {sequence_name};")
+            result = cur.fetchone()
+            if result:
+                last_value, is_called = result
+                # 如果序列從未被調用過，實際可用值是 last_value
+                # 如果已被調用過，下一個值是 last_value + 1
+                current_val = last_value if not is_called else last_value
+            else:
+                current_val = 1
+            
+            # 獲取表中最大ID
+            cur.execute(f"SELECT COALESCE(MAX({id_column}), 0) FROM {table_name};")
+            max_id = cur.fetchone()[0]
+            
+            return {
+                'sequence_name': sequence_name,
+                'current_val': current_val,
+                'max_id': max_id,
+                'table_name': table_name,
+                'id_column': id_column,
+                'is_called': is_called if result else False
+            }
+        except psycopg2.errors.UndefinedTable:
+            return None
+        except Exception as e:
+            print(f"   - ⚠️ 獲取序列 {sequence_name} 信息時出錯: {e}")
+            return None
+
+def detect_sequence_conflicts(local_conn, render_conn):
+    """檢測序號衝突"""
+    conflicts = []
+    tables_to_check = [
+        ('trips', 'trip_id'),
+        ('completed_trips', 'id')
+    ]
+    
+    print("🔍 正在檢查序號衝突...")
+    
+    for table_name, id_column in tables_to_check:
+        print(f"   - 檢查 {table_name} 表的序號...")
+        
+        # 獲取遠端序號信息
+        remote_info = get_sequence_info(render_conn, table_name, id_column)
+        if not remote_info:
+            print(f"   - ⚠️ 遠端 {table_name} 表沒有序列，跳過檢查")
+            continue
+            
+        # 獲取本地序號信息
+        local_info = get_sequence_info(local_conn, table_name, id_column)
+        if not local_info:
+            print(f"   - ⚠️ 本地 {table_name} 表沒有序列，跳過檢查")
+            continue
+            
+        # 檢測衝突條件：
+        # 1. 遠端序號小於本地序號
+        # 2. 遠端最大ID小於本地最大ID
+        has_conflict = False
+        conflict_reasons = []
+        
+        if remote_info['current_val'] < local_info['current_val']:
+            has_conflict = True
+            conflict_reasons.append(f"遠端序號({remote_info['current_val']}) < 本地序號({local_info['current_val']})")
+            
+        if remote_info['max_id'] < local_info['max_id']:
+            has_conflict = True
+            conflict_reasons.append(f"遠端最大ID({remote_info['max_id']}) < 本地最大ID({local_info['max_id']})")
+            
+        if has_conflict:
+            conflict_info = {
+                'table_name': table_name,
+                'id_column': id_column,
+                'local_info': local_info,
+                'remote_info': remote_info,
+                'reasons': conflict_reasons
+            }
+            conflicts.append(conflict_info)
+            print(f"   - ⚠️ 發現衝突: {', '.join(conflict_reasons)}")
+        else:
+            print(f"   - ✅ {table_name} 序號無衝突")
+    
+    return conflicts
+
 def calibrate_sequence(conn, table_name, id_column='id'):
     """校準指定資料表的序列計數器"""
     sequence_name = f"{table_name}_{id_column}_seq"
@@ -335,9 +423,12 @@ def incremental_sync_completed_trips(local_conn, render_conn):
             print(f"❌ 增量同步 '{table_name}' 時發生錯誤: {e}", file=sys.stderr)
             raise
 
-def main():
+def main(check_only=False, force_sync=False):
     """主函數"""
-    print("🚀 開始 Render 資料庫混合模式同步流程")
+    if check_only:
+        print("🔍 執行序號衝突檢查模式")
+    else:
+        print("🚀 開始 Render 資料庫混合模式同步流程")
     print("=" * 60)
 
     if not all(RENDER_DB_CONFIG.values()):
@@ -353,6 +444,36 @@ def main():
 
         if not render_conn or not local_conn:
             return False
+
+        # 檢測序號衝突
+        conflicts = detect_sequence_conflicts(local_conn, render_conn)
+        
+        if conflicts:
+            print(f"\n⚠️ 發現 {len(conflicts)} 個序號衝突:")
+            for conflict in conflicts:
+                print(f"\n📋 表名: {conflict['table_name']}")
+                print(f"   本地序號: {conflict['local_info']['current_val']} (最大ID: {conflict['local_info']['max_id']})")
+                print(f"   遠端序號: {conflict['remote_info']['current_val']} (最大ID: {conflict['remote_info']['max_id']})")
+                print(f"   衝突原因: {', '.join(conflict['reasons'])}")
+            
+            if check_only:
+                print("\n🔍 檢查完成，發現序號衝突。")
+                return {"status": "conflicts", "conflicts": conflicts}
+            
+            if not force_sync:
+                print("\n❌ 由於序號衝突，同步已停止。")
+                print("💡 解決方案:")
+                print("   1. 在 LINE Bot 中輸入「確認序號覆蓋」來強制以遠端序號為主")
+                print("   2. 或手動解決衝突後再重新同步")
+                return {"status": "conflicts", "conflicts": conflicts}
+            else:
+                print("\n⚡ 強制同步模式: 將以遠端序號為主覆蓋本地序號")
+        else:
+            print("\n✅ 未發現序號衝突，可安全進行同步")
+            
+        if check_only:
+            print("\n🔍 檢查完成，無序號衝突。")
+            return {"status": "no_conflicts"}
 
         # 確保本地 account_ledger 的時間欄位型別正確，避免 8 小時位移
         try:
@@ -402,5 +523,29 @@ def main():
 
 
 if __name__ == "__main__":
-    success = main()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Render 資料庫同步工具')
+    parser.add_argument('--check-only', action='store_true', help='只檢查序號衝突，不執行同步')
+    parser.add_argument('--force', action='store_true', help='強制同步，忽略序號衝突')
+    
+    args = parser.parse_args()
+    
+    result = main(check_only=args.check_only, force_sync=args.force)
+    
+    # 如果是檢查模式，返回檢查結果
+    if args.check_only:
+        if isinstance(result, dict):
+            if result["status"] == "conflicts":
+                print("\n❌ 檢查結果：發現序號衝突")
+                exit(1)
+            else:
+                print("\n✅ 檢查結果：無序號衝突")
+                exit(0)
+    
+    # 正常同步模式
+    if isinstance(result, dict) and result["status"] == "conflicts":
+        exit(2)  # 特殊返回碼表示序號衝突
+    
+    success = result if isinstance(result, bool) else False
     exit(0 if success else 1)

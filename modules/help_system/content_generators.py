@@ -183,7 +183,7 @@ class HelpContentGenerator:
         """生成功能指南內容"""
         features = item.get("features", {})
         
-        return {
+        content = {
             "type": "feature_guide",
             "title": item["title"],
             "description": item["description"],
@@ -199,6 +199,12 @@ class HelpContentGenerator:
             "getting_started": self._get_getting_started_guide(item["id"]),
             "advanced_usage": self._get_advanced_usage_guide(item["id"])
         }
+        
+        # 如果有詳細說明，添加到內容中
+        if "detailed_description" in item:
+            content["detailed_description"] = item["detailed_description"]
+        
+        return content
     
     def _generate_troubleshooting_guide_content(self, item: Dict[str, Any], category_id: str) -> Dict[str, Any]:
         """生成故障排除指南內容"""
@@ -401,14 +407,26 @@ class HelpContentGenerator:
             "long_term_leave": "點擊固定班次按鈕，然後輸入請假原因和加成",
             "bulk_import": "使用「匯入固定班次」命令批量導入班次",
             "schedule_recovery": "使用「固定班次恢復」命令恢復請假班次",
-            "cross_time_management": "系統自動處理跨時間態的班次轉換"
-            ,
+            "cross_time_management": "系統自動處理跨時間態的班次轉換",
             # === 群組地點與到院提醒：簡明使用方法（給一般用戶） ===
-            "set_place": "／設定 [類別/地點] [座標]\n例：／設定 診所 22.9983,120.2002 或 ／設定 東洋 (22.9983, 120.2002)",
-            "set_name": "／設定地點名稱 [名稱]\n例：／設定地點名稱 診所",
-            "set_template": "／設定到院訊息 [模板]\n可用：{name}/{distance_km}/{eta_min}/{provider}/{speed}",
-            "view_meta": "／查看到院設定（顯示名稱與是否有自訂模板）",
-            "reset_template": "／恢復預設到院訊息（清除自訂模板）"
+            "set_place": "設定地點 名稱 緯度 經度\n例：設定地點 診所 22.9983,120.2002 或 設定地點 東洋 (22.9983, 120.2002)",
+            "set_name": "設定地點名稱 名稱\n例：設定地點名稱 診所",
+            "set_template": "設定到院訊息 模板\n可用變數：{name}/{distance_km}/{eta_min}/{provider}/{speed}",
+            "view_meta": "查看到院設定（顯示名稱與是否有自訂模板）",
+            "reset_template": "恢復預設到院訊息（清除自訂模板）",
+            # === 批量加成功能 ===
+            "batch_allowance": "輸入「批量加成」，系統會引導您逐步設定日期範圍、金額和原因",
+            "interactive_mode": "問答式互動，系統會詢問日期範圍、加成金額和原因",
+            "special_occasions": "適用於春節、颱風假等需要為多個班次統一加成的特殊情況",
+            # === 清理Trips功能 ===
+            "cleanup_completed": "清理trips 已完成 - 清理所有已完成狀態的班次",
+            "cleanup_past": "清理trips 過去 - 清理所有過去日期的班次（不管狀態）",
+            "cleanup_all": "清理trips 全部 - 與「過去」功能相同",
+            # === 序號管理功能 ===
+            "line_bot_fix": "在LINE Bot中輸入「/fix-sequence」或「修復序號」，系統會自動檢查並修復序列問題",
+            "reset_render": "執行 python reset_render_sequences.py，會重置Render資料庫的序號為1（需確認）",
+            "fix_after_import": "執行 python scripts/fix_sequence_after_import.py，修復資料搬移後的序列同步問題",
+            "web_admin": "訪問網頁管理介面 /admin/database-tools，進行視覺化的序列檢查和修復"
         }
         
         return usage_guide.get(feature_name, "使用方法待補充")
@@ -433,20 +451,56 @@ class HelpContentGenerator:
             ],
             # === 群組地點與到院提醒：範例 ===
             "set_place": [
-                "／設定 診所 22.9983,120.2002",
-                "／設定 東洋 (22.9983, 120.2002)"
+                "設定地點 診所 22.9983,120.2002",
+                "設定地點 東洋 (22.9983, 120.2002)"
             ],
             "set_name": [
-                "／設定地點名稱 診所"
+                "設定地點名稱 診所"
             ],
             "set_template": [
-                "／設定到院訊息 🧑‍🦽 請準備輪椅\n距離：{distance_km} 公里，約 {eta_min} 分鐘（{provider}）"
+                "設定到院訊息 🧑‍🦽 請準備輪椅\n距離：{distance_km} 公里，約 {eta_min} 分鐘（{provider}）"
             ],
             "view_meta": [
-                "／查看到院設定"
+                "查看到院設定"
             ],
             "reset_template": [
-                "／恢復預設到院訊息"
+                "恢復預設到院訊息"
+            ],
+            # === 批量加成功能：範例 ===
+            "batch_allowance": [
+                "批量加成（然後依序輸入：1/20-1/29、100、春節加成）"
+            ],
+            "interactive_mode": [
+                "輸入「批量加成」後，系統會逐步詢問日期範圍、金額和原因"
+            ],
+            "special_occasions": [
+                "春節期間：批量加成 → 1/20-1/29 → 100 → 春節加成",
+                "颱風假：批量加成 → 7/28-7/29 → 50 → 颱風補償"
+            ],
+            # === 清理Trips功能：範例 ===
+            "cleanup_completed": [
+                "清理trips 已完成"
+            ],
+            "cleanup_past": [
+                "清理trips 過去"
+            ],
+            "cleanup_all": [
+                "清理trips 全部"
+            ],
+            # === 序號管理功能：範例 ===
+            "line_bot_fix": [
+                "/fix-sequence",
+                "修復序號"
+            ],
+            "reset_render": [
+                "python reset_render_sequences.py"
+            ],
+            "fix_after_import": [
+                "python scripts/fix_sequence_after_import.py",
+                "python scripts/fix_sequence_after_import.py --quick"
+            ],
+            "web_admin": [
+                "訪問 http://your-domain/admin/database-tools"
             ]
         }
         

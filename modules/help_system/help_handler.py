@@ -413,6 +413,10 @@ class HelpHandler:
                         message += f"\n工作流程：{workflow}\n"
             
             elif content_type == "feature_guide":
+                # 如果有詳細說明，優先顯示
+                if help_data.get("detailed_description"):
+                    message += f"{help_data['detailed_description']}\n\n"
+                
                 features = help_data.get("features", [])
                 if features:
                     message += "🔧 功能說明：\n"
@@ -420,6 +424,10 @@ class HelpHandler:
                         message += f"• {feature['name']}：{feature['description']}\n"
                         if feature.get("how_to_use"):
                             message += f"  使用方法：{feature['how_to_use']}\n"
+                        if feature.get("examples"):
+                            examples = feature.get("examples", [])
+                            if examples:
+                                message += f"  範例：{', '.join(examples[:2])}\n"
             
             elif content_type == "troubleshooting_guide":
                 issues = help_data.get("common_issues", [])

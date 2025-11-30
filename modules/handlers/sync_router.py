@@ -21,21 +21,18 @@ def handle_sync_commands(message_text: str, user_id: str, reply_token: str) -> b
             mock_event = MockEvent(user_id)
             result = handle_database_sync_request(mock_event, None)
             if result and result.get("text"):
-                if "❌" not in result["text"]:
-                    from modules.utils.response_handler import send_text_response
-                    buttons = [
-                        {"label": "✅ 確認同步", "text": "確認同步", "type": "message"},
-                        {"label": "❌ 放棄操作", "text": "放棄", "type": "message"}
-                    ]
-                    send_text_response(reply_token, result["text"], buttons)
+                # 使用新的 QuickReply 格式直接發送回應
+                if result.get("quick_reply"):
+                    from modules.utils.line_bot import reply_message_with_quick_reply
+                    reply_message_with_quick_reply(reply_token, result["text"], result["quick_reply"])
                 else:
                     reply_text(reply_token, result["text"])
             else:
                 reply_text(reply_token, "❌ 無法獲取資料庫狀態")
             return True
 
-        if message_text == "確認同步":
-            logger.info(f"用戶 {user_id} 確認執行資料庫同步")
+        if message_text in ["確認同步", "確定", "是", "yes", "ok", "OK"]:
+            logger.info(f"用戶 {user_id} 確認執行資料庫同步 (輸入: {message_text})")
             from modules.handlers.database_sync_handler import handle_database_sync_confirm_free
 
             class MockEvent:
@@ -45,6 +42,20 @@ def handle_sync_commands(message_text: str, user_id: str, reply_token: str) -> b
 
             mock_event = MockEvent(user_id, reply_token)
             handle_database_sync_confirm_free(mock_event, None)
+            return True
+
+        if message_text == "確認序號覆蓋":
+            logger.info(f"用戶 {user_id} 確認執行強制資料庫同步 (序號覆蓋模式)")
+            from modules.handlers.database_sync_handler import handle_database_sync_confirm
+
+            class MockEventWithMessage:
+                def __init__(self, uid, token, msg_text):
+                    self.source = type('', (), {'user_id': uid})()
+                    self.reply_token = token
+                    self.message = type('', (), {'text': msg_text})()
+
+            mock_event = MockEventWithMessage(user_id, reply_token, message_text)
+            handle_database_sync_confirm(mock_event, None)
             return True
 
         if message_text == "同步結果":

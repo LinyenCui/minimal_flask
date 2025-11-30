@@ -73,6 +73,32 @@ class DatabaseSyncHandler:
         except Exception as e:
             return f"錯誤: {str(e)}"
 
+def check_sequence_conflicts():
+    """檢查序號衝突"""
+    try:
+        import sys
+        python_executable = sys.executable
+        script_path = "scripts/sync_from_render.py"
+        
+        result = subprocess.run(
+            [python_executable, script_path, "--check-only"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        # 返回碼 1 表示有衝突，0 表示無衝突
+        if result.returncode == 1:
+            return {"has_conflicts": True, "output": result.stdout}
+        elif result.returncode == 0:
+            return {"has_conflicts": False, "output": result.stdout}
+        else:
+            return {"has_conflicts": False, "error": result.stderr}
+            
+    except Exception as e:
+        logger.error(f"檢查序號衝突時發生錯誤: {e}")
+        return {"has_conflicts": False, "error": str(e)}
+
 def handle_database_sync_request(event, line_bot_api):
     """處理資料庫同步請求，顯示狀態並提供確認按鈕"""
     user_id = event.source.user_id
@@ -87,22 +113,51 @@ def handle_database_sync_request(event, line_bot_api):
         response_text = "❌ Render 資料庫連線設定不完整\n缺少：\n" + "\n".join([f"• {c}" for c in missing_config])
         return {"type": "text", "text": response_text}
     
+    # 檢查序號衝突
+    conflict_result = check_sequence_conflicts()
+    
     response_text = "📊 資料庫同步狀態檢查\n"
     response_text += "=" * 20 + "\n"
     response_text += "🏠 本地資料庫：\n" + sync_handler.get_database_stats(is_render=False) + "\n\n"
     response_text += "☁️ Render 資料庫：\n" + sync_handler.get_database_stats(is_render=True) + "\n\n"
+    
+    # 顯示序號衝突檢查結果
+    if conflict_result.get("has_conflicts"):
+        response_text += "⚠️ 序號衝突檢測：\n"
+        # 從輸出中提取關鍵信息
+        if "發現" in conflict_result.get("output", ""):
+            conflict_lines = [line for line in conflict_result["output"].split('\n') 
+                            if '發現' in line or '表名:' in line or '本地序號:' in line or '遠端序號:' in line]
+            response_text += "\n".join(conflict_lines[:10])  # 限制顯示行數
+        else:
+            response_text += "發現序號衝突，詳情請查看日誌"
+        response_text += "\n\n"
+    else:
+        response_text += "✅ 序號衝突檢測：未發現衝突\n\n"
+    
     response_text += "⚠️ 同步將使用混合模式進行：\n"
     response_text += "• `completed_trips` 將只增不減。\n"
-    response_text += "• 其他資料表將被完全覆蓋。\n\n"
-    response_text += "確定要執行同步嗎？"
+    response_text += "• 其他資料表將被完全覆蓋。\n"
+    
+    # 如果有序號衝突，增加警告信息
+    if conflict_result.get("has_conflicts"):
+        response_text += "• ⚠️ 檢測到序號衝突，將以遠端序號為主覆蓋本地\n"
+    
+    response_text += "\n確定要執行同步嗎？"
     
     from modules.utils.quick_reply_manager import QuickReplyManager
     
     # 使用新的 Quick Reply 標準格式
-    confirm_buttons = [
-        {"label": "✅ 確認同步", "text": "確認同步", "type": "message"},
-        {"label": "❌ 放棄操作", "text": "放棄", "type": "message"}
-    ]
+    if conflict_result.get("has_conflicts"):
+        confirm_buttons = [
+            {"label": "⚡ 強制同步", "text": "確認序號覆蓋", "type": "message"},
+            {"label": "❌ 放棄操作", "text": "放棄", "type": "message"}
+        ]
+    else:
+        confirm_buttons = [
+            {"label": "✅ 確認同步", "text": "確認同步", "type": "message"},
+            {"label": "❌ 放棄操作", "text": "放棄", "type": "message"}
+        ]
     
     return QuickReplyManager.create_text_response(response_text, confirm_buttons)
 
@@ -115,6 +170,13 @@ def handle_database_sync_confirm(event, line_bot_api_passed=None):
     user_id = event.source.user_id
     user_name = get_user_display_name(user_id)
     
+    # 檢測是否是強制同步模式
+    force_sync = False
+    if hasattr(event, 'message') and hasattr(event.message, 'text'):
+        message_text = event.message.text.strip()
+        if message_text == "確認序號覆蓋":
+            force_sync = True
+    
     from linebot.v3.messaging import (
         ReplyMessageRequest,
         TextMessage
@@ -123,7 +185,10 @@ def handle_database_sync_confirm(event, line_bot_api_passed=None):
     line_bot_api = line_bot_api_passed or get_line_bot_api()
     
     # 立即回覆開始訊息，包含查詢提示
-    start_message = f"🚀 {user_name} 開始執行資料庫同步...\n"
+    if force_sync:
+        start_message = f"⚡ {user_name} 開始執行強制同步 (序號覆蓋模式)...\n"
+    else:
+        start_message = f"🚀 {user_name} 開始執行資料庫同步...\n"
     start_message += "⏱️ 預計需要 30-60 秒\n"
     start_message += "💡 完成後輸入「同步結果」查看結果"
     
@@ -138,17 +203,25 @@ def handle_database_sync_confirm(event, line_bot_api_passed=None):
         logger.error(f"回覆同步開始訊息失敗: {reply_error}")
         return start_message
 
-    logger.info(f"用戶 {user_name} 確認執行資料庫同步，開始呼叫新腳本...")
+    if force_sync:
+        logger.info(f"用戶 {user_name} 確認執行強制資料庫同步 (序號覆蓋模式)...")
+    else:
+        logger.info(f"用戶 {user_name} 確認執行資料庫同步...")
 
     # 使用 sys.executable 確保使用正確的 Python 解釋器
     python_executable = sys.executable
     script_path = "scripts/sync_from_render.py"
     
-    logger.info(f"將要執行的命令: {python_executable} {script_path}")
+    # 構建命令參數
+    command_args = [python_executable, script_path]
+    if force_sync:
+        command_args.append("--force")
+    
+    logger.info(f"將要執行的命令: {' '.join(command_args)}")
 
     try:
         process = subprocess.run(
-            [python_executable, script_path],
+            command_args,
             capture_output=True,
             text=True,
             timeout=50,  # 縮短到50秒

@@ -859,7 +859,7 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             
         # --- 🤖 智能助手系統整合 ---
         # 排除特定命令，不交給智能助手處理
-        excluded_commands = ["資料庫同步", "確認同步", "同步結果", "fix-sequence", "batch-allowance", "批量加成"]
+        excluded_commands = ["fix-sequence", "batch-allowance", "批量加成"]
         if message_text in excluded_commands:
             logger.info(f"❌ 命令 '{message_text}' 在排除列表中，但沒有被正確處理")
             reply_text(reply_token, f"❌ 未識別的命令: {message_text}\n\n請使用「幫助」查看可用命令")

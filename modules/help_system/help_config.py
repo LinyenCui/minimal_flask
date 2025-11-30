@@ -162,7 +162,150 @@ class HelpSystemConfig:
                             "set_template": "設定到院訊息 模板（支援 {name}/{distance_km}/{eta_min}/{provider}/{speed}）",
                             "view_meta": "查看到院設定（僅顯示名稱與模板長度）",
                             "reset_template": "恢復預設到院訊息"
-                        }
+                        },
+                        "detailed_description": """群組地點與到院提醒功能讓您可以設定群組的固定地點，當群組成員傳送位置訊息時，系統會自動計算距離與預估到達時間。
+
+📋 主要功能：
+• 設定群組固定地點（支援多種座標格式）
+• 自訂到院提醒訊息模板
+• 自動計算距離與ETA
+• 支援Google地圖路線計算（需設定API金鑰）
+
+💡 使用場景：
+• 診所接送：設定診所位置，司機傳位置時自動提醒
+• 固定接送點：設定常用接送地點，方便計算距離
+• 到院提醒：自訂提醒訊息，包含距離、時間等資訊
+
+⚠️ 注意事項：
+• 座標格式支援：22.9983,120.2002 或 (22.9983, 120.2002)
+• 模板變數：{name}、{distance_km}、{eta_min}、{provider}、{speed}
+• 需要設定GOOGLE_MAPS_API_KEY才能使用Google路線計算"""
+                    },
+                    {
+                        "id": "batch_allowance",
+                        "title": "💰 批量加成",
+                        "description": "問答式批量加成功能（春節/颱風假期等特殊情況）",
+                        "content_type": "feature_guide",
+                        "features": {
+                            "batch_allowance": "批量加成 - 為多個班次一次性設定加成金額",
+                            "interactive_mode": "問答式互動，逐步確認日期範圍和金額",
+                            "special_occasions": "適用於春節、颱風假等特殊情況"
+                        },
+                        "detailed_description": """批量加成功能讓您可以為多個班次一次性設定加成金額，特別適用於特殊節日或情況。
+
+📋 使用流程：
+1. 輸入「批量加成」啟動功能
+2. 系統會詢問日期範圍（例如：1/20-1/29）
+3. 輸入加成金額（例如：100 或 -50）
+4. 輸入原因（例如：春節加成）
+5. 系統顯示符合條件的班次數量
+6. 確認後批量更新
+
+💡 適用場景：
+• 春節期間：為所有班次統一加成
+• 颱風假：為受影響班次設定補償
+• 特殊活動：為特定日期範圍的班次加成
+
+⚠️ 注意事項：
+• 只會影響符合日期範圍的班次
+• 可以設定正數（加成）或負數（減成）
+• 建議先查看受影響的班次數量再確認"""
+                    },
+                    {
+                        "id": "cleanup_trips",
+                        "title": "🗑️ 清理Trips資料",
+                        "description": "清理trips表中的過去資料，保持資料庫整潔",
+                        "content_type": "feature_guide",
+                        "features": {
+                            "cleanup_completed": "清理trips 已完成 - 清理所有已完成狀態的班次",
+                            "cleanup_past": "清理trips 過去 - 清理所有過去日期的班次",
+                            "cleanup_all": "清理trips 全部 - 清理所有過去日期的班次"
+                        },
+                        "detailed_description": """清理功能專門用於清理trips表中的過去資料，幫助保持資料庫的整潔和效能。
+
+📋 可用選項：
+• 清理trips 已完成：清理所有狀態為「已完成」的班次
+• 清理trips 過去：清理所有過去日期的班次（不管狀態）
+• 清理trips 全部：與「過去」功能相同
+
+🔒 安全機制：
+• 不影響今天：今天的班次不會被清理
+• 不影響未來：未來的班次完全不會被清理
+• 只清理過去：所有清理選項都只作用於過去的資料
+
+💡 使用建議：
+• 每週清理：使用「清理trips 已完成」清理已執行完成的班次
+• 月度清理：使用「清理trips 過去」清理所有過去日期的班次
+• 定期維護：保持資料庫整潔，提升查詢效能
+
+⚠️ 注意事項：
+• 清理操作不可恢復，請謹慎使用
+• 建議先備份資料再進行大規模清理
+• 清理已完成：只清理已完成狀態，保留其他狀態
+• 清理過去/全部：清理所有過去日期，但保留當前和未來
+
+🔧 清理後的序號處理：
+清理資料後，序號不會自動重置。如果需要重置序號，請使用「序號管理」功能。"""
+                    },
+                    {
+                        "id": "sequence_management",
+                        "title": "🔢 序號管理與重置",
+                        "description": "管理資料庫序號，重置和修復序列值",
+                        "content_type": "feature_guide",
+                        "features": {
+                            "line_bot_fix": "LINE Bot修復：輸入「/fix-sequence」或「修復序號」檢查並修復序列",
+                            "reset_render": "重置Render序號：python reset_render_sequences.py（命令行工具）",
+                            "fix_after_import": "匯入後修復：python scripts/fix_sequence_after_import.py（命令行工具）",
+                            "web_admin": "網頁管理介面：訪問 /admin/database-tools 進行視覺化管理"
+                        },
+                        "detailed_description": """序號管理功能用於處理資料庫序列（Sequence）的同步和重置問題。
+
+📋 使用場景：
+• 清理資料後需要重置序號
+• 資料搬移後序列不同步
+• 主鍵衝突問題修復
+• 序號過大需要回收
+
+🛠️ 可用工具：
+
+1️⃣ LINE Bot修復（最方便）
+• 命令：/fix-sequence 或 修復序號
+• 功能：自動檢查所有序列狀態，發現問題時提供修復選項
+• 適用：日常維護和快速檢查
+• 支援：trips 和 completed_trips 表
+
+2️⃣ 重置Render序號（命令行）
+• 檔案：reset_render_sequences.py
+• 命令：python reset_render_sequences.py
+• 功能：重置Render資料庫的序號為1（需確認）
+• 適用：清理資料後需要從頭開始編號
+• 注意：會重置 trips_trip_id_seq 和 completed_trips_id_seq
+
+3️⃣ 匯入後修復（命令行）
+• 檔案：scripts/fix_sequence_after_import.py
+• 命令：python scripts/fix_sequence_after_import.py
+• 快速模式：python scripts/fix_sequence_after_import.py --quick
+• 功能：修復資料搬移後的序列同步問題
+• 適用：TRUNCATE + 匯入資料後使用
+• 選項：可選擇只修復 completed_trips 或檢查所有序列
+
+4️⃣ 網頁管理介面（視覺化）
+• 路徑：/admin/database-tools
+• 功能：視覺化檢查和修復序列
+• 適用：需要詳細報告和視覺化操作
+• 特點：即時狀態檢查、一鍵修復、詳細報告
+
+💡 使用建議：
+• 日常檢查：使用 LINE Bot 的 /fix-sequence 命令
+• 清理後重置：使用 reset_render_sequences.py
+• 資料搬移後：使用 fix_sequence_after_import.py --quick
+• 詳細診斷：使用網頁管理介面
+
+⚠️ 重要提醒：
+• 重置序號前請確認資料表狀態
+• 序號重置後不可恢復，請謹慎操作
+• 資料搬移後務必修復序列，避免主鍵衝突
+• Render端序號建議每週或每月重置一次（視使用頻率）"""
                     },
                     {
                         "id": "reporting_system",
