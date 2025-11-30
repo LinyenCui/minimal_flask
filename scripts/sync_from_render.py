@@ -355,6 +355,30 @@ def incremental_sync_completed_trips(local_conn, render_conn):
             # 過濾記錄資料，只包含非生成欄位
             filtered_records = [[rec[i] for i in col_indices] for rec in new_records]
 
+            # 3.1 若 unique_code 已存在於本地，預先刪除舊資料以便遠端覆蓋
+            unique_code_idx = filtered_cols.index('unique_code') if 'unique_code' in filtered_cols else None
+            duplicates_removed = 0
+            if unique_code_idx is not None:
+                candidate_codes = {record[unique_code_idx] for record in filtered_records if record[unique_code_idx]}
+                if candidate_codes:
+                    local_cur.execute(
+                        "SELECT unique_code FROM completed_trips WHERE unique_code = ANY(%s)",
+                        (list(candidate_codes),)
+                    )
+                    duplicate_codes = [row[0] for row in local_cur.fetchall()]
+                    if duplicate_codes:
+                        print(f"   - ⚠️ 偵測到 {len(duplicate_codes)} 個 unique_code 已存在於本地，將以 Render 資料覆蓋")
+                        local_cur.execute(
+                            "DELETE FROM completed_trips WHERE unique_code = ANY(%s)",
+                            (duplicate_codes,)
+                        )
+                        duplicates_removed = local_cur.rowcount
+                        print(f"   - ✅ 已預先移除 {duplicates_removed} 筆衝突記錄，避免 unique_completed_trip_code 衝突")
+                else:
+                    print("   - ℹ️ 新紀錄中沒有 unique_code，跳過衝突檢查")
+            else:
+                print("   - ⚠️ 找不到 unique_code 欄位，無法自動處理重複序號")
+
             # 4. 使用 ON CONFLICT DO UPDATE 覆蓋本地資料
             print(f"   - 正在將新紀錄寫入本地，覆蓋已存在的記錄...")
             placeholders = "%s, " * len(filtered_cols)
