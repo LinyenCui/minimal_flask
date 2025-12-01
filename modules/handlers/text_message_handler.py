@@ -415,42 +415,6 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 reply_text(reply_token, response.get("text", "啟動批量加成中..."))
             return
         
-        # 東洋班次 (東洋/臨時)
-        elif message_text.startswith("東洋班次"):
-            try:
-                parts = message_text.split()
-                # --- 恢復原有邏輯：如果帶有日期參數，則執行查詢；否則觸發日期選擇 --- 
-                if len(parts) > 1:
-                    # 執行實際查詢 (東洋/臨時) - 保持原有的Flex Message格式
-                    logger.info(f"處理東洋班次命令 (帶日期): {message_text}")
-                    from modules.services.trip_query_service import handle_query_trips_flex
-                    flex_content, result_message = handle_query_trips_flex(message_text)
-                    logger.info(f"handle_query_trips_flex返回: flex={bool(flex_content)}, msg='{result_message}'")
-                    if flex_content:
-                        reply_flex(reply_token, "班次查詢結果", flex_content)
-                    elif result_message:
-                        reply_text(reply_token, result_message)
-                    else:
-                        reply_text(reply_token, "查詢完成，但沒有找到任何信息。")
-                else:
-                    # 觸發日期選擇
-                    logger.info(f"處理東洋班次命令 (觸發日期選擇): {message_text}")
-                    from modules.services.trip_query_service import request_toyo_temp_trip_date_selection
-                    reply_msg, error_message = request_toyo_temp_trip_date_selection()
-                    if reply_msg and error_message is None:
-                        reply_message(reply_token, [reply_msg])
-                    else:
-                        reply_text(reply_token, error_message or "無法生成日期選擇")
-                return 
-            except Exception as e:
-                logger.error(f"處理東洋班次時出錯: {e}")
-                traceback.print_exc()
-                # 使用文本版本作為後備
-                from modules.services.trip_query_service import handle_query_trips
-                result = handle_query_trips(message_text)
-                reply_text(reply_token, f"Flex消息處理錯誤，使用文本版本：\n{result}")
-                return
-            
         # 班次詳情（委派輕路由）
         elif message_text.startswith("班次詳情"):
             from modules.handlers.view_router import handle_view_commands
@@ -503,57 +467,6 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             result_text = update_completed_trips()
             reply_text(reply_token, result_text)
             return
-            
-        # 🔥 新增：查詢班次命令 - 支援複雜條件
-        elif message_text.startswith("查詢班次"):
-            try:
-                logger.info(f"🔍 處理查詢班次命令: {message_text}")
-                # 🔥 修復：查詢班次應該使用AdvancedQueryProcessor，返回Text+QuickReply格式
-                from modules.services.advanced_query_processor import AdvancedQueryProcessor
-                processor = AdvancedQueryProcessor()
-                result = processor.process_complex_query(message_text, user_id)
-                
-                if result.get('type') == 'success':
-                    reply_text(reply_token, result['message'])
-                elif result.get('type') == 'success_with_pagination':
-                    # 支持帶Quick Reply的分頁結果  
-                    reply_message_with_quick_reply(reply_token, result['message'], result['quick_reply'])
-                elif result.get('type') == 'no_results':
-                    reply_text(reply_token, result['message'])
-                else:
-                    reply_text(reply_token, result.get('message', '查詢完成'))
-                return
-            except Exception as e:
-                logger.error(f"❌ 處理查詢班次命令時出錯: {e}")
-                traceback.print_exc()
-                reply_text(reply_token, f"查詢班次失敗: {str(e)}")
-                return
-            
-        # --- 🔥 新增：跨日期範圍查詢處理 ---
-        elif message_text.startswith("查已完成範圍"):
-            try:
-                logger.info(f"🎯 處理查已完成範圍命令: {message_text}")
-                from modules.services.date_range_query_service import handle_query_completed_trips_range
-                result = handle_query_completed_trips_range(message_text)
-                reply_text(reply_token, result)
-                return
-            except Exception as e:
-                logger.error(f"❌ 查已完成範圍處理失敗: {e}")
-                reply_text(reply_token, f"查詢失敗: {str(e)}")
-                return
-                
-        elif message_text.startswith("查班次範圍"):
-            try:
-                logger.info(f"🎯 處理查班次範圍命令: {message_text}")
-                from modules.services.date_range_query_service import handle_query_current_trips_range
-                result = handle_query_current_trips_range(message_text)
-                reply_text(reply_token, result)
-                return
-            except Exception as e:
-                logger.error(f"❌ 查班次範圍處理失敗: {e}")
-                reply_text(reply_token, f"查詢失敗: {str(e)}")
-                return
-
             
         # 帳務處理（委派輕路由）
         from modules.handlers.accounting_router import handle_accounting_commands
