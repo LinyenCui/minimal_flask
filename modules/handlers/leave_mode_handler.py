@@ -68,26 +68,27 @@ def check_and_handle_simple_leave_format(message_text: str, user_id: str, reply_
     reason = parts[0]
     extra_fare = int(parts[1])
     
-    # 獲取請假模式上下文
-    leave_context = conversation_manager.get_leave_mode_context(user_id)
+    # 獲取請假模式上下文（使用 get_recent_trip_id 和 get_recent_fixed_schedule_id）
+    recent_trip_id = conversation_manager.get_recent_trip_id(user_id)
+    recent_fixed_schedule_id = conversation_manager.get_recent_fixed_schedule_id(user_id)
     
-    if not leave_context:
+    if not recent_trip_id and not recent_fixed_schedule_id:
         conversation_manager.clear_leave_mode(user_id)
         reply_text(reply_token, "❌ 請假模式上下文遺失，請重新操作")
         return True
     
     # 執行請假
     try:
-        if leave_context.get('is_fixed_schedule'):
+        if recent_fixed_schedule_id:
             # 固定班次請假
-            fixed_schedule_id = leave_context.get('fixed_schedule_id')
-            from modules.handlers.passenger_leave_handler import handle_fixed_schedule_leave
-            result = handle_fixed_schedule_leave(fixed_schedule_id, extra_fare, reason)
-        else:
+            from modules.handlers.fixed_schedule_leave_handler import handle_fixed_schedule_leave_command
+            full_command = f"固定班次請假 {recent_fixed_schedule_id} {extra_fare} {reason}"
+            result = handle_fixed_schedule_leave_command(full_command, user_id)
+        elif recent_trip_id:
             # 一般班次請假
-            trip_id = leave_context.get('trip_id')
             from modules.handlers.passenger_leave_handler import handle_passenger_leave_command
-            result = handle_passenger_leave_command(f"乘客請假 {trip_id} {extra_fare} {reason}", user_id)
+            full_command = f"乘客請假 {recent_trip_id} {extra_fare} {reason}"
+            result = handle_passenger_leave_command(full_command, user_id)
         
         # 清除請假模式
         conversation_manager.clear_leave_mode(user_id)

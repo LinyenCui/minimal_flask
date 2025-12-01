@@ -54,8 +54,9 @@ def _handle_record_fare_command(message_text: str, user_id: str, reply_token: st
             return True
         
         # 執行記錄車資
-        from modules.services.trip_service import record_fare
-        result = record_fare(completed_trip_id, meter_fare, extra_fare, reason)
+        from modules.handlers.trip_handler import handle_record_fare
+        full_command = f"記錄車資 {completed_trip_id} {meter_fare} {extra_fare} {reason}"
+        result = handle_record_fare(full_command, user_id)
         
         reply_text(reply_token, result)
         return True
@@ -77,13 +78,14 @@ def _handle_ai_modification_confirm(message_text: str, user_id: str, reply_token
             return True
         
         # 執行修改
-        completed_trip_id = pending_modification.get('completed_trip_id')
+        trip_id = pending_modification.get('trip_id')
         meter_fare = pending_modification.get('meter_fare')
         extra_fare = pending_modification.get('extra_fare')
         reason = pending_modification.get('reason', '')
         
-        from modules.services.trip_service import record_fare
-        result = record_fare(completed_trip_id, meter_fare, extra_fare, reason)
+        from modules.handlers.trip_handler import handle_record_fare
+        full_command = f"記錄車資 {trip_id} {meter_fare} {extra_fare} {reason}"
+        result = handle_record_fare(full_command, user_id)
         
         # 清除待處理修改
         conversation_manager.clear_pending_modification(user_id)
