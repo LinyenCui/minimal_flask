@@ -684,12 +684,12 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                         reply_text(reply_token, f"❌ 智能引導失敗：{str(e)}")
                         return
                 
-                # 🔥 新增：智能助手路由的跨日期範圍查詢
+                # 🔥 新增：智能助手路由的跨日期範圍查詢（支援翻頁）
                 elif command.startswith("查已完成範圍"):
                     try:
                         logger.info(f"🎯 智能助手路由查已完成範圍命令: {command}")
                         from modules.services.date_range_query_service import handle_query_completed_trips_range
-                        result = handle_query_completed_trips_range(command)
+                        result = handle_query_completed_trips_range(command, user_id)
                         reply_text(reply_token, result)
                         return
                     except Exception as e:
@@ -701,7 +701,7 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                     try:
                         logger.info(f"🎯 智能助手路由查班次範圍命令: {command}")
                         from modules.services.date_range_query_service import handle_query_current_trips_range
-                        result = handle_query_current_trips_range(command)
+                        result = handle_query_current_trips_range(command, user_id)
                         reply_text(reply_token, result)
                         return
                     except Exception as e:
