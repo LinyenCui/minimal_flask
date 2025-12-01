@@ -187,9 +187,10 @@ def query_current_trips_range(start_date, end_date, driver_id=None, category=Non
         logger.error(f"詳細錯誤: {traceback.format_exc()}")
         return []
 
-def format_completed_trips_range_result(trips, start_date, end_date, driver_id=None, category=None):
+def format_completed_trips_range_result(trips, start_date, end_date, driver_id=None, category=None, page_info=None):
     """
     格式化已完成班次範圍查詢結果
+    page_info: {'current': 1, 'total_items': 50, 'has_more': True}
     """
     if not trips:
         filter_desc = []
@@ -301,7 +302,17 @@ def format_completed_trips_range_result(trips, start_date, end_date, driver_id=N
             lines.append(f"#{trip_id} 🚗{driver_id_result} {start_point}→{end_point} ${display_amount}{problem_indicator}")
             displayed_count += 1
     
-    if total_trips > max_display:
+    # 分頁提示
+    if page_info:
+        total_items = page_info.get('total_items', total_trips)
+        current_page = page_info.get('current', 1)
+        has_more = page_info.get('has_more', False)
+        
+        if has_more:
+            lines.append(f"")
+            lines.append(f"📄 第 {current_page} 頁，共 {total_items} 筆")
+            lines.append(f"💡 輸入「更多」查看下一頁")
+    elif total_trips > max_display:
         lines.append(f"...")
         lines.append(f"還有 {total_trips - max_display} 筆班次未顯示")
     
@@ -313,9 +324,10 @@ def format_completed_trips_range_result(trips, start_date, end_date, driver_id=N
     
     return "\n".join(lines)
 
-def format_current_trips_range_result(trips, start_date, end_date, driver_id=None, category=None):
+def format_current_trips_range_result(trips, start_date, end_date, driver_id=None, category=None, page_info=None):
     """
     格式化進行中班次範圍查詢結果
+    page_info: {'current': 1, 'total_items': 50, 'has_more': True}
     """
     if not trips:
         filter_desc = []
@@ -411,16 +423,27 @@ def format_current_trips_range_result(trips, start_date, end_date, driver_id=Non
             lines.append(f"#{trip_id} {time_str} 🚗{driver_id_result} {loc_start}→{loc_end} {status_emoji}{status}")
             displayed_count += 1
     
-    if total_trips > max_display:
+    # 分頁提示
+    if page_info:
+        total_items = page_info.get('total_items', total_trips)
+        current_page = page_info.get('current', 1)
+        has_more = page_info.get('has_more', False)
+        
+        if has_more:
+            lines.append(f"")
+            lines.append(f"📄 第 {current_page} 頁，共 {total_items} 筆")
+            lines.append(f"💡 輸入「更多」查看下一頁")
+    elif total_trips > max_display:
         lines.append(f"...")
         lines.append(f"還有 {total_trips - max_display} 筆班次未顯示")
     
     return "\n".join(lines)
 
-def handle_query_completed_trips_range(message_text):
+def handle_query_completed_trips_range(message_text, user_id=None):
     """
     處理已完成班次範圍查詢命令
     格式：查已完成範圍 7/28-7/30 [司機ID] [類別]
+    支援翻頁
     """
     try:
         parts = message_text.split()
@@ -477,8 +500,27 @@ def handle_query_completed_trips_range(message_text):
         # 查詢數據
         trips = query_completed_trips_range(start_date, end_date, driver_id, category)
         
-        # 格式化結果
-        result = format_completed_trips_range_result(trips, start_date, end_date, driver_id, category)
+        # 如果提供了 user_id，保存查詢結果以支援翻頁
+        if user_id and len(trips) > 10:
+            from modules.utils.conversation_context import get_conversation_context
+            context = get_conversation_context(user_id)
+            context.save_query_result(
+                query_type='completed_trips_range',
+                command=message_text,
+                all_results=trips,
+                conditions={
+                    'start_date': start_date.strftime('%Y-%m-%d'),
+                    'end_date': end_date.strftime('%Y-%m-%d'),
+                    'driver_id': driver_id,
+                    'category': category
+                }
+            )
+            # 格式化第一頁結果（前10筆）
+            result = format_completed_trips_range_result(trips[:10], start_date, end_date, driver_id, category, 
+                                                        page_info={'current': 1, 'total_items': len(trips), 'has_more': True})
+        else:
+            # 格式化結果（全部顯示，最多20筆）
+            result = format_completed_trips_range_result(trips, start_date, end_date, driver_id, category)
         
         return result
         
@@ -486,10 +528,11 @@ def handle_query_completed_trips_range(message_text):
         logger.error(f"處理已完成班次範圍查詢失敗: {e}")
         return f"❌ 查詢失敗：{str(e)}"
 
-def handle_query_current_trips_range(message_text):
+def handle_query_current_trips_range(message_text, user_id=None):
     """
     處理進行中班次範圍查詢命令
     格式：查班次範圍 8/1-8/5 [司機ID] [類別]
+    支援翻頁
     """
     try:
         parts = message_text.split()
@@ -558,7 +601,28 @@ def handle_query_current_trips_range(message_text):
         else:
             # 純現在/未來範圍
             trips = query_current_trips_range(start_date, end_date, driver_id, category)
-            result = format_current_trips_range_result(trips, start_date, end_date, driver_id, category)
+            
+            # 如果提供了 user_id，保存查詢結果以支援翻頁
+            if user_id and len(trips) > 10:
+                from modules.utils.conversation_context import get_conversation_context
+                context = get_conversation_context(user_id)
+                context.save_query_result(
+                    query_type='current_trips_range',
+                    command=message_text,
+                    all_results=trips,
+                    conditions={
+                        'start_date': start_date.strftime('%Y-%m-%d'),
+                        'end_date': end_date.strftime('%Y-%m-%d'),
+                        'driver_id': driver_id,
+                        'category': category
+                    }
+                )
+                # 格式化第一頁結果（前10筆）
+                result = format_current_trips_range_result(trips[:10], start_date, end_date, driver_id, category,
+                                                          page_info={'current': 1, 'total_items': len(trips), 'has_more': True})
+            else:
+                # 格式化結果（全部顯示，最多20筆）
+                result = format_current_trips_range_result(trips, start_date, end_date, driver_id, category)
             return result
         
     except Exception as e:

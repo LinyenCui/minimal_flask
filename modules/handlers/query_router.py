@@ -66,15 +66,15 @@ def handle_query_commands(message_text: str, user_id: str, reply_token: str) -> 
             else:
                 reply_text(reply_token, result.get('message', '查詢完成'))
             return True
-        # 範圍查詢
+        # 範圍查詢（支援翻頁）
         if message_text.startswith("查已完成範圍"):
             from modules.services.date_range_query_service import handle_query_completed_trips_range
-            result = handle_query_completed_trips_range(message_text)
+            result = handle_query_completed_trips_range(message_text, user_id)
             reply_text(reply_token, result)
             return True
         if message_text.startswith("查班次範圍"):
             from modules.services.date_range_query_service import handle_query_current_trips_range
-            result = handle_query_current_trips_range(message_text)
+            result = handle_query_current_trips_range(message_text, user_id)
             reply_text(reply_token, result)
             return True
         return False

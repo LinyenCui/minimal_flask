@@ -128,9 +128,10 @@ class ConversationContext:
         result_text += f"找到 {total_results} 筆記錄，顯示第 {start_idx + 1}-{min(end_idx, total_results)} 筆\n\n"
         
         query_type = state['query_type']
+        conditions = state.get('conditions', {})
         
         # 根據查詢類型格式化結果
-        if query_type == 'completed_trips':
+        if query_type in ['completed_trips', 'completed_trips_range']:
             # 已完成班次
             for trip in page_results:
                 trip_id = trip.get('id', 'N/A')
@@ -141,9 +142,9 @@ class ConversationContext:
                 
                 result_text += f"  🚗 #{trip_id} - {start_point} → {end_point}"
                 result_text += f" | 🚕{driver_id} | {date_str}\n"
-                
-        else:
-            # 當前班次 (current_trips) - 🔥 修正：使用狀態分組顯示
+        
+        elif query_type in ['current_trips', 'current_trips_range']:
+            # 當前班次 - 🔥 修正：使用狀態分組顯示
             # 🔥 修正：按狀態分組顯示，考慮請假情況
             status_groups = {}
             for trip in page_results:
