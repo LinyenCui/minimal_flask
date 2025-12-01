@@ -239,16 +239,14 @@ LEDGER_PAGE_SIZE = 10
 def _fetch_ledger_page(from_date: str | None, to_date: str | None, last_ts: str | None, last_id: int | None, limit: int = LEDGER_PAGE_SIZE + 1):
     sql = sql_text(
         """
-        WITH baseline_rows AS (
-            SELECT (COALESCE(a.amount_in,0) - COALESCE(a.amount_out,0)) AS delta
+        WITH total_balance AS (
+            -- 計算總餘額
+            SELECT COALESCE(SUM(COALESCE(a.amount_in,0) - COALESCE(a.amount_out,0)),0) AS total
             FROM account_ledger a
-            WHERE (:last_ts IS NOT NULL)
-              AND (:from_date IS NULL OR (a.occurred_at AT TIME ZONE 'UTC')::date >= CAST(:from_date AS date))
-              AND (:to_date   IS NULL OR (a.occurred_at AT TIME ZONE 'UTC')::date <= CAST(:to_date AS date))
-              AND ((a.occurred_at AT TIME ZONE 'UTC'), a.id) <= ((CAST(:last_ts AS timestamptz) AT TIME ZONE 'UTC'), :last_id)
-        ), baseline AS (
-            SELECT COALESCE(SUM(delta),0) AS start_balance FROM baseline_rows
-        ), rows AS (
+            WHERE (CAST(:from_date AS date) IS NULL OR (a.occurred_at AT TIME ZONE 'UTC')::date >= CAST(:from_date AS date))
+              AND (CAST(:to_date AS date)   IS NULL OR (a.occurred_at AT TIME ZONE 'UTC')::date <= CAST(:to_date AS date))
+        ), latest_rows AS (
+            -- 取得最新的記錄（降序）
             SELECT a.id,
                    a.occurred_at AT TIME ZONE 'UTC' AS occurred_at,
                    a.type,
@@ -257,15 +255,16 @@ def _fetch_ledger_page(from_date: str | None, to_date: str | None, last_ts: str 
                    COALESCE(a.amount_out,0) AS amount_out,
                    (COALESCE(a.amount_in,0) - COALESCE(a.amount_out,0)) AS delta
             FROM account_ledger a
-            WHERE (:from_date IS NULL OR (a.occurred_at AT TIME ZONE 'UTC')::date >= CAST(:from_date AS date))
-              AND (:to_date   IS NULL OR (a.occurred_at AT TIME ZONE 'UTC')::date <= CAST(:to_date AS date))
-              AND (:last_ts IS NULL OR ((a.occurred_at AT TIME ZONE 'UTC'), a.id) > ((CAST(:last_ts AS timestamptz) AT TIME ZONE 'UTC'), :last_id))
-            ORDER BY (a.occurred_at AT TIME ZONE 'UTC') ASC, a.id ASC
+            WHERE (CAST(:from_date AS date) IS NULL OR (a.occurred_at AT TIME ZONE 'UTC')::date >= CAST(:from_date AS date))
+              AND (CAST(:to_date AS date)   IS NULL OR (a.occurred_at AT TIME ZONE 'UTC')::date <= CAST(:to_date AS date))
+              AND (CAST(:last_ts AS timestamptz) IS NULL OR ((a.occurred_at AT TIME ZONE 'UTC'), a.id) < ((CAST(:last_ts AS timestamptz) AT TIME ZONE 'UTC'), :last_id))
+            ORDER BY (a.occurred_at AT TIME ZONE 'UTC') DESC, a.id DESC
             LIMIT :limit
         )
-        SELECT r.*, (b.start_balance + SUM(delta) OVER (ORDER BY r.occurred_at, r.id)) AS running_balance
-        FROM rows r CROSS JOIN baseline b
-        ORDER BY r.occurred_at ASC, r.id ASC;
+        SELECT r.*, 
+               (t.total - SUM(delta) OVER (ORDER BY r.occurred_at DESC, r.id DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) + r.delta) AS running_balance
+        FROM latest_rows r CROSS JOIN total_balance t
+        ORDER BY r.occurred_at DESC, r.id DESC;
         """
     )
 
