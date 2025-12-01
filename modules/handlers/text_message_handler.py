@@ -112,44 +112,16 @@ def process_text_message(event):
         
         # 3. 根據對話類型分發處理
         if active_conversation.conversation_type == 'fare_modification':
-            # 車資修改對話
+            # 車資修改對話 - 使用新的處理器
+            from modules.handlers.fare_modification_handler import handle_fare_modification_conversation
             return handle_fare_modification_conversation(active_conversation, message_text, user_id, reply_token)
         elif active_conversation.conversation_type == 'temp_booking':
             # 預約叫車對話
             return handle_temp_booking_conversation(active_conversation, message_text, user_id, reply_token)
         elif active_conversation.conversation_type == 'passenger_leave':
-            # 乘客請假對話 - 先檢查格式，不符合就自動取消
-            parts = message_text.split()
-            is_valid_leave_format = False
-            
-            if len(parts) == 2:
-                try:
-                    int(parts[1])  # 第二部分必須是數字
-                    reason = parts[0]
-                    if reason and not any(char.isdigit() for char in reason):
-                        is_valid_leave_format = True
-                except ValueError:
-                    pass
-            
-            if not is_valid_leave_format:
-                # 格式不正確，自動取消請假對話並直接回覆提示（不再處理本次輸入的其他命令）
-                logger.info(f"🚫 請假格式不正確，自動取消: '{message_text}'")
-                conversation_manager.end_conversation(user_id, "格式不正確自動取消")
-                cancel_msg = (
-                    "🚫 已取消請假操作\n\n"
-                    "💡 輸入格式不正確，請重新點擊請假按鈕\n"
-                    "• 正確格式：[原因] [加成]\n"
-                    "• 範例：臨時有事 -30\n\n"
-                    "⚠️ 群組對話請記得加前綴 '/'"
-                )
-                reply_text(reply_token, cancel_msg)
-                return
-            else:
-                # 格式正確，處理請假
-                return handle_passenger_leave_conversation(active_conversation, message_text, user_id, reply_token)
-        elif active_conversation.conversation_type == 'fare_modification':
-            # 車資修改對話
-            return handle_fare_modification_conversation(active_conversation, message_text, user_id, reply_token)
+            # 乘客請假對話 - 使用新的處理器
+            from modules.handlers.leave_mode_handler import handle_passenger_leave_conversation
+            return handle_passenger_leave_conversation(active_conversation, message_text, user_id, reply_token)
         elif active_conversation.conversation_type == 'driver_assign':
             # 司機指派對話
             return handle_driver_assign_conversation(active_conversation, message_text, user_id, reply_token)
@@ -540,15 +512,13 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             match = re.match(r"固定班次#(\d+)請假", message_text)
             if match:
                 schedule_id = match.group(1)
-                # 記錄固定班次ID到上下文（用於簡化請假格式）
+                # 使用新的請假模式處理器設置上下文
                 try:
+                    from modules.handlers.leave_mode_handler import set_leave_mode_with_context
                     conversation_manager.set_recent_fixed_schedule_id(user_id, int(schedule_id))
-                    # 🔧 修正：設置請假模式標記，正確使用 fixed_schedule_id 參數
-                    conversation_manager.set_leave_mode(user_id=user_id, fixed_schedule_id=int(schedule_id))
-                    logger.info(f"✅ 設置用戶 {user_id} 進入固定班次請假模式，固定班次 #{schedule_id}")
+                    set_leave_mode_with_context(user_id, fixed_schedule_id=int(schedule_id))
                 except Exception as context_error:
-                    logger.error(f"❌ 記錄固定班次ID到上下文或設置請假模式時出錯: {context_error}")
-                    # 使用頂部導入的 traceback
+                    logger.error(f"❌ 設置請假模式時出錯: {context_error}")
                     logger.error(f"❌ 詳細錯誤: {traceback.format_exc()}")
                 
                 # 🔥 新增：提供Quick Reply退出機制（參考車資修改和班次請假成功模式）
@@ -584,8 +554,14 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             return
         # --- 結束新增 ---
         
-        # --- AI修改確認處理（保持原格式，但照搬預約叫車邏輯）---
-        elif message_text.startswith("確認AI修改"):
+        # 車資修改相關命令處理（使用新的處理器）
+        from modules.handlers.fare_modification_handler import handle_fare_modification_commands
+        if handle_fare_modification_commands(message_text, user_id, reply_token):
+            return
+        
+        # --- AI修改確認處理（已移至 fare_modification_handler）---
+        # 以下代碼將在第三階段清理時刪除
+        if False and message_text.startswith("確認AI修改"):
             try:
                 # 🔥 兼容模式：既支持上下文，也支持命令參數
                 pending_modification = conversation_manager.get_pending_modification(user_id)
@@ -778,20 +754,14 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             reply_text(reply_token, f"❌ 未識別的命令: {message_text}\n\n請使用「幫助」查看可用命令")
             return
         
-        # 🔥 修復：先檢查放棄操作命令
-        if message_text.strip() == "放棄操作":
-            logger.info(f"✅ 用戶 {user_id} 執行放棄操作")
-            # 清除請假模式
-            if conversation_manager.is_in_leave_mode(user_id):
-                conversation_manager.clear_leave_mode(user_id)
-                reply_text(reply_token, "❌ 已取消請假操作")
-                return
-            else:
-                reply_text(reply_token, "❌ 目前沒有進行中的操作可以取消")
-                return
+        # 請假模式相關處理（使用新的處理器）
+        from modules.handlers.leave_mode_handler import handle_leave_mode_commands
+        if handle_leave_mode_commands(message_text, user_id, reply_token):
+            return
         
-        # 🔥 修復：優先檢查簡單請假格式，避免被智能助手攔截
-        # 嚴格檢測簡單請假格式：必須恰好2個部分，且第一部分不含數字
+        # 🔥 簡單請假格式檢測已移至 leave_mode_handler
+        # 以下代碼將在第三階段清理
+        '''
         parts = message_text.split()
         is_valid_simple_leave = False
         
@@ -868,11 +838,13 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
 ⚠️ 群組對話請記得加前綴 "/"""
                 )
                 return
+        '''
 
         # 🔥 傳統過去態命令處理（在AI之前，作為穩定的後備機制）
         
-        # 記錄車資傳統命令
-        if message_text.startswith("記錄車資"):
+        # 記錄車資傳統命令（已移至 fare_modification_handler）
+        # 以下代碼將在第三階段清理
+        if False and message_text.startswith("記錄車資"):
             try:
                 parts = message_text.split()
                 
@@ -1364,6 +1336,8 @@ def handle_temp_booking_conversation(conversation, message_text: str, user_id: s
     conversation_manager.end_conversation(user_id, "預約流程結束")
     reply_text(reply_token, "預約流程已結束")
 
+# 以下函數已經移至各自的處理器模組，將在第三階段清理時刪除
+'''
 def handle_passenger_leave_conversation(conversation, message_text: str, user_id: str, reply_token: str):
     """處理乘客請假對話"""
     logger.info(f"🎯 處理乘客請假對話: 步驟={conversation.current_step}")
@@ -1508,6 +1482,7 @@ def handle_fare_modification_conversation(conversation, message_text: str, user_
     # 結束對話
     conversation_manager.end_conversation(user_id, "車資修改處理完成")
     reply_text(reply_token, result)
+'''
 
 def handle_driver_assign_conversation(conversation, message_text: str, user_id: str, reply_token: str):
     """處理司機指派對話"""
