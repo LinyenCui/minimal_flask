@@ -382,12 +382,6 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
         if handled:
             return
             
-        # 處理匯入固定班次（一整周）
-        elif message_text.startswith("匯入固定班次"):
-            from modules.handlers.import_handler import handle_import_fixed_trips_week
-            result_text = handle_import_fixed_trips_week(message_text)
-            reply_text(reply_token, result_text)
-            return
             
             
         # 查詢相關命令（委派給輕路由）
@@ -442,74 +436,7 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
         
         # --- 移除：記錄車資早期AI攔截，改用後面的雙軌制處理 ---
         
-        # --- 新增：固定班表查詢功能 ---
-        elif message_text.startswith("固定班表"):
-            from modules.handlers.fixed_schedule_query_handler import handle_fixed_schedule_query
-            result = handle_fixed_schedule_query(message_text, user_id)
-            
-            # 檢查回傳的結果類型
-            if isinstance(result, dict) and result.get("type") == "quick_reply":
-                # 發送帶有 Quick Reply 的訊息
-                try:
-                    reply_message(reply_token, [result])
-                    logger.info("成功發送固定班表查詢的 Quick Reply 訊息")
-                except Exception as e:
-                    logger.error(f"發送固定班表查詢 Quick Reply 訊息失敗: {e}")
-                    # 降級為純文字
-                    reply_text(reply_token, result.get("text", "查詢失敗"))
-            else:
-                # 純文字回應
-                reply_text(reply_token, result)
-            return
         
-        # --- 新增：固定班次請假功能 ---
-        elif message_text.startswith("固定班次#") and message_text.endswith("請假"):
-            # 處理固定班次#ID請假的交互模式
-            import re
-            match = re.match(r"固定班次#(\d+)請假", message_text)
-            if match:
-                schedule_id = match.group(1)
-                # 使用新的請假模式處理器設置上下文
-                try:
-                    from modules.handlers.leave_mode_handler import set_leave_mode_with_context
-                    conversation_manager.set_recent_fixed_schedule_id(user_id, int(schedule_id))
-                    set_leave_mode_with_context(user_id, fixed_schedule_id=int(schedule_id))
-                except Exception as context_error:
-                    logger.error(f"❌ 設置請假模式時出錯: {context_error}")
-                    logger.error(f"❌ 詳細錯誤: {traceback.format_exc()}")
-                
-                # 🔥 新增：提供Quick Reply退出機制（參考車資修改和班次請假成功模式）
-                from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
-                
-                # 創建Quick Reply按鈕
-                quick_reply_items = [
-                    QuickReplyItem(
-                        action=MessageAction(
-                            label="❌ 放棄操作",
-                            text="放棄操作"
-                        )
-                    )
-                ]
-                
-                quick_reply = QuickReply(items=quick_reply_items)
-                message_text = f"固定班次 #{schedule_id} 乘客長期請假\n\n請輸入：[原因] [加成]\n\n例如：\n診所乘客長期住院 -50\n出國一個月 0\n搬家不再需要 -100\n\n💡 提示：先寫原因，最後寫加成金額\n\n🚪 退出方式：點擊下方「放棄操作」按鈕"
-                
-                # 使用與車資修改相同的Quick Reply發送機制
-                reply_message_with_quick_reply(reply_token, message_text, quick_reply)
-                return
-        
-        elif message_text.startswith("固定班次請假"):
-            from modules.handlers.fixed_schedule_leave_handler import handle_fixed_schedule_leave_command
-            result = handle_fixed_schedule_leave_command(message_text, user_id)
-            reply_text(reply_token, result)
-            return
-            
-        elif message_text.startswith("固定班次恢復"):
-            from modules.handlers.fixed_schedule_leave_handler import handle_fixed_schedule_restore_command
-            result = handle_fixed_schedule_restore_command(message_text, user_id)
-            reply_text(reply_token, result)
-            return
-        # --- 結束新增 ---
         
         # 車資修改相關命令處理（使用新的處理器）
         from modules.handlers.fare_modification_handler import handle_fare_modification_commands

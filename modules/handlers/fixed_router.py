@@ -12,6 +12,13 @@ logger = logging.getLogger(__name__)
 
 def handle_fixed_commands(message_text: str, user_id: str, reply_token: str) -> bool:
     try:
+        # 匯入固定班次
+        if message_text.startswith("匯入固定班次"):
+            from modules.handlers.import_handler import handle_import_fixed_trips_week
+            result_text = handle_import_fixed_trips_week(message_text)
+            reply_text(reply_token, result_text)
+            return True
+        
         # 固定班表
         if message_text.startswith("固定班表"):
             from modules.handlers.fixed_schedule_query_handler import handle_fixed_schedule_query
