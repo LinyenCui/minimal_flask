@@ -344,22 +344,9 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                         reply_text(reply_token, text_content)
             return
         
-        # 序列修復命令
-        elif message_text.startswith("fix-sequence"):
-            logger.info(f"用戶 {user_id} 請求序列修復")
-            try:
-                response = handle_sequence_fix_start(user_id)
-                
-                if response:
-                    # 使用統一響應處理器
-                    success = ResponseHandler.handle_legacy_format(reply_token, response)
-                    if not success:
-                        reply_text(reply_token, "❌ 處理序列修復響應時出錯")
-                else:
-                    reply_text(reply_token, "❌ 無法獲取序列狀態")
-            except Exception as e:
-                logger.error(f"序列修復命令處理失敗: {e}")
-                reply_text(reply_token, f"❌ 序列修復檢查失敗: {str(e)}")
+        # 系統維護命令（使用新路由器）
+        from modules.handlers.system_router import handle_system_commands
+        if handle_system_commands(message_text, user_id, reply_token):
             return
         
         # 資料庫同步相關命令（委派給輕路由）
@@ -368,15 +355,6 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
         if handled:
             return
         
-        # 批量加成命令
-        elif message_text.startswith("batch-allowance") or message_text.startswith("批量加成"):
-            logger.info(f"用戶 {user_id} 請求批量加成")
-            from modules.handlers.batch_allowance_handler import handle_batch_allowance_start
-            response = handle_batch_allowance_start(user_id)
-            
-            if response:
-                reply_text(reply_token, response.get("text", "啟動批量加成中..."))
-            return
         
         # 班次詳情（委派輕路由）
         elif message_text.startswith("班次詳情"):
@@ -411,12 +389,6 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             reply_text(reply_token, result_text)
             return
             
-        # 處理清理trips功能
-        elif message_text.startswith("清理trips"):
-            from modules.handlers.cleanup_handler import handle_cleanup_trips
-            result_text = handle_cleanup_trips(message_text)
-            reply_text(reply_token, result_text)
-            return
             
         # 查詢相關命令（委派給輕路由）
         from modules.handlers.query_router import handle_query_commands
@@ -424,12 +396,6 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
         if handled:
             return
         
-        # 更新已完成班次
-        elif message_text == "更新已完成班次":
-            from modules.services.scheduler_service import update_completed_trips
-            result_text = update_completed_trips()
-            reply_text(reply_token, result_text)
-            return
             
         # 帳務處理（委派輕路由）
         from modules.handlers.accounting_router import handle_accounting_commands
