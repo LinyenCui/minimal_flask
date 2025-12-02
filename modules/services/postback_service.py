@@ -19,7 +19,7 @@ from linebot.v3.messaging import QuickReply, QuickReplyItem, PostbackAction
 from modules.utils.taiwan_time import get_taiwan_time, get_taiwan_date
 from modules.utils.quick_reply_manager import QuickReplyManager
 from modules.utils.response_handler import ResponseHandler
-from modules.handlers.text_message_handler import get_help_text
+from modules.utils.help_text import get_help_text
 
 # 建立日誌記錄器
 logger = logging.getLogger(__name__)
@@ -129,12 +129,10 @@ def handle_postback(event):
             reply_text(reply_token, result)
             
         elif action == 'help':
-            from modules.handlers.text_message_handler import get_help_text
             help_text = get_help_text()
             reply_text(reply_token, help_text)
             
         elif action == 'help_text':
-            from modules.handlers.text_message_handler import get_help_text
             help_text = get_help_text()
             reply_text(reply_token, help_text)
             
