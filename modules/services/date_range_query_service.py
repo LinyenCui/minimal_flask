@@ -215,25 +215,31 @@ def format_completed_trips_range_result(trips, start_date, end_date, driver_id=N
     total_trips = len(trips)
     
     # 使用最準確的金額計算方式
-    total_fare = 0
-    problematic_trips = []
-    
-    for trip in trips:
-        # 新查詢結構：calculated_total=7, coalesced_total=8, original_total=9
-        calculated_total = trip[7]  # 智能計算（NULL處理）
-        coalesced_total = trip[8]   # 強制COALESCE處理
-        original_total = trip[9]    # 原始數據庫total_fare
+    # 如果有 page_info 且包含 total_fare，使用傳入的總金額（避免只計算部分筆數）
+    if page_info and 'total_fare' in page_info:
+        total_fare = page_info['total_fare']
+        total_trips = page_info.get('total_items', total_trips)
+        problematic_trips = []
+    else:
+        total_fare = 0
+        problematic_trips = []
         
-        # 優先使用original_total，如果為NULL則使用calculated_total
-        if original_total is not None:
-            trip_amount = original_total
-        elif calculated_total is not None:
-            trip_amount = calculated_total
-        else:
-            trip_amount = 0
-            problematic_trips.append(trip[0])  # 記錄問題班次ID
+        for trip in trips:
+            # 新查詢結構：calculated_total=7, coalesced_total=8, original_total=9
+            calculated_total = trip[7]  # 智能計算（NULL處理）
+            coalesced_total = trip[8]   # 強制COALESCE處理
+            original_total = trip[9]    # 原始數據庫total_fare
             
-        total_fare += trip_amount
+            # 優先使用original_total，如果為NULL則使用calculated_total
+            if original_total is not None:
+                trip_amount = original_total
+            elif calculated_total is not None:
+                trip_amount = calculated_total
+            else:
+                trip_amount = 0
+                problematic_trips.append(trip[0])  # 記錄問題班次ID
+                
+            total_fare += trip_amount
     
     # 按日期分組
     trips_by_date = {}
@@ -505,6 +511,21 @@ def handle_query_completed_trips_range(message_text, user_id=None):
             from modules.utils.conversation_context import get_conversation_context
             from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
             
+            # 計算總金額（使用所有結果）
+            total_fare = 0
+            for trip in trips:
+                calculated_total = trip[7]
+                coalesced_total = trip[8]
+                original_total = trip[9]
+                
+                if original_total is not None:
+                    trip_amount = original_total
+                elif calculated_total is not None:
+                    trip_amount = calculated_total
+                else:
+                    trip_amount = 0
+                total_fare += trip_amount
+            
             # 轉換 tuple 為 dict 格式以便翻頁處理
             trips_dict = []
             for trip in trips:
@@ -529,12 +550,20 @@ def handle_query_completed_trips_range(message_text, user_id=None):
                     'start_date': start_date.strftime('%Y-%m-%d'),
                     'end_date': end_date.strftime('%Y-%m-%d'),
                     'driver_id': driver_id,
-                    'category': category
+                    'category': category,
+                    'total_fare': total_fare  # 保存總金額
                 }
             )
-            # 格式化第一頁結果（前10筆）
-            result = format_completed_trips_range_result(trips[:10], start_date, end_date, driver_id, category, 
-                                                        page_info={'current': 1, 'total_items': len(trips), 'has_more': True})
+            # 格式化第一頁結果（前10筆，但傳遞總金額）
+            result = format_completed_trips_range_result(
+                trips[:10], start_date, end_date, driver_id, category, 
+                page_info={
+                    'current': 1, 
+                    'total_items': len(trips), 
+                    'total_fare': total_fare,  # 傳遞總金額
+                    'has_more': True
+                }
+            )
             
             # 添加 Quick Reply 按鈕
             quick_reply = QuickReply(items=[
