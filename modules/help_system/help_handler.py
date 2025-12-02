@@ -122,8 +122,8 @@ class HelpHandler:
     def _handle_text_help(self, user_id: str, reply_token: str) -> bool:
         """處理文字版幫助"""
         try:
-            # 使用舊的文字版幫助功能
-            from modules.handlers.text_message_handler import get_help_text
+            # 使用統一的幫助文本
+            from modules.utils.help_text import get_help_text
             help_text = get_help_text()
             reply_text(reply_token, help_text)
             return True
