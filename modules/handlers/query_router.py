@@ -66,16 +66,33 @@ def handle_query_commands(message_text: str, user_id: str, reply_token: str) -> 
             else:
                 reply_text(reply_token, result.get('message', '查詢完成'))
             return True
-        # 範圍查詢（支援翻頁）
+        # 範圍查詢（支援翻頁，返回 dict 或 string）
         if message_text.startswith("查已完成範圍"):
             from modules.services.date_range_query_service import handle_query_completed_trips_range
+            from linebot.v3.messaging import TextMessage
             result = handle_query_completed_trips_range(message_text, user_id)
-            reply_text(reply_token, result)
+            
+            if isinstance(result, dict):
+                # 有 Quick Reply 的結果
+                text_msg = TextMessage(text=result['message'], quick_reply=result.get('quick_reply'))
+                reply_message(reply_token, [text_msg])
+            else:
+                # 純文字結果
+                reply_text(reply_token, result)
             return True
+            
         if message_text.startswith("查班次範圍"):
             from modules.services.date_range_query_service import handle_query_current_trips_range
+            from linebot.v3.messaging import TextMessage
             result = handle_query_current_trips_range(message_text, user_id)
-            reply_text(reply_token, result)
+            
+            if isinstance(result, dict):
+                # 有 Quick Reply 的結果
+                text_msg = TextMessage(text=result['message'], quick_reply=result.get('quick_reply'))
+                reply_message(reply_token, [text_msg])
+            else:
+                # 純文字結果
+                reply_text(reply_token, result)
             return True
         return False
     except Exception as e:

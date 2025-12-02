@@ -503,11 +503,28 @@ def handle_query_completed_trips_range(message_text, user_id=None):
         # 如果提供了 user_id，保存查詢結果以支援翻頁
         if user_id and len(trips) > 10:
             from modules.utils.conversation_context import get_conversation_context
+            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+            
+            # 轉換 tuple 為 dict 格式以便翻頁處理
+            trips_dict = []
+            for trip in trips:
+                trip_dict = {
+                    'id': trip[0],
+                    'date': trip[1].strftime('%Y-%m-%d') if trip[1] else 'N/A',
+                    'start_point': trip[2],
+                    'end_point': trip[3],
+                    'category': trip[4],
+                    'meter_fare': trip[5],
+                    'extra_fare': trip[6],
+                    'driver_id': trip[10]
+                }
+                trips_dict.append(trip_dict)
+            
             context = get_conversation_context(user_id)
             context.save_query_result(
                 query_type='completed_trips_range',
                 command=message_text,
-                all_results=trips,
+                all_results=trips_dict,
                 conditions={
                     'start_date': start_date.strftime('%Y-%m-%d'),
                     'end_date': end_date.strftime('%Y-%m-%d'),
@@ -518,11 +535,29 @@ def handle_query_completed_trips_range(message_text, user_id=None):
             # 格式化第一頁結果（前10筆）
             result = format_completed_trips_range_result(trips[:10], start_date, end_date, driver_id, category, 
                                                         page_info={'current': 1, 'total_items': len(trips), 'has_more': True})
+            
+            # 添加 Quick Reply 按鈕
+            quick_reply = QuickReply(items=[
+                QuickReplyItem(
+                    action=MessageAction(
+                        label="📄 下一頁",
+                        text="下一頁"
+                    )
+                ),
+                QuickReplyItem(
+                    action=MessageAction(
+                        label="🔍 重新查詢",
+                        text="重新查詢"
+                    )
+                )
+            ])
+            
+            # 返回帶 Quick Reply 的結果
+            return {'message': result, 'quick_reply': quick_reply}
         else:
             # 格式化結果（全部顯示，最多20筆）
             result = format_completed_trips_range_result(trips, start_date, end_date, driver_id, category)
-        
-        return result
+            return result
         
     except Exception as e:
         logger.error(f"處理已完成班次範圍查詢失敗: {e}")
@@ -605,11 +640,29 @@ def handle_query_current_trips_range(message_text, user_id=None):
             # 如果提供了 user_id，保存查詢結果以支援翻頁
             if user_id and len(trips) > 10:
                 from modules.utils.conversation_context import get_conversation_context
+                from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+                
+                # 轉換 tuple 為 dict 格式以便翻頁處理
+                trips_dict = []
+                for trip in trips:
+                    trip_dict = {
+                        'trip_id': trip[0],
+                        'date': trip[1].strftime('%Y-%m-%d') if trip[1] else 'N/A',
+                        'time': trip[2],
+                        'start_point': trip[3],
+                        'end_point': trip[4],
+                        'category': trip[5],
+                        'driver_id': trip[6],
+                        'status': trip[7],
+                        'trip_type': trip[8]
+                    }
+                    trips_dict.append(trip_dict)
+                
                 context = get_conversation_context(user_id)
                 context.save_query_result(
                     query_type='current_trips_range',
                     command=message_text,
-                    all_results=trips,
+                    all_results=trips_dict,
                     conditions={
                         'start_date': start_date.strftime('%Y-%m-%d'),
                         'end_date': end_date.strftime('%Y-%m-%d'),
@@ -620,10 +673,29 @@ def handle_query_current_trips_range(message_text, user_id=None):
                 # 格式化第一頁結果（前10筆）
                 result = format_current_trips_range_result(trips[:10], start_date, end_date, driver_id, category,
                                                           page_info={'current': 1, 'total_items': len(trips), 'has_more': True})
+                
+                # 添加 Quick Reply 按鈕
+                quick_reply = QuickReply(items=[
+                    QuickReplyItem(
+                        action=MessageAction(
+                            label="📄 下一頁",
+                            text="下一頁"
+                        )
+                    ),
+                    QuickReplyItem(
+                        action=MessageAction(
+                            label="🔍 重新查詢",
+                            text="重新查詢"
+                        )
+                    )
+                ])
+                
+                # 返回帶 Quick Reply 的結果
+                return {'message': result, 'quick_reply': quick_reply}
             else:
                 # 格式化結果（全部顯示，最多20筆）
                 result = format_current_trips_range_result(trips, start_date, end_date, driver_id, category)
-            return result
+                return result
         
     except Exception as e:
         logger.error(f"處理進行中班次範圍查詢失敗: {e}")
