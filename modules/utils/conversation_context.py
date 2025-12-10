@@ -132,7 +132,7 @@ class ConversationContext:
         
         # 根據查詢類型格式化結果
         if query_type in ['completed_trips', 'completed_trips_range']:
-            # 已完成班次
+            # 已完成班次 - 包含車資和0元警示
             for trip in page_results:
                 trip_id = trip.get('id', 'N/A')
                 date_str = trip.get('date', 'N/A')
@@ -140,8 +140,32 @@ class ConversationContext:
                 end_point = trip.get('end_point', 'N/A')
                 driver_id = trip.get('driver_id', 'N/A')
                 
-                result_text += f"  🚗 #{trip_id} - {start_point} → {end_point}"
-                result_text += f" | 🚕{driver_id} | {date_str}\n"
+                # 🔥 計算車資金額
+                meter_fare = trip.get('meter_fare')
+                extra_fare = trip.get('extra_fare')
+                calculated_total = trip.get('calculated_total')
+                original_total = trip.get('original_total')
+                modification_reason = trip.get('modification_reason', '')
+                
+                # 金額計算邏輯（與 date_range_query_service.py 保持一致）
+                if calculated_total is not None:
+                    display_amount = int(calculated_total)
+                elif original_total is not None:
+                    display_amount = int(original_total)
+                elif meter_fare is not None or extra_fare is not None:
+                    display_amount = int((meter_fare or 0) + (extra_fare or 0))
+                else:
+                    display_amount = 0
+                
+                # 🔥 0元警示（與 date_range_query_service.py 保持一致）
+                problem_indicator = ""
+                if display_amount == 0:
+                    if modification_reason and any(kw in modification_reason for kw in ["免費", "請假", "贈送", "優惠"]):
+                        problem_indicator = " 🏷️(0元)"  # 有備註的0元
+                    else:
+                        problem_indicator = " ⚠️(0元)"  # 異常的0元
+                
+                result_text += f"#{trip_id} 🚗{driver_id} {start_point}→{end_point} ${display_amount}{problem_indicator}\n"
         
         elif query_type in ['current_trips', 'current_trips_range']:
             # 當前班次 - 🔥 修正：使用狀態分組顯示
@@ -588,6 +612,19 @@ class ConversationManager:
         if user_id in self.pending_modifications:
             del self.pending_modifications[user_id]
             logger.info(f"清除用戶 {user_id} 的待執行修改")
+    
+    # 🔥 別名方法（統一 IntentExecutor 使用）
+    def set_pending_operation(self, user_id: str, operation_data: Dict):
+        """設定待執行操作（set_pending_modification 的別名）"""
+        self.set_pending_modification(user_id, operation_data)
+    
+    def get_pending_operation(self, user_id: str) -> Optional[Dict]:
+        """獲取待執行操作（get_pending_modification 的別名）"""
+        return self.get_pending_modification(user_id)
+    
+    def clear_pending_operation(self, user_id: str):
+        """清除待執行操作（clear_pending_modification 的別名）"""
+        self.clear_pending_modification(user_id)
     
     def reset_context(self, user_id: str):
         """重置用戶的所有上下文狀態"""

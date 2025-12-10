@@ -506,7 +506,38 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             logger.info(f"🤖 智能助手處理用戶訊息: {message_text}")
             smart_result = process_with_smart_assistant(message_text, user_id)
             
-            if smart_result["type"] == "execute_command":
+            # 🔥 新增：處理 Function Calling 結果（請假、車資修改等）
+            if smart_result["type"] == "function_call":
+                logger.info(f"🔧 Function Calling: {smart_result['function_name']}")
+                try:
+                    from modules.core.intent_executor import IntentExecutor
+                    executor = IntentExecutor()
+                    
+                    # 構建意圖結構
+                    intent = {
+                        "action": smart_result["function_name"],
+                        "params": smart_result["parameters"],
+                        "confidence": smart_result.get("confidence", 0.9)
+                    }
+                    
+                    # 執行意圖
+                    execute_result = executor.execute(intent, user_id, reply_token)
+                    
+                    # IntentExecutor 已經處理了回覆，直接返回
+                    if execute_result.get("success"):
+                        return
+                    
+                    # 如果執行失敗且有錯誤消息，發送給用戶
+                    if execute_result.get("message"):
+                        reply_text(reply_token, execute_result.get("message"))
+                        return
+                
+                except Exception as e:
+                    logger.error(f"Function Calling 執行失敗: {e}", exc_info=True)
+                    # FC 失敗，降級到傳統處理（不發送錯誤消息，讓後續邏輯處理）
+                    pass
+            
+            elif smart_result["type"] == "execute_command":
                 command = smart_result["command"]
                 
                 # 🔥 新增：統計金額命令處理

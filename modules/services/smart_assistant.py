@@ -27,6 +27,8 @@ class SmartAssistant:
     
     def __init__(self):
         self.model = None
+        self.fc_model = None  # 🔥 Function Calling 專用模型
+        self.fc_enabled = False  # 🔥 FC 是否啟用（會在 _initialize_ai 中設為 True）
         self.ai_enabled = self._initialize_ai()
         
     def _initialize_ai(self) -> bool:
@@ -44,8 +46,31 @@ class SmartAssistant:
             # 初始化 Vertex AI
             vertexai.init(project=project_id, location=location)
             
-            # 初始化 Gemini 模型
+            # 初始化 Gemini 模型（傳統 JSON 輸出）
             self.model = GenerativeModel(model_name)
+            
+            # 🔥 嘗試初始化 Function Calling 模型
+            try:
+                from vertexai.generative_models import Tool, FunctionDeclaration
+                from modules.core.gemini_functions import GEMINI_FUNCTIONS
+                
+                # 將函數定義轉換為 Vertex AI 格式
+                function_declarations = []
+                for func in GEMINI_FUNCTIONS:
+                    fd = FunctionDeclaration(
+                        name=func["name"],
+                        description=func["description"],
+                        parameters=func["parameters"]
+                    )
+                    function_declarations.append(fd)
+                
+                tools = [Tool(function_declarations=function_declarations)]
+                self.fc_model = GenerativeModel(model_name, tools=tools)
+                self.fc_enabled = True
+                logger.info(f"✅ Function Calling 初始化成功: {len(GEMINI_FUNCTIONS)} 個函數")
+            except Exception as fc_e:
+                logger.warning(f"⚠️ Function Calling 初始化失敗，使用傳統模式: {fc_e}")
+                self.fc_enabled = False
             
             logger.info(f"✅ Gemini AI 初始化成功: {model_name}")
             return True
@@ -777,6 +802,15 @@ class SmartAssistant:
                 f"💰 車資命令跳過時間態護欄: {suggested_command} (原始輸入: '{original_input}')"
             )
             return suggested_command
+        
+        # 🚨 重要：請假命令不應該進行時間態轉換
+        # 請假是操作而非查詢，不需要轉換成「查詢班次」
+        leave_commands = ["乘客請假", "請假", "批量請假", "固定班次請假", "passenger_leave"]
+        if any(cmd in suggested_command for cmd in leave_commands):
+            logging.getLogger(__name__).info(
+                f"🏥 請假命令跳過時間態護欄: {suggested_command} (原始輸入: '{original_input}')"
+            )
+            return suggested_command
 
         # 嘗試先處理「日期範圍」情境
         separators = ['-', '到', '至', '~', 'to']
@@ -902,15 +936,41 @@ class SmartAssistant:
             return suggested_command
 
     def process_user_message(self, user_input: str, user_id: str) -> Dict:
-        """智能處理用戶消息 - AI增強版"""
+        """智能處理用戶消息 - FC優先 + 查詢回退架構"""
         logger.info(f"🤖 智能助手處理: {user_input}")
         
-        # 步驟1: 嘗試AI分析（如果可用）
+        # 🔥 步驟1: Function Calling（暫時禁用，避免破壞查詢功能）
+        # TODO: FC 會把查詢也攔截成 clarify_user_intent，需要調整 prompt 或分流邏輯
+        fc_temporarily_disabled = True  # 🚨 暫時禁用，保持系統穩定
+        
+        if self.fc_enabled and not fc_temporarily_disabled:
+            logger.info(f"🔧 嘗試 Function Calling 分析...")
+            fc_result = self._analyze_with_function_calling(user_input, user_id)
+            
+            if fc_result and fc_result.get('type') == 'function_call':
+                function_name = fc_result['function_name']
+                logger.info(f"✅ FC 識別意圖: {function_name}")
+                
+                # 🔥 關鍵：只有「純查詢」才回退到傳統路徑
+                # clarify_user_intent、passenger_leave、update_fare 等都走 IntentExecutor
+                pure_query_functions = ['query_trips', 'query_completed_trips', 'query_trips_by_context']
+                if function_name in pure_query_functions:
+                    logger.info(f"🔄 純查詢操作 {function_name} 回退到傳統路徑（更穩定）")
+                    # 不返回，繼續走傳統 AI 分析
+                else:
+                    # 🔥 clarify_user_intent、請假、車資修改等操作走 IntentExecutor
+                    # clarify_user_intent 會找到班次後詢問用戶想做什麼
+                    logger.info(f"🎯 走 IntentExecutor: {function_name}")
+                    return fc_result
+            else:
+                logger.info(f"ℹ️ FC 未返回有效意圖，嘗試傳統分析")
+        
+        # 🔥 步驟2: 傳統 AI 分析路徑（查詢等操作）
         ai_result = None
         if self.ai_enabled:
-            ai_result = self._analyze_with_ai(user_input, user_id)  # 🔥 傳遞user_id
+            ai_result = self._analyze_with_ai(user_input, user_id)
         
-        if ai_result and ai_result.get('confidence', 0) > 0.6:  # 🔥 提高門檻到0.6，避免錯誤解析低質量輸入
+        if ai_result and ai_result.get('confidence', 0) > 0.6:
             logger.info(f"✅ AI分析成功，信心度: {ai_result['confidence']}")
             
             # AI理解成功，執行標準命令
@@ -925,7 +985,7 @@ class SmartAssistant:
                     "entities": ai_result.get('entities', {})
                 }
         
-        # 🔥 新增：處理中等信心度情況（0.3-0.6）- 提供澄清對話
+        # 處理中等信心度情況（0.3-0.6）- 提供澄清對話
         elif ai_result and 0.3 <= ai_result.get('confidence', 0) <= 0.6:
             logger.info(f"⚠️ AI信心度中等: {ai_result['confidence']}，提供澄清選項")
             return {
@@ -978,6 +1038,80 @@ class SmartAssistant:
                     "suggestions": self._get_intelligent_suggestions(user_input),
                     "original_input": user_input
                 }
+    
+    def _analyze_with_function_calling(self, user_input: str, user_id: str) -> Optional[Dict]:
+        """
+        使用 Function Calling 分析用戶輸入
+        
+        只處理：請假、車資修改、確認/取消操作
+        """
+        if not self.fc_enabled or not self.fc_model:
+            return None
+        
+        try:
+            logger.info(f"🔧 使用 Function Calling 分析: {user_input}")
+            
+            # 構建上下文感知的 prompt
+            from modules.utils.taiwan_time import get_taiwan_date
+            today = get_taiwan_date()
+            
+            # 檢查對話上下文
+            conversation_context = ""
+            try:
+                from modules.utils.conversation_context import conversation_manager
+                pending_op = conversation_manager.get_pending_operation(user_id)
+                if pending_op:
+                    conversation_context = f"\n\n⚠️ 用戶有待確認操作: {pending_op.get('action')}"
+            except Exception:
+                pass
+            
+            system_prompt = f"""你是派班系統AI助手，當前日期是 {today}。
+
+根據用戶輸入選擇合適的函數：
+- passenger_leave: 乘客請假（必須明確提到「請假」「不來」「不用載」等）
+- update_fare: 修改車資（必須有班次號和金額）
+- confirm_operation: 確認操作（用戶說「確認」「是」等）
+- cancel_operation: 取消操作（用戶說「取消」「算了」等）
+
+⚠️ 重要：如果用戶只是查詢班次（沒有明確的操作意圖），不要調用任何函數！{conversation_context}"""
+            
+            # 使用 FC 模型生成回應
+            from vertexai.generative_models import GenerationConfig
+            generation_config = GenerationConfig(
+                temperature=0.1,
+                top_p=0.8,
+                top_k=40,
+            )
+            
+            response = self.fc_model.generate_content(
+                [system_prompt, f"用戶輸入: {user_input}"],
+                generation_config=generation_config
+            )
+            
+            # 解析 Function Call 結果
+            if response.candidates and response.candidates[0].content.parts:
+                for part in response.candidates[0].content.parts:
+                    if hasattr(part, 'function_call') and part.function_call:
+                        fc = part.function_call
+                        function_name = fc.name
+                        parameters = dict(fc.args) if fc.args else {}
+                        
+                        logger.info(f"✅ FC 解析成功: {function_name}, params={parameters}")
+                        
+                        return {
+                            "type": "function_call",
+                            "function_name": function_name,
+                            "parameters": parameters,
+                            "original_input": user_input,
+                            "confidence": 0.9
+                        }
+            
+            logger.info("ℹ️ FC 未返回函數調用，用戶可能只是查詢")
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Function Calling 分析失敗: {e}")
+            return None
     
     def _get_intelligent_suggestions(self, user_input: str) -> list:
         """根據用戶輸入提供智能建議"""

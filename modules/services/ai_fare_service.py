@@ -1439,13 +1439,14 @@ def parse_fare_modification_intent(message_text: str) -> Optional[Dict]:
         # 🔥 修复：支持$符号格式，如：修改班次1560$400 +100
         # 🔥 新增：支持#號開頭格式，如：修改#2111$1150+375
         # 🔥 修復：支持"記錄車資"格式，如：記錄車資 2111 1150 375
+        # 🔥 三數字格式（班次ID、錶價、加成）
         simple_format_patterns = [
             r'修改班次#?(\d+)\s+(\d+)\s+([+-]?\d+)',        # 空格分隔：修改班次1505 270 -40
             r'修改班次#?(\d+)\$(\d+)\s+([+-]?\d+)',        # $符号格式：修改班次1560$400 +100
             r'修改班次#?(\d+)\s+\$(\d+)\s+([+-]?\d+)',     # 空格+$格式
             r'修改#(\d+)\$(\d+)([+-]?\d+)',                # 緊湊格式：修改#2111$1150+375
             r'修改#(\d+)\s*\$\s*(\d+)\s*([+-]?\d+)',      # #號格式帶空格
-            r'記錄車資\s+(\d+)\s+(\d+)\s+([+-]?\d+)',      # 🔥 修復：記錄車資格式
+            r'記錄車資\s+(\d+)\s+(\d+)\s+([+-]?\d+)',      # 記錄車資格式（三數字）
         ]
         
         simple_format_match = None
@@ -1462,8 +1463,33 @@ def parse_fare_modification_intent(message_text: str) -> Optional[Dict]:
                     cleaned_reason = after_numbers.strip('() ')
                     if cleaned_reason:
                         result['reason'] = cleaned_reason
-                logger.info(f"簡單格式解析成功 (模式: {pattern}): 班次ID#{result['trip_id']}, 錶價{result['meter_fare']}, 加成{result['extra_fare']}, 原因'{result.get('reason', '無')}'")
+                logger.info(f"簡單格式解析成功 (三數字模式: {pattern}): 班次ID#{result['trip_id']}, 錶價{result['meter_fare']}, 加成{result['extra_fare']}, 原因'{result.get('reason', '無')}'")
                 break
+        
+        # 🔥 新增：兩數字格式（班次ID、錶價，加成預設為0）
+        if not simple_format_match:
+            two_number_patterns = [
+                r'修改#(\d+)\$(\d+)(?:\s|（|$)',            # 修改#4996$90（一般記賬）
+                r'修改#(\d+)\s*\$\s*(\d+)(?:\s|（|$)',     # 修改#4996 $90（一般記賬）
+                r'修改班次#?(\d+)\$(\d+)(?:\s|（|$)',       # 修改班次4996$90
+                r'修改班次#?(\d+)\s+(\d+)(?:\s+[^\d]|$)',   # 修改班次4996 90 一般記賬（後面是非數字）
+                r'記錄車資\s+(\d+)\s+(\d+)(?:\s+[^\d+-]|$)', # 🔥 關鍵：記錄車資 4996 90 一般記賬
+            ]
+            
+            for pattern in two_number_patterns:
+                two_num_match = re.search(pattern, message_text)
+                if two_num_match:
+                    result['trip_id'] = int(two_num_match.group(1))
+                    result['meter_fare'] = int(two_num_match.group(2))
+                    result['extra_fare'] = 0  # 沒有加成時預設為0
+                    # 檢查是否有原因在數字後面
+                    after_numbers = message_text[two_num_match.end():].strip()
+                    # 清理括號和空格
+                    cleaned_reason = after_numbers.strip('（）() ')
+                    if cleaned_reason and not cleaned_reason.isdigit() and len(cleaned_reason) >= 2:
+                        result['reason'] = cleaned_reason
+                    logger.info(f"簡單格式解析成功 (兩數字模式: {pattern}): 班次ID#{result['trip_id']}, 錶價{result['meter_fare']}, 加成{result['extra_fare']}, 原因'{result.get('reason', '無')}'")
+                    break
         
         # 提取錶價 - 增強版本
         if 'meter_fare' not in result:  # 如果簡單格式沒有解析到，才使用複雜模式

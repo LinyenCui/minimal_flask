@@ -304,6 +304,12 @@ def format_completed_trips_range_result(trips, start_date, end_date, driver_id=N
                 problem_indicator = " ⚠️"
             elif original_total != calculated_total and original_total is not None and calculated_total is not None:
                 problem_indicator = " 🔄"  # 金額不一致
+            elif display_amount == 0:
+                # 車資為0元：檢查是否有合理的備註說明（如請假、免費等）
+                if modification_reason and any(kw in modification_reason for kw in ["免費", "請假", "贈送", "優惠"]):
+                    problem_indicator = " 🏷️(0元)"  # 有備註的0元
+                else:
+                    problem_indicator = " ⚠️(0元)"  # 異常的0元
             
             lines.append(f"#{trip_id} 🚗{driver_id_result} {start_point}→{end_point} ${display_amount}{problem_indicator}")
             displayed_count += 1
