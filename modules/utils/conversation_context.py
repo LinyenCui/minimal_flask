@@ -552,19 +552,22 @@ class ConversationManager:
         # 回退到普通記錄
         return self.recent_fixed_schedule_ids.get(user_id)
     
-    def set_leave_mode(self, user_id: str, trip_id: int = None, fixed_schedule_id: int = None):
-        """設定用戶進入請假模式"""
-        if trip_id is None and fixed_schedule_id is None:
-            logger.error(f"設定請假模式時必須提供 trip_id 或 fixed_schedule_id")
+    def set_leave_mode(self, user_id: str, trip_id: int = None, trip_ids: list = None, fixed_schedule_id: int = None):
+        """設定用戶進入請假模式（支持單一或多個班次）"""
+        if trip_id is None and trip_ids is None and fixed_schedule_id is None:
+            logger.error(f"設定請假模式時必須提供 trip_id、trip_ids 或 fixed_schedule_id")
             return
             
         self.leave_modes[user_id] = {
             'trip_id': trip_id,
+            'trip_ids': trip_ids,  # 🔥 支持批量
             'fixed_schedule_id': fixed_schedule_id,
             'timestamp': time.time()
         }
         
-        if trip_id:
+        if trip_ids:
+            logger.info(f"用戶 {user_id} 進入批量請假模式，班次IDs: {trip_ids}")
+        elif trip_id:
             logger.info(f"用戶 {user_id} 進入普通班次請假模式，班次ID: {trip_id}")
         elif fixed_schedule_id:
             logger.info(f"用戶 {user_id} 進入固定班次請假模式，固定班次ID: {fixed_schedule_id}")

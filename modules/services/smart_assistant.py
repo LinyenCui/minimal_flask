@@ -939,11 +939,8 @@ class SmartAssistant:
         """智能處理用戶消息 - FC優先 + 查詢回退架構"""
         logger.info(f"🤖 智能助手處理: {user_input}")
         
-        # 🔥 步驟1: Function Calling（暫時禁用，避免破壞查詢功能）
-        # TODO: FC 會把查詢也攔截成 clarify_user_intent，需要調整 prompt 或分流邏輯
-        fc_temporarily_disabled = True  # 🚨 暫時禁用，保持系統穩定
-        
-        if self.fc_enabled and not fc_temporarily_disabled:
+        # 🔥 步驟1: Function Calling（已調整 prompt，查詢會正確識別）
+        if self.fc_enabled:
             logger.info(f"🔧 嘗試 Function Calling 分析...")
             fc_result = self._analyze_with_function_calling(user_input, user_id)
             

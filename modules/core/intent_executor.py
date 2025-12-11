@@ -107,26 +107,25 @@ class IntentExecutor:
         """
         🔥 核心對話功能：意圖不明確時，先找班次再詢問用戶想做什麼
         
-        範例場景：
-        用戶："明天和緯四"（沒說要查詢還是請假）
-        
-        處理流程：
-        1. 解析日期和地點
-        2. 查詢相關班次
-        3. 顯示班次 + Quick Reply 詢問「您想做什麼？」
-        4. 用戶選擇後再執行具體操作
+        根據班次狀態動態生成選項：
+        - 準備/待派 → 請假、註銷、衝突、查詢
+        - 請假/註銷/衝突 → 改回準備、查詢
         """
         logger.info(f"🤔 澄清用戶意圖: {params}")
         
         # 1. 解析日期
         date_str = params.get("date", "今天")
-        parsed_date = self.date_parser.parse_date_input(date_str)
+        parsed_date = self.date_parser.parse(date_str)
         
         if not parsed_date:
             reply_text(reply_token, f"❌ 無法解析日期：{date_str}\n請使用明確的日期格式，如：明天、12/11")
             return {"success": False, "message": f"無法解析日期：{date_str}"}
         
         # 2. 判斷時間態
+        # 🔥 三時間態設計：
+        # - 過去態 (completed_trips)：日期 < 今天
+        # - 現在態 (trips)：日期 >= 今天（包含今天和未來已匯入的班次）
+        # - 未來態 (fixed_schedules)：模板，尚未匯入
         from modules.utils.taiwan_time import get_taiwan_date
         today = get_taiwan_date()
         
@@ -134,10 +133,11 @@ class IntentExecutor:
             table_name = "completed_trips"
             time_status = "過去態"
         else:
+            # 🔥 今天和未來已匯入的班次都在 trips 表，都是「現在態」
             table_name = "trips"
-            time_status = "現在態" if parsed_date == today else "未來"
+            time_status = "現在態"
         
-        # 3. 查詢相關班次
+        # 3. 查詢相關班次（包含所有狀態）
         location = params.get("location", "")
         driver_id = params.get("driver_id")
         category = params.get("category")
@@ -154,60 +154,187 @@ class IntentExecutor:
             reply_text(reply_token, f"📭 {date_str}「{location}」沒有找到相關班次\n\n💡 請確認日期和地點是否正確")
             return {"success": False, "message": "沒有找到班次"}
         
-        # 4. 保存上下文供後續使用
+        # 4. 分析班次狀態，決定提供的選項
+        from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+        
+        trip_ids = [t.get("id") or t.get("trip_id") for t in trips]
+        
+        # 保存上下文
         conversation_manager.set_pending_operation(user_id, {
             "action": "clarify_context",
-            "trips": [{"id": t.get("id") or t.get("trip_id"), "route": f"{t.get('start_point')}→{t.get('end_point')}"} for t in trips[:3]],
+            "trips": [{"id": t.get("id") or t.get("trip_id"), 
+                      "route": f"{t.get('start_point')}→{t.get('end_point')}",
+                      "status": t.get("status", ""),
+                      "leave_reason": t.get("passenger_leave_reason", "")} for t in trips],
             "date": date_str,
             "location": location,
             "table": table_name
         })
         
-        # 5. 生成詢問訊息
-        if len(trips) == 1:
-            trip = trips[0]
-            trip_id = trip.get("id") or trip.get("trip_id")
-            message = self._format_clarify_single_trip(trip, date_str, location, time_status)
-            
-            # Quick Reply 詢問用戶想做什麼
-            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
-            quick_reply = QuickReply(items=[
-                QuickReplyItem(action=MessageAction(label="🏥 設定請假", text=f"班次 {trip_id} 乘客請假")),
-                QuickReplyItem(action=MessageAction(label="📋 查看詳情", text=f"班次詳情 {trip_id}")),
-                QuickReplyItem(action=MessageAction(label="💰 修改車資", text=f"修改班次#{trip_id}車資")),
-                QuickReplyItem(action=MessageAction(label="❌ 算了", text="取消操作"))
-            ])
+        # 5. 根據狀態生成 Quick Reply
+        if table_name == "trips":
+            # 現在態：根據狀態動態生成選項
+            quick_reply = self._generate_clarify_quick_reply(trips, date_str, location)
+            message = self._format_clarify_with_status(trips, date_str, location, time_status)
         else:
-            message = self._format_clarify_multiple_trips(trips, date_str, location, time_status)
-            
-            # 多個班次時提供更通用的選項
-            first_trip_id = trips[0].get("id") or trips[0].get("trip_id")
-            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+            # 過去態：只提供查詢和車資修改選項
+            first_trip_id = trip_ids[0]
             quick_reply = QuickReply(items=[
-                QuickReplyItem(action=MessageAction(label=f"🏥 {first_trip_id}請假", text=f"班次 {first_trip_id} 乘客請假")),
-                QuickReplyItem(action=MessageAction(label=f"📋 {first_trip_id}詳情", text=f"班次詳情 {first_trip_id}")),
-                QuickReplyItem(action=MessageAction(label="🔍 查詢全部", text=f"查詢班次 {date_str} {location}")),
+                QuickReplyItem(action=MessageAction(label="📋 查看詳情", text=f"查看 {first_trip_id}")),
+                QuickReplyItem(action=MessageAction(label="💰 修改車資", text=f"修改班次#{first_trip_id}車資")),
+                QuickReplyItem(action=MessageAction(label="🔍 查詢全部", text=f"查已完成 {date_str} {location}")),
                 QuickReplyItem(action=MessageAction(label="❌ 算了", text="取消操作"))
             ])
+            message = self._format_clarify_multiple_trips(trips, date_str, location, time_status)
         
         reply_message_with_quick_reply(reply_token, message, quick_reply)
         return {"success": True, "message": "已詢問用戶意圖"}
     
+    def _generate_clarify_quick_reply(self, trips: List[Dict], date_str: str, location: str):
+        """
+        根據班次狀態動態生成 Quick Reply 選項
+        
+        🔥 兩層邏輯：
+        第一層：詢問要做什麼操作
+        - 準備狀態 → 請假？註銷？衝突？只是查詢？
+        - 非準備狀態 → 改回準備？
+        第二層：用戶選擇後進入對應模式
+        """
+        from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+        
+        trip_ids = [t.get("id") or t.get("trip_id") for t in trips]
+        
+        # 分類狀態
+        ready_trips = []      # 準備/待派（無請假原因）
+        leave_trips = []      # 請假（有請假原因）
+        cancelled_trips = []  # 註銷
+        conflict_trips = []   # 衝突
+        
+        for t in trips:
+            tid = t.get("id") or t.get("trip_id")
+            status = t.get("status", "")
+            leave_reason = t.get("passenger_leave_reason", "")
+            
+            # 判斷實際狀態
+            if status in ("準備", "待派"):
+                if leave_reason:  # 有請假原因視為請假
+                    leave_trips.append(tid)
+                else:
+                    ready_trips.append(tid)
+            elif status == "註銷":
+                cancelled_trips.append(tid)
+            elif status == "衝突":
+                conflict_trips.append(tid)
+            else:
+                ready_trips.append(tid)  # 預設為準備
+        
+        items = []
+        
+        if len(trips) == 1:
+            # === 單一班次 ===
+            tid = trip_ids[0]
+            if ready_trips:
+                # 準備狀態 → 三種操作選項
+                items.extend([
+                    QuickReplyItem(action=MessageAction(label="🏥 請假", text=f"班次 {tid} 乘客請假")),
+                    QuickReplyItem(action=MessageAction(label="🚫 註銷", text=f"修改狀態 {tid} 註銷")),
+                    QuickReplyItem(action=MessageAction(label="⚠️ 衝突", text=f"修改狀態 {tid} 衝突")),
+                ])
+            else:
+                # 非準備狀態 → 只有改回準備選項
+                items.append(QuickReplyItem(action=MessageAction(label="✅ 改回準備", text=f"修改狀態 {tid} 準備")))
+            
+            items.append(QuickReplyItem(action=MessageAction(label="📋 查看詳情", text=f"班次詳情 {tid}")))
+        
+        else:
+            # === 多個班次 ===
+            if ready_trips and len(ready_trips) == len(trips):
+                # 🔥 全部準備狀態 → 第一層：問「要做什麼操作」（不是全部！）
+                # 用戶點擊後進入第二層，再讓用戶選擇全部還是單個
+                items.extend([
+                    QuickReplyItem(action=MessageAction(label="🏥 請假", text="選擇請假")),
+                    QuickReplyItem(action=MessageAction(label="🚫 註銷", text="選擇註銷")),
+                    QuickReplyItem(action=MessageAction(label="⚠️ 衝突", text="選擇衝突")),
+                ])
+            
+            elif leave_trips and len(leave_trips) == len(trips):
+                # 🔥 全部請假狀態 → 提供改回準備（使用正確的觸發文字）
+                items.append(QuickReplyItem(action=MessageAction(label="✅ 全部改回準備", text="全部改回準備")))
+                for tid in trip_ids[:2]:
+                    items.append(QuickReplyItem(action=MessageAction(label=f"#{tid}改回", text=f"修改狀態 {tid} 準備")))
+            
+            elif cancelled_trips and len(cancelled_trips) == len(trips):
+                # 全部註銷狀態 → 提供改回準備
+                items.append(QuickReplyItem(action=MessageAction(label="✅ 全部改回準備", text="全部改回準備")))
+                for tid in trip_ids[:2]:
+                    items.append(QuickReplyItem(action=MessageAction(label=f"#{tid}改回", text=f"修改狀態 {tid} 準備")))
+            
+            elif conflict_trips and len(conflict_trips) == len(trips):
+                # 全部衝突狀態 → 提供改回準備
+                items.append(QuickReplyItem(action=MessageAction(label="✅ 全部改回準備", text="全部改回準備")))
+                for tid in trip_ids[:2]:
+                    items.append(QuickReplyItem(action=MessageAction(label=f"#{tid}改回", text=f"修改狀態 {tid} 準備")))
+            
+            else:
+                # 混合狀態 → 提供個別班次操作
+                for tid in trip_ids[:3]:
+                    items.append(QuickReplyItem(action=MessageAction(label=f"📋 #{tid}詳情", text=f"班次詳情 {tid}")))
+            
+            items.append(QuickReplyItem(action=MessageAction(label="🔍 查詢全部", text=f"查詢班次 {date_str} {location}")))
+        
+        items.append(QuickReplyItem(action=MessageAction(label="❌ 算了", text="取消操作")))
+        
+        return QuickReply(items=items[:13])  # LINE 限制最多13個
+    
+    def _format_clarify_with_status(self, trips: List[Dict], date_str: str, location: str, time_status: str) -> str:
+        """格式化班次訊息（包含狀態信息）"""
+        message = f"📍 找到 {date_str}「{location}」的 {len(trips)} 個班次：\n\n"
+        
+        for i, trip in enumerate(trips[:5], 1):
+            trip_id = trip.get("id") or trip.get("trip_id")
+            time = trip.get("time", "")
+            start = trip.get("start_point", "")
+            end = trip.get("end_point", "")
+            status = trip.get("status", "")
+            leave_reason = trip.get("passenger_leave_reason", "")
+            
+            # 顯示實際狀態
+            if leave_reason:
+                status_display = f"請假({leave_reason})"
+            elif status == "註銷":
+                status_display = "🚫註銷"
+            elif status == "衝突":
+                status_display = "⚠️衝突"
+            else:
+                status_display = f"✅{status}"
+            
+            message += f"{i}. #{trip_id}｜{time}｜{start}→{end}｜{status_display}\n"
+        
+        message += f"\n🕒 {time_status}"
+        message += "\n\n❓ 請問您想做什麼？"
+        
+        return message
+    
     def _query_trips_for_clarify(self, table_name: str, date, location: str, 
                                   driver_id: Optional[int] = None, category: str = None) -> List[Dict]:
-        """查詢班次用於澄清意圖"""
+        """
+        查詢班次用於澄清意圖
+        
+        🔥 查詢所有狀態的班次（包含已請假、已註銷、已衝突）
+        """
         try:
             if table_name == "trips":
+                # 🔥 查詢所有狀態，包含 passenger_leave_reason
                 base_query = """
                     SELECT trip_id as id, date, time, start_point, via_point, end_point,
-                           driver_id, passenger_name, status, category
+                           driver_id, passenger_name, status, category, passenger_leave_reason
                     FROM trips
-                    WHERE date = :date AND status IN ('待派', '準備')
+                    WHERE date = :date
                 """
             else:
                 base_query = """
                     SELECT id, date, start_point, via_point, end_point,
-                           driver_id, passenger_name, meter_fare, extra_fare, category
+                           driver_id, passenger_name, meter_fare, extra_fare, category, passenger_leave_reason
                     FROM completed_trips
                     WHERE date = :date
                 """
@@ -291,7 +418,7 @@ class IntentExecutor:
         
         # 1. 解析日期
         date_str = params.get("date", "今天")
-        parsed_date = self.date_parser.parse_date_input(date_str)
+        parsed_date = self.date_parser.parse(date_str)
         
         if not parsed_date:
             return {
@@ -316,11 +443,11 @@ class IntentExecutor:
             table_name = "trips"
             time_status = "現在態（未來）"
         
-        # 3. 查詢相關班次
+        # 3. 查詢相關班次（包含已請假的）
         location = params.get("location", "")
         driver_id = params.get("driver_id")
         
-        trips = self._query_trips_by_location(
+        trips = self._query_trips_for_leave(
             table_name=table_name,
             date=parsed_date,
             location=location,
@@ -328,43 +455,172 @@ class IntentExecutor:
         )
         
         if not trips:
-            return {
-                "success": False,
-                "message": f"沒有找到 {date_str}「{location}」的相關班次"
-            }
+            reply_text(reply_token, f"📭 沒有找到 {date_str}「{location}」的相關班次")
+            return {"success": False, "message": "沒有找到班次"}
         
-        # 4. 生成確認訊息
-        if len(trips) == 1:
-            trip = trips[0]
-            message = self._format_passenger_leave_confirmation(trip, params, time_status)
+        # 4. 分類：已請假 vs 準備狀態
+        already_on_leave = [t for t in trips if t.get('passenger_leave_reason')]
+        ready_trips = [t for t in trips if not t.get('passenger_leave_reason')]
+        
+        from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+        
+        # 情況1：所有班次都已請假 → 問是否恢復
+        if already_on_leave and not ready_trips:
+            trip_ids = [t.get('id') for t in already_on_leave]
             
-            # 保存上下文供後續確認使用
-            conversation_manager.set_pending_operation(user_id, {
-                "action": "passenger_leave",
-                "trip_id": trip["id"],
-                "table": table_name,
-                "reason": params.get("reason", "乘客請假"),
-                "allowance": params.get("allowance", 0)
-            })
+            if len(already_on_leave) == 1:
+                trip = already_on_leave[0]
+                trip_id = trip.get('id')
+                reason = trip.get('passenger_leave_reason', '未知原因')
+                message = f"""📍 {date_str}「{location}」的班次：
+
+🚕 班次 #{trip_id}
+📍 {trip.get('start_point')}→{trip.get('end_point')}
+⏰ {trip.get('time', '')}
+
+⚠️ 這班已經是請假狀態了
+📝 原因：{reason}
+
+是否要改回「準備」狀態？"""
+                
+                # 保存恢復上下文
+                conversation_manager.set_pending_operation(user_id, {
+                    "action": "restore_from_leave",
+                    "trip_ids": trip_ids,
+                    "table": table_name
+                })
+                
+                quick_reply = QuickReply(items=[
+                    QuickReplyItem(action=MessageAction(label="✅ 改回準備", text="確認請假")),
+                    QuickReplyItem(action=MessageAction(label=f"📋 #{trip_id}詳情", text=f"班次詳情 {trip_id}")),
+                    QuickReplyItem(action=MessageAction(label="❌ 放棄操作", text="取消操作"))
+                ])
+            else:
+                # 多個已請假班次
+                message = f"📍 {date_str}「{location}」找到 {len(already_on_leave)} 個班次，都已經請假了：\n\n"
+                for trip in already_on_leave[:5]:
+                    tid = trip.get('id')
+                    reason = trip.get('passenger_leave_reason', '')
+                    message += f"• #{tid} {trip.get('start_point')}→{trip.get('end_point')} ({reason})\n"
+                message += "\n請選擇要改回準備的班次："
+                
+                # 保存恢復上下文（全部）
+                conversation_manager.set_pending_operation(user_id, {
+                    "action": "restore_from_leave",
+                    "trip_ids": trip_ids,
+                    "table": table_name
+                })
+                
+                # 🔥 生成選項：全部改回 + 單獨改回
+                items = [
+                    QuickReplyItem(action=MessageAction(label="✅ 全部改回準備", text="確認請假"))
+                ]
+                for tid in trip_ids[:2]:  # 最多顯示2個單獨選項
+                    items.append(QuickReplyItem(action=MessageAction(label=f"#{tid}改回", text=f"班次詳情 {tid}")))
+                items.append(QuickReplyItem(action=MessageAction(label="❌ 放棄操作", text="取消操作")))
+                
+                quick_reply = QuickReply(items=items)
             
-            # 生成 Quick Reply 按鈕
-            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+            reply_message_with_quick_reply(reply_token, message, quick_reply)
+            return {"success": True, "message": "班次已請假"}
+        
+        # 情況2：有準備狀態的班次可以請假 → 進入請假模式
+        if len(ready_trips) == 1:
+            trip = ready_trips[0]
+            trip_id = trip.get('id')
+            
+            # 🔥 使用現有的請假模式（讓用戶輸入理由+加成）
+            conversation_manager.set_leave_mode(user_id=user_id, trip_id=trip_id)
+            
+            message = f"""📍 找到 {date_str}「{location}」的班次：
+
+🚕 班次 #{trip_id}
+📍 {trip.get('start_point')}→{trip.get('end_point')}
+⏰ {trip.get('time', '')}
+
+🏥 已進入請假模式
+請輸入「請假原因 加成金額」
+例如：出國旅遊 -50
+
+💡 輸入「放棄操作」取消"""
+            
             quick_reply = QuickReply(items=[
-                QuickReplyItem(action=MessageAction(label="✅ 確認請假", text="確認請假")),
-                QuickReplyItem(action=MessageAction(label="📋 查看詳情", text=f"班次詳情 {trip['id']}")),
-                QuickReplyItem(action=MessageAction(label="❌ 取消", text="取消操作"))
+                QuickReplyItem(action=MessageAction(label="📋 查看詳情", text=f"班次詳情 {trip_id}")),
+                QuickReplyItem(action=MessageAction(label="❌ 放棄操作", text="放棄操作"))
             ])
             
             reply_message_with_quick_reply(reply_token, message, quick_reply)
-            
-            return {"success": True, "message": "已發送確認訊息"}
+            return {"success": True, "message": "已進入請假模式"}
         
         else:
-            # 多個班次：顯示列表供用戶選擇
-            message = self._format_multiple_trips_list(trips, date_str, location, time_status)
-            reply_text(reply_token, message)
+            # 🔥 多個準備狀態班次：進入批量請假模式
+            trip_ids = [t.get('id') for t in ready_trips]
             
-            return {"success": True, "message": "已顯示多個班次"}
+            # 進入批量請假模式
+            conversation_manager.set_leave_mode(user_id=user_id, trip_ids=trip_ids)
+            
+            message = f"📍 {date_str}「{location}」找到 {len(ready_trips)} 個班次：\n\n"
+            
+            for trip in ready_trips[:5]:
+                trip_id = trip.get('id')
+                message += f"• #{trip_id} {trip.get('time', '')} {trip.get('start_point')}→{trip.get('end_point')}\n"
+            
+            message += f"\n🏥 已進入批量請假模式（{len(trip_ids)}班）"
+            message += "\n請輸入「請假原因 加成金額」"
+            message += "\n例如：出國旅遊 -50"
+            message += "\n\n💡 輸入「放棄操作」取消"
+            
+            # 生成選項
+            items = [
+                QuickReplyItem(action=MessageAction(label="❌ 放棄操作", text="放棄操作"))
+            ]
+            # 也提供單獨請假選項
+            for tid in trip_ids[:2]:
+                items.append(QuickReplyItem(action=MessageAction(label=f"只#{tid}請假", text=f"班次詳情 {tid}")))
+            
+            quick_reply = QuickReply(items=items)
+            reply_message_with_quick_reply(reply_token, message, quick_reply)
+            return {"success": True, "message": "已進入批量請假模式"}
+    
+    def _query_trips_for_leave(self, table_name: str, date, location: str, 
+                                driver_id: Optional[int] = None) -> List[Dict]:
+        """查詢班次用於請假操作（包含已請假的班次）"""
+        try:
+            if table_name == "trips":
+                base_query = """
+                    SELECT trip_id as id, date, time, start_point, via_point, end_point,
+                           driver_id, passenger_name, status, passenger_leave_reason
+                    FROM trips
+                    WHERE date = :date
+                    AND status IN ('待派', '準備')
+                """
+            else:
+                base_query = """
+                    SELECT id, date, start_point, via_point, end_point,
+                           driver_id, passenger_name, meter_fare, extra_fare, passenger_leave_reason
+                    FROM completed_trips
+                    WHERE date = :date
+                """
+            
+            params = {"date": date.strftime("%Y-%m-%d")}
+            
+            if location:
+                base_query += " AND (start_point LIKE :location OR via_point LIKE :location OR end_point LIKE :location)"
+                params["location"] = f"%{location}%"
+            
+            if driver_id:
+                base_query += " AND driver_id = :driver_id"
+                params["driver_id"] = driver_id
+            
+            base_query += " ORDER BY time" if table_name == "trips" else " ORDER BY id"
+            base_query += " LIMIT 10"
+            
+            result = db.session.execute(text(base_query), params)
+            return [dict(row._mapping) for row in result]
+        
+        except Exception as e:
+            logger.error(f"查詢班次失敗: {e}", exc_info=True)
+            return []
     
     def _query_trips_by_location(self, table_name: str, date: datetime, 
                                   location: str, driver_id: Optional[int] = None) -> List[Dict]:
@@ -505,19 +761,23 @@ class IntentExecutor:
         """
         處理修改車資意圖
         
-        範例場景：
-        用戶："把 4914 加 75，加載湖美街"
+        支持兩種模式：
+        1. 設定模式：$550+250 → 錶價=550, 加成=250
+        2. 累加模式：+75 → 在現有基礎上加75
         
         處理流程：
-        1. 查詢班次 #4914
-        2. 顯示當前車資
+        1. 查詢班次
+        2. 顯示當前與調整後車資
         3. 請求確認
         4. 執行修改
         """
         logger.info(f"💰 處理車資修改: {params}")
         
         trip_id = params.get("trip_id")
-        adjustment = params.get("adjustment", 0)  # 調整金額
+        # 🔥 支持直接設定錶價和加成
+        new_meter_fare = params.get("meter_fare")  # 設定錶價
+        new_extra_fare = params.get("extra_fare")  # 設定加成
+        adjustment = params.get("adjustment", 0)   # 累加金額（舊模式）
         reason = params.get("reason", "車資調整")
         
         if not trip_id:
@@ -543,29 +803,50 @@ class IntentExecutor:
                 }
             
             trip = dict(result._mapping)
-            current_fare = (trip.get("meter_fare") or 0) + (trip.get("extra_fare") or 0)
-            new_fare = current_fare + adjustment
+            current_meter = trip.get("meter_fare") or 0
+            current_extra = trip.get("extra_fare") or 0
+            current_total = current_meter + current_extra
+            
+            # 🔥 計算新車資
+            # 優先使用設定模式（有明確的錶價或加成）
+            if new_meter_fare is not None or new_extra_fare is not None:
+                # 設定模式：用戶明確指定錶價/加成
+                final_meter = new_meter_fare if new_meter_fare is not None else current_meter
+                final_extra = new_extra_fare if new_extra_fare is not None else current_extra
+                # 如果有 adjustment 且沒有設定 extra_fare，則用 adjustment 作為加成
+                if new_extra_fare is None and adjustment != 0:
+                    final_extra = adjustment
+            else:
+                # 累加模式：只有 adjustment
+                final_meter = current_meter
+                final_extra = current_extra + adjustment
+            
+            new_total = final_meter + final_extra
             
             # 生成確認訊息
             message = f"""💰 確認修改班次 #{trip_id} 車資
 
 📍 路線：{trip['start_point']} → {trip['end_point']}
 🚕 司機：{trip['driver_id']}
-💵 當前車資：${current_fare}
-➕ 調整金額：{adjustment:+d} 元
-💰 調整後車資：${new_fare}
+
+📊 車資變更：
+   錶價：${current_meter} → ${final_meter}
+   加成：${current_extra} → ${final_extra}
+   總計：${current_total} → ${new_total}
+   
 📝 原因：{reason}
 
 確認修改嗎？"""
             
-            # 保存上下文
+            # 🔥 保存完整的車資信息
             conversation_manager.set_pending_operation(user_id, {
                 "action": "update_fare",
                 "trip_id": trip_id,
-                "adjustment": adjustment,
+                "meter_fare": final_meter,
+                "extra_fare": final_extra,
                 "reason": reason,
-                "current_fare": current_fare,
-                "new_fare": new_fare
+                "current_total": current_total,
+                "new_total": new_total
             })
             
             # 生成 Quick Reply
@@ -618,6 +899,10 @@ class IntentExecutor:
         try:
             if action == "passenger_leave":
                 return self._execute_passenger_leave(pending_op, user_id, reply_token)
+            elif action == "restore_from_leave":
+                return self._execute_restore_from_leave(pending_op, user_id, reply_token)
+            elif action == "batch_leave":
+                return self._execute_batch_leave(pending_op, user_id, reply_token)
             elif action == "update_fare":
                 return self._execute_update_fare(pending_op, user_id, reply_token)
             else:
@@ -723,46 +1008,160 @@ class IntentExecutor:
             reply_text(reply_token, f"❌ 請假操作失敗: {str(e)}")
             return {"success": False, "message": str(e)}
     
+    def _execute_restore_from_leave(self, pending_op: Dict[str, Any], user_id: str, reply_token: str) -> Dict[str, Any]:
+        """
+        執行恢復（從請假改回準備狀態）- 支持批量
+        """
+        trip_id = pending_op.get("trip_id")
+        trip_ids = pending_op.get("trip_ids", [])
+        table_name = pending_op.get("table")
+        
+        # 兼容單一 trip_id
+        if trip_id and not trip_ids:
+            trip_ids = [trip_id]
+        
+        logger.info(f"🔄 執行恢復: trip_ids={trip_ids}, table={table_name}")
+        
+        try:
+            if table_name == "trips":
+                success_count = 0
+                restored_trips = []
+                
+                for tid in trip_ids:
+                    # 🔥 清除所有請假相關欄位
+                    update_query = text("""
+                        UPDATE trips
+                        SET passenger_leave_reason = NULL,
+                            extra_fare = 0,
+                            modification_reason = NULL
+                        WHERE trip_id = :trip_id
+                        RETURNING trip_id, start_point, end_point
+                    """)
+                    result = db.session.execute(update_query, {"trip_id": tid})
+                    updated_row = result.fetchone()
+                    if updated_row:
+                        success_count += 1
+                        restored_trips.append(f"#{tid}")
+                
+                db.session.commit()
+                
+                if success_count > 0:
+                    if len(trip_ids) == 1:
+                        message = f"""✅ 已恢復為準備狀態！
+
+🚕 班次 {restored_trips[0]}
+📊 狀態：準備（已清除請假原因和加成）
+
+💡 如需再次請假，請使用相同方式操作"""
+                    else:
+                        message = f"""✅ 批量恢復完成！
+
+🚕 班次：{', '.join(restored_trips)}
+📊 狀態：準備（已清除請假原因和加成）
+✅ 成功：{success_count}/{len(trip_ids)} 個"""
+                    
+                    reply_text(reply_token, message)
+                    return {"success": True, "message": f"已恢復 {success_count} 個班次"}
+                else:
+                    reply_text(reply_token, f"❌ 找不到指定班次")
+                    return {"success": False, "message": "班次不存在"}
+            else:
+                reply_text(reply_token, "❌ 已完成班次無法恢復狀態")
+                return {"success": False, "message": "已完成班次無法恢復"}
+        
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"執行恢復失敗: {e}", exc_info=True)
+            reply_text(reply_token, f"❌ 恢復操作失敗: {str(e)}")
+            return {"success": False, "message": str(e)}
+    
+    def _execute_batch_leave(self, pending_op: Dict[str, Any], user_id: str, reply_token: str) -> Dict[str, Any]:
+        """
+        執行批量請假
+        """
+        trip_ids = pending_op.get("trip_ids", [])
+        table_name = pending_op.get("table")
+        reason = pending_op.get("reason", "乘客請假")
+        
+        logger.info(f"🏥 執行批量請假: trip_ids={trip_ids}, table={table_name}, reason={reason}")
+        
+        if not trip_ids:
+            reply_text(reply_token, "❌ 沒有指定班次")
+            return {"success": False, "message": "沒有指定班次"}
+        
+        try:
+            if table_name == "trips":
+                success_count = 0
+                for trip_id in trip_ids:
+                    update_query = text("""
+                        UPDATE trips
+                        SET passenger_leave_reason = :reason
+                        WHERE trip_id = :trip_id
+                        RETURNING trip_id
+                    """)
+                    result = db.session.execute(update_query, {
+                        "trip_id": trip_id,
+                        "reason": reason
+                    })
+                    if result.fetchone():
+                        success_count += 1
+                
+                db.session.commit()
+                
+                if success_count > 0:
+                    trip_list = ", ".join([f"#{tid}" for tid in trip_ids[:success_count]])
+                    message = f"""✅ 批量請假成功！
+
+🏥 已請假班次：{trip_list}
+📝 請假原因：{reason}
+📊 成功：{success_count} 個班次
+
+💡 如需恢復，請使用「班次詳情 #ID」查看後操作"""
+                    
+                    reply_text(reply_token, message)
+                    return {"success": True, "message": f"批量請假成功: {success_count}個"}
+                else:
+                    reply_text(reply_token, "❌ 沒有班次被更新")
+                    return {"success": False, "message": "沒有班次被更新"}
+            else:
+                reply_text(reply_token, "❌ 已完成班次請使用單獨操作")
+                return {"success": False, "message": "已完成班次不支援批量請假"}
+        
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"執行批量請假失敗: {e}", exc_info=True)
+            reply_text(reply_token, f"❌ 批量請假失敗: {str(e)}")
+            return {"success": False, "message": str(e)}
+    
     def _execute_update_fare(self, pending_op: Dict[str, Any], user_id: str, reply_token: str) -> Dict[str, Any]:
         """
         執行車資修改操作
+        
+        支持設定模式：直接設定 meter_fare 和 extra_fare
         """
         trip_id = pending_op.get("trip_id")
-        adjustment = pending_op.get("adjustment", 0)
+        meter_fare = pending_op.get("meter_fare")
+        extra_fare = pending_op.get("extra_fare")
         reason = pending_op.get("reason", "車資調整")
-        new_fare = pending_op.get("new_fare")
         
-        logger.info(f"💰 執行車資修改: trip_id={trip_id}, adjustment={adjustment}, new_fare={new_fare}, reason={reason}")
+        logger.info(f"💰 執行車資修改: trip_id={trip_id}, meter_fare={meter_fare}, extra_fare={extra_fare}, reason={reason}")
         
         try:
-            if new_fare is not None:
-                # 直接設定新車資
-                update_query = text("""
-                    UPDATE completed_trips
-                    SET meter_fare = :new_fare,
-                        modification_reason = :reason
-                    WHERE id = :trip_id
-                    RETURNING id, meter_fare, extra_fare
-                """)
-                result = db.session.execute(update_query, {
-                    "trip_id": trip_id,
-                    "new_fare": new_fare,
-                    "reason": reason
-                })
-            else:
-                # 調整金額
-                update_query = text("""
-                    UPDATE completed_trips
-                    SET extra_fare = COALESCE(extra_fare, 0) + :adjustment,
-                        modification_reason = :reason
-                    WHERE id = :trip_id
-                    RETURNING id, meter_fare, extra_fare
-                """)
-                result = db.session.execute(update_query, {
-                    "trip_id": trip_id,
-                    "adjustment": adjustment,
-                    "reason": reason
-                })
+            # 🔥 直接設定錶價和加成
+            update_query = text("""
+                UPDATE completed_trips
+                SET meter_fare = :meter_fare,
+                    extra_fare = :extra_fare,
+                    modification_reason = :reason
+                WHERE id = :trip_id
+                RETURNING id, meter_fare, extra_fare
+            """)
+            result = db.session.execute(update_query, {
+                "trip_id": trip_id,
+                "meter_fare": meter_fare,
+                "extra_fare": extra_fare,
+                "reason": reason
+            })
             
             updated_row = result.fetchone()
             db.session.commit()

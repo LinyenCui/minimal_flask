@@ -18,7 +18,7 @@ KNOWN_COMMANDS = {
     "預約叫車幫助",  # Help for AI booking
     "東洋班次", "診所班次", "查已完成", "指派司機", "完成班次", "回報問題",
     "取消預約", "取消指派", "更新已完成班次", "取消AI修改",  # 語意衝突已解決，統一使用「取消」
-    "確認修改", "取消修改", "確認請假", "取消操作",  # 🔥 FC 確認/取消操作
+    "確認修改", "取消修改", "確認請假", "取消操作", "全部請假",  # 🔥 FC 確認/取消操作
     "fix-sequence",   # Database sequence repair command
     "批量加成", "batch-allowance",   # Batch allowance command
     "資料庫同步", "確認同步", "同步結果", "取消",   # Database sync and maintenance commands
@@ -31,7 +31,11 @@ KNOWN_COMMANDS = {
     # 帳務處理事件代碼
     "acct_deposit_start", "acct_weekly_start", "acct_ledger_start",
     # 分頁與區間事件（文字命令也需放行）
-    "acct_ledger_range"
+    "acct_ledger_range",
+    # 🔥 新增：批量狀態變更命令
+    "全部註銷", "全部衝突", "全部改回準備",
+    # 🔥 第二層：選擇操作類型
+    "選擇請假", "選擇註銷", "選擇衝突",
 }
 
 # 🔥 新增：postback displayText 模式匹配
@@ -45,7 +49,10 @@ COMMANDS_WITH_ARGS = {
     "記錄車資", "修改類別", "生成周報表", "生成週報表", "生成周報", "生成週報",
     "確認指派", "取消指派", "確認AI修改", "確認修改", "取消AI修改", "查看", "修改班次",
     "固定班次請假", "固定班次恢復",  # 固定班次請假相關命令
-    "固定班表"  # 新增固定班表查詢命令（去掉前綴，因為前綴會被預處理掉）
+    "固定班表",  # 新增固定班表查詢命令（去掉前綴，因為前綴會被預處理掉）
+    "查詢班次", "班次",  # 🔥 FC Quick Reply 生成的命令
+    "修改狀態",  # 🔥 狀態變更命令
+    "全部請假", "全部註銷", "全部衝突", "全部改回準備",  # 🔥 批量狀態變更
 }
 
 def is_from_button(message_text):
