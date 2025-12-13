@@ -736,6 +736,95 @@ class SmartAssistant:
     "reasoning": "詳細的分析推理過程，說明如何用生產線思維理解用戶意圖並選擇命令"
 }}"""
     
+    def _check_location_date_pattern(self, user_input: str) -> Optional[Dict]:
+        """
+        🔥 2025-12 新增：FC 兜底機制
+        
+        當 FC 不穩定時（同樣輸入有時返回 clarify_user_intent，有時不返回），
+        這個方法檢測輸入是否符合「地點+日期」模式，如果符合則強制觸發 clarify_user_intent。
+        
+        這確保 Quick Reply 總是可用，用戶點擊後能正確執行操作。
+        
+        觸發條件（必須同時滿足）：
+        1. 有日期關鍵字（今天、明天、昨天等）或日期格式（12/13、12-13等）
+        2. 沒有「班次」關鍵字
+        3. 沒有操作關鍵字（請假、修改、記錄、查詢、查看、統計等）
+        4. 輸入長度較短（<20字，避免誤判複雜查詢）
+        
+        Returns:
+            Dict: clarify_user_intent 結果結構，或 None
+        """
+        import re
+        
+        # 日期關鍵字
+        date_keywords = ['今天', '明天', '昨天', '前天', '後天', '本週', '下週', '上週']
+        
+        # 操作關鍵字（有這些詞不應觸發澄清，應該走正常處理）
+        operation_keywords = [
+            '請假', '修改', '記錄', '查詢', '查看', '統計', '班次', 
+            '車資', '金額', '總和', '總計', '收入', '已完成', '範圍',
+            '幫助', '取消', '確認'
+        ]
+        
+        # 檢查輸入長度（太長的輸入可能是複雜查詢，不應該觸發澄清）
+        if len(user_input) > 20:
+            return None
+        
+        # 檢查是否有操作關鍵字（有則不觸發）
+        if any(kw in user_input for kw in operation_keywords):
+            return None
+        
+        # 檢查是否有日期關鍵字
+        has_date_keyword = any(kw in user_input for kw in date_keywords)
+        
+        # 檢查是否有日期格式（如 12/13、12-13、1213 等）
+        date_pattern = re.search(r'(\d{1,2}[/\-\.]\d{1,2}|\d{3,4})', user_input)
+        has_date_format = date_pattern is not None
+        
+        # 必須有日期信息
+        if not (has_date_keyword or has_date_format):
+            return None
+        
+        # 提取日期和地點
+        date_str = None
+        location = None
+        
+        # 提取日期
+        for kw in date_keywords:
+            if kw in user_input:
+                date_str = kw
+                # 從輸入中移除日期，剩下的可能是地點
+                location = user_input.replace(kw, '').strip()
+                break
+        
+        if not date_str and date_pattern:
+            date_str = date_pattern.group(1)
+            # 從輸入中移除日期格式，剩下的可能是地點
+            location = re.sub(r'\d{1,2}[/\-\.]\d{1,2}|\d{3,4}', '', user_input).strip()
+        
+        # 如果沒有提取到地點，嘗試整個輸入作為地點（除了日期）
+        if not location:
+            return None
+        
+        # 清理地點（移除可能的前綴符號）
+        location = location.lstrip('/#!@').strip()
+        
+        # 如果地點為空或太短，不觸發
+        if not location or len(location) < 2:
+            return None
+        
+        logger.info(f"🎯 FC 兜底：檢測到模式 date={date_str}, location={location}")
+        
+        # 構造 clarify_user_intent 結果
+        return {
+            "type": "function_call",
+            "function_name": "clarify_user_intent",
+            "parameters": {
+                "date": date_str,
+                "location": location
+            }
+        }
+    
     def _analyze_with_ai(self, user_input: str, user_id: str) -> Dict:
         """使用Gemini AI分析用戶輸入"""
         try:
@@ -840,6 +929,9 @@ class SmartAssistant:
                 def to_completed_range(cmd: str) -> str:
                     if cmd.startswith("查已完成範圍"):
                         return cmd
+                    # 🔥 2025-12 修復：統計金額命令保持原樣（已完成態統計）
+                    if cmd.startswith("統計金額"):
+                        return cmd  # 統計金額命令不需要添加前綴，直接返回
                     for s in ("查已完成範圍", "查已完成", "查詢班次範圍", "查詢班次", "查班次範圍"):
                         if cmd.startswith(s):
                             return cmd.replace(s, "查已完成範圍", 1)
@@ -961,6 +1053,14 @@ class SmartAssistant:
                     return fc_result
             else:
                 logger.info(f"ℹ️ FC 未返回有效意圖，嘗試傳統分析")
+                
+                # 🔥 2025-12 修復：FC 不穩定時的兜底機制
+                # 當 FC 未返回但輸入符合「地點+日期」模式時，強制觸發 clarify_user_intent
+                # 這確保 Quick Reply 總是可用，避免用戶點擊後無效
+                fallback_result = self._check_location_date_pattern(user_input)
+                if fallback_result:
+                    logger.info(f"🔧 FC 兜底：檢測到「地點+日期」模式，強制觸發 clarify_user_intent")
+                    return fallback_result
         
         # 🔥 步驟2: 傳統 AI 分析路徑（查詢等操作）
         ai_result = None

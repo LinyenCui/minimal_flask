@@ -96,6 +96,37 @@ def process_text_message(event):
     # 記錄將要處理的文本
     logger.info(f"Processing text message handed over: '{message_text}' (Normalized: '{message_text}')")
     
+    # 🔥🔥🔥🔥🔥 霸王清除指令 - 強制重置所有對話狀態回到本初
+    # 支援：!!!!!、見相非相、reset
+    if message_text.strip() in ['!!!!!', '見相非相', 'reset', 'RESET']:
+        logger.info(f"🔥🔥🔥🔥🔥 霸王清除！用戶 {user_id} 觸發強制重置")
+        # 清除所有可能的對話狀態
+        conversation_manager.clear_pending_operation(user_id)
+        conversation_manager.clear_leave_mode(user_id)
+        try:
+            conversation_manager.end_conversation(user_id, "霸王清除")
+        except:
+            pass
+        # 清除序列修復狀態（已在文件頂部導入）
+        if user_id in sequence_fix_states:
+            del sequence_fix_states[user_id]
+        # 清除批量加成狀態
+        try:
+            from modules.handlers.batch_allowance_handler import batch_allowance_states as bas
+            if user_id in bas:
+                del bas[user_id]
+        except:
+            pass
+        # 清除臨時預約狀態
+        try:
+            from modules.handlers.temp_booking_session import end_booking
+            end_booking(user_id)
+        except:
+            pass
+        
+        reply_text(reply_token, "🔥🔥🔥🔥🔥 見諸相非相，即見如來\n\n✨ 所有對話狀態已清除，回到本初\n💡 您可以重新開始任何操作")
+        return
+    
     # 🔥 統一對話狀態檢查 - 防止智能助手搶戲
     
     # 1. 檢查是否有活躍對話
@@ -139,7 +170,51 @@ def process_text_message(event):
     
     # 4. 沒有活躍對話，進入正常處理流程...
     
+    # 🔥 2025-12 修復：智能清除舊的 pending_operation
+    # 只有當用戶輸入「完全無關的新命令」時才清除，對話流程中的命令不清除
+    pending_op = conversation_manager.get_pending_operation(user_id)
+    if pending_op:
+        msg_stripped = message_text.strip()
+        
+        # 🔥 對話流程中的命令（不應該清除 pending_operation）
+        conversation_flow_commands = [
+            # 取消/放棄命令
+            '取消', '算了', '放棄', '放棄操作', '取消操作',
+            # 第一層選擇命令
+            '選擇請假', '選擇註銷', '選擇衝突',
+            # 批量操作命令
+            '全部請假', '全部註銷', '全部衝突', '全部改回準備',
+        ]
+        
+        # 檢查是否是對話流程命令（包括 #ID請假、#ID改回、修改狀態 等模式）
+        import re
+        is_modify_status_cmd = bool(re.match(r'^修改狀態\s+\d+\s+\S+$', msg_stripped))  # 修改狀態 852 註銷
+        
+        is_conversation_cmd = (
+            msg_stripped in conversation_flow_commands or
+            msg_stripped.endswith('請假') or  # 如 #852請假
+            msg_stripped.endswith('改回') or  # 如 #852改回
+            msg_stripped.endswith('註銷') or  # 如 #852註銷
+            msg_stripped.endswith('衝突') or  # 如 #852衝突
+            msg_stripped.startswith('班次詳情') or  # 班次詳情 xxx
+            is_modify_status_cmd  # 修改狀態 852 註銷
+        )
+        
+        if not is_conversation_cmd:
+            # 用戶輸入了完全無關的新命令，自動清除舊的對話狀態
+            old_action = pending_op.get('action', '未知')
+            logger.info(f"🔄 用戶 {user_id} 輸入新命令，自動清除舊的對話狀態: {old_action}")
+            conversation_manager.clear_pending_operation(user_id)
+    
     try:
+        # 🔥🔥🔥 2025-12 修復：將請假模式命令處理提前到最前面
+        # 確保第二層命令（選擇註銷、選擇衝突、選擇請假、全部註銷等）被優先處理
+        # 不會被其他 router 攔截
+        from modules.handlers.leave_mode_handler import handle_leave_mode_commands
+        if handle_leave_mode_commands(message_text, user_id, reply_token):
+            logger.info(f"✅ leave_mode_handler 已處理命令: {message_text}")
+            return
+        
         # 🔥 新增：處理查詢範例命令（來自Quick Reply）
         if message_text in ["查詢範例", "查看範例格式", "範例格式", "我想查詢具體的班次資料"]:
             example_text = """📋 **AI智能查詢範例**
@@ -482,13 +557,7 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             
         # --- 🤖 智能助手系統整合 ---
         
-        # 請假模式相關處理（使用新的處理器）
-        from modules.handlers.leave_mode_handler import handle_leave_mode_commands
-        if handle_leave_mode_commands(message_text, user_id, reply_token):
-            return
-        
-        # 🔥 簡單請假格式檢測已移至 leave_mode_handler
-        # 以下代碼將在第三階段清理
+        # 🔥 leave_mode_handler 已移至 try 塊開頭，確保第二層命令優先處理
 
         # 🔥 傳統過去態命令處理（在AI之前，作為穩定的後備機制）
         
@@ -708,6 +777,35 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                     except Exception as e:
                         logger.error(f"乘客請假執行失敗: {e}")
                         reply_text(reply_token, f"❌ 請假執行失敗：{str(e)}")
+                        return
+                
+                # 🔥 2025-12 修復：修改班次狀態命令的處理（AI生成格式：修改班次 xxx 狀態=yyy）
+                elif command.startswith("修改班次") and "狀態=" in command:
+                    try:
+                        import re
+                        match = re.match(r'修改班次\s+(\d+)\s+狀態=(.+)', command.strip())
+                        if match:
+                            trip_id = match.group(1)
+                            new_status = match.group(2).strip()
+                            
+                            logger.info(f"🔧 執行狀態修改：班次 #{trip_id} → {new_status}")
+                            
+                            # 轉換為標準命令格式並調用處理器
+                            from modules.handlers.trip_status_handler import handle_update_trip_status
+                            standard_command = f"修改狀態 {trip_id} {new_status}"
+                            result = handle_update_trip_status(standard_command, user_id)
+                            
+                            # 清除相關對話狀態
+                            conversation_manager.clear_pending_operation(user_id)
+                            
+                            reply_text(reply_token, result)
+                            return
+                        else:
+                            reply_text(reply_token, f"❌ 命令格式錯誤：{command}")
+                            return
+                    except Exception as e:
+                        logger.error(f"修改班次狀態執行失敗: {e}")
+                        reply_text(reply_token, f"❌ 修改狀態失敗：{str(e)}")
                         return
                 
                 # 🔥 新增：統一班次查詢命令的智能處理

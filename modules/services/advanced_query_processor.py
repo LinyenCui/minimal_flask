@@ -120,6 +120,15 @@ class AdvancedQueryProcessor:
                     params.update(amount_condition['params'])
                     self.logger.info(f"💰 添加金額條件: {amount_condition}")
             
+            # 🔥 新增：添加地點條件（已完成班次）
+            if conditions.get('location'):
+                location = conditions['location']
+                where_conditions.append(
+                    "(ct.start_point LIKE :location OR ct.via_point LIKE :location OR ct.end_point LIKE :location)"
+                )
+                params['location'] = f'%{location}%'
+                self.logger.info(f"📍 添加地點條件（已完成）: {location}")
+            
             # 組合完整查詢
             if where_conditions:
                 full_query = base_query + " AND " + " AND ".join(where_conditions)
@@ -262,6 +271,16 @@ class AdvancedQueryProcessor:
             if conditions.get('driver_id'):
                 where_conditions.append("t.driver_id = :driver_id")
                 params['driver_id'] = conditions['driver_id']
+            
+            # 🔥 新增：添加地點條件
+            if conditions.get('location'):
+                location = conditions['location']
+                where_conditions.append(
+                    "(t.start_point LIKE :location OR t.via_point LIKE :location OR t.end_point LIKE :location "
+                    "OR t.custom_start_point LIKE :location OR t.custom_end_point LIKE :location)"
+                )
+                params['location'] = f'%{location}%'
+                self.logger.info(f"📍 添加地點條件: {location}")
             
             # 組合查詢
             if where_conditions:
@@ -456,7 +475,57 @@ class AdvancedQueryProcessor:
             amount = int(amount_match.group(2))
             conditions['amount_condition'] = {'operator': operator, 'amount': amount}
         
+        # 🔥 新增：解析地點條件（提取命令中的地點關鍵字）
+        location = self._extract_location_from_command(command)
+        if location:
+            conditions['location'] = location
+            self.logger.info(f"📍 解析地點條件: {location}")
+        
         return conditions
+    
+    def _extract_location_from_command(self, command: str) -> Optional[str]:
+        """從命令中提取地點關鍵字"""
+        # 移除已知的命令前綴和已解析的條件
+        remaining = command
+        
+        # 移除命令類型前綴（🔥 2025-12 修復：添加"範圍"後綴的命令）
+        prefixes = [
+            '查詢班次範圍', '查已完成範圍', '統計金額範圍',  # 帶範圍後綴的命令優先
+            '查班次範圍',  # 簡化版
+            '查詢班次', '查已完成', '統計金額', '查詢司機',  # 基本命令
+            '範圍'  # 單獨的"範圍"關鍵字
+        ]
+        for prefix in prefixes:
+            remaining = remaining.replace(prefix, '')
+        
+        # 移除相對日期
+        relative_dates = ['今天', '昨天', '前天', '明天', '後天', '本週', '上週']
+        for rd in relative_dates:
+            remaining = remaining.replace(rd, '')
+        
+        # 移除類別關鍵字
+        categories = ['診所', '東洋', '臨時']
+        for cat in categories:
+            remaining = remaining.replace(cat, '')
+        
+        # 移除司機關鍵字
+        remaining = re.sub(r'司機\d+', '', remaining)
+        
+        # 移除日期格式
+        remaining = re.sub(r'\d{4}-\d{1,2}-\d{1,2}', '', remaining)
+        remaining = re.sub(r'\d{1,2}/\d{1,2}', '', remaining)
+        remaining = re.sub(r'\d{1,2}-\d{1,2}', '', remaining)
+        remaining = re.sub(r'\d{1,2}月\d{1,2}日?', '', remaining)
+        
+        # 清理空白
+        remaining = remaining.strip()
+        
+        # 如果還有剩餘內容，可能是地點
+        if remaining and len(remaining) >= 2:
+            self.logger.info(f"🔍 從命令中提取地點: '{remaining}'")
+            return remaining
+        
+        return None
     
     def _build_date_condition(self, date_type: str, table_prefix: str = "ct") -> Tuple[str, Dict]:
         """構建日期條件SQL - 支援不同表前綴和具體日期"""

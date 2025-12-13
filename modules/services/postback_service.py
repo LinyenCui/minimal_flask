@@ -185,6 +185,12 @@ def handle_postback(event):
             
         elif action == 'update_status' and 'trip_id' in params:
             trip_id = params['trip_id']
+            # 🔥 2025-12 修復：確保 trip_id 是整數類型
+            try:
+                trip_id_int = int(trip_id)
+            except (ValueError, TypeError):
+                reply_text(reply_token, f"❌ 無效的班次ID: {trip_id}")
+                return
             
             if 'status' in params:
                 # 情況 1: 帶 status 參數 (來自 Quick Reply)，執行更新
@@ -195,7 +201,7 @@ def handle_postback(event):
                     from modules.models.trip import Trip
                     from modules.models.base import db
                     
-                    trip = db.session.query(Trip).filter_by(trip_id=trip_id).first()
+                    trip = db.session.query(Trip).filter_by(trip_id=trip_id_int).first()
                     
                     if trip and not trip.can_modify_status():
                         # 在限制期間，不允許修改狀態

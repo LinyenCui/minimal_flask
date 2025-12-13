@@ -135,7 +135,7 @@ class IntentExecutor:
         else:
             # 🔥 今天和未來已匯入的班次都在 trips 表，都是「現在態」
             table_name = "trips"
-            time_status = "現在態"
+            time_status = "現在態 (如來者，如其本來，如實而來)"
         
         # 3. 查詢相關班次（包含所有狀態）
         location = params.get("location", "")
@@ -199,6 +199,10 @@ class IntentExecutor:
         - 準備狀態 → 請假？註銷？衝突？只是查詢？
         - 非準備狀態 → 改回準備？
         第二層：用戶選擇後進入對應模式
+        
+        🔥 2025-12 修復：
+        - 全部註銷/衝突/請假狀態時，正確顯示「改回準備」選項
+        - 混合狀態時，提供班次詳情按鈕讓用戶單獨處理
         """
         from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
         
@@ -230,6 +234,9 @@ class IntentExecutor:
         
         items = []
         
+        # 🔥 計算非準備狀態的班次數量
+        non_ready_count = len(leave_trips) + len(cancelled_trips) + len(conflict_trips)
+        
         if len(trips) == 1:
             # === 單一班次 ===
             tid = trip_ids[0]
@@ -249,36 +256,36 @@ class IntentExecutor:
         else:
             # === 多個班次 ===
             if ready_trips and len(ready_trips) == len(trips):
-                # 🔥 全部準備狀態 → 第一層：問「要做什麼操作」（不是全部！）
-                # 用戶點擊後進入第二層，再讓用戶選擇全部還是單個
+                # 🔥 全部準備狀態 → 第一層：問「要做什麼操作」
                 items.extend([
                     QuickReplyItem(action=MessageAction(label="🏥 請假", text="選擇請假")),
                     QuickReplyItem(action=MessageAction(label="🚫 註銷", text="選擇註銷")),
                     QuickReplyItem(action=MessageAction(label="⚠️ 衝突", text="選擇衝突")),
                 ])
             
-            elif leave_trips and len(leave_trips) == len(trips):
-                # 🔥 全部請假狀態 → 提供改回準備（使用正確的觸發文字）
+            elif non_ready_count == len(trips):
+                # 🔥 全部非準備狀態（註銷/衝突/請假） → 提供改回準備選項
                 items.append(QuickReplyItem(action=MessageAction(label="✅ 全部改回準備", text="全部改回準備")))
+                # 也提供單個改回選項
                 for tid in trip_ids[:2]:
                     items.append(QuickReplyItem(action=MessageAction(label=f"#{tid}改回", text=f"修改狀態 {tid} 準備")))
-            
-            elif cancelled_trips and len(cancelled_trips) == len(trips):
-                # 全部註銷狀態 → 提供改回準備
-                items.append(QuickReplyItem(action=MessageAction(label="✅ 全部改回準備", text="全部改回準備")))
+                # 提供班次詳情
                 for tid in trip_ids[:2]:
-                    items.append(QuickReplyItem(action=MessageAction(label=f"#{tid}改回", text=f"修改狀態 {tid} 準備")))
-            
-            elif conflict_trips and len(conflict_trips) == len(trips):
-                # 全部衝突狀態 → 提供改回準備
-                items.append(QuickReplyItem(action=MessageAction(label="✅ 全部改回準備", text="全部改回準備")))
-                for tid in trip_ids[:2]:
-                    items.append(QuickReplyItem(action=MessageAction(label=f"#{tid}改回", text=f"修改狀態 {tid} 準備")))
+                    items.append(QuickReplyItem(action=MessageAction(label=f"📋 #{tid}詳情", text=f"班次詳情 {tid}")))
             
             else:
-                # 混合狀態 → 提供個別班次操作
+                # 🔥 混合狀態 → 提供班次詳情讓用戶單獨處理
+                # 先提供每個班次的詳情按鈕
                 for tid in trip_ids[:3]:
                     items.append(QuickReplyItem(action=MessageAction(label=f"📋 #{tid}詳情", text=f"班次詳情 {tid}")))
+                
+                # 如果有準備狀態的班次，提供批量操作選項
+                if ready_trips:
+                    items.append(QuickReplyItem(action=MessageAction(label="🏥 請假", text="選擇請假")))
+                
+                # 如果有非準備狀態的班次，提供改回準備選項
+                if non_ready_count > 0:
+                    items.append(QuickReplyItem(action=MessageAction(label="✅ 改回準備", text="全部改回準備")))
             
             items.append(QuickReplyItem(action=MessageAction(label="🔍 查詢全部", text=f"查詢班次 {date_str} {location}")))
         
@@ -300,7 +307,7 @@ class IntentExecutor:
             
             # 顯示實際狀態
             if leave_reason:
-                status_display = f"請假({leave_reason})"
+                status_display = f"🔵請假({leave_reason})"
             elif status == "註銷":
                 status_display = "🚫註銷"
             elif status == "衝突":
@@ -312,6 +319,7 @@ class IntentExecutor:
         
         message += f"\n🕒 {time_status}"
         message += "\n\n❓ 請問您想做什麼？"
+        message += "\n💡 點選下方按鈕操作，或直接輸入新命令"
         
         return message
     
@@ -434,14 +442,10 @@ class IntentExecutor:
             # 過去態：已完成的班次
             table_name = "completed_trips"
             time_status = "過去態"
-        elif parsed_date == today:
-            # 現在態：今天的班次
-            table_name = "trips"
-            time_status = "現在態（今天）"
         else:
-            # 現在態：未來已匯入的班次
+            # 現在態：今天和未來已匯入的班次都在 trips 表
             table_name = "trips"
-            time_status = "現在態（未來）"
+            time_status = "現在態 (如來者，如其本來，如實而來)"
         
         # 3. 查詢相關班次（包含已請假的）
         location = params.get("location", "")
@@ -524,7 +528,62 @@ class IntentExecutor:
             reply_message_with_quick_reply(reply_token, message, quick_reply)
             return {"success": True, "message": "班次已請假"}
         
-        # 情況2：有準備狀態的班次可以請假 → 進入請假模式
+        # 🔥 情況2：混合狀態（部分已請假、部分準備）
+        if already_on_leave and ready_trips:
+            # 顯示混合狀態信息
+            message = f"📍 {date_str}「{location}」找到 {len(trips)} 個班次：\n\n"
+            
+            # 已請假的班次
+            message += f"🔵 已請假 ({len(already_on_leave)}個)：\n"
+            for trip in already_on_leave[:3]:
+                tid = trip.get('id')
+                reason = trip.get('passenger_leave_reason', '')
+                message += f"  • #{tid} {trip.get('start_point')}→{trip.get('end_point')} ({reason})\n"
+            
+            # 準備狀態的班次
+            message += f"\n✅ 可請假 ({len(ready_trips)}個)：\n"
+            for trip in ready_trips[:3]:
+                tid = trip.get('id')
+                message += f"  • #{tid} {trip.get('time', '')} {trip.get('start_point')}→{trip.get('end_point')}\n"
+            
+            message += "\n請選擇操作："
+            
+            # 生成選項
+            items = []
+            
+            # 如果有多個準備班次，顯示全部請假
+            if len(ready_trips) > 1:
+                trip_ids = [t.get('id') for t in ready_trips]
+                conversation_manager.set_leave_mode(user_id=user_id, trip_ids=trip_ids)
+                items.append(QuickReplyItem(action=MessageAction(label=f"🏥 全部請假({len(ready_trips)}班)", text="全部請假")))
+            
+            # 單獨請假選項
+            for trip in ready_trips[:2]:
+                tid = trip.get('id')
+                items.append(QuickReplyItem(action=MessageAction(label=f"#{tid}請假", text=f"#{tid}請假")))
+            
+            # 改回準備選項（已請假的）
+            if len(already_on_leave) == 1:
+                tid = already_on_leave[0].get('id')
+                items.append(QuickReplyItem(action=MessageAction(label=f"#{tid}改回準備", text=f"#{tid}改回")))
+            else:
+                items.append(QuickReplyItem(action=MessageAction(label="全部改回準備", text="全部改回準備")))
+            
+            items.append(QuickReplyItem(action=MessageAction(label="❌ 放棄", text="放棄操作")))
+            
+            # 保存上下文
+            conversation_manager.set_pending_operation(user_id, {
+                "action": "mixed_leave_status",
+                "ready_trip_ids": [t.get('id') for t in ready_trips],
+                "leave_trip_ids": [t.get('id') for t in already_on_leave],
+                "table": table_name
+            })
+            
+            quick_reply = QuickReply(items=items)
+            reply_message_with_quick_reply(reply_token, message, quick_reply)
+            return {"success": True, "message": "混合狀態"}
+        
+        # 情況3：有準備狀態的班次可以請假 → 進入請假模式
         if len(ready_trips) == 1:
             trip = ready_trips[0]
             trip_id = trip.get('id')
@@ -565,18 +624,18 @@ class IntentExecutor:
                 trip_id = trip.get('id')
                 message += f"• #{trip_id} {trip.get('time', '')} {trip.get('start_point')}→{trip.get('end_point')}\n"
             
-            message += f"\n🏥 已進入批量請假模式（{len(trip_ids)}班）"
-            message += "\n請輸入「請假原因 加成金額」"
-            message += "\n例如：出國旅遊 -50"
-            message += "\n\n💡 輸入「放棄操作」取消"
+            message += f"\n🏥 請選擇請假方式："
             
-            # 生成選項
+            # 🔥 修復：生成正確的 Quick Reply 選項
             items = [
-                QuickReplyItem(action=MessageAction(label="❌ 放棄操作", text="放棄操作"))
+                # 全部請假按鈕（最重要！）
+                QuickReplyItem(action=MessageAction(label=f"🏥 全部請假({len(trip_ids)}班)", text="全部請假"))
             ]
             # 也提供單獨請假選項
             for tid in trip_ids[:2]:
-                items.append(QuickReplyItem(action=MessageAction(label=f"只#{tid}請假", text=f"班次詳情 {tid}")))
+                items.append(QuickReplyItem(action=MessageAction(label=f"只#{tid}請假", text=f"#{tid}請假")))
+            # 放棄按鈕放最後
+            items.append(QuickReplyItem(action=MessageAction(label="❌ 放棄", text="放棄操作")))
             
             quick_reply = QuickReply(items=items)
             reply_message_with_quick_reply(reply_token, message, quick_reply)

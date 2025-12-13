@@ -36,6 +36,8 @@ KNOWN_COMMANDS = {
     "全部註銷", "全部衝突", "全部改回準備",
     # 🔥 第二層：選擇操作類型
     "選擇請假", "選擇註銷", "選擇衝突",
+    # 🔥🔥🔥🔥🔥 霸王清除指令
+    "!!!!!", "見相非相", "reset", "RESET",
 }
 
 # 🔥 新增：postback displayText 模式匹配
@@ -173,6 +175,11 @@ def should_process(message_text, source_type, user_id):
         # 特殊處理「固定班次#ID請假」格式
         if re.match(r"固定班次#\d+請假", command_body):
             logger.info(f"[should_process] Group message matches '固定班次#ID請假' pattern")
+            return True, command_body
+        
+        # 🔥 新增：處理「#ID請假」和「#ID改回」格式
+        if re.match(r"#\d+(請假|改回)$", command_body):
+            logger.info(f"[should_process] Group message matches '#ID請假/改回' pattern: '{command_body}'")
             return True, command_body
         
         # 🔥 新增：檢查 postback displayText 模式
