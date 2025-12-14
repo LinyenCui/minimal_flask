@@ -864,27 +864,25 @@ class SmartAssistant:
             return None
     
     def _enforce_time_routing(self, original_input: str, suggested_command: str) -> str:
-        """強制套用日期 vs {today} 的分流規則，防止AI/提示詞誤導。
-
-        規則：
-        - 過去日期(<today)：一律使用『查已完成』
-        - 今天(=today)：含『已完成』→『查已完成』；否則→『查詢班次』
-        - 未來日期(>today)：一律使用『查詢班次』
-        """
+        """強制套用日期 vs {today} 的分流規則，防止AI/提示詞誤導。"""
         try:
             # 延遲匯入避免循環
             from modules.utils.unified_date_parser import parse_date_input
             from modules.utils.taiwan_time import get_taiwan_date
             from modules.services.date_range_query_service import parse_date_range
         except Exception:
+            if not isinstance(suggested_command, str):
+                return str(suggested_command or "")
             return suggested_command
+
+        if not isinstance(suggested_command, str):
+            suggested_command = str(suggested_command or "")
 
         tokens = (suggested_command or "").split()
         if not tokens:
             return suggested_command
 
         # 🚨 重要：車資修改命令不應該進行時間態轉換
-        # 車資修改命令應該直接執行，不需要查詢班次
         fare_commands = ["記錄車資", "修改車資", "車資"]
         if any(suggested_command.startswith(cmd) for cmd in fare_commands):
             logging.getLogger(__name__).info(
@@ -893,7 +891,6 @@ class SmartAssistant:
             return suggested_command
         
         # 🚨 重要：請假命令不應該進行時間態轉換
-        # 請假是操作而非查詢，不需要轉換成「查詢班次」
         leave_commands = ["乘客請假", "請假", "批量請假", "固定班次請假", "passenger_leave"]
         if any(cmd in suggested_command for cmd in leave_commands):
             logging.getLogger(__name__).info(
@@ -925,13 +922,11 @@ class SmartAssistant:
         if range_token and today is not None:
             start_date, end_date = parse_date_range(range_token.lstrip('/#!'))
             if start_date and end_date:
-                # 依範圍與 today 比較決定前綴
                 def to_completed_range(cmd: str) -> str:
                     if cmd.startswith("查已完成範圍"):
                         return cmd
-                    # 🔥 2025-12 修復：統計金額命令保持原樣（已完成態統計）
                     if cmd.startswith("統計金額"):
-                        return cmd  # 統計金額命令不需要添加前綴，直接返回
+                        return cmd
                     for s in ("查已完成範圍", "查已完成", "查詢班次範圍", "查詢班次", "查班次範圍"):
                         if cmd.startswith(s):
                             return cmd.replace(s, "查已完成範圍", 1)
@@ -950,7 +945,6 @@ class SmartAssistant:
                 elif start_date >= today:
                     corrected = to_trips_range(suggested_command)
                 else:
-                    # 混合範圍：優先使用查班次範圍，由服務層自動分段合併
                     logging.getLogger(__name__).info(
                         f"⚠️ 混合日期範圍（跨過去與今天/未來）→ 路由為 '查班次範圍' 並由服務層分段: {range_token}"
                     )
@@ -974,7 +968,6 @@ class SmartAssistant:
                 continue
 
         if not query_date:
-            # 從原始輸入嘗試解析（處理AI命令未帶日期但用戶有日期）
             for tok in original_input.split():
                 norm = tok.lstrip('/#!')
                 try:
@@ -994,8 +987,6 @@ class SmartAssistant:
                 return suggested_command
 
         has_completed_kw = "已完成" in original_input
-        starts_completed = suggested_command.startswith("查已完成")
-        starts_trips = suggested_command.startswith("查詢班次")
 
         def to_completed(cmd: str) -> str:
             if cmd.startswith("查詢班次"):
@@ -1016,7 +1007,7 @@ class SmartAssistant:
                 corrected = to_completed(suggested_command)
             elif query_date > today:
                 corrected = to_trips(suggested_command)
-            else:  # 今天
+            else:
                 corrected = to_completed(suggested_command) if has_completed_kw else to_trips(suggested_command)
 
             if corrected != suggested_command:
@@ -1026,6 +1017,102 @@ class SmartAssistant:
             return corrected
         except Exception:
             return suggested_command
+
+    def _try_direct_query_execution(self, ai_result: Dict, user_input: str, user_id: str) -> Optional[Dict]:
+        """
+        當 AI 已判定為查詢且參數齊全時，直接呼叫日期範圍查詢服務。
+        失敗時返回 None，讓既有流程繼續（不影響舊路徑）。
+        """
+        try:
+            if not ai_result or ai_result.get("intent_type") != "query":
+                return None
+            if ai_result.get("needs_clarification") in (True, "true", "True"):
+                return None
+            
+            conditions = ai_result.get("extracted_conditions") or {}
+            date_range_raw = conditions.get("date_range") or conditions.get("dateRange")
+            date_raw = conditions.get("date")
+            
+            from modules.utils.unified_date_parser import UnifiedDateParser
+            from modules.utils.taiwan_time import get_taiwan_date
+            from modules.services.date_range_query_service import (
+                parse_date_range,
+                handle_query_completed_trips_range,
+                handle_query_current_trips_range,
+            )
+            
+            parser = UnifiedDateParser()
+            start_date = end_date = None
+            
+            # 日期範圍優先（避免將範圍丟入單日解析）
+            if date_range_raw:
+                start_date, end_date = parse_date_range(str(date_range_raw))
+            
+            # 單日視為同日起訖
+            if not start_date and date_raw:
+                try:
+                    parsed = parser.parse(str(date_raw))
+                    if parsed:
+                        start_date = end_date = parsed
+                except Exception:
+                    return None
+            
+            if not start_date or not end_date:
+                return None
+            
+            # 其他條件
+            driver_id = conditions.get("driver_id") or conditions.get("driverId") or conditions.get("driver")
+            if isinstance(driver_id, str):
+                driver_id = int(driver_id) if driver_id.isdigit() else None
+            category = conditions.get("category")
+            
+            today = get_taiwan_date()
+            date_fmt = "%Y-%m-%d"
+            base_range = f"{start_date.strftime(date_fmt)}-{end_date.strftime(date_fmt)}"
+            
+            suffix_tokens = []
+            if driver_id:
+                suffix_tokens.append(str(driver_id))
+            if category:
+                suffix_tokens.append(str(category))
+            suffix = f" {' '.join(suffix_tokens)}" if suffix_tokens else ""
+            
+            # 根據時間態選擇服務（混合範圍交給現有服務處理）
+            if end_date < today:
+                message_text = f"查已完成範圍 {base_range}{suffix}"
+                service_result = handle_query_completed_trips_range(message_text, user_id)
+            else:
+                message_text = f"查班次範圍 {base_range}{suffix}"
+                service_result = handle_query_current_trips_range(message_text, user_id)
+            
+            if not service_result:
+                return None
+            
+            # 正規化 direct_query_result 結構
+            if isinstance(service_result, dict):
+                text_result = service_result.get("message", "")
+                quick_reply = service_result.get("quick_reply")
+            else:
+                text_result = service_result
+                quick_reply = None
+            
+            return {
+                "type": "direct_query_result",
+                "direct_query_result": {
+                    "text": text_result,
+                    "quick_reply": quick_reply,
+                    "meta": {
+                        "source": "date_range_query_service",
+                        "start_date": start_date.strftime(date_fmt),
+                        "end_date": end_date.strftime(date_fmt),
+                        "driver_id": driver_id,
+                        "category": category
+                    }
+                }
+            }
+        except Exception as e:
+            logger.warning(f"direct_query_result fallback to standard flow: {e}")
+            return None
 
     def process_user_message(self, user_input: str, user_id: str) -> Dict:
         """智能處理用戶消息 - FC優先 + 查詢回退架構"""
@@ -1070,9 +1157,17 @@ class SmartAssistant:
         if ai_result and ai_result.get('confidence', 0) > 0.6:
             logger.info(f"✅ AI分析成功，信心度: {ai_result['confidence']}")
             
+            # 🔥 新增：查詢類且參數齊全時，直接呼叫日期範圍服務
+            direct_query = self._try_direct_query_execution(ai_result, user_input, user_id)
+            if direct_query:
+                return direct_query
+            
             # AI理解成功，執行標準命令
             if ai_result.get('standard_command'):
-                corrected_cmd = self._enforce_time_routing(user_input, ai_result['standard_command'])
+                std_cmd = ai_result.get('standard_command')
+                if not isinstance(std_cmd, str):
+                    std_cmd = str(std_cmd or "")
+                corrected_cmd = self._enforce_time_routing(user_input, std_cmd)
                 return {
                     "type": "execute_command",
                     "command": corrected_cmd,
@@ -1114,7 +1209,9 @@ class SmartAssistant:
             else:
                 return {
                     "type": "execute_command", 
-                    "command": self._enforce_time_routing(user_input, parse_result["standard_command"]),
+                    "command": self._enforce_time_routing(
+                        user_input, str(parse_result["standard_command"] or "")
+                    ),
                     "original_input": user_input,
                     "confidence": parse_result["confidence"]
                 }

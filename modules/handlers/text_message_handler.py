@@ -575,6 +575,20 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             logger.info(f"🤖 智能助手處理用戶訊息: {message_text}")
             smart_result = process_with_smart_assistant(message_text, user_id)
             
+            # 🔥 新增：直接查詢結果（不經 standard_command）
+            if smart_result.get("direct_query_result"):
+                dqr = smart_result["direct_query_result"]
+                text_payload = dqr.get("text", "")
+                quick_reply_obj = dqr.get("quick_reply")
+                
+                if quick_reply_obj:
+                    from linebot.v3.messaging import TextMessage
+                    text_msg = TextMessage(text=text_payload, quick_reply=quick_reply_obj)
+                    reply_message(reply_token, [text_msg])
+                else:
+                    reply_text(reply_token, text_payload)
+                return
+            
             # 🔥 新增：處理 Function Calling 結果（請假、車資修改等）
             if smart_result["type"] == "function_call":
                 logger.info(f"🔧 Function Calling: {smart_result['function_name']}")
@@ -607,7 +621,9 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                     pass
             
             elif smart_result["type"] == "execute_command":
-                command = smart_result["command"]
+                command = smart_result.get("command", "")
+                if not isinstance(command, str):
+                    command = str(command or "")
                 
                 # 🔥 新增：統計金額命令處理
                 if command.startswith("統計金額") or (command.startswith("查已完成") and any(k in command for k in ['總和', '總計', '統計', '金額總和'])):
