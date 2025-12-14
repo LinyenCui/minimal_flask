@@ -575,6 +575,24 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             logger.info(f"🤖 智能助手處理用戶訊息: {message_text}")
             smart_result = process_with_smart_assistant(message_text, user_id)
             
+            # 🔥 execute_intent：新管線（只讀查詢）
+            if smart_result.get("type") == "execute_intent" and isinstance(smart_result.get("intent"), dict):
+                from modules.core.action_dispatcher import action_dispatcher
+                logger.info("🚀 execute_intent -> ActionDispatcher")
+                dispatch_result = action_dispatcher.dispatch(smart_result["intent"], user_id)
+                if dispatch_result:
+                    text_payload = dispatch_result.get("text", "")
+                    quick_reply_obj = dispatch_result.get("quick_reply")
+                    if quick_reply_obj:
+                        from linebot.v3.messaging import TextMessage
+                        text_msg = TextMessage(text=text_payload, quick_reply=quick_reply_obj)
+                        reply_message(reply_token, [text_msg])
+                    else:
+                        reply_text(reply_token, text_payload)
+                    return  # 早退，避免雙回覆
+                logger.info("↩️ dispatcher fallback to legacy command flow")
+                # dispatcher 返回 None → 繼續舊流程
+            
             # 🔥 新增：直接查詢結果（不經 standard_command）
             if smart_result.get("direct_query_result"):
                 dqr = smart_result["direct_query_result"]

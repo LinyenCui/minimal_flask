@@ -1020,7 +1020,7 @@ class SmartAssistant:
 
     def _try_direct_query_execution(self, ai_result: Dict, user_input: str, user_id: str) -> Optional[Dict]:
         """
-        當 AI 已判定為查詢且參數齊全時，直接呼叫日期範圍查詢服務。
+        當 AI 已判定為查詢且參數齊全時，構造結構化 intent（query_trips_range）。
         失敗時返回 None，讓既有流程繼續（不影響舊路徑）。
         """
         try:
@@ -1035,11 +1035,7 @@ class SmartAssistant:
             
             from modules.utils.unified_date_parser import UnifiedDateParser
             from modules.utils.taiwan_time import get_taiwan_date
-            from modules.services.date_range_query_service import (
-                parse_date_range,
-                handle_query_completed_trips_range,
-                handle_query_current_trips_range,
-            )
+            from modules.services.date_range_query_service import parse_date_range
             
             parser = UnifiedDateParser()
             start_date = end_date = None
@@ -1066,52 +1062,83 @@ class SmartAssistant:
                 driver_id = int(driver_id) if driver_id.isdigit() else None
             category = conditions.get("category")
             
-            today = get_taiwan_date()
-            date_fmt = "%Y-%m-%d"
-            base_range = f"{start_date.strftime(date_fmt)}-{end_date.strftime(date_fmt)}"
-            
-            suffix_tokens = []
-            if driver_id:
-                suffix_tokens.append(str(driver_id))
-            if category:
-                suffix_tokens.append(str(category))
-            suffix = f" {' '.join(suffix_tokens)}" if suffix_tokens else ""
-            
-            # 根據時間態選擇服務（混合範圍交給現有服務處理）
-            if end_date < today:
-                message_text = f"查已完成範圍 {base_range}{suffix}"
-                service_result = handle_query_completed_trips_range(message_text, user_id)
-            else:
-                message_text = f"查班次範圍 {base_range}{suffix}"
-                service_result = handle_query_current_trips_range(message_text, user_id)
-            
-            if not service_result:
-                return None
-            
-            # 正規化 direct_query_result 結構
-            if isinstance(service_result, dict):
-                text_result = service_result.get("message", "")
-                quick_reply = service_result.get("quick_reply")
-            else:
-                text_result = service_result
-                quick_reply = None
-            
+            logger.info(
+                "✅ execute_intent(query_trips_range) prepared: start=%s, end=%s, driver=%s, category=%s",
+                start_date, end_date, driver_id, category
+            )
             return {
-                "type": "direct_query_result",
-                "direct_query_result": {
-                    "text": text_result,
-                    "quick_reply": quick_reply,
-                    "meta": {
-                        "source": "date_range_query_service",
-                        "start_date": start_date.strftime(date_fmt),
-                        "end_date": end_date.strftime(date_fmt),
+                "type": "execute_intent",
+                "intent": {
+                    "action": "query_trips_range",
+                    "params": {
+                        "start_date": start_date,
+                        "end_date": end_date,
                         "driver_id": driver_id,
-                        "category": category
-                    }
-                }
+                        "category": category,
+                        "trip_type": conditions.get("trip_type"),
+                    },
+                },
+                "original_input": user_input,
+                "confidence": ai_result.get("confidence", 0),
             }
         except Exception as e:
             logger.warning(f"direct_query_result fallback to standard flow: {e}")
+            return None
+
+    def _build_query_intent_from_params(self, params: Dict, original_input: str, confidence: float) -> Optional[Dict]:
+        """
+        將 FC 的參數轉為 execute_intent（僅 query_trips_range）。解析失敗返回 None。
+        """
+        try:
+            if not isinstance(params, dict):
+                return None
+
+            date_range_raw = params.get("date_range") or params.get("dateRange")
+            date_raw = params.get("date")
+
+            from modules.utils.unified_date_parser import UnifiedDateParser
+            from modules.services.date_range_query_service import parse_date_range
+
+            parser = UnifiedDateParser()
+            start_date = end_date = None
+
+            if date_range_raw:
+                start_date, end_date = parse_date_range(str(date_range_raw))
+
+            if not start_date and date_raw:
+                parsed = parser.parse(str(date_raw))
+                if parsed:
+                    start_date = end_date = parsed
+
+            if not start_date or not end_date:
+                return None
+
+            driver_id = params.get("driver_id") or params.get("driverId") or params.get("driver")
+            if isinstance(driver_id, str):
+                driver_id = int(driver_id) if driver_id.isdigit() else None
+            category = params.get("category")
+
+            logger.info(
+                "✅ execute_intent(query_trips_range) prepared: start=%s, end=%s, driver=%s, category=%s",
+                start_date, end_date, driver_id, category
+            )
+
+            return {
+                "type": "execute_intent",
+                "intent": {
+                    "action": "query_trips_range",
+                    "params": {
+                        "start_date": start_date,
+                        "end_date": end_date,
+                        "driver_id": driver_id,
+                        "category": category,
+                        "trip_type": params.get("trip_type"),
+                    },
+                },
+                "original_input": original_input,
+                "confidence": confidence,
+            }
+        except Exception:
             return None
 
     def process_user_message(self, user_input: str, user_id: str) -> Dict:
@@ -1127,11 +1154,17 @@ class SmartAssistant:
                 function_name = fc_result['function_name']
                 logger.info(f"✅ FC 識別意圖: {function_name}")
                 
-                # 🔥 關鍵：只有「純查詢」才回退到傳統路徑
-                # clarify_user_intent、passenger_leave、update_fare 等都走 IntentExecutor
+                # 🔥 關鍵：純查詢改為構造 execute_intent，寫入操作仍走 IntentExecutor
                 pure_query_functions = ['query_trips', 'query_completed_trips', 'query_trips_by_context']
                 if function_name in pure_query_functions:
-                    logger.info(f"🔄 純查詢操作 {function_name} 回退到傳統路徑（更穩定）")
+                    intent_from_fc = self._build_query_intent_from_params(
+                        fc_result.get("parameters") or {},
+                        user_input,
+                        fc_result.get("confidence", 0.7),
+                    )
+                    if intent_from_fc:
+                        return intent_from_fc
+                    logger.info(f"🔄 純查詢 {function_name} 參數不足/解析失敗，回退傳統路徑")
                     # 不返回，繼續走傳統 AI 分析
                 else:
                     # 🔥 clarify_user_intent、請假、車資修改等操作走 IntentExecutor

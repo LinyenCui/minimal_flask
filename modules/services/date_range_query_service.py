@@ -187,6 +187,54 @@ def query_current_trips_range(start_date, end_date, driver_id=None, category=Non
         logger.error(f"詳細錯誤: {traceback.format_exc()}")
         return []
 
+
+def handle_query_trips_range(start_date, end_date, driver_id=None, category=None, trip_type=None, user_id=None):
+    """
+    薄 wrapper：統一入口供 ActionDispatcher 使用。
+    - 支援混合範圍（過去→completed_trips；今天/未來→trips）
+    - 回傳格式：{"text": str, "quick_reply": Optional[obj], "meta": dict}
+    """
+    try:
+        if not start_date or not end_date:
+            return None
+
+        today = get_taiwan_date()
+        meta = {
+            "start_date": start_date.strftime("%Y-%m-%d"),
+            "end_date": end_date.strftime("%Y-%m-%d"),
+            "driver_id": driver_id,
+            "category": category,
+            "trip_type": trip_type,
+        }
+
+        # 全過去
+        if end_date < today:
+            trips = query_completed_trips_range(start_date, end_date, driver_id, category)
+            text = format_completed_trips_range_result(trips, start_date, end_date, driver_id, category)
+            return {"text": text, "quick_reply": None, "meta": meta}
+
+        # 全現在/未來
+        if start_date >= today:
+            trips = query_current_trips_range(start_date, end_date, driver_id, category)
+            text = format_current_trips_range_result(trips, start_date, end_date, driver_id, category)
+            return {"text": text, "quick_reply": None, "meta": meta}
+
+        # 混合：拆分為過去 + 現在/未來
+        past_end = today - timedelta(days=1)
+        completed_part = query_completed_trips_range(start_date, past_end, driver_id, category)
+        completed_text = format_completed_trips_range_result(completed_part, start_date, past_end, driver_id, category)
+
+        current_part = query_current_trips_range(today, end_date, driver_id, category)
+        current_text = format_current_trips_range_result(current_part, today, end_date, driver_id, category)
+
+        combined = "🔀 混合日期範圍（已完成 + 現在/未來）\n" + "─" * 30
+        combined += f"\n\n【已完成（過去）】\n{completed_text}\n\n【現在/未來（trips）】\n{current_text}"
+
+        return {"text": combined, "quick_reply": None, "meta": meta}
+    except Exception as e:
+        logger.error(f"handle_query_trips_range 失敗: {e}")
+        return None
+
 def format_completed_trips_range_result(trips, start_date, end_date, driver_id=None, category=None, page_info=None):
     """
     格式化已完成班次範圍查詢結果
