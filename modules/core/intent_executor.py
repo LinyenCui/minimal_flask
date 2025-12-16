@@ -89,6 +89,9 @@ class IntentExecutor:
             elif action == "cancel_operation":
                 return self._handle_cancel_operation(user_id, reply_token)
             
+            elif action == "update_trip_status":
+                return self._handle_update_trip_status(params, user_id, reply_token)
+            
             else:
                 logger.warning(f"未知的意圖類型: {action}")
                 return {
@@ -928,16 +931,71 @@ class IntentExecutor:
     
     def _handle_query_trips(self, params: Dict[str, Any], user_id: str, reply_token: str) -> Dict[str, Any]:
         """
-        處理查詢班次意圖
-        注意：查詢功能走傳統路徑更穩定，這裡只是 fallback
+        處理查詢班次意圖 - 直接查詢並返回結果
+        🔥 2025-12-17 修復：實現真正的查詢，不再降級
         """
         logger.info(f"🔍 處理班次查詢: {params}")
         
-        # 查詢功能應該走傳統路徑，這裡返回失敗讓系統降級
-        return {
-            "success": False,
-            "message": "請使用標準查詢命令，例如：「12/1 5386東洋班次」"
-        }
+        date_str = params.get("date", "今天")
+        location = params.get("location", "")
+        driver_id = params.get("driver_id")
+        category = params.get("category")
+        
+        # 解析日期
+        parsed_date = self.date_parser.parse_to_date(date_str)
+        if not parsed_date:
+            parsed_date = get_taiwan_date()
+        
+        # 判斷時間態
+        today = get_taiwan_date()
+        if parsed_date < today:
+            table_name = "completed_trips"
+        else:
+            table_name = "trips"
+        
+        # 查詢班次
+        trips = self._query_trips_by_location(table_name, parsed_date, location, driver_id)
+        
+        if not trips:
+            reply_text(reply_token, f"❌ 找不到符合條件的班次\n\n📅 日期：{date_str}\n📍 地點：{location or '全部'}")
+            return {"success": True, "message": "查無結果"}
+        
+        # 格式化結果
+        message = f"🔍 查詢結果\n\n"
+        message += f"📅 日期：{parsed_date.strftime('%Y-%m-%d')} ({date_str})\n"
+        if location:
+            message += f"📍 地點：{location}\n"
+        message += f"📊 找到 {len(trips)} 筆班次\n"
+        message += "-" * 25 + "\n\n"
+        
+        for trip in trips[:10]:  # 最多顯示10筆
+            tid = trip.get('id') or trip.get('trip_id')
+            route = trip.get('route', f"{trip.get('start_point', '?')}→{trip.get('end_point', '?')}")
+            status = trip.get('status', '未知')
+            driver = trip.get('driver_id', '未指派')
+            leave_reason = trip.get('leave_reason') or trip.get('passenger_leave_reason')
+            
+            # 狀態圖示
+            if status == '準備' and leave_reason:
+                status_icon = "🔵請假"
+            elif status == '準備':
+                status_icon = "🟢準備"
+            elif status == '待派':
+                status_icon = "🔴待派"
+            elif status == '註銷':
+                status_icon = "❌註銷"
+            elif status == '衝突':
+                status_icon = "🟠衝突"
+            else:
+                status_icon = status
+            
+            message += f"#{tid} {route} | 🚕{driver} | {status_icon}\n"
+        
+        if len(trips) > 10:
+            message += f"\n... 還有 {len(trips) - 10} 筆\n"
+        
+        reply_text(reply_token, message)
+        return {"success": True, "message": "查詢成功"}
     
     def _handle_confirm_operation(self, user_id: str, reply_token: str) -> Dict[str, Any]:
         """
@@ -983,6 +1041,119 @@ class IntentExecutor:
         
         reply_text(reply_token, "✅ 已取消操作\n\n如有需要，可以重新發起請求")
         return {"success": True, "message": "已取消"}
+    
+    def _handle_update_trip_status(self, params: Dict[str, Any], user_id: str, reply_token: str) -> Dict[str, Any]:
+        """
+        處理修改班次狀態意圖（註銷、衝突等）
+        
+        🔥 2025-12-17 新增：用戶明確說「今天新建路的要註銷」時，直接找到班次並執行
+        """
+        logger.info(f"🔄 處理修改狀態: {params}")
+        
+        date_str = params.get("date", "今天")
+        location = params.get("location", "")
+        new_status = params.get("new_status", "")
+        
+        if not new_status:
+            reply_text(reply_token, "❌ 請指定要修改的狀態（如：註銷、衝突）")
+            return {"success": False, "message": "未指定狀態"}
+        
+        # 解析日期
+        parsed_date = self.date_parser.parse(date_str)
+        if not parsed_date:
+            reply_text(reply_token, f"❌ 無法解析日期：{date_str}")
+            return {"success": False, "message": f"無法解析日期：{date_str}"}
+        
+        # 查詢相關班次
+        trips = self._query_trips_for_leave("trips", parsed_date, location)
+        
+        if not trips:
+            reply_text(reply_token, f"📭 {date_str}「{location}」沒有找到相關班次")
+            return {"success": False, "message": "沒有找到班次"}
+        
+        from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+        
+        trip_ids = [t.get('id') for t in trips]
+        
+        # 狀態圖示
+        status_icons = {
+            '註銷': '🚫',
+            '衝突': '⚠️',
+            '準備': '✅',
+            '待派': '🔴'
+        }
+        status_icon = status_icons.get(new_status, '🔄')
+        
+        if len(trips) == 1:
+            # 單一班次：直接執行
+            trip = trips[0]
+            trip_id = trip.get('id')
+            
+            try:
+                update_query = text("""
+                    UPDATE trips
+                    SET status = :new_status
+                    WHERE trip_id = :trip_id
+                    RETURNING trip_id, status
+                """)
+                result = db.session.execute(update_query, {
+                    "trip_id": trip_id,
+                    "new_status": new_status
+                })
+                updated_row = result.fetchone()
+                db.session.commit()
+                
+                if updated_row:
+                    message = f"""✅ 狀態修改成功！
+
+🚕 班次 #{trip_id}
+📍 {trip.get('start_point')}→{trip.get('end_point')}
+{status_icon} 狀態：{new_status}
+
+💡 如需修改，請使用「班次詳情 {trip_id}」查看"""
+                    reply_text(reply_token, message)
+                    return {"success": True, "message": f"已修改為{new_status}"}
+                else:
+                    reply_text(reply_token, f"❌ 找不到班次 #{trip_id}")
+                    return {"success": False, "message": "班次不存在"}
+                    
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"修改狀態失敗: {e}", exc_info=True)
+                reply_text(reply_token, f"❌ 修改失敗: {str(e)}")
+                return {"success": False, "message": str(e)}
+        
+        else:
+            # 多個班次：讓用戶選擇
+            message = f"📍 {date_str}「{location}」找到 {len(trips)} 個班次：\n\n"
+            
+            for trip in trips[:5]:
+                tid = trip.get('id')
+                message += f"• #{tid} {trip.get('time', '')} {trip.get('start_point')}→{trip.get('end_point')}\n"
+            
+            message += f"\n{status_icon} 要將哪些班次設為「{new_status}」？"
+            
+            # 保存上下文
+            conversation_manager.set_pending_operation(user_id, {
+                "action": "batch_update_status",
+                "trip_ids": trip_ids,
+                "new_status": new_status,
+                "date": date_str,
+                "location": location,
+                "table": "trips"
+            })
+            
+            # 生成 Quick Reply
+            items = [
+                QuickReplyItem(action=MessageAction(label=f"{status_icon} 全部{new_status}", text=f"全部{new_status}"))
+            ]
+            for tid in trip_ids[:2]:
+                items.append(QuickReplyItem(action=MessageAction(label=f"#{tid}{new_status}", text=f"修改狀態 {tid} {new_status}")))
+            items.append(QuickReplyItem(action=MessageAction(label="❌ 放棄", text="放棄操作")))
+            
+            quick_reply = QuickReply(items=items)
+            reply_message_with_quick_reply(reply_token, message, quick_reply)
+            return {"success": True, "message": f"已進入批量{new_status}模式"}
     
     def _execute_passenger_leave(self, pending_op: Dict[str, Any], user_id: str, reply_token: str) -> Dict[str, Any]:
         """

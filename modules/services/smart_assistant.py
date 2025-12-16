@@ -809,21 +809,88 @@ class SmartAssistant:
         # 清理地點（移除可能的前綴符號）
         location = location.lstrip('/#!@').strip()
         
+        # 🔥 2025-12-17 修正：先檢測用戶意圖，再清理地點
+        # 操作意圖映射（用戶說「要註銷」→ 應該執行註銷，不是問東問西）
+        detected_action = None
+        action_patterns = [
+            # (後綴模式, 對應的操作)
+            ('的要註銷', 'update_status_cancel'),
+            ('要註銷', 'update_status_cancel'),
+            ('的註銷', 'update_status_cancel'),
+            ('註銷', 'update_status_cancel'),
+            ('的要衝突', 'update_status_conflict'),
+            ('要衝突', 'update_status_conflict'),
+            ('的衝突', 'update_status_conflict'),
+            ('衝突', 'update_status_conflict'),
+            ('的要請假', 'passenger_leave'),
+            ('要請假', 'passenger_leave'),
+            ('的請假', 'passenger_leave'),
+            # 「狀態」「狀況」→ clarify（純查詢狀態，問用戶想做什麼）
+            ('的狀態', 'clarify_user_intent'),
+            ('狀態', 'clarify_user_intent'),
+            ('的狀況', 'clarify_user_intent'),
+            ('狀況', 'clarify_user_intent'),
+        ]
+        
+        for suffix, action in action_patterns:
+            if location.endswith(suffix):
+                detected_action = action
+                location = location[:-len(suffix)].strip()
+                # 移除可能殘留的「的」
+                if location.endswith('的'):
+                    location = location[:-1].strip()
+                break
+        
         # 如果地點為空或太短，不觸發
         if not location or len(location) < 2:
             return None
         
-        logger.info(f"🎯 FC 兜底：檢測到模式 date={date_str}, location={location}")
+        # 默認走 clarify
+        if not detected_action:
+            detected_action = 'clarify_user_intent'
         
-        # 構造 clarify_user_intent 結果
-        return {
-            "type": "function_call",
-            "function_name": "clarify_user_intent",
-            "parameters": {
-                "date": date_str,
-                "location": location
+        logger.info(f"🎯 FC 兜底：檢測到模式 date={date_str}, location={location}, action={detected_action}")
+        
+        # 🔥 根據用戶意圖返回不同的 function_call
+        if detected_action == 'update_status_cancel':
+            return {
+                "type": "function_call",
+                "function_name": "update_trip_status",
+                "parameters": {
+                    "date": date_str,
+                    "location": location,
+                    "new_status": "註銷"
+                }
             }
-        }
+        elif detected_action == 'update_status_conflict':
+            return {
+                "type": "function_call",
+                "function_name": "update_trip_status",
+                "parameters": {
+                    "date": date_str,
+                    "location": location,
+                    "new_status": "衝突"
+                }
+            }
+        elif detected_action == 'passenger_leave':
+            return {
+                "type": "function_call",
+                "function_name": "passenger_leave",
+                "parameters": {
+                    "date": date_str,
+                    "location": location
+                }
+            }
+        else:
+            # clarify_user_intent - 純狀態查詢，問用戶想做什麼
+            return {
+                "type": "function_call",
+                "function_name": "clarify_user_intent",
+                "parameters": {
+                    "date": date_str,
+                    "location": location
+                }
+            }
     
     def _analyze_with_ai(self, user_input: str, user_id: str) -> Dict:
         """使用Gemini AI分析用戶輸入"""
@@ -1174,13 +1241,16 @@ class SmartAssistant:
             else:
                 logger.info(f"ℹ️ FC 未返回有效意圖，嘗試傳統分析")
                 
-                # 🔥 2025-12 修復：FC 不穩定時的兜底機制
-                # 當 FC 未返回但輸入符合「地點+日期」模式時，強制觸發 clarify_user_intent
-                # 這確保 Quick Reply 總是可用，避免用戶點擊後無效
-                fallback_result = self._check_location_date_pattern(user_input)
-                if fallback_result:
-                    logger.info(f"🔧 FC 兜底：檢測到「地點+日期」模式，強制觸發 clarify_user_intent")
-                    return fallback_result
+                # 🔥 2025-12-17 修正：狀態詢問 或 操作請求（日期+地點+狀態詞）走 clarify_user_intent
+                # 「今天新建路的狀態」→ 走 clarify，問用戶想做什麼
+                # 「今天新建路的註銷」→ 走 clarify，找到班次後讓用戶確認
+                # 「今天新建路」→ 純查詢，不要問東問西（由 query_classifier 在入口處理）
+                status_words = ['狀態', '狀況', '請假', '註銷', '衝突', '取消', '準備', '待派']
+                if any(sw in user_input for sw in status_words):
+                    fallback_result = self._check_location_date_pattern(user_input)
+                    if fallback_result:
+                        logger.info(f"🔧 狀態相關兜底：觸發 clarify_user_intent")
+                        return fallback_result
         
         # 🔥 步驟2: 傳統 AI 分析路徑（查詢等操作）
         ai_result = None

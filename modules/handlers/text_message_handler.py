@@ -180,6 +180,8 @@ def process_text_message(event):
         conversation_flow_commands = [
             # 取消/放棄命令
             '取消', '算了', '放棄', '放棄操作', '取消操作',
+            # 確認命令
+            '確認', '確認修改', '確認請假', '是', '對', '執行',
             # 第一層選擇命令
             '選擇請假', '選擇註銷', '選擇衝突',
             # 批量操作命令
@@ -569,6 +571,116 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             return
         
         # 完成記錄已委派
+
+        # 🔥 2025-12-17：查詢分流（三條路徑）
+        # 1. 狀態篩選查詢：「待派班次」「請假班次」→ 走 advanced_query_processor（用 status=xxx）
+        # 2. 一般查詢：「明天新建路」「12/7司機5386」→ 走 advanced_query_processor（地點/司機條件）
+        # 3. 狀態詢問/操作請求：「明天新建路狀態」「明天新建路請假」→ 走智能助手（clarify_user_intent）
+        from modules.core.query_classifier import is_status_filter_query, is_simple_direct_query
+        
+        # 🔥 優先檢查狀態篩選查詢（「待派班次」「請假班次」等）
+        if is_status_filter_query(message_text):
+            logger.info(f"📊 狀態篩選查詢分流: {message_text}")
+            try:
+                from modules.services.advanced_query_processor import AdvancedQueryProcessor
+                from modules.core.query_classifier import determine_query_table
+                
+                processor = AdvancedQueryProcessor()
+                table = determine_query_table(message_text)
+                
+                if table == 'completed_trips':
+                    cmd = f"查已完成 {message_text}"
+                else:
+                    cmd = f"查詢班次 {message_text}"
+                
+                logger.info(f"📊 狀態篩選，走 advanced_query_processor: {cmd}")
+                result = processor.process_complex_query(cmd, user_id)
+                
+                if result.get('type') in ('success', 'success_with_pagination', 'no_results'):
+                    if result.get('quick_reply'):
+                        reply_message_with_quick_reply(reply_token, result['message'], result['quick_reply'])
+                    else:
+                        reply_text(reply_token, result['message'])
+                    return
+                    
+            except Exception as e:
+                logger.error(f"狀態篩選查詢處理失敗: {e}")
+                # 失敗則繼續走智能助手
+        
+        # 🔥 一般查詢（range query）- 無「狀態」字眼的日期+地點/司機查詢
+        if is_simple_direct_query(message_text):
+            logger.info(f"📊 一般查詢分流: {message_text}")
+            try:
+                from modules.core.query_classifier import parse_direct_query, determine_query_table, _has_location_pattern
+                
+                query_params = parse_direct_query(message_text)
+                has_location = _has_location_pattern(message_text)
+                
+                # 🔥 2025-12-17：有地點的查詢走 advanced_query_processor（支持地點條件）
+                if has_location and query_params.get('start_date'):
+                    from modules.services.advanced_query_processor import AdvancedQueryProcessor
+                    processor = AdvancedQueryProcessor()
+                    
+                    table = determine_query_table(message_text)
+                    if table == 'completed_trips':
+                        cmd = f"查已完成 {message_text}"
+                    else:
+                        cmd = f"查詢班次 {message_text}"
+                    
+                    logger.info(f"📊 地點查詢，走 advanced_query_processor: {cmd}")
+                    result = processor.process_complex_query(cmd, user_id)
+                    
+                    if result.get('type') in ('success', 'success_with_pagination', 'no_results'):
+                        if result.get('quick_reply'):
+                            reply_message_with_quick_reply(reply_token, result['message'], result['quick_reply'])
+                        else:
+                            reply_text(reply_token, result['message'])
+                        return
+                
+                # 🔥 無地點的日期範圍查詢走 date_range_query_service（有分頁）
+                elif query_params and query_params.get('start_date') and query_params.get('end_date'):
+                    from modules.services.date_range_query_service import (
+                        handle_query_completed_trips_range,
+                        handle_query_current_trips_range
+                    )
+                    
+                    start = query_params['start_date']
+                    end = query_params['end_date']
+                    date_range_str = f"{start.month}/{start.day}-{end.month}/{end.day}"
+                    
+                    cmd_parts = [date_range_str]
+                    if query_params.get('driver_id'):
+                        cmd_parts.append(str(query_params['driver_id']))
+                    if query_params.get('category'):
+                        cmd_parts.append(query_params['category'])
+                    
+                    table = determine_query_table(message_text)
+                    if table == 'completed_trips':
+                        cmd = "查已完成範圍 " + " ".join(cmd_parts)
+                        result = handle_query_completed_trips_range(cmd, user_id)
+                    else:
+                        cmd = "查班次範圍 " + " ".join(cmd_parts)
+                        result = handle_query_current_trips_range(cmd, user_id)
+                    
+                    logger.info(f"📊 範圍查詢，走 date_range_query_service: {cmd}")
+                    
+                    if result:
+                        if isinstance(result, dict):
+                            text_result = result.get('message', '')
+                            quick_reply = result.get('quick_reply')
+                            if quick_reply:
+                                reply_message_with_quick_reply(reply_token, text_result, quick_reply)
+                            else:
+                                reply_text(reply_token, text_result)
+                        else:
+                            reply_text(reply_token, result)
+                        return
+                
+                # 如果解析失敗或結果為空，繼續走智能助手
+                logger.info(f"📊 直接查詢解析失敗，繼續走智能助手")
+            except Exception as e:
+                logger.error(f"直接查詢處理失敗: {e}")
+                # 失敗則繼續走智能助手
 
         # 優先嘗試智能助手處理
         try:

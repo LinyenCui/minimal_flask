@@ -517,6 +517,16 @@ class AdvancedQueryProcessor:
         remaining = re.sub(r'\d{1,2}-\d{1,2}', '', remaining)
         remaining = re.sub(r'\d{1,2}月\d{1,2}日?', '', remaining)
         
+        # 🔥 2025-12-16 修復：移除狀態詞（避免把狀態詞當地點）
+        status_keywords = ['待派', '準備', '已完成', '註銷', '衝突', '請假', '取消']
+        for status in status_keywords:
+            remaining = remaining.replace(status, '')
+        
+        # 🔥 2025-12-16 修復：移除「狀態」「狀況」「的」「查」「列出」「有哪些」「班次」等語氣詞
+        noise_words = ['狀態', '狀況', '的', '查', '列出', '有哪些', '班次', '列表']
+        for word in noise_words:
+            remaining = remaining.replace(word, '')
+        
         # 清理空白
         remaining = remaining.strip()
         
@@ -827,12 +837,15 @@ class AdvancedQueryProcessor:
                         start_point = trip.get('start_point') or '未知'
                         end_point = trip.get('end_point') or '未知'
                     
-                    # 🔥 修改：顯示執行時間而非金額（根據用戶要求），時間排在id之後起點之前
+                    # 🔥 修改：顯示日期和執行時間
+                    trip_date = trip.get('date')
                     trip_time = trip.get('time')
-                    time_info = f"⏰{trip_time.strftime('%H:%M')}-" if trip_time else ""
+                    date_info = f"📅{trip_date.strftime('%m/%d')}" if trip_date else ""
+                    time_info = f"⏰{trip_time.strftime('%H:%M')}" if trip_time else ""
+                    datetime_info = f"{date_info} {time_info} " if date_info or time_info else ""
                     
-                    # 🔥 修改：去掉📍圖示，保留#號和時鐘圖示，執行時間在id之後起點之前
-                    result_text += f"#{trip_id} {time_info}{start_point}→{end_point}|{driver_info}\n"
+                    # 🔥 修改：顯示日期、時間、路線、司機
+                    result_text += f"#{trip_id} {datetime_info}{start_point}→{end_point}|{driver_info}\n"
                 result_text += "\n"
             
             result_text += f"\n... 還有 {len(trips) - 10} 筆結果\n"
@@ -918,12 +931,15 @@ class AdvancedQueryProcessor:
                     start_point = trip.get('start_point') or '未知'
                     end_point = trip.get('end_point') or '未知'
                 
-                # 🔥 修改：顯示執行時間而非金額（根據用戶要求），時間排在id之後起點之前
+                # 🔥 修改：顯示日期和執行時間
+                trip_date = trip.get('date')
                 trip_time = trip.get('time')
-                time_info = f"⏰{trip_time.strftime('%H:%M')}-" if trip_time else ""
+                date_info = f"📅{trip_date.strftime('%m/%d')}" if trip_date else ""
+                time_info = f"⏰{trip_time.strftime('%H:%M')}" if trip_time else ""
+                datetime_info = f"{date_info} {time_info} " if date_info or time_info else ""
                 
-                # 🔥 修改：去掉📍圖示，保留#號和時鐘圖示，執行時間在id之後起點之前
-                result_text += f"#{trip_id} {time_info}{start_point}→{end_point}|{driver_info}\n"
+                # 🔥 修改：顯示日期、時間、路線、司機
+                result_text += f"#{trip_id} {datetime_info}{start_point}→{end_point}|{driver_info}\n"
             result_text += "\n"
 
         return {
