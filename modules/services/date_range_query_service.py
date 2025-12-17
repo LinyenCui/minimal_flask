@@ -60,7 +60,7 @@ def parse_date_range(date_range_str):
         logger.error(f"解析日期範圍 '{date_range_str}' 失敗: {e}")
         return None, None
 
-def query_completed_trips_range(start_date, end_date, driver_id=None, category=None):
+def query_completed_trips_range(start_date, end_date, driver_id=None, category=None, location=None):
     """
     查詢日期範圍內的已完成班次
     
@@ -69,6 +69,7 @@ def query_completed_trips_range(start_date, end_date, driver_id=None, category=N
         end_date: 結束日期  
         driver_id: 司機ID（可選）
         category: 班次類別（可選）
+        location: 地點關鍵字（可選）🔥 2025-12-17 新增
     
     Returns:
         list: 查詢結果列表
@@ -90,6 +91,11 @@ def query_completed_trips_range(start_date, end_date, driver_id=None, category=N
         if category and category != "全部":
             where_conditions.append("category = :category")
             params["category"] = category
+        
+        # 🔥 2025-12-17 新增：添加地點過濾條件
+        if location:
+            where_conditions.append("(start_point LIKE :location OR via_point LIKE :location OR end_point LIKE :location)")
+            params["location"] = f"%{location}%"
         
         where_clause = " AND ".join(where_conditions)
         
@@ -127,7 +133,7 @@ def query_completed_trips_range(start_date, end_date, driver_id=None, category=N
         logger.error(f"詳細錯誤: {traceback.format_exc()}")
         return []
 
-def query_current_trips_range(start_date, end_date, driver_id=None, category=None):
+def query_current_trips_range(start_date, end_date, driver_id=None, category=None, location=None):
     """
     查詢日期範圍內的進行中班次(trips表)
     
@@ -136,6 +142,7 @@ def query_current_trips_range(start_date, end_date, driver_id=None, category=Non
         end_date: 結束日期
         driver_id: 司機ID（可選）
         category: 班次類別（可選）
+        location: 地點關鍵字（可選）🔥 2025-12-17 新增
     
     Returns:
         list: 查詢結果列表
@@ -157,6 +164,11 @@ def query_current_trips_range(start_date, end_date, driver_id=None, category=Non
         if category and category != "全部":
             where_conditions.append("category = :category")
             params["category"] = category
+        
+        # 🔥 2025-12-17 新增：添加地點過濾條件
+        if location:
+            where_conditions.append("(start_point LIKE :location OR via_point LIKE :location OR end_point LIKE :location OR custom_start_point LIKE :location OR custom_end_point LIKE :location)")
+            params["location"] = f"%{location}%"
         
         where_clause = " AND ".join(where_conditions)
         
@@ -188,11 +200,13 @@ def query_current_trips_range(start_date, end_date, driver_id=None, category=Non
         return []
 
 
-def handle_query_trips_range(start_date, end_date, driver_id=None, category=None, trip_type=None, user_id=None):
+def handle_query_trips_range(start_date, end_date, driver_id=None, category=None, trip_type=None, user_id=None, location=None):
     """
     薄 wrapper：統一入口供 ActionDispatcher 使用。
     - 支援混合範圍（過去→completed_trips；今天/未來→trips）
     - 回傳格式：{"text": str, "quick_reply": Optional[obj], "meta": dict}
+    
+    🔥 2025-12-17 新增：支援 location 參數，按地點過濾班次
     """
     try:
         if not start_date or not end_date:
@@ -205,27 +219,28 @@ def handle_query_trips_range(start_date, end_date, driver_id=None, category=None
             "driver_id": driver_id,
             "category": category,
             "trip_type": trip_type,
+            "location": location,  # 🔥 記錄地點過濾
         }
 
         # 全過去
         if end_date < today:
-            trips = query_completed_trips_range(start_date, end_date, driver_id, category)
-            text = format_completed_trips_range_result(trips, start_date, end_date, driver_id, category)
+            trips = query_completed_trips_range(start_date, end_date, driver_id, category, location=location)
+            text = format_completed_trips_range_result(trips, start_date, end_date, driver_id, category, location=location)
             return {"text": text, "quick_reply": None, "meta": meta}
 
         # 全現在/未來
         if start_date >= today:
-            trips = query_current_trips_range(start_date, end_date, driver_id, category)
-            text = format_current_trips_range_result(trips, start_date, end_date, driver_id, category)
+            trips = query_current_trips_range(start_date, end_date, driver_id, category, location=location)
+            text = format_current_trips_range_result(trips, start_date, end_date, driver_id, category, location=location)
             return {"text": text, "quick_reply": None, "meta": meta}
 
         # 混合：拆分為過去 + 現在/未來
         past_end = today - timedelta(days=1)
-        completed_part = query_completed_trips_range(start_date, past_end, driver_id, category)
-        completed_text = format_completed_trips_range_result(completed_part, start_date, past_end, driver_id, category)
+        completed_part = query_completed_trips_range(start_date, past_end, driver_id, category, location=location)
+        completed_text = format_completed_trips_range_result(completed_part, start_date, past_end, driver_id, category, location=location)
 
-        current_part = query_current_trips_range(today, end_date, driver_id, category)
-        current_text = format_current_trips_range_result(current_part, today, end_date, driver_id, category)
+        current_part = query_current_trips_range(today, end_date, driver_id, category, location=location)
+        current_text = format_current_trips_range_result(current_part, today, end_date, driver_id, category, location=location)
 
         combined = "🔀 混合日期範圍（已完成 + 現在/未來）\n" + "─" * 30
         combined += f"\n\n【已完成（過去）】\n{completed_text}\n\n【現在/未來（trips）】\n{current_text}"
@@ -235,10 +250,11 @@ def handle_query_trips_range(start_date, end_date, driver_id=None, category=None
         logger.error(f"handle_query_trips_range 失敗: {e}")
         return None
 
-def format_completed_trips_range_result(trips, start_date, end_date, driver_id=None, category=None, page_info=None):
+def format_completed_trips_range_result(trips, start_date, end_date, driver_id=None, category=None, page_info=None, location=None):
     """
     格式化已完成班次範圍查詢結果
     page_info: {'current': 1, 'total_items': 50, 'has_more': True}
+    🔥 2025-12-17 新增：支援 location 參數
     """
     if not trips:
         filter_desc = []
@@ -246,8 +262,10 @@ def format_completed_trips_range_result(trips, start_date, end_date, driver_id=N
             filter_desc.append(f"司機{driver_id}")
         if category:
             filter_desc.append(f"{category}班次")
+        if location:
+            filter_desc.append(f"地點「{location}」")
         
-        filter_text = "".join(filter_desc) if filter_desc else ""
+        filter_text = "、".join(filter_desc) if filter_desc else ""
         
         return f"""❌ 找不到符合條件的已完成班次
 
@@ -384,10 +402,11 @@ def format_completed_trips_range_result(trips, start_date, end_date, driver_id=N
     
     return "\n".join(lines)
 
-def format_current_trips_range_result(trips, start_date, end_date, driver_id=None, category=None, page_info=None):
+def format_current_trips_range_result(trips, start_date, end_date, driver_id=None, category=None, page_info=None, location=None):
     """
     格式化進行中班次範圍查詢結果
     page_info: {'current': 1, 'total_items': 50, 'has_more': True}
+    🔥 2025-12-17 新增：支援 location 參數
     """
     if not trips:
         filter_desc = []
@@ -395,8 +414,10 @@ def format_current_trips_range_result(trips, start_date, end_date, driver_id=Non
             filter_desc.append(f"司機{driver_id}")
         if category:
             filter_desc.append(f"{category}班次")
+        if location:
+            filter_desc.append(f"地點「{location}」")
         
-        filter_text = "".join(filter_desc) if filter_desc else ""
+        filter_text = "、".join(filter_desc) if filter_desc else ""
         
         return f"""❌ 找不到符合條件的班次
 

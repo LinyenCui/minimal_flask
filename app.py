@@ -355,6 +355,109 @@ def render_diagnosis():
     # 返回JSON結果
     return jsonify(results)
 
+# 🔥 記憶體監控端點
+@app.route('/memory_stats')
+def memory_stats():
+    """記憶體使用統計端點（用於監控和診斷）"""
+    from flask import jsonify
+    import sys
+    
+    stats = {
+        'timestamp': datetime.now().isoformat(),
+        'python_memory': {}
+    }
+    
+    # 系統記憶體（如果 psutil 可用）
+    if _proc is not None:
+        try:
+            mem_info = _proc.memory_info()
+            stats['system_memory'] = {
+                'rss_mb': round(mem_info.rss / (1024 * 1024), 2),
+                'vms_mb': round(mem_info.vms / (1024 * 1024), 2)
+            }
+        except Exception as e:
+            stats['system_memory'] = {'error': str(e)}
+    
+    # 對話狀態統計
+    try:
+        from modules.utils.conversation_context import (
+            conversation_states, conversation_manager
+        )
+        stats['conversation_states'] = {
+            'count': len(conversation_states),
+            'keys_sample': list(conversation_states.keys())[:10]  # 只顯示前10個
+        }
+        
+        if conversation_manager:
+            stats['conversation_manager'] = conversation_manager.get_memory_stats()
+    except Exception as e:
+        stats['conversation_states'] = {'error': str(e)}
+    
+    # temp_booking_states 統計
+    try:
+        from modules.handlers.temp_booking_handler import temp_booking_states
+        stats['temp_booking_states'] = {
+            'count': len(temp_booking_states),
+            'keys_sample': list(temp_booking_states.keys())[:10]
+        }
+    except Exception as e:
+        stats['temp_booking_states'] = {'error': str(e)}
+    
+    # helpers.user_states 統計
+    try:
+        from modules.utils.helpers import user_states
+        stats['user_states'] = {
+            'count': len(user_states),
+            'keys_sample': list(user_states.keys())[:10]
+        }
+    except Exception as e:
+        stats['user_states'] = {'error': str(e)}
+    
+    # 其他狀態字典
+    try:
+        from modules.services.booking.booking_service import booking_states
+        stats['booking_states'] = {'count': len(booking_states)}
+    except:
+        pass
+    
+    try:
+        from modules.handlers.sequence_fix_handler import sequence_fix_states
+        stats['sequence_fix_states'] = {'count': len(sequence_fix_states)}
+    except:
+        pass
+    
+    try:
+        from modules.handlers.batch_allowance_handler import batch_allowance_states
+        stats['batch_allowance_states'] = {'count': len(batch_allowance_states)}
+    except:
+        pass
+    
+    return jsonify(stats)
+
+
+# 🔥 手動觸發記憶體清理端點
+@app.route('/cleanup_memory')
+def cleanup_memory():
+    """手動觸發記憶體清理"""
+    from flask import jsonify
+    
+    try:
+        from modules.services.scheduler_service import cleanup_expired_conversation_states
+        cleanup_expired_conversation_states()
+        
+        # 返回清理後的統計
+        return jsonify({
+            'status': 'success',
+            'message': '記憶體清理完成',
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+
+
 # 啟動應用
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 3000))

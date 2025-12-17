@@ -631,6 +631,11 @@ def init_scheduler(app):
         with app.app_context():
             initialize_unique_codes()
 
+    # 🔥 記憶體優化：定期清理過期狀態
+    def cleanup_memory_wrapper():
+        with app.app_context():
+            cleanup_expired_conversation_states()
+
     # schedule_all_trip_updates 任務定義 (這個函數內部已有上下文處理)
     app.scheduler.add_job(
         id='schedule_daily_updates',
@@ -658,4 +663,118 @@ def init_scheduler(app):
         trigger='cron',
         hour='*', minute=45, timezone='Asia/Taipei',
         replace_existing=True
-    ) 
+    )
+    
+    # 🔥 記憶體優化：每 5 分鐘清理一次過期狀態
+    app.scheduler.add_job(
+        id='cleanup_expired_states',
+        func=cleanup_memory_wrapper,
+        trigger='interval',
+        minutes=5,
+        replace_existing=True
+    )
+    
+    current_app.logger.info("✅ 已添加記憶體清理排程任務（每5分鐘）")
+
+
+def cleanup_expired_conversation_states():
+    """清理所有過期的對話狀態（記憶體優化）"""
+    try:
+        from modules.utils.conversation_context import clear_all_expired_contexts, conversation_manager
+        from modules.handlers.temp_booking_handler import temp_booking_states
+        from modules.utils.helpers import user_states
+        
+        current_time = time.time()
+        cleaned_total = 0
+        
+        # 1. 清理 conversation_context 中的狀態
+        clear_all_expired_contexts()
+        
+        # 2. 清理 temp_booking_states（過期時間：10分鐘）
+        expired_booking = [
+            user_id for user_id, state in list(temp_booking_states.items())
+            if 'timestamp' in state.get('data', {}) and 
+               current_time - state['data'].get('timestamp', current_time) > 600
+        ]
+        # 如果沒有 timestamp，檢查狀態是否超過10分鐘（保守處理）
+        for user_id in list(temp_booking_states.keys()):
+            if user_id not in expired_booking:
+                # 沒有 timestamp 的舊狀態，直接清理
+                state = temp_booking_states.get(user_id, {})
+                data = state.get('data', {})
+                if not data.get('timestamp'):
+                    # 舊格式狀態，設置 timestamp 以便下次檢查
+                    if 'data' not in state:
+                        state['data'] = {}
+                    state['data']['timestamp'] = current_time
+        
+        for user_id in expired_booking:
+            temp_booking_states.pop(user_id, None)
+            cleaned_total += 1
+        
+        # 3. 限制 temp_booking_states 容量
+        MAX_BOOKING_STATES = 200
+        if len(temp_booking_states) > MAX_BOOKING_STATES:
+            # 簡單策略：清理掉一半最舊的
+            keys_to_remove = list(temp_booking_states.keys())[:-MAX_BOOKING_STATES//2]
+            for key in keys_to_remove:
+                temp_booking_states.pop(key, None)
+                cleaned_total += 1
+        
+        # 4. 清理 helpers.user_states（過期時間：5分鐘）
+        # 這個字典沒有 timestamp，我們限制其大小
+        MAX_USER_STATES = 200
+        if len(user_states) > MAX_USER_STATES:
+            keys_to_remove = list(user_states.keys())[:-MAX_USER_STATES//2]
+            for key in keys_to_remove:
+                user_states.pop(key, None)
+                cleaned_total += 1
+        
+        # 5. 嘗試清理其他狀態字典
+        try:
+            from modules.services.booking.booking_service import booking_states
+            if len(booking_states) > 100:
+                keys_to_remove = list(booking_states.keys())[:-50]
+                for key in keys_to_remove:
+                    booking_states.pop(key, None)
+                    cleaned_total += 1
+        except ImportError:
+            pass
+        
+        try:
+            from modules.handlers.sequence_fix_handler import sequence_fix_states
+            if len(sequence_fix_states) > 50:
+                keys_to_remove = list(sequence_fix_states.keys())[:-25]
+                for key in keys_to_remove:
+                    sequence_fix_states.pop(key, None)
+                    cleaned_total += 1
+        except ImportError:
+            pass
+        
+        try:
+            from modules.handlers.batch_allowance_handler import batch_allowance_states
+            if len(batch_allowance_states) > 50:
+                keys_to_remove = list(batch_allowance_states.keys())[:-25]
+                for key in keys_to_remove:
+                    batch_allowance_states.pop(key, None)
+                    cleaned_total += 1
+        except ImportError:
+            pass
+        
+        # 記錄清理結果和當前記憶體狀態
+        if cleaned_total > 0:
+            current_app.logger.info(f"🧹 記憶體清理完成，共清理 {cleaned_total} 個過期狀態")
+        
+        # 輸出當前狀態統計
+        stats = {
+            'temp_booking_states': len(temp_booking_states),
+            'user_states': len(user_states),
+        }
+        if conversation_manager:
+            stats.update(conversation_manager.get_memory_stats())
+        
+        current_app.logger.info(f"📊 當前記憶體狀態: {stats}")
+        
+    except Exception as e:
+        current_app.logger.error(f"❌ 記憶體清理失敗: {e}")
+        traceback.print_exc() 

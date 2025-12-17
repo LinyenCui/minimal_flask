@@ -39,12 +39,14 @@ logger = logging.getLogger(__name__)
 
 def handle_temp_booking_start(user_id, category="東洋"):
     """初始化 預約叫車 (AI) 流程"""
+    import time as _time
     logger.info(f"[AI Flow Start] Initializing for User ID: {user_id}, Category: {category}")
     temp_booking_states[user_id] = {
         "state": STATE_WAITING_AI_INPUT,  # Use the consistent state name
         "data": { 
             "category": category, "date": None, "time": None, "start_point": None,
-            "end_point": None, "via_point": None, "meter_fare": None, "passenger_name": None
+            "end_point": None, "via_point": None, "meter_fare": None, "passenger_name": None,
+            "timestamp": _time.time()  # 🔥 記憶體優化：添加時間戳以支援過期清理
         }
     }
     logger.info(f"[AI Flow Start] State for User ID {user_id} set to: {temp_booking_states[user_id]}")

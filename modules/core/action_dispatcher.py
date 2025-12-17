@@ -50,6 +50,7 @@ class ActionDispatcher:
             driver_id = params.get("driver_id")
             category = params.get("category")
             trip_type = params.get("trip_type")
+            location = params.get("location")  # 🔥 2025-12-17 新增：支援地點過濾
 
             from modules.services.date_range_query_service import handle_query_trips_range
 
@@ -60,6 +61,7 @@ class ActionDispatcher:
                 category=category,
                 trip_type=trip_type,
                 user_id=user_id,
+                location=location,  # 🔥 傳遞地點參數
             )
 
             if not result:

@@ -2,6 +2,7 @@
 AI對話上下文管理模塊
 用於維持多輪對話的連續性，讓AI能記住之前的查詢結果和操作意圖
 🔥 新增：統一對話狀態管理系統，防止智能助手搶戲
+🔥 2024-12 記憶體優化：添加定期清理和容量限制
 """
 
 import logging
@@ -10,11 +11,21 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 import json
 import time
+from collections import OrderedDict
 
 logger = logging.getLogger(__name__)
 
-# 全域變數存儲會話狀態
-conversation_states = {}
+# ============================================================
+# 🔥 記憶體優化配置
+# ============================================================
+MAX_CONVERSATION_STATES = 500  # 最大會話狀態數量
+MAX_QUERY_RESULTS_PER_USER = 100  # 每用戶最大查詢結果數量
+STATE_EXPIRE_SECONDS = 300  # 狀態過期時間（5分鐘）
+CLEANUP_INTERVAL_SECONDS = 60  # 清理間隔（1分鐘）
+
+# 使用 OrderedDict 支援 LRU 淘汰
+conversation_states = OrderedDict()
+_last_cleanup_time = 0
 
 @dataclass
 class ActiveConversation:
@@ -68,20 +79,46 @@ class ConversationContext:
         self.state_key = f"context_{user_id}"
     
     def save_query_result(self, query_type: str, command: str, all_results: List, conditions: Dict = None):
-        """保存查詢結果供翻頁使用"""
-        global conversation_states
+        """保存查詢結果供翻頁使用
+        
+        🔥 記憶體優化：
+        1. 限制結果數量，避免存儲過多資料
+        2. 自動觸發過期清理
+        3. LRU 淘汰策略
+        """
+        global conversation_states, _last_cleanup_time
+        
+        # 🔥 自動觸發清理（每分鐘最多一次）
+        current_time = time.time()
+        if current_time - _last_cleanup_time > CLEANUP_INTERVAL_SECONDS:
+            _cleanup_expired_states()
+            _last_cleanup_time = current_time
+        
+        # 🔥 限制結果數量，避免記憶體爆炸
+        limited_results = all_results[:MAX_QUERY_RESULTS_PER_USER] if all_results else []
         
         state = {
             'query_type': query_type,  # 'completed_trips' 或 'current_trips'
             'command': command,
-            'all_results': all_results,
+            'all_results': limited_results,
+            'total_count': len(all_results) if all_results else 0,  # 記錄原始數量
             'conditions': conditions or {},
             'current_page': 0,
             'page_size': 10,
-            'timestamp': time.time()
+            'timestamp': current_time
         }
         
+        # 🔥 LRU：如果 key 已存在，先移除再添加（移到末尾）
+        if self.state_key in conversation_states:
+            conversation_states.pop(self.state_key)
+        
         conversation_states[self.state_key] = state
+        
+        # 🔥 容量限制：超過上限時移除最舊的
+        while len(conversation_states) > MAX_CONVERSATION_STATES:
+            oldest_key = next(iter(conversation_states))
+            conversation_states.pop(oldest_key)
+            logger.debug(f"LRU淘汰舊狀態: {oldest_key}")
         
     def get_query_result(self) -> Optional[Dict]:
         """獲取保存的查詢結果"""
@@ -638,26 +675,133 @@ class ConversationManager:
         # 🔥 新增：也清除活躍對話
         self.end_conversation(user_id, "重置上下文")
         logger.info(f"重置用戶 {user_id} 的所有上下文狀態")
+    
+    # ============================================================
+    # 🔥 記憶體優化：定期清理過期狀態
+    # ============================================================
+    
+    def cleanup_expired_states(self):
+        """清理所有過期的狀態（記憶體優化）
+        
+        清理範圍：
+        1. active_conversations - 過期對話
+        2. leave_modes - 過期請假模式
+        3. pending_modifications - 過期待處理修改
+        4. transient_notices - 清空所有（一次性通知應該已被消費）
+        5. recent_trip_ids / recent_fixed_schedule_ids - 容量限制
+        """
+        current_time = time.time()
+        cleaned_counts = {
+            'active_conversations': 0,
+            'leave_modes': 0,
+            'pending_modifications': 0,
+            'transient_notices': 0,
+            'recent_ids': 0
+        }
+        
+        # 1. 清理過期的活躍對話
+        expired_conversations = [
+            user_id for user_id, conv in list(self.active_conversations.items())
+            if conv.is_expired()
+        ]
+        for user_id in expired_conversations:
+            self.active_conversations.pop(user_id, None)
+            cleaned_counts['active_conversations'] += 1
+        
+        # 2. 清理過期的請假模式
+        expired_leave_modes = [
+            user_id for user_id, mode_data in list(self.leave_modes.items())
+            if current_time - mode_data.get('timestamp', 0) > STATE_EXPIRE_SECONDS
+        ]
+        for user_id in expired_leave_modes:
+            self.leave_modes.pop(user_id, None)
+            cleaned_counts['leave_modes'] += 1
+        
+        # 3. 清理過期的待處理修改
+        expired_modifications = [
+            user_id for user_id, mod_data in list(self.pending_modifications.items())
+            if current_time - mod_data.get('timestamp', 0) > STATE_EXPIRE_SECONDS
+        ]
+        for user_id in expired_modifications:
+            self.pending_modifications.pop(user_id, None)
+            cleaned_counts['pending_modifications'] += 1
+        
+        # 4. 清空過期的一次性通知（超過5分鐘的 reply_token 已經失效）
+        # 這些通知如果沒被消費，說明處理流程有問題，直接清空
+        if len(self.transient_notices) > 100:  # 超過100個未處理的通知說明有問題
+            cleaned_counts['transient_notices'] = len(self.transient_notices)
+            self.transient_notices.clear()
+        
+        # 5. 限制 recent_trip_ids 和 recent_fixed_schedule_ids 的大小
+        MAX_RECENT_IDS = 500
+        if len(self.recent_trip_ids) > MAX_RECENT_IDS:
+            # 只保留最近的一半
+            keys_to_remove = list(self.recent_trip_ids.keys())[:-MAX_RECENT_IDS//2]
+            for key in keys_to_remove:
+                self.recent_trip_ids.pop(key, None)
+                cleaned_counts['recent_ids'] += 1
+        
+        if len(self.recent_fixed_schedule_ids) > MAX_RECENT_IDS:
+            keys_to_remove = list(self.recent_fixed_schedule_ids.keys())[:-MAX_RECENT_IDS//2]
+            for key in keys_to_remove:
+                self.recent_fixed_schedule_ids.pop(key, None)
+                cleaned_counts['recent_ids'] += 1
+        
+        # 記錄清理結果
+        total_cleaned = sum(cleaned_counts.values())
+        if total_cleaned > 0:
+            logger.info(f"🧹 ConversationManager 清理完成: {cleaned_counts}")
+        
+        return cleaned_counts
+    
+    def get_memory_stats(self) -> Dict:
+        """獲取記憶體使用統計（用於監控）"""
+        return {
+            'active_conversations': len(self.active_conversations),
+            'leave_modes': len(self.leave_modes),
+            'pending_modifications': len(self.pending_modifications),
+            'transient_notices': len(self.transient_notices),
+            'recent_trip_ids': len(self.recent_trip_ids),
+            'recent_fixed_schedule_ids': len(self.recent_fixed_schedule_ids),
+            'user_states': len(self.user_states)
+        }
 
 
 def get_conversation_context(user_id: str) -> ConversationContext:
     """獲取用戶的會話上下文"""
     return ConversationContext(user_id)
 
-def clear_all_expired_contexts():
-    """清理所有過期的會話上下文（定期清理）"""
+def _cleanup_expired_states():
+    """內部清理函數：清理所有過期的會話上下文"""
     global conversation_states
     current_time = time.time()
     expired_keys = [
-        key for key, state in conversation_states.items()
-        if current_time - state['timestamp'] > 300  # 5分鐘過期
+        key for key, state in list(conversation_states.items())
+        if current_time - state.get('timestamp', 0) > STATE_EXPIRE_SECONDS
     ]
     
     for key in expired_keys:
-        del conversation_states[key]
+        conversation_states.pop(key, None)
     
     if expired_keys:
-        print(f"清理了 {len(expired_keys)} 個過期的會話上下文")
+        logger.info(f"🧹 清理了 {len(expired_keys)} 個過期的會話上下文")
+
+
+def clear_all_expired_contexts():
+    """清理所有過期的會話上下文（供外部調用）
+    
+    🔥 記憶體優化：同時清理 conversation_states 和 ConversationManager 中的狀態
+    """
+    global conversation_states, _last_cleanup_time
+    
+    _cleanup_expired_states()
+    _last_cleanup_time = time.time()
+    
+    # 🔥 同時清理 ConversationManager 中的過期狀態
+    if conversation_manager:
+        conversation_manager.cleanup_expired_states()
+    
+    logger.info(f"📊 當前狀態數量: conversation_states={len(conversation_states)}")
 
 # 🔥 創建全局conversation_manager實例
 conversation_manager = ConversationManager() 

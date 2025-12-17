@@ -1185,9 +1185,12 @@ class SmartAssistant:
                 driver_id = int(driver_id) if driver_id.isdigit() else None
             category = params.get("category")
 
+            # 🔥 2025-12-17 修正：傳遞 location 參數，避免查詢所有28筆結果
+            location = params.get("location")
+            
             logger.info(
-                "✅ execute_intent(query_trips_range) prepared: start=%s, end=%s, driver=%s, category=%s",
-                start_date, end_date, driver_id, category
+                "✅ execute_intent(query_trips_range) prepared: start=%s, end=%s, driver=%s, category=%s, location=%s",
+                start_date, end_date, driver_id, category, location
             )
 
             return {
@@ -1200,6 +1203,7 @@ class SmartAssistant:
                         "driver_id": driver_id,
                         "category": category,
                         "trip_type": params.get("trip_type"),
+                        "location": location,  # 🔥 新增：傳遞地點過濾
                     },
                 },
                 "original_input": original_input,
