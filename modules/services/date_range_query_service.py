@@ -200,13 +200,23 @@ def query_current_trips_range(start_date, end_date, driver_id=None, category=Non
         return []
 
 
-def handle_query_trips_range(start_date, end_date, driver_id=None, category=None, trip_type=None, user_id=None, location=None):
+def handle_query_trips_range(start_date, end_date, driver_id=None, category=None, trip_type=None, user_id=None, location=None, force_completed=False):
     """
     薄 wrapper：統一入口供 ActionDispatcher 使用。
     - 支援混合範圍（過去→completed_trips；今天/未來→trips）
     - 回傳格式：{"text": str, "quick_reply": Optional[obj], "meta": dict}
     
     🔥 2025-12-17 新增：支援 location 參數，按地點過濾班次
+    🔥 2025-12-18 重要修復：支援 force_completed 參數
+    
+    Args:
+        force_completed: 若為 True，表示用戶明確指定「已完成」，
+                        今天的資料應查 completed_trips 而非 trips
+    
+    今天的時間態邊界規則：
+    - 今天是一個「流動的邊界」
+    - 若有「已完成」關鍵字（force_completed=True）：今天查 completed_trips
+    - 若無「已完成」關鍵字（force_completed=False）：今天查 trips
     """
     try:
         if not start_date or not end_date:
@@ -220,21 +230,37 @@ def handle_query_trips_range(start_date, end_date, driver_id=None, category=None
             "category": category,
             "trip_type": trip_type,
             "location": location,  # 🔥 記錄地點過濾
+            "force_completed": force_completed,  # 🔥 記錄是否強制查已完成
         }
 
-        # 全過去
+        # 全過去（end_date < today）
         if end_date < today:
             trips = query_completed_trips_range(start_date, end_date, driver_id, category, location=location)
             text = format_completed_trips_range_result(trips, start_date, end_date, driver_id, category, location=location)
             return {"text": text, "quick_reply": None, "meta": meta}
 
-        # 全現在/未來
-        if start_date >= today:
+        # 🔥 2025-12-18：force_completed 模式下，全部查 completed_trips
+        # （這用於「12/1-12/25 司機61553 診所已完成班次」這類查詢）
+        if force_completed:
+            # 只查到今天為止的已完成班次（未來不可能有已完成）
+            effective_end = min(end_date, today)
+            trips = query_completed_trips_range(start_date, effective_end, driver_id, category, location=location)
+            text = format_completed_trips_range_result(trips, start_date, effective_end, driver_id, category, location=location)
+            return {"text": text, "quick_reply": None, "meta": meta}
+
+        # 全現在/未來（start_date > today，或 start_date == today 且無 force_completed）
+        if start_date > today:
+            trips = query_current_trips_range(start_date, end_date, driver_id, category, location=location)
+            text = format_current_trips_range_result(trips, start_date, end_date, driver_id, category, location=location)
+            return {"text": text, "quick_reply": None, "meta": meta}
+        
+        # start_date == today（今天開始的範圍，無 force_completed）
+        if start_date == today:
             trips = query_current_trips_range(start_date, end_date, driver_id, category, location=location)
             text = format_current_trips_range_result(trips, start_date, end_date, driver_id, category, location=location)
             return {"text": text, "quick_reply": None, "meta": meta}
 
-        # 混合：拆分為過去 + 現在/未來
+        # 混合：拆分為過去 + 現在/未來（start_date < today <= end_date）
         past_end = today - timedelta(days=1)
         completed_part = query_completed_trips_range(start_date, past_end, driver_id, category, location=location)
         completed_text = format_completed_trips_range_result(completed_part, start_date, past_end, driver_id, category, location=location)
@@ -672,6 +698,12 @@ def handle_query_current_trips_range(message_text, user_id=None):
     處理進行中班次範圍查詢命令
     格式：查班次範圍 8/1-8/5 [司機ID] [類別]
     支援翻頁
+    
+    🔥 2025-12-18 重要修復：
+    此函數名稱雖為 current_trips，但實際上會根據日期範圍自動分流到正確的時間態：
+    - 過去日期 → completed_trips
+    - 今天（無「已完成」關鍵字）→ trips
+    - 未來日期 → trips
     """
     try:
         parts = message_text.split()

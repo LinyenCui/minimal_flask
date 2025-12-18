@@ -33,13 +33,19 @@ def is_status_filter_query(text: str) -> bool:
     這類查詢應該走 advanced_query_processor，用 SQL 的 status 條件篩選。
     
     規則：
-    - 狀態詞 + 班次/列表語氣（無「狀態」「狀況」字眼）→ True
+    - 操作性狀態詞 + 班次/列表語氣（無「狀態」「狀況」字眼）→ True
     - 包含「狀態」「狀況」字眼 → False（這是狀態詢問，應該走智能助手 clarify）
+    - 🔥 「已完成班次」+ 日期/司機 → False（這是查詢已完成的班次，不是狀態篩選）
+    
+    🔥 2025-12-18 重要修復：
+    - 「已完成」不是操作性狀態詞，它是一個查詢修飾詞
+    - 「今天司機61553已完成班次」應該走直接查詢流程，不是狀態篩選
     
     Examples:
         "查待派班次" → True（狀態篩選）
         "列出請假班次" → True（狀態篩選）
         "有哪些衝突班次" → True（狀態篩選）
+        "今天司機61553已完成班次" → False（🔥 已完成班次查詢，不是狀態篩選）
         "明天新建路的狀態" → False（狀態詢問，走智能助手）
         "今天新建路狀態" → False（狀態詢問，走智能助手）
         "明天新建路" → False（一般查詢）
@@ -50,14 +56,25 @@ def is_status_filter_query(text: str) -> bool:
         logger.info(f"🤖 狀態詢問，走智能助手: {text}")
         return False
     
-    # 狀態詞 + 班次/列表語氣 → 狀態篩選查詢
+    # 🔥 2025-12-18：「已完成班次」+ 日期或司機 → 不是狀態篩選，是查詢已完成的班次
+    # 這種情況應該走直接查詢流程
+    has_completed = '已完成' in text
+    has_date = _has_date_pattern(text)
+    has_driver = bool(re.search(r'司機\d+|\d{4,5}號?司機', text))
+    
+    if has_completed and (has_date or has_driver):
+        logger.info(f"📊 已完成班次查詢（已完成+日期/司機），不是狀態篩選: {text}")
+        return False
+    
+    # 操作性狀態詞（不包含「已完成」）+ 班次/列表語氣 → 狀態篩選查詢
     # 語氣詞：班次、列表、有哪些、列出、查
+    OPERATION_STATUS_WORDS = {'待派', '準備', '註銷', '衝突', '請假', '取消'}
     query_indicators = ['班次', '列表', '有哪些', '列出', '查']
-    has_status_word = any(s in text for s in STATUS_WORDS)
+    has_operation_status = any(s in text for s in OPERATION_STATUS_WORDS)
     has_query_indicator = any(q in text for q in query_indicators)
     
-    if has_status_word and has_query_indicator:
-        logger.info(f"📊 狀態篩選查詢（狀態詞+語氣詞）: {text}")
+    if has_operation_status and has_query_indicator:
+        logger.info(f"📊 狀態篩選查詢（操作性狀態詞+語氣詞）: {text}")
         return True
     
     return False
@@ -72,14 +89,20 @@ def is_simple_direct_query(text: str) -> bool:
     規則：
     1. 包含「狀態」「狀況」字眼 → False（狀態詢問，走智能助手 clarify）
     2. 如果是狀態篩選查詢 → False（走狀態篩選流程）
-    3. 「日期+地點+狀態詞」（如「明天新建路請假」）→ False（操作請求）
-    4. 有動詞+狀態詞（如「要請假」）→ False（操作請求）
-    5. 「日期+地點」或「日期+司機」（無狀態詞）→ True（一般查詢）
-    6. 其他 → False（走智能助手）
+    3. 🔥 「日期+司機+已完成班次」→ True（查詢已完成班次，不是操作）
+    4. 「日期+地點+操作性狀態詞」（如「明天新建路請假」）→ False（操作請求）
+    5. 有動詞+狀態詞（如「要請假」）→ False（操作請求）
+    6. 「日期+地點」或「日期+司機」→ True（一般查詢）
+    7. 其他 → False（走智能助手）
+    
+    🔥 2025-12-18 重要修復：
+    - 「已完成」是一個查詢修飾詞，不是操作請求
+    - 「已完成班次」表示查詢過去態數據，應該走直接查詢流程
     
     Examples:
         "明天新建路" → True（一般查詢）
         "12/7-12/13司機61553" → True（一般查詢）
+        "今天司機61553診所已完成班次" → True（🔥 已完成班次查詢）
         "明天新建路狀態" → False（狀態詢問，走智能助手）
         "待派班次" → False（狀態篩選查詢）
         "明天新建路請假" → False（操作請求）
@@ -97,21 +120,32 @@ def is_simple_direct_query(text: str) -> bool:
     # 先提取條件
     has_date = _has_date_pattern(text)
     has_location = _has_location_pattern(text)
-    has_status_word = any(s in text for s in STATUS_WORDS)
     has_action_verb = any(v in text for v in ACTION_VERBS)
     has_driver = bool(re.search(r'司機\d+|\d{4,5}號?司機', text))
     
-    # 規則3：「日期+地點+狀態詞」→ 操作請求
-    if has_date and has_location and has_status_word:
-        logger.info(f"🤖 走智能助手（日期+地點+狀態詞=操作請求）: {text}")
+    # 🔥 2025-12-18：「已完成」是查詢修飾詞，不是操作
+    # 操作性狀態詞：待派、準備、註銷、衝突、請假、取消（這些表示要做某種操作）
+    # 查詢性修飾詞：已完成（這個表示查詢已完成的班次）
+    OPERATION_STATUS_WORDS = {'待派', '準備', '註銷', '衝突', '請假', '取消'}
+    has_operation_status = any(s in text for s in OPERATION_STATUS_WORDS)
+    has_completed_keyword = '已完成' in text
+    
+    # 規則3：🔥 「日期+司機+已完成班次」→ 直接查詢（不是操作）
+    if has_date and has_driver and has_completed_keyword and not has_operation_status:
+        logger.info(f"📊 已完成班次查詢（日期+司機+已完成）: {text}")
+        return True
+    
+    # 規則4：「日期+地點+操作性狀態詞」→ 操作請求
+    if has_date and has_location and has_operation_status:
+        logger.info(f"🤖 走智能助手（日期+地點+操作性狀態詞=操作請求）: {text}")
         return False
     
-    # 規則4：有動詞+狀態詞 → 操作請求
-    if has_action_verb and has_status_word:
+    # 規則5：有動詞+狀態詞 → 操作請求
+    if has_action_verb and (has_operation_status or has_completed_keyword):
         logger.info(f"🤖 走智能助手（動詞+狀態詞=操作請求）: {text}")
         return False
     
-    # 規則5：「日期+地點」或「日期+司機」（無狀態詞）→ 一般查詢
+    # 規則6：「日期+地點」或「日期+司機」→ 一般查詢
     if has_date and (has_location or has_driver):
         logger.info(f"📊 一般查詢（日期+地點/司機）: {text}")
         return True
@@ -123,7 +157,18 @@ def is_simple_direct_query(text: str) -> bool:
 
 def determine_query_table(text: str) -> str:
     """
-    根據日期判斷應該查哪個表
+    根據日期和「已完成」關鍵字判斷應該查哪個表
+    
+    🔥 2025-12-18 重要修復：
+    - 今天是一個「流動的邊界」
+    - 今天已經執行完成、掉進 completed_trips 的班次 → 過去態
+    - 今天還在 trips 表、尚未執行完成的班次 → 現在態
+    
+    規則：
+    1. 有「已完成」關鍵字 → 查 completed_trips（不論日期是今天或過去）
+    2. 日期在過去（< 今天）→ 查 completed_trips
+    3. 日期是今天且無「已完成」關鍵字 → 查 trips
+    4. 日期在未來 → 查 trips
     
     Returns:
         'completed_trips' - 過去態（已完成班次）
@@ -133,6 +178,9 @@ def determine_query_table(text: str) -> str:
     from datetime import date
     
     today = get_taiwan_date()
+    
+    # 🔥 關鍵：檢查是否有「已完成」關鍵字
+    has_completed_keyword = '已完成' in text
     
     # 嘗試解析日期範圍
     range_match = re.search(r'(\d{1,2})[/\-](\d{1,2})[~\-至到](\d{1,2})[/\-](\d{1,2})', text)
@@ -150,8 +198,13 @@ def determine_query_table(text: str) -> str:
                 logger.info(f"📅 日期範圍 {end_date} < 今天 {today}，查過去態")
                 return 'completed_trips'
             else:
-                logger.info(f"📅 日期範圍包含今天或未來，查現在態")
-                return 'trips'
+                # 🔥 範圍包含今天或未來：根據「已完成」關鍵字決定
+                if has_completed_keyword:
+                    logger.info(f"📅 日期範圍包含今天或未來，但有「已完成」關鍵字，查過去態")
+                    return 'completed_trips'
+                else:
+                    logger.info(f"📅 日期範圍包含今天或未來，查現在態")
+                    return 'trips'
         except ValueError:
             pass
     
@@ -165,8 +218,16 @@ def determine_query_table(text: str) -> str:
             if query_date < today:
                 logger.info(f"📅 日期 {query_date} < 今天 {today}，查過去態")
                 return 'completed_trips'
+            elif query_date == today:
+                # 🔥 今天是流動的邊界：根據「已完成」關鍵字決定
+                if has_completed_keyword:
+                    logger.info(f"📅 日期是今天 {today}，有「已完成」關鍵字，查過去態")
+                    return 'completed_trips'
+                else:
+                    logger.info(f"📅 日期是今天 {today}，無「已完成」關鍵字，查現在態")
+                    return 'trips'
             else:
-                logger.info(f"📅 日期 {query_date} >= 今天，查現在態")
+                logger.info(f"📅 日期 {query_date} > 今天，查現在態")
                 return 'trips'
         except ValueError:
             pass
@@ -175,6 +236,15 @@ def determine_query_table(text: str) -> str:
     if '昨天' in text or '前天' in text or '上週' in text:
         logger.info(f"📅 相對日期（昨天/前天/上週），查過去態")
         return 'completed_trips'
+    
+    # 🔥 「今天」關鍵字判斷
+    if '今天' in text:
+        if has_completed_keyword:
+            logger.info(f"📅 今天 + 已完成關鍵字，查過去態")
+            return 'completed_trips'
+        else:
+            logger.info(f"📅 今天（無已完成關鍵字），查現在態")
+            return 'trips'
     
     # 默認查現在態
     logger.info(f"📅 默認查現在態")
