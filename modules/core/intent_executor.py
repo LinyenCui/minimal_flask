@@ -840,7 +840,7 @@ class IntentExecutor:
         new_meter_fare = params.get("meter_fare")  # 設定錶價
         new_extra_fare = params.get("extra_fare")  # 設定加成
         adjustment = params.get("adjustment", 0)   # 累加金額（舊模式）
-        reason = params.get("reason", "車資調整")
+        reason = params.get("reason", "")
         
         if not trip_id:
             return {
@@ -852,7 +852,7 @@ class IntentExecutor:
         try:
             query = text("""
                 SELECT id, date, start_point, via_point, end_point,
-                       meter_fare, extra_fare, driver_id
+                       meter_fare, extra_fare, driver_id, category
                 FROM completed_trips
                 WHERE id = :trip_id
             """)
@@ -867,60 +867,82 @@ class IntentExecutor:
             trip = dict(result._mapping)
             current_meter = trip.get("meter_fare") or 0
             current_extra = trip.get("extra_fare") or 0
-            current_total = current_meter + current_extra
             
             # 🔥 計算新車資
-            # 優先使用設定模式（有明確的錶價或加成）
             if new_meter_fare is not None or new_extra_fare is not None:
-                # 設定模式：用戶明確指定錶價/加成
                 final_meter = new_meter_fare if new_meter_fare is not None else current_meter
                 final_extra = new_extra_fare if new_extra_fare is not None else current_extra
-                # 如果有 adjustment 且沒有設定 extra_fare，則用 adjustment 作為加成
                 if new_extra_fare is None and adjustment != 0:
                     final_extra = adjustment
             else:
-                # 累加模式：只有 adjustment
                 final_meter = current_meter
                 final_extra = current_extra + adjustment
             
-            new_total = final_meter + final_extra
+            # 🔥 關鍵：檢查是否為預設原因，複用 ai_fare_service.py 的邏輯
+            default_reasons = [
+                '透過AI智能修改', '錶價260加成', '費用調整要求',
+                '一般記帳', '一般記賬', '記帳', '記賬',  # Gemini FC 常填的預設原因
+                '車資調整', '修改車資', '車資修改', '費用修改',
+            ]
+            is_default_reason = not reason or reason.strip() in default_reasons or len(reason.strip()) < 3
             
-            # 生成確認訊息
-            message = f"""💰 確認修改班次 #{trip_id} 車資
+            if is_default_reason:
+                # 🔥 需要追問原因，使用現有的對話系統（ai_modification_reason）
+                logger.info(f"🔍 檢測到預設原因 '{reason}'，啟動追問模式")
+                
+                context_data = {
+                    'trip_id': trip['id'],
+                    'meter_fare': final_meter,
+                    'extra_fare': final_extra,
+                    'trip': trip,
+                    'original_meter': current_meter,
+                    'original_extra': current_extra
+                }
+                
+                conversation_manager.start_conversation(
+                    user_id, "ai_modification_reason", 
+                    current_step="waiting_reason",
+                    context_data=context_data,
+                    prompt_message=f"請提供修改班次#{trip['id']}車資的原因",
+                    duration_minutes=3
+                )
+                
+                confirmation_message = f"""🎯 AI理解您要修改班次#{trip['id']}的車資：
 
-📍 路線：{trip['start_point']} → {trip['end_point']}
-🚕 司機：{trip['driver_id']}
+📊 當前記錄：錶價 {current_meter}, 加成 {current_extra}
+🔄 修改為：錶價 {final_meter}, 加成 {final_extra}
 
-📊 車資變更：
-   錶價：${current_meter} → ${final_meter}
-   加成：${current_extra} → ${final_extra}
-   總計：${current_total} → ${new_total}
-   
-📝 原因：{reason}
-
-確認修改嗎？"""
+⚠️ 請說明修改原因（例如：客戶要求調整、等候時間過長等）"""
+                
+                # 返回追問訊息（帶放棄按鈕）
+                from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+                quick_reply = QuickReply(items=[
+                    QuickReplyItem(action=MessageAction(label="❌ 放棄修改", text="放棄AI修改"))
+                ])
+                reply_message_with_quick_reply(reply_token, confirmation_message, quick_reply)
+                
+                return {"success": True, "message": "已發送追問原因訊息", "waiting_reason": True}
             
-            # 🔥 保存完整的車資信息
-            conversation_manager.set_pending_operation(user_id, {
-                "action": "update_fare",
-                "trip_id": trip_id,
-                "meter_fare": final_meter,
-                "extra_fare": final_extra,
-                "reason": reason,
-                "current_total": current_total,
-                "new_total": new_total
-            })
+            # 🔥 有明確原因，調用現有的 execute_fare_modification 生成確認框
+            from modules.services.ai_fare_service import execute_fare_modification
             
-            # 生成 Quick Reply
-            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
-            quick_reply = QuickReply(items=[
-                QuickReplyItem(action=MessageAction(label="✅ 確認修改", text="確認修改")),
-                QuickReplyItem(action=MessageAction(label="❌ 取消", text="取消操作"))
-            ])
+            modification_intent = {
+                'meter_fare': final_meter,
+                'extra_fare': final_extra,
+                'reason': reason
+            }
             
-            reply_message_with_quick_reply(reply_token, message, quick_reply)
+            flex_result = execute_fare_modification(trip, modification_intent, user_id)
             
-            return {"success": True, "message": "已發送確認訊息"}
+            if flex_result and isinstance(flex_result, dict):
+                # 返回 Flex Message 確認框
+                from modules.handlers.text_message_handler import handle_ai_fare_result
+                handle_ai_fare_result(flex_result, reply_token)
+                return {"success": True, "message": "已發送確認訊息"}
+            else:
+                # 降級為文字回覆
+                reply_text(reply_token, str(flex_result) if flex_result else "❌ 生成確認框失敗")
+                return {"success": False, "message": "生成確認框失敗"}
         
         except Exception as e:
             logger.error(f"查詢班次失敗: {e}", exc_info=True)

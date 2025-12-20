@@ -32,6 +32,7 @@ def dispatch_conversation(conversation, message_text: str, user_id: str, reply_t
         'query_clarification': handle_query_clarification_conversation,
         'query_confirmation': handle_query_confirmation_conversation,
         'fare_modification_reason': handle_ai_modification_reason_conversation,
+        'ai_modification_reason': handle_ai_modification_reason_conversation,  # ai_fare_service.py 使用這個名稱
     }
     
     handler = handlers.get(conversation_type)
@@ -298,17 +299,19 @@ def handle_ai_modification_reason_conversation(conversation, message_text: str, 
         # 結束原因收集對話
         conversation_manager.end_conversation(user_id, "原因已收集")
         
-        # 顯示確認框（使用AI車資服務生成）
+        # 顯示確認框（使用現有的 execute_fare_modification）
         try:
-            from modules.services.ai_fare_service import create_fare_modification_confirmation_flex
-            flex_result = create_fare_modification_confirmation_flex(trip_data, {
-                'trip_id': trip_id,
+            from modules.services.ai_fare_service import execute_fare_modification
+            
+            modification_intent = {
                 'meter_fare': meter_fare,
                 'extra_fare': extra_fare,
                 'reason': reason
-            })
+            }
             
-            if flex_result:
+            flex_result = execute_fare_modification(trip_data, modification_intent, user_id)
+            
+            if flex_result and isinstance(flex_result, dict):
                 from modules.handlers.text_message_handler import handle_ai_fare_result
                 handle_ai_fare_result(flex_result, reply_token)
             else:

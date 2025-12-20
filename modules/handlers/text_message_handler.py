@@ -199,6 +199,8 @@ def process_text_message(event):
             msg_stripped.endswith('註銷') or  # 如 #852註銷
             msg_stripped.endswith('衝突') or  # 如 #852衝突
             msg_stripped.startswith('班次詳情') or  # 班次詳情 xxx
+            msg_stripped.startswith('確認AI修改') or  # 確認AI修改 5297 140 60 原因
+            msg_stripped in ['放棄AI修改', '取消AI修改'] or  # AI修改取消命令
             is_modify_status_cmd  # 修改狀態 852 註銷
         )
         
