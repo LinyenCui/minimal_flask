@@ -839,7 +839,7 @@ class IntentExecutor:
         # 🔥 支持直接設定錶價和加成
         new_meter_fare = params.get("meter_fare")  # 設定錶價
         new_extra_fare = params.get("extra_fare")  # 設定加成
-        adjustment = params.get("adjustment", 0)   # 累加金額（舊模式）
+        adjustment = params.get("adjustment")   # 覆蓋加成（不再累加）
         reason = params.get("reason", "")
         
         if not trip_id:
@@ -869,14 +869,22 @@ class IntentExecutor:
             current_extra = trip.get("extra_fare") or 0
             
             # 🔥 計算新車資
-            if new_meter_fare is not None or new_extra_fare is not None:
-                final_meter = new_meter_fare if new_meter_fare is not None else current_meter
-                final_extra = new_extra_fare if new_extra_fare is not None else current_extra
-                if new_extra_fare is None and adjustment != 0:
-                    final_extra = adjustment
+            # 🔥 計算新車資 (強制覆蓋邏輯)
+            final_meter = new_meter_fare if new_meter_fare is not None else current_meter
+            
+            if new_extra_fare is not None:
+                final_extra = new_extra_fare
+            elif adjustment is not None:
+                final_extra = adjustment
             else:
-                final_meter = current_meter
-                final_extra = current_extra + adjustment
+                final_extra = current_extra
+            
+            # 🔥 檢查是否有變更 (防止無效寫入)
+            if final_meter == current_meter and final_extra == current_extra:
+                return {
+                    "success": True,
+                    "message": f"⚠️ 車資無變更，無需修改\n\n班次 #{trip_id} 當前已是：\n錶價 {final_meter}、加成 {final_extra}"
+                }
             
             # 🔥 關鍵：檢查是否為預設原因，複用 ai_fare_service.py 的邏輯
             default_reasons = [
