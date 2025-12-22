@@ -880,16 +880,19 @@ class IntentExecutor:
                 final_extra = current_extra
             
             # 🔥 檢查是否有變更 (防止無效寫入)
+            # 🔥 檢查是否有變更 (防止無效寫入)
             if final_meter == current_meter and final_extra == current_extra:
+                msg = f"⚠️ 車資無變更，無需修改\n\n班次 #{trip_id} 當前已是：\n錶價 {final_meter}、加成 {final_extra}"
+                reply_text(reply_token, msg)
                 return {
                     "success": True,
-                    "message": f"⚠️ 車資無變更，無需修改\n\n班次 #{trip_id} 當前已是：\n錶價 {final_meter}、加成 {final_extra}"
+                    "message": "車資無變更"
                 }
             
             # 🔥 關鍵：檢查是否為預設原因，複用 ai_fare_service.py 的邏輯
             default_reasons = [
                 '透過AI智能修改', '錶價260加成', '費用調整要求',
-                '一般記帳', '一般記賬', '記帳', '記賬',  # Gemini FC 常填的預設原因
+                # '一般記帳', '一般記賬', '記帳', '記賬',  # 移除：這些是用戶真正使用的理由
                 '車資調整', '修改車資', '車資修改', '費用修改',
             ]
             is_default_reason = not reason or reason.strip() in default_reasons or len(reason.strip()) < 3

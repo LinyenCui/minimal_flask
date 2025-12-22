@@ -35,7 +35,7 @@ LOCATION = os.environ.get("GCP_LOCATION", "us-central1") # Try us-central1 again
 # LOCATION = os.environ.get("GCP_LOCATION", "asia-east1") # Try asia-east1 again in the new project
 # MODEL_ID = "gemini-1.0-pro" # Try the standard Pro model
 # MODEL_ID = "gemini-pro" # Try short name variant
-MODEL_ID = "gemini-2.0-flash-001" # Use latest stable model according to docs
+MODEL_ID = "gemini-2.5-flash" # Use latest stable model according to docs
 
 # --- ADDED: Function to load prompt from file ---
 def load_prompt_from_file(file_path):
