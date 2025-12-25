@@ -35,8 +35,37 @@ def callback():
             if event.type == "message" and event.message.type == "text":
                 original_message_text = event.message.text
                 source_type = event.source.type
-                user_id = event.source.user_id # 獲取 user_id
+                user_id = event.source.user_id # Restored missing definition
                 
+                # --- PATCH: Customers AI Sandbox Trigger ---
+                is_private = source_type == 'user'
+                trigger_sandbox = False
+                lower_text = original_message_text.lower()
+                
+                try:
+                    from modules.handlers.customers_ai_handler import SANDBOX_STATES, handle_customers_ai_message
+                    
+                    # Check 1: Explicit trigger phrases
+                    if is_private and (lower_text.startswith('cu') or original_message_text.startswith('客')):
+                        trigger_sandbox = True
+                    elif not is_private and (lower_text.startswith('/cu') or original_message_text.startswith('/客')):
+                        trigger_sandbox = True
+                        
+                    # Check 2: Pending Confirmation State
+                    # If the user is in the middle of a Sandbox confirmation, intercept EVERYTHING.
+                    elif user_id in SANDBOX_STATES:
+                        trigger_sandbox = True
+                        
+                    if trigger_sandbox:
+                        logger.info(f"Routing to Customers AI Sandbox: {user_id}")
+                        handle_customers_ai_message(event)
+                        continue
+                except Exception as e:
+                    logger.error(f"Sandbox dispatch failed: {e}", exc_info=True)
+                    # Proceed to normal flow if sandbox fails to load/dispatch? 
+                    # No, safer to just log.
+                # --- END PATCH ---
+
                 should_handle, processed_text = should_process(original_message_text, source_type, user_id)
                 
                 if should_handle:
