@@ -251,7 +251,9 @@ def process_sandbox_message(user_id, text_input):
     Instructions:
     1. Analyze the user's intent (Query, Create, Update, Delete).
     2. PROACTIVELY call the corresponding tool function.
-    3. For 'customer_create', 'short_name' and 'category' are REQUIRED. If missing, ASK the user for them.
+    3. For 'customer_create', 'short_name' and 'category' are REQUIRED. 
+       CRITICAL: If these fields are missing, YOU MUST STILL CALL the 'customer_create' tool with whatever data you have (leave missing fields as null or empty string).
+       DO NOT ask the user for them in your text response. Creating the tool call with missing fields allows the system to prompt the user correctly.
     4. For 'lookup', partial name is enough.
     5. For 'create', infer the name and address from the text.
        - Example: "新增客戶 肯德基基隆路店" -> name="肯德基基隆路店"
@@ -341,6 +343,43 @@ def process_sandbox_message(user_id, text_input):
                     "type": "text_response",
                     "content": f"找不到名稱為「{target_short or target_name}」的客戶。請確認名稱是否正確，或先查詢確認。"
                 }
+
+            # Check for missing required fields for customer_create
+            # Check for missing required fields for customer_create
+            # Check for missing required fields for customer_create
+            if fname == 'customer_create':
+                required_fields = ["name", "address", "short_name", "category"]
+                missing = [field for field in required_fields if not fargs.get(field)]
+                
+                if missing:
+                    # Translate field names to Chinese for better UX
+                    field_map = {
+                        "name": "名稱",
+                        "address": "地址",
+                        "short_name": "簡稱",
+                        "category": "類別",
+                        "contact_phone": "電話"
+                    }
+                    missing_zh = [field_map.get(m, m) for m in missing]
+                    
+                    # 🔥 Return structured info for handler to manage state
+                    return {
+                        "type": "missing_info",
+                        "content": f"為了確保後續功能（如班次查詢）正常運作，新增客戶時請務必提供「{'、'.join(missing_zh)}」。\n請補充後再試一次！",
+                        "missing_fields": missing,
+                        "draft_data": fargs  # Return what we have so far
+                    }
+                    
+                # 🔥 Pre-check for duplicate short_name
+                # User hates crashes. Check integrity constraint BEFORE proposal.
+                check_short = fargs.get('short_name')
+                if check_short:
+                    existing = CustomerSandbox.query.filter_by(short_name=check_short).first()
+                    if existing:
+                        return {
+                            "type": "text_response",
+                            "content": f"簡稱「{check_short}」已經被客戶「{existing.name}」使用中。\n請更換一個簡稱再試一次（例如改用「{check_short}2」）。"
+                        }
 
             summary = f"欲執行操作：{fname}\n參數：{json.dumps(fargs, ensure_ascii=False)}"
             # Map standard Create/Update/Delete to nice Chinese summary

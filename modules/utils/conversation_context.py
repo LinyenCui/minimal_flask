@@ -419,40 +419,40 @@ class ConversationManager:
         self.active_conversations = {}
         # 🔔 短暫提示：用於在下一次回覆前附加簡短通知（例如：自動取消說明）
         self.transient_notices = {}
+        
+        # 定義各種對話的取消命令
+        # 🎯 語意衝突已解決：trips狀態已從「取消」改為「註銷」，現在可以自然使用「取消」命令
+        self.cancel_commands_map = {
+            'fare_modification': ['取消修改', '取消', '取消AI修改', '放棄AI修改', '放棄修改', '退出', '不修改'],
+            'temp_booking': ['取消預約', '取消', '退出', '不預約'],
+            'passenger_leave': ['取消請假', '取消', '退出', '不請假', '放棄操作', '完成記錄', '查已完成', '班次詳情'],
+            'driver_assign': ['取消指派', '取消', '退出', '不指派'],
+            'fixed_schedule': ['取消', '退出', '放棄操作'],
+            'accounting_deposit': ['放棄操作', '取消', '退出'],
+            'accounting_weekly_charge': ['放棄操作', '取消', '退出'],
+            'customer_sandbox': ['取消', '放棄', '退出', 'cancel']
+        }
     
     # === 🔥 統一對話狀態管理 ===
     
     def start_conversation(self, user_id: str, conversation_type: str, 
                           current_step: str, context_data: Dict, 
                           prompt_message: str, duration_minutes: int = 5) -> ActiveConversation:
-        """開始一個新的對話流程"""
-        now = datetime.now()
-        expires_at = now + timedelta(minutes=duration_minutes)
+        """開啟一個新的對話狀態"""
+        expires_at = datetime.now() + timedelta(minutes=duration_minutes)
         
-        # 定義各種對話的取消命令
-        # 🎯 語意衝突已解決：trips狀態已從「取消」改為「註銷」，現在可以自然使用「取消」命令
-        # 現在態狀態有：「待派」、「請假」、「衝突」、「註銷」、「準備」
-        # 「取消修改」不再與任何資料庫狀態產生語意混淆
-        cancel_commands_map = {
-            'fare_modification': ['取消修改', '取消', '取消AI修改', '放棄AI修改', '放棄修改', '退出', '不修改'],
-            'temp_booking': ['取消預約', '取消', '退出', '不預約'],
-            'passenger_leave': ['取消請假', '取消', '退出', '不請假', '放棄操作', '完成記錄', '查已完成', '班次詳情'],  # 學習未來態設計，添加常見的非請假命令
-            'driver_assign': ['取消指派', '取消', '退出', '不指派'],
-            'fixed_schedule': ['取消', '退出', '放棄操作'],  # 未來態已使用此設計
-            # 🔥 新增：帳務處理對話的取消命令
-            'accounting_deposit': ['放棄操作', '取消', '退出'],
-            'accounting_weekly_charge': ['放棄操作', '取消', '退出']
-        }
+        # 根據不同的 type 決定 cancel_commands
+        cancel_commands = self.cancel_commands_map.get(conversation_type, ['取消', '放棄'])
         
         conversation = ActiveConversation(
             user_id=user_id,
             conversation_type=conversation_type,
             current_step=current_step,
             context_data=context_data,
-            created_at=now,
+            created_at=datetime.now(),
             expires_at=expires_at,
             prompt_message=prompt_message,
-            cancel_commands=cancel_commands_map.get(conversation_type, ['取消', '退出'])
+            cancel_commands=cancel_commands
         )
         
         # 清除該用戶的舊對話（如果有）
@@ -460,12 +460,11 @@ class ConversationManager:
             logger.info(f"清除用戶 {user_id} 的舊對話: {self.active_conversations[user_id].conversation_type}")
         
         self.active_conversations[user_id] = conversation
-        logger.info(f"開始對話: 用戶={user_id}, 類型={conversation_type}, 步驟={current_step}")
-        
+        logger.info(f"Conversation STARTED for {user_id}: type={conversation_type}, expires={expires_at}")
+        logger.info(f"Current active conversations count: {len(self.active_conversations)}")
         return conversation
     
     def get_active_conversation(self, user_id: str) -> Optional[ActiveConversation]:
-        """獲取用戶的活躍對話"""
         if user_id not in self.active_conversations:
             return None
             

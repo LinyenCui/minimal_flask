@@ -44,20 +44,36 @@ def callback():
                 
                 try:
                     from modules.handlers.customers_ai_handler import SANDBOX_STATES, handle_customers_ai_message
+                    from modules.utils.conversation_context import conversation_manager
                     
-                    # Check 1: Explicit trigger phrases
-                    if is_private and (lower_text.startswith('cu') or original_message_text.startswith('客')):
+                    # Logic: Determine if we should route to Sandbox
+                    
+                    # 1. Check strict prefix (Always Valid)
+                    has_sandbox_prefix = (lower_text.startswith('cu') or original_message_text.startswith('客') or
+                                          lower_text.startswith('/cu') or original_message_text.startswith('/客'))
+
+                    # 2. Check Active Sandbox Conversation (Multi-turn Memory)
+                    is_active_sandbox_conv = False
+                    active_conv = conversation_manager.get_active_conversation(user_id)
+                    if active_conv and active_conv.conversation_type == 'customer_sandbox':
+                         is_active_sandbox_conv = True
+
+                    # --- DECISION TREE ---
+                    if has_sandbox_prefix:
                         trigger_sandbox = True
-                    elif not is_private and (lower_text.startswith('/cu') or original_message_text.startswith('/客')):
-                        trigger_sandbox = True
-                        
-                    # Check 2: Pending Confirmation State
-                    # If the user is in the middle of a Sandbox confirmation, intercept EVERYTHING.
+                    # If the user is in the middle of a Sandbox confirmation (Legacy state), intercept.
                     elif user_id in SANDBOX_STATES:
                         trigger_sandbox = True
+                    # If user is in a multi-turn flow (e.g. filling missing info), intercept.
+                    elif is_active_sandbox_conv:
+                        trigger_sandbox = True
+                    
+                    # NOTE: We REVERTED the "Smart Router" (Prefix-less for private chat) 
+                    # because it conflicted with legacy commands with arguments (e.g. "診所班次 今天").
+                    # Safety first -> Require prefix or active context.
                         
                     if trigger_sandbox:
-                        logger.info(f"Routing to Customers AI Sandbox: {user_id}")
+                        logger.info(f"Routing to Customers AI Sandbox: {user_id} (Prefix={has_sandbox_prefix}, Active={is_active_sandbox_conv})")
                         handle_customers_ai_message(event)
                         continue
                 except Exception as e:
