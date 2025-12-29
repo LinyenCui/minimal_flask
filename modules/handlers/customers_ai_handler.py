@@ -1,9 +1,11 @@
 import logging
+import json
 from flask import g
 from modules.utils.line_bot import reply_text
 from modules.services.customers_ai_service import process_sandbox_message, execute_proposal
 from modules.utils.conversation_context import conversation_manager
-import json
+from modules.models.base import db
+from sqlalchemy import text as sql_text
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,26 @@ def handle_customers_ai_message(event):
     text = event.message.text.strip()
     reply_token = event.reply_token
     
+    # 0. Prepare Context (Recent Trips) for AI "Entity Linking"
+    # This enables "Change that one"
+    additional_context = ""
+    try:
+        # Fetch last 5 trips
+        sql = "SELECT trip_id, date, time, start_point, end_point, category FROM trips ORDER BY trip_id DESC LIMIT 5"
+        trips = db.session.execute(sql_text(sql)).fetchall()
+        if trips:
+            trip_lines = []
+            for t in trips:
+                 t_id = t[0]
+                 t_date = t[1]
+                 t_time = t[2].strftime("%H:%M") if t[2] else "??"
+                 t_start = t[3]
+                 t_end = t[4]
+                 trip_lines.append(f" - Trip #{t_id}: {t_date} {t_time} from {t_start} to {t_end or 'N/A'}")
+            additional_context = "Recent Trips (Visible to user):\n" + "\n".join(trip_lines)
+    except Exception as e:
+        logger.warning(f"Failed to fetch context: {e}")
+
     logger.info(f"Customers AI Sandbox: User {user_id} says '{text}'")
     
     # 1. Check for Pending Confirmation (Final Step)
@@ -124,7 +146,7 @@ def handle_customers_ai_message(event):
         return
 
     try:
-        result = process_sandbox_message(user_id, clean_text)
+        result = process_sandbox_message(user_id, clean_text, additional_context=additional_context)
         logger.info(f"Sandbox Result Type: {result.get('type')}")
         
         if result['type'] == 'text_response' or result['type'] == 'rest_response':

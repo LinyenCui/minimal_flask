@@ -153,89 +153,47 @@ def process_booking_input(user_id, message_text):
             
             return confirm_text
         
-        elif current_step == 'confirm':
             # 處理確認或取消
             if message_text.strip() == "確認":
                 # 保存預約到數據庫
                 booking_data = booking_states[user_id]['data']
                 
-                # 創建新的班次記錄
-                insert_query = """
-                INSERT INTO trips 
-                (date, time, start_point, via_point, end_point, category, status, trip_type) 
-                VALUES 
-                (:date, :time, :start_point, :via_point, :end_point, :category, '待派', 'temp')
-                RETURNING trip_id
-                """
+                # 🔥 Refactored: Call shared creation logic
+                success, result = create_booking_record(booking_data)
                 
-                result = db.session.execute(
-                    sql_text(insert_query), 
-                    {
-                        "date": booking_data['date'],
-                        "time": booking_data['time'],
-                        "start_point": booking_data['start_point'],
-                        "via_point": booking_data.get('via_point'),
-                        "end_point": booking_data.get('end_point'),
-                        "category": booking_data['category']
-                    }
-                )
-                new_trip_id = result.fetchone()[0]
-                
-                # 生成唯一識別碼
-                # 臨時班次：加入日期信息避免 trip_id 重複問題
-                date_str = booking_data['date'].strftime('%Y%m%d')
-                unique_code = f"T_{new_trip_id}_{date_str}"
-                
-                # 計算一年中的第幾周
-                _, week_number, _ = booking_data['date'].isocalendar()
-                
-                # 更新班次的唯一識別碼和週數
-                update_query = """
-                UPDATE trips 
-                SET unique_code = :unique_code, week_number = :week_number
-                WHERE trip_id = :trip_id
-                """
-                
-                db.session.execute(
-                    sql_text(update_query), 
-                    {
-                        "unique_code": unique_code,
-                        "week_number": week_number,
-                        "trip_id": new_trip_id
-                    }
-                )
-                
-                db.session.commit()
-                
-                # 清除用戶狀態
-                del booking_states[user_id]
-                
-                # 發送確認消息
-                reply_text = (
-                    "✅ 預約成功！\n\n"
-                    f"班次ID: {new_trip_id}\n"
-                    f"日期：{booking_data['date']}\n"
-                    f"時間：{booking_data['time'].strftime('%H:%M')}\n"
-                    f"起點：{booking_data['start_point']}\n"
-                )
-                
-                if booking_data.get('via_point'):
-                    reply_text += f"途經：{booking_data['via_point']}\n"
+                if success:
+                    new_trip_id = result['trip_id']
+                    # 清除用戶狀態
+                    del booking_states[user_id]
+                    
+                    # 發送確認消息
+                    reply_text = (
+                        "✅ 預約成功！\n\n"
+                        f"班次ID: {new_trip_id}\n"
+                        f"日期：{booking_data['date']}\n"
+                        f"時間：{booking_data['time'].strftime('%H:%M')}\n"
+                        f"起點：{booking_data['start_point']}\n"
+                    )
+                    
+                    if booking_data.get('via_point'):
+                        reply_text += f"途經：{booking_data['via_point']}\n"
+                    else:
+                        reply_text += "途經：無\n"
+                    
+                    if booking_data.get('end_point'):
+                        reply_text += f"終點：{booking_data['end_point']}\n"
+                    else:
+                        reply_text += "終點：無\n"
+                    
+                    reply_text += (
+                        f"類別：{booking_data['category']}\n"
+                        f"狀態：待派\n\n"
+                        "我們會盡快為您指派司機。"
+                    )
+                    
+                    return reply_text
                 else:
-                    reply_text += "途經：無\n"
-                
-                if booking_data.get('end_point'):
-                    reply_text += f"終點：{booking_data['end_point']}\n"
-                else:
-                    reply_text += "終點：無\n"
-                
-                reply_text += (
-                    f"類別：{booking_data['category']}\n"
-                    f"狀態：待派\n\n"
-                    "我們會盡快為您指派司機。"
-                )
-                
-                return reply_text
+                    return f"❌ 預約失敗：{result}"
             
             elif message_text.strip() == "取消":
                 # 清除用戶狀態
@@ -255,4 +213,73 @@ def process_booking_input(user_id, message_text):
         if user_id in booking_states:
             del booking_states[user_id]
         
-        return f"預約過程中發生錯誤: {str(e)}\n請重新開始預約流程。" 
+        return f"預約過程中發生錯誤: {str(e)}\n請重新開始預約流程。"
+
+def create_booking_record(booking_data):
+    """
+    創建預約記錄 (共用邏輯)
+    
+    Args:
+        booking_data: dict, 包含 date, time, start_point, via_point(opt), end_point(opt), category
+        
+    Returns:
+        tuple: (success, result)
+            success: bool
+            result: dict (success=True) or str (success=False, error message)
+    """
+    try:
+        # 創建新的班次記錄
+        insert_query = """
+        INSERT INTO trips 
+        (date, time, start_point, via_point, end_point, category, status, trip_type, passenger_name, meter_fare, driver_id) 
+        VALUES 
+        (:date, :time, :start_point, :via_point, :end_point, :category, '待派', 'temp', :passenger_name, :meter_fare, :driver_id)
+        RETURNING trip_id
+        """
+        
+        result = db.session.execute(
+            sql_text(insert_query), 
+            {
+                "date": booking_data['date'],
+                "time": booking_data['time'],
+                "start_point": booking_data['start_point'],
+                "via_point": booking_data.get('via_point'),
+                "end_point": booking_data.get('end_point'),
+                "category": booking_data.get('category', '診所'),
+                "passenger_name": booking_data.get('passenger_name'),
+                "meter_fare": booking_data.get('meter_fare'),
+                "driver_id": booking_data.get('driver_id')
+            }
+        )
+        new_trip_id = result.fetchone()[0]
+        
+        # 生成唯一識別碼
+        # 臨時班次：加入日期信息避免 trip_id 重複問題
+        date_str = booking_data['date'].strftime('%Y%m%d')
+        unique_code = f"T_{new_trip_id}_{date_str}"
+        
+        # 計算一年中的第幾周
+        _, week_number, _ = booking_data['date'].isocalendar()
+        
+        # 更新班次的唯一識別碼和週數
+        update_query = """
+        UPDATE trips 
+        SET unique_code = :unique_code, week_number = :week_number
+        WHERE trip_id = :trip_id
+        """
+        
+        db.session.execute(
+            sql_text(update_query), 
+            {
+                "unique_code": unique_code,
+                "week_number": week_number,
+                "trip_id": new_trip_id
+            }
+        )
+        
+        db.session.commit()
+        return True, {'trip_id': new_trip_id, 'unique_code': unique_code}
+        
+    except Exception as e:
+        db.session.rollback()
+        return False, str(e) 
