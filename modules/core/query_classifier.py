@@ -145,9 +145,11 @@ def is_simple_direct_query(text: str) -> bool:
         logger.info(f"🤖 走智能助手（動詞+狀態詞=操作請求）: {text}")
         return False
     
-    # 規則6：「日期+地點」或「日期+司機」→ 一般查詢
-    if has_date and (has_location or has_driver):
-        logger.info(f"📊 一般查詢（日期+地點/司機）: {text}")
+    # 規則6：「日期+地點」或「日期+司機」或「日期+類別」→ 一般查詢
+    has_category = any(c in text for c in ['診所', '東洋', '臨時'])
+    
+    if has_date and (has_location or has_driver or has_category):
+        logger.info(f"📊 一般查詢（日期+地點/司機/類別）: {text}")
         return True
     
     # 其他情況：走智能助手
@@ -191,8 +193,15 @@ def determine_query_table(text: str) -> str:
         
         # 推斷年份
         year = today.year
+        start_year = year
+        end_year = year
+        
+        # 情況：12月查 "12/14 - 1/2" -> 跨年
+        if start_month > end_month:
+            end_year += 1
+            
         try:
-            end_date = date(year, end_month, end_day)
+            end_date = date(end_year, end_month, end_day)
             # 如果結束日期在過去，整個範圍都是過去態
             if end_date < today:
                 logger.info(f"📅 日期範圍 {end_date} < 今天 {today}，查過去態")
@@ -293,9 +302,22 @@ def parse_direct_query(text: str) -> dict:
         start_month, start_day = int(range_match.group(1)), int(range_match.group(2))
         end_month, end_day = int(range_match.group(3)), int(range_match.group(4))
         year = today.year
+        
+        # 智能年份判斷
+        # 如果開始月份比當前月份大很多（例如在1月查12月），可能是去年？但通常查班次是查近期。
+        # 假設：
+        # 1. 跨年範圍：12月到1月 -> 結束年份+1
+        
+        start_year = year
+        end_year = year
+        
+        # 情況：12月查 "12/14 - 1/2"
+        if start_month > end_month:
+            end_year += 1
+            
         try:
-            result['start_date'] = date(year, start_month, start_day)
-            result['end_date'] = date(year, end_month, end_day)
+            result['start_date'] = date(start_year, start_month, start_day)
+            result['end_date'] = date(end_year, end_month, end_day)
             logger.info(f"📅 解析日期範圍: {result['start_date']} 到 {result['end_date']}")
             return result
         except ValueError:

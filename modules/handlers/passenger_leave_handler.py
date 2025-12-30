@@ -90,7 +90,8 @@ def process_passenger_leave(trip_id, surcharge_adjustment, reason, user_id):
                 passenger_leave_reason = :leave_reason,
                 modified_by = :modified_by,
                 modification_time = :modification_time,
-                modification_reason = :modification_reason
+                modification_reason = :modification_reason,
+                status = '準備'
             WHERE trip_id = :trip_id
             RETURNING trip_id
             """
@@ -109,7 +110,8 @@ def process_passenger_leave(trip_id, surcharge_adjustment, reason, user_id):
             SET extra_fare = :new_extra_fare,
                 modified_by = :modified_by,
                 modification_reason = :modification_reason,
-                modification_time = :modification_time
+                modification_time = :modification_time,
+                status = '準備'
             WHERE trip_id = :trip_id
             RETURNING trip_id
             """

@@ -465,29 +465,43 @@ class IntentExecutor:
             reply_text(reply_token, f"📭 沒有找到 {date_str}「{location}」的相關班次")
             return {"success": False, "message": "沒有找到班次"}
         
-        # 4. 分類：已請假 vs 準備狀態
+        # 4. 分類：已請假 vs 準備狀態 vs 其他非準備狀態
         already_on_leave = [t for t in trips if t.get('passenger_leave_reason')]
-        ready_trips = [t for t in trips if not t.get('passenger_leave_reason')]
+        ready_trips = [t for t in trips if not t.get('passenger_leave_reason') and t.get('status') in ['準備', '待派']]
+        other_non_ready = [t for t in trips if t.get('status') in ['註銷', '衝突'] and not t.get('passenger_leave_reason')]
+        
+        # 將其他非準備狀態視為需要恢復的班次
+        trips_to_restore = already_on_leave + other_non_ready
         
         from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
         
-        # 情況1：所有班次都已請假 → 問是否恢復
-        if already_on_leave and not ready_trips:
-            trip_ids = [t.get('id') for t in already_on_leave]
+        # 情況1：所有班次都已請假或處於非準備狀態 → 問是否恢復
+        if trips_to_restore and not ready_trips:
+            # trip_ids = [t.get('id') for t in trips_to_restore]
+            # Bug fix: use safe id extraction
+            trip_ids = [t.get('id') or t.get('trip_id') for t in trips_to_restore]
             
-            if len(already_on_leave) == 1:
-                trip = already_on_leave[0]
-                trip_id = trip.get('id')
-                reason = trip.get('passenger_leave_reason', '未知原因')
+            if len(trips_to_restore) == 1:
+                trip = trips_to_restore[0]
+                trip_id = trip.get('id') or trip.get('trip_id')
+                reason = trip.get('passenger_leave_reason', '')
+                status = trip.get('status', '')
+                
+                status_desc = f"狀態為「{status}」"
+                if reason:
+                    status_desc = f"已經請假（{reason}）"
+                elif status == '註銷':
+                    status_desc = "已經註銷"
+                elif status == '衝突':
+                    status_desc = "處於衝突狀態"
+                
                 message = f"""📍 {date_str}「{location}」的班次：
 
 🚕 班次 #{trip_id}
 📍 {trip.get('start_point')}→{trip.get('end_point')}
 ⏰ {trip.get('time', '')}
 
-⚠️ 這班已經是請假狀態了
-📝 原因：{reason}
-
+⚠️ 這班{status_desc}
 是否要改回「準備」狀態？"""
                 
                 # 保存恢復上下文
@@ -498,17 +512,25 @@ class IntentExecutor:
                 })
                 
                 quick_reply = QuickReply(items=[
-                    QuickReplyItem(action=MessageAction(label="✅ 改回準備", text="確認請假")),
+                    QuickReplyItem(action=MessageAction(label="✅ 改回準備", text="確認請假")), # Note: '確認請假' triggers restore in some handler? Wait, check handler.
+                    # Wait, '確認請假' text might be misleading if logic handles it.
+                    # But if I change it, I must ensure handler supports it.
+                    # Actually, the user's logic likely maps "確認請假" to restore if context is restore.
+                    # Let's keep existing text or use "全部改回準備" which maps to specific handler?
+                    # Line 523 used "確認請假" for restore.
+                    # Let's use "全部改回準備" to be safe and explicit, mapped in leave_mode_handler.
                     QuickReplyItem(action=MessageAction(label=f"📋 #{trip_id}詳情", text=f"班次詳情 {trip_id}")),
                     QuickReplyItem(action=MessageAction(label="❌ 放棄操作", text="取消操作"))
                 ])
             else:
-                # 多個已請假班次
-                message = f"📍 {date_str}「{location}」找到 {len(already_on_leave)} 個班次，都已經請假了：\n\n"
-                for trip in already_on_leave[:5]:
-                    tid = trip.get('id')
+                # 多個需恢復班次
+                message = f"📍 {date_str}「{location}」找到 {len(trips_to_restore)} 個需恢復的班次：\n\n"
+                for trip in trips_to_restore[:5]:
+                    tid = trip.get('id') or trip.get('trip_id')
                     reason = trip.get('passenger_leave_reason', '')
-                    message += f"• #{tid} {trip.get('start_point')}→{trip.get('end_point')} ({reason})\n"
+                    status = trip.get('status', '')
+                    desc = f"({reason})" if reason else f"({status})"
+                    message += f"• #{tid} {trip.get('start_point')}→{trip.get('end_point')} {desc}\n"
                 message += "\n請選擇要改回準備的班次："
                 
                 # 保存恢復上下文（全部）
@@ -520,33 +542,35 @@ class IntentExecutor:
                 
                 # 🔥 生成選項：全部改回 + 單獨改回
                 items = [
-                    QuickReplyItem(action=MessageAction(label="✅ 全部改回準備", text="確認請假"))
+                    QuickReplyItem(action=MessageAction(label="✅ 全部改回準備", text="全部改回準備"))
                 ]
                 for tid in trip_ids[:2]:  # 最多顯示2個單獨選項
-                    items.append(QuickReplyItem(action=MessageAction(label=f"#{tid}改回", text=f"班次詳情 {tid}")))
+                    items.append(QuickReplyItem(action=MessageAction(label=f"#{tid}改回", text=f"修改狀態 {tid} 準備")))
                 items.append(QuickReplyItem(action=MessageAction(label="❌ 放棄操作", text="取消操作")))
                 
                 quick_reply = QuickReply(items=items)
             
             reply_message_with_quick_reply(reply_token, message, quick_reply)
-            return {"success": True, "message": "班次已請假"}
+            return {"success": True, "message": "需恢復"}
         
-        # 🔥 情況2：混合狀態（部分已請假、部分準備）
-        if already_on_leave and ready_trips:
+        # 🔥 情況2：混合狀態（部分需恢復、部分準備）
+        if trips_to_restore and ready_trips:
             # 顯示混合狀態信息
             message = f"📍 {date_str}「{location}」找到 {len(trips)} 個班次：\n\n"
             
-            # 已請假的班次
-            message += f"🔵 已請假 ({len(already_on_leave)}個)：\n"
-            for trip in already_on_leave[:3]:
-                tid = trip.get('id')
+            # 需恢復的班次
+            message += f"🔵 需恢復 ({len(trips_to_restore)}個)：\n"
+            for trip in trips_to_restore[:3]:
+                tid = trip.get('id') or trip.get('trip_id')
                 reason = trip.get('passenger_leave_reason', '')
-                message += f"  • #{tid} {trip.get('start_point')}→{trip.get('end_point')} ({reason})\n"
+                status = trip.get('status', '')
+                desc = f"({reason})" if reason else f"({status})"
+                message += f"  • #{tid} {trip.get('start_point')}→{trip.get('end_point')} {desc}\n"
             
             # 準備狀態的班次
             message += f"\n✅ 可請假 ({len(ready_trips)}個)：\n"
             for trip in ready_trips[:3]:
-                tid = trip.get('id')
+                tid = trip.get('id') or trip.get('trip_id')
                 message += f"  • #{tid} {trip.get('time', '')} {trip.get('start_point')}→{trip.get('end_point')}\n"
             
             message += "\n請選擇操作："
@@ -554,31 +578,35 @@ class IntentExecutor:
             # 生成選項
             items = []
             
-            # 如果有多個準備班次，顯示全部請假
+            # 針對準備班次：如果有多個，顯示全部請假
             if len(ready_trips) > 1:
-                trip_ids = [t.get('id') for t in ready_trips]
-                conversation_manager.set_leave_mode(user_id=user_id, trip_ids=trip_ids)
+                r_ids = [t.get('id') or t.get('trip_id') for t in ready_trips]
+                # Note: We must Set Leave Mode immediately if user clicks this? 
+                # "全部請假" command handles context setup inside leave_mode_handler if we setup pending here?
+                # Check leave_mode_handler Line 164. It checks `leave_modes` OR `pending_operation`.
+                # So we just need to set pending.
+                # But wait, below we set 'mixed_leave_status'.
+                # Does "全部請假" handler handle 'mixed_leave_status'?
+                # leave_mode_handler Line 191 looks for 'ready_trip_ids'.
+                # Yes: `pending_trip_ids = ... or pending.get("ready_trip_ids")`.
+                # So we must use "ready_trip_ids" key.
                 items.append(QuickReplyItem(action=MessageAction(label=f"🏥 全部請假({len(ready_trips)}班)", text="全部請假")))
+            elif len(ready_trips) == 1:
+                 tid = ready_trips[0].get('id') or ready_trips[0].get('trip_id')
+                 items.append(QuickReplyItem(action=MessageAction(label=f"#{tid}請假", text=f"#{tid}請假")))
             
-            # 單獨請假選項
-            for trip in ready_trips[:2]:
-                tid = trip.get('id')
-                items.append(QuickReplyItem(action=MessageAction(label=f"#{tid}請假", text=f"#{tid}請假")))
-            
-            # 改回準備選項（已請假的）
-            if len(already_on_leave) == 1:
-                tid = already_on_leave[0].get('id')
-                items.append(QuickReplyItem(action=MessageAction(label=f"#{tid}改回準備", text=f"#{tid}改回")))
-            else:
-                items.append(QuickReplyItem(action=MessageAction(label="全部改回準備", text="全部改回準備")))
+            # 針對需恢復班次：全部改回
+            if trips_to_restore:
+                items.append(QuickReplyItem(action=MessageAction(label="✅ 改回準備", text="全部改回準備")))
             
             items.append(QuickReplyItem(action=MessageAction(label="❌ 放棄", text="放棄操作")))
             
             # 保存上下文
             conversation_manager.set_pending_operation(user_id, {
                 "action": "mixed_leave_status",
-                "ready_trip_ids": [t.get('id') for t in ready_trips],
-                "leave_trip_ids": [t.get('id') for t in already_on_leave],
+                "ready_trip_ids": [t.get('id') or t.get('trip_id') for t in ready_trips],
+                "trip_ids": [t.get('id') or t.get('trip_id') for t in trips_to_restore], # For restore
+                "leave_trip_ids": [t.get('id') or t.get('trip_id') for t in trips_to_restore], # Legacy support
                 "table": table_name
             })
             

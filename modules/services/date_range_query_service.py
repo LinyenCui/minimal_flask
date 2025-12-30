@@ -430,9 +430,7 @@ def format_completed_trips_range_result(trips, start_date, end_date, driver_id=N
 
 def format_current_trips_range_result(trips, start_date, end_date, driver_id=None, category=None, page_info=None, location=None):
     """
-    格式化進行中班次範圍查詢結果
-    page_info: {'current': 1, 'total_items': 50, 'has_more': True}
-    🔥 2025-12-17 新增：支援 location 參數
+    格式化進行中班次範圍查詢結果（統一使用分組格式）
     """
     if not trips:
         filter_desc = []
@@ -458,78 +456,93 @@ def format_current_trips_range_result(trips, start_date, end_date, driver_id=Non
     # 統計信息
     total_trips = len(trips)
     
-    # 按日期分組
-    trips_by_date = {}
-    for trip in trips:
-        date_str = trip[1]  # date欄位
-        if date_str not in trips_by_date:
-            trips_by_date[date_str] = []
-        trips_by_date[date_str].append(trip)
-    
     # 建立回應
     lines = []
-    lines.append("🔍 班次查詢結果")
+    lines.append(f"📊 查詢結果 (第 {page_info['current'] if page_info else 1} 頁)")
+    lines.append(f"找到 {total_trips} 筆記錄")
     lines.append("")
     
-    # 查詢條件摘要
-    filter_desc = []
-    if driver_id:
-        filter_desc.append(f"司機{driver_id}")
-    if category:
-        filter_desc.append(f"{category}班次")
-    
-    lines.append(f"📅 查詢範圍：{start_date.strftime('%m/%d')} - {end_date.strftime('%m/%d')}")
-    if filter_desc:
-        lines.append(f"🔍 篩選條件：{' '.join(filter_desc)}")
-    lines.append("")
-    
-    # 統計摘要
-    lines.append(f"📊 找到 {total_trips} 筆班次")
-    lines.append("-" * 30)
-    
-    # 按日期列出班次（最多顯示前20筆）
-    displayed_count = 0
-    max_display = 20
-    
-    for date_str in sorted(trips_by_date.keys()):
-        if displayed_count >= max_display:
-            break
-            
-        date_trips = trips_by_date[date_str]
-        lines.append(f"📅 {date_str}")
+    # 按狀態分組
+    status_groups = {}
+    for trip in trips:
+        # Trip Tuple Mapping:
+        # 0:id, 1:date, 2:time, 3:start, 4:end, 5:cat, 6:driver, 7:status, 8:type
+        # 9:custom_start, 10:custom_end, 11:custom_via, 12:leave_reason
         
-        for trip in date_trips:
-            if displayed_count >= max_display:
-                break
-                
-            trip_id = trip[0]
-            date_val = trip[1]
-            time_val = trip[2]
-            start_point = trip[3]
-            end_point = trip[4]
-            category_val = trip[5]
-            driver_id_result = trip[6]
-            status = trip[7]
-            trip_type = trip[8]
-            custom_start_point = trip[9] if len(trip) > 9 else None
-            custom_end_point = trip[10] if len(trip) > 10 else None
-            # custom_via_point = trip[11] if len(trip) > 11 else None
-            # passenger_leave_reason = trip[12] if len(trip) > 12 else None
+        t_id = trip[0]
+        # t_date = trip[1] # Unused here
+        t_time = trip[2]
+        t_start = trip[3]
+        t_end = trip[4]
+        # t_cat = trip[5]
+        t_driver = trip[6]
+        t_status = trip[7]
+        t_type = trip[8]
+        
+        # Handle custom points
+        t_custom_start = trip[9] if len(trip) > 9 else None
+        t_custom_end = trip[10] if len(trip) > 10 else None
+        # t_custom_via = trip[11] if len(trip) > 11 else None
+        # t_leave_reason = trip[12] if len(trip) > 12 else None
+        t_leave_reason = None # We might need to fetch this if not present? 
+        # Wait, the SELECT query in query_current_trips_range (Line 176) selects:
+        # ... passenger_leave_reason (index 13 actually? No)
+        # Ind 0:id, 1:date, 2:time, 3:start, 4:end, 5:cat, 6:dr, 7:stat, 8:type,
+        # 9:cust_start, 10:cust_end, 11:cust_via, 12:pass_leave, 13:mod_reason
+        # So yes, index 12 is passenger_leave_reason.
+        
+        if len(trip) > 12:
+            t_leave_reason = trip[12]
             
-            # 顯示地點：temp 使用 custom 欄位
-            if trip_type == 'temp':
-                loc_start = custom_start_point or start_point
-                loc_end = custom_end_point or end_point
-            else:
-                loc_start = start_point
-                loc_end = end_point
+        display_status = t_status
+        if t_status == '準備' and t_leave_reason:
+            display_status = '請假'
             
-            time_str = time_val.strftime('%H:%M') if time_val else '--:--'
-            status_emoji = {"待派": "⏳", "準備": "🚀", "已完成": "✅"}.get(status, "❓")
+        if display_status not in status_groups:
+            status_groups[display_status] = []
             
-            lines.append(f"#{trip_id} {time_str} 🚗{driver_id_result} {loc_start}→{loc_end} {status_emoji}{status}")
-            displayed_count += 1
+        # Store dict for formatter
+        status_groups[display_status].append({
+            'id': t_id,
+            'time': t_time,
+            'driver': t_driver,
+            'start': t_custom_start or t_start,
+            'end': t_custom_end or t_end,
+            'type': t_type
+        })
+
+    # Render Groups
+    # Order: 準備 -> 請假 -> 待派 -> 其他
+    preferred_order = ['準備', '請假', '待派', '已完成', '註銷', '衝突']
+    sorted_keys = sorted(status_groups.keys(), key=lambda k: preferred_order.index(k) if k in preferred_order else 99)
     
+    for status in sorted_keys:
+        group_items = status_groups[status]
+        
+        # Icons
+        icon = "🎯"
+        if status == '準備': icon = "🟢"
+        elif status == '請假': icon = "🔵"
+        elif status == '待派': icon = "🔴"
+        elif status == '已完成': icon = "✅"
+        elif status == '註銷': icon = "❌"
+        elif status == '衝突': icon = "🟠"
+        
+        lines.append(f"{icon} {status} ({len(group_items)}個) :")
+        
+        for item in group_items:
+            # #1321 11:50-馬鎮宮->診所|🚕5386
+            t_str = item['time'].strftime('%H:%M') if item['time'] else '--:--'
+            d_str = f"🚕{item['driver']}" if item['driver'] else "未指派"
+            
+            # Format: #ID Time-Start->End|Driver
+            # Note: User screenshot shows "⏰11:50-" (clock icon) or just "11:50-"
+            # Page 2 screenshot users "⏰11:50-Start->End|🚕Driver"
+            # I will match that format.
+            lines.append(f"#{item['id']} ⏰{t_str}-{item['start']}→{item['end']}|{d_str}")
+        
+        lines.append("")
+
     # 分頁提示
     if page_info:
         total_items = page_info.get('total_items', total_trips)
@@ -537,12 +550,12 @@ def format_current_trips_range_result(trips, start_date, end_date, driver_id=Non
         has_more = page_info.get('has_more', False)
         
         if has_more:
-            lines.append(f"")
+            # lines.append(f"") # Already added empty line after group
             lines.append(f"📄 第 {current_page} 頁，共 {total_items} 筆")
-            lines.append(f"💡 輸入「更多」查看下一頁")
+            lines.append(f"💡 輸入「下一頁」查看更多")
     elif total_trips > max_display:
         lines.append(f"...")
-        lines.append(f"還有 {total_trips - max_display} 筆班次未顯示")
+        lines.append(f"還有 {total_trips - max_display} 筆班次未顯示 (此模式無分頁)")
     
     return "\n".join(lines)
 
@@ -762,13 +775,72 @@ def handle_query_current_trips_range(message_text, user_id=None):
             # 1) 過去部分：完成倉庫
             past_end = today - timedelta(days=1)
             completed_part = query_completed_trips_range(start_date, past_end, driver_id, category)
-            completed_text = format_completed_trips_range_result(completed_part, start_date, past_end, driver_id, category)
+            
             # 2) 現在/未來部分：生產線
             current_part = query_current_trips_range(today, end_date, driver_id, category)
-            current_text = format_current_trips_range_result(current_part, today, end_date, driver_id, category)
-            # 合併輸出（清楚標註兩部分）
-            header = "🔀 混合日期範圍（已完成 + 現在/未來）\n" + "─"*30
-            return f"{header}\n\n【已完成（過去）】\n{completed_text}\n\n【現在/未來（trips）】\n{current_text}"
+            
+            # 3) 統一數據結構以便分頁
+            all_results = []
+            
+            # 處理已完成 (Source: completed)
+            for trip in completed_part:
+                all_results.append({
+                    'id': trip[0],
+                    'date': trip[1].strftime('%Y-%m-%d') if trip[1] else 'N/A',
+                    'start_point': trip[2],
+                    'end_point': trip[3],
+                    'category': trip[4],
+                    'meter_fare': trip[5], # index 5
+                    'driver_id': trip[10], # index 10
+                    '_source': 'completed'
+                })
+                
+            # 處理進行中 (Source: current)
+            for trip in current_part:
+                all_results.append({
+                    'id': trip[0],
+                    'date': trip[1].strftime('%Y-%m-%d') if trip[1] else 'N/A',
+                    'time': trip[2].strftime('%H:%M') if trip[2] else '',
+                    'start_point': trip[3],
+                    'end_point': trip[4],
+                    'category': trip[5],
+                    'driver_id': trip[6],
+                    'status': trip[7],
+                    'passenger_leave_reason': trip[12] if len(trip) > 12 else None,
+                    '_source': 'current'
+                })
+                
+            # 4) 保存上下文以支援翻頁
+            if user_id and len(all_results) > 10:
+                from modules.utils.conversation_context import get_conversation_context
+                from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+                
+                context = get_conversation_context(user_id)
+                context.save_query_result(
+                    query_type='hybrid_range', # 新增類型，需要在 pagination_router 處理
+                    command=message_text,
+                    all_results=all_results,
+                    conditions={
+                        'start_date': start_date.strftime('%Y-%m-%d'),
+                        'end_date': end_date.strftime('%Y-%m-%d')
+                    }
+                )
+                
+                # 格式化第一頁 (前10筆)
+                result_text = format_hybrid_results(
+                    all_results[:10], start_date, end_date, driver_id, category,
+                    page_info={'current': 1, 'total_items': len(all_results), 'has_more': True}
+                )
+                
+                quick_reply = QuickReply(items=[
+                    QuickReplyItem(action=MessageAction(label="📄 下一頁", text="下一頁")),
+                    QuickReplyItem(action=MessageAction(label="🔍 重新查詢", text="重新查詢"))
+                ])
+                return {'message': result_text, 'quick_reply': quick_reply}
+            
+            else:
+                # 無需分頁，直接全顯示
+                return format_hybrid_results(all_results, start_date, end_date, driver_id, category)
         else:
             # 純現在/未來範圍
             trips = query_current_trips_range(start_date, end_date, driver_id, category)
@@ -790,7 +862,8 @@ def handle_query_current_trips_range(message_text, user_id=None):
                         'category': trip[5],
                         'driver_id': trip[6],
                         'status': trip[7],
-                        'trip_type': trip[8]
+                        'trip_type': trip[8],
+                        'passenger_leave_reason': trip[12] if len(trip) > 12 else None
                     }
                     trips_dict.append(trip_dict)
                 
@@ -836,3 +909,115 @@ def handle_query_current_trips_range(message_text, user_id=None):
     except Exception as e:
         logger.error(f"處理進行中班次範圍查詢失敗: {e}")
         return f"❌ 查詢失敗：{str(e)}"
+
+def format_hybrid_results(items, start_date, end_date, driver_id=None, category=None, page_info=None):
+    """
+    格式化混合查詢結果 (Completed + Current)
+    items: list of dicts (normalized)
+    """
+    lines = []
+    
+    total_count = page_info.get('total_items', len(items)) if page_info else len(items)
+    lines.append(f"📊 混合查詢結果 (第 {page_info['current'] if page_info else 1} 頁)")
+    lines.append(f"📅 範圍：{start_date.strftime('%m/%d')} - {end_date.strftime('%m/%d')}，共 {total_count} 筆")
+    lines.append("─" * 30)
+    
+    # Split by source
+    completed_items = [i for i in items if i.get('_source') == 'completed']
+    current_items = [i for i in items if i.get('_source') == 'current']
+    
+    # 1. Render Completed (Grouped by Date)
+    if completed_items:
+        lines.append("【已完成 (過去)】")
+        
+        # Group by date
+        comp_by_date = {}
+        for item in completed_items:
+            d = item.get('date', 'N/A')
+            if d not in comp_by_date:
+                comp_by_date[d] = []
+            comp_by_date[d].append(item)
+            
+        # Render groups
+        for d in sorted(comp_by_date.keys()):
+            lines.append(f"📅 {d}")
+            group = comp_by_date[d]
+            for item in group:
+                # Completed Style: #ID Driver Start->End $Fare
+                fare = item.get('meter_fare', 0) or 0
+                lines.append(f"#{item['id']} 🚗{item.get('driver_id')} {item['start_point']}→{item['end_point']} ${fare}")
+            # Space between date groups? Maybe not needed for compactness in hybrid view
+            # lines.append("") 
+        
+        lines.append("")
+        
+    # 2. Render Current (Grouped by Status)
+    if current_items:
+        lines.append("【進行中 (現在/未來)】")
+        
+        status_groups = {}
+        for item in current_items:
+            # Extract info
+            t_status = item.get('status', '未知')
+            if item.get('passenger_leave_reason'):
+                t_status = '請假'
+            
+            # Check for leave (not explicitly stored in normalized dict? 
+            # In handle_query_current_trips_range, we didn't store passenger_leave_reason in the normalized dict!
+            # We must assume status from DB is enough or update normalization logic.
+            # For now, use raw status. 
+            # Wait, user screenshot showed specific Leave handling.
+            # If I want Leave detection here, I need to check if 'status' has extra info or update normalization.
+            # Let's check `handle_query_current_trips_range` normalization again?
+            # It just saved 'status': trip[7].
+            # It didn't save leave reason.
+            # So "請假" might be missed if it's just "準備" + Reason.
+            # *Self-correction*: I should update `handle_query_current_trips_range` to inject a better status 
+            # or save leave reason. But for now, I will stick to formatting what I have.
+            # If `item['status']` is '請假', it works. If it relied on reason... 
+            # Let's just group by `t_status`.
+            
+            if t_status not in status_groups:
+                status_groups[t_status] = []
+            status_groups[t_status].append(item)
+            
+        # Render Groups
+        preferred_order = ['準備', '請假', '待派', '已完成', '註銷', '衝突']
+        sorted_keys = sorted(status_groups.keys(), key=lambda k: preferred_order.index(k) if k in preferred_order else 99)
+        
+        for status in sorted_keys:
+            group = status_groups[status]
+            icon = "🎯"
+            if status == '準備': icon = "🟢"
+            elif status == '請假': icon = "🔵"
+            elif status == '待派': icon = "🔴"
+            elif status == '已完成': icon = "✅"
+            elif status == '註銷': icon = "❌"
+            elif status == '衝突': icon = "🟠"
+            
+            lines.append(f"{icon} {status} ({len(group)}個) :")
+            for item in group:
+                # #ID Date Time Start->End|Driver
+                # Time is string HH:MM
+                t_str = item.get('time', '--:--')
+                d_str = f"🚕{item.get('driver_id')}" if item.get('driver_id') else "未指派"
+                
+                # 🔥 Add simple date prefix like "12/31"
+                date_full = item.get('date', '') # Expect YYYY-MM-DD
+                simple_date = ""
+                if date_full and len(date_full) >= 10:
+                    try:
+                        # Extract 12-31 from 2025-12-31, replace - with /
+                        simple_date = date_full[5:].replace('-', '/') + " "
+                    except: 
+                        pass
+                
+                lines.append(f"#{item['id']} {simple_date}⏰{t_str}-{item.get('start_point')}→{item.get('end_point')}|{d_str}")
+            lines.append("")
+
+    # Pagination Footer
+    if page_info and page_info.get('has_more'):
+        lines.append(f"📄 第 {page_info['current']} 頁")
+        lines.append("💡 輸入「下一頁」查看更多")
+        
+    return "\n".join(lines)

@@ -441,6 +441,16 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             if handle_view_commands(message_text, user_id, reply_token):
                 return
 
+        # 修改班次狀態（委派給狀態處理器）
+        elif message_text.startswith("修改狀態"):
+            logger.info(f"Delegate '修改狀態' to trip_status_handler: {message_text}")
+            from modules.handlers.trip_status_handler import handle_update_trip_status
+            response = handle_update_trip_status(message_text, user_id)
+            if response:
+                ResponseHandler.handle_legacy_format(reply_token, response)
+            logger.info(f"Finished '修改狀態' handling.")
+            return
+
         # 查看已完成班次詳情（委派輕路由）
         elif message_text.startswith("查看"):
             from modules.handlers.view_router import handle_view_commands
@@ -743,8 +753,11 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                         return
                     
                     # 如果執行失敗且有錯誤消息，發送給用戶
-                    if execute_result.get("message"):
-                        reply_text(reply_token, execute_result.get("message"))
+                    # 🔥 修復：IntentExecutor 大多數情況下已經自行回覆了（包含邏輯錯誤、找不到資料等）
+                    # 只有在 execute() 發生未捕捉異常導致崩潰時（message 以「執行操作時發生錯誤:」開頭），才由這裡補發錯誤提示
+                    msg = execute_result.get("message")
+                    if msg and msg.startswith("執行操作時發生錯誤:"):
+                        reply_text(reply_token, msg)
                         return
                 
                 except Exception as e:

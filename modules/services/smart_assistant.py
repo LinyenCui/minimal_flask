@@ -815,11 +815,15 @@ class SmartAssistant:
         action_patterns = [
             # (後綴模式, 對應的操作)
             ('的要註銷', 'update_status_cancel'),
+            ('的設為註銷', 'update_status_cancel'),
             ('要註銷', 'update_status_cancel'),
+            ('設為註銷', 'update_status_cancel'),
             ('的註銷', 'update_status_cancel'),
             ('註銷', 'update_status_cancel'),
             ('的要衝突', 'update_status_conflict'),
+            ('的設為衝突', 'update_status_conflict'),
             ('要衝突', 'update_status_conflict'),
+            ('設為衝突', 'update_status_conflict'),
             ('的衝突', 'update_status_conflict'),
             ('衝突', 'update_status_conflict'),
             ('的要請假', 'passenger_leave'),
@@ -1370,6 +1374,7 @@ class SmartAssistant:
 
 根據用戶輸入選擇合適的函數：
 - passenger_leave: 乘客請假（必須明確提到「請假」「不來」「不用載」等）
+- update_trip_status: 修改班次狀態（支援「註銷」「取消班次」「衝突」「改回準備」等）
 - update_fare: 修改車資（必須有班次號和金額）
 - confirm_operation: 確認操作（用戶說「確認」「是」等）
 - cancel_operation: 取消操作（用戶說「取消」「算了」等）

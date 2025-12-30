@@ -170,39 +170,56 @@ class ConversationContext:
         # 根據查詢類型格式化結果
         if query_type in ['completed_trips', 'completed_trips_range']:
             # 已完成班次 - 包含車資和0元警示
+            # 🔥 修復：按日期分組顯示，與第一頁保持一致
+            trips_by_date = {}
             for trip in page_results:
-                trip_id = trip.get('id', 'N/A')
                 date_str = trip.get('date', 'N/A')
-                start_point = trip.get('start_point', 'N/A')
-                end_point = trip.get('end_point', 'N/A')
-                driver_id = trip.get('driver_id', 'N/A')
+                if date_str not in trips_by_date:
+                    trips_by_date[date_str] = []
+                trips_by_date[date_str].append(trip)
+            
+            # 按日期排序並輸出
+            for date_str in sorted(trips_by_date.keys()):
+                result_text += f"📅 {date_str}\n"
                 
-                # 🔥 計算車資金額
-                meter_fare = trip.get('meter_fare')
-                extra_fare = trip.get('extra_fare')
-                calculated_total = trip.get('calculated_total')
-                original_total = trip.get('original_total')
-                modification_reason = trip.get('modification_reason', '')
-                
-                # 金額計算邏輯（與 date_range_query_service.py 保持一致）
-                if calculated_total is not None:
-                    display_amount = int(calculated_total)
-                elif original_total is not None:
-                    display_amount = int(original_total)
-                elif meter_fare is not None or extra_fare is not None:
-                    display_amount = int((meter_fare or 0) + (extra_fare or 0))
-                else:
-                    display_amount = 0
-                
-                # 🔥 0元警示（與 date_range_query_service.py 保持一致）
-                problem_indicator = ""
-                if display_amount == 0:
-                    if modification_reason and any(kw in modification_reason for kw in ["免費", "請假", "贈送", "優惠"]):
-                        problem_indicator = " 🏷️(0元)"  # 有備註的0元
+                for trip in trips_by_date[date_str]:
+                    trip_id = trip.get('id', 'N/A')
+                    # date_str already used for header
+                    start_point = trip.get('start_point', 'N/A')
+                    end_point = trip.get('end_point', 'N/A')
+                    driver_id = trip.get('driver_id', 'N/A')
+                    
+                    # 🔥 計算車資金額
+                    meter_fare = trip.get('meter_fare')
+                    extra_fare = trip.get('extra_fare')
+                    calculated_total = trip.get('calculated_total')
+                    original_total = trip.get('original_total')
+                    modification_reason = trip.get('modification_reason', '')
+                    
+                    # 金額計算邏輯（與 date_range_query_service.py 保持一致）
+                    if calculated_total is not None:
+                        display_amount = int(calculated_total)
+                    elif original_total is not None:
+                        display_amount = int(original_total)
+                    elif meter_fare is not None or extra_fare is not None:
+                        display_amount = int((meter_fare or 0) + (extra_fare or 0))
                     else:
-                        problem_indicator = " ⚠️(0元)"  # 異常的0元
+                        display_amount = 0
+                    
+                    # 🔥 0元警示（與 date_range_query_service.py 保持一致）
+                    problem_indicator = ""
+                    if display_amount == 0:
+                        if modification_reason and any(kw in modification_reason for kw in ["免費", "請假", "贈送", "優惠"]):
+                            problem_indicator = " 🏷️(0元)"  # 有備註的0元
+                        else:
+                            problem_indicator = " ⚠️(0元)"  # 異常的0元
+                    
+                    result_text += f"#{trip_id} 🚗{driver_id} {start_point}→{end_point} ${display_amount}{problem_indicator}\n"
                 
-                result_text += f"#{trip_id} 🚗{driver_id} {start_point}→{end_point} ${display_amount}{problem_indicator}\n"
+                # 每個日期組之間空一行，但不要在最後一行空
+                if date_str != sorted(trips_by_date.keys())[-1]:
+                    # result_text += "\n" # 截圖看起來緊湊比較好，暫不空行
+                    pass
         
         elif query_type in ['current_trips', 'current_trips_range']:
             # 當前班次 - 🔥 修正：使用狀態分組顯示
@@ -280,8 +297,57 @@ class ConversationContext:
                     time_info = f"⏰{trip_time.strftime('%H:%M')}-" if trip_time else ""
                     
                     # 🔥 修改：使用統一格式，執行時間在id之後起點之前
-                    result_text += f"#{trip_id} {time_info}{start_point}→{end_point}|{driver_info}\n"
+                    # Add simple date prefix like "12/31"
+                    if isinstance(trip_data.get('date'), (datetime,)): 
+                        # If date object
+                        dq = trip_data.get('date')
+                        simple_date = f"{dq.month:02d}/{dq.day:02d} "
+                    else:
+                        # If string
+                        d_str_raw = str(trip_data.get('date', ''))
+                        simple_date = ""
+                        if len(d_str_raw) >= 10:
+                            simple_date = d_str_raw[5:].replace('-', '/') + " "
+                            
+                    result_text += f"#{trip_id} {simple_date}{time_info}{start_point}→{end_point}|{driver_info}\n"
                 result_text += "\n"
+
+        elif query_type == 'hybrid_range':
+            from modules.services.date_range_query_service import format_hybrid_results
+            from modules.utils.unified_date_parser import UnifiedDateParser
+            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+            
+            s_date = UnifiedDateParser.parse(conditions['start_date'])
+            e_date = UnifiedDateParser.parse(conditions['end_date'])
+            
+            result_text = format_hybrid_results(
+                page_results, s_date, e_date,
+                None, None,
+                page_info={'current': page_num + 1, 'total_items': total_results, 'has_more': (end_idx < total_results)}
+            )
+            
+            # 構建 Quick Reply
+            total_pages = (total_results + page_size - 1) // page_size
+            quick_reply_items = []
+            
+            if page_num + 1 < total_pages:
+                quick_reply_items.extend([
+                    QuickReplyItem(action=MessageAction(label="📄 下一頁", text="下一頁")),
+                    QuickReplyItem(action=MessageAction(label="🔍 重新查詢", text="重新查詢")),
+                    QuickReplyItem(action=MessageAction(label="❌ 放棄", text="放棄"))
+                ])
+            else:
+                quick_reply_items.append(
+                    QuickReplyItem(action=MessageAction(label="🔍 重新查詢", text="重新查詢"))
+                )
+            
+            return {
+                'type': 'success',
+                'message': result_text,
+                'page': page_num + 1,
+                'total_pages': total_pages,
+                'quick_reply': QuickReply(items=quick_reply_items)
+            }
         
         # 計算總頁數
         total_pages = (total_results + page_size - 1) // page_size
