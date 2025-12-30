@@ -1378,6 +1378,7 @@ class SmartAssistant:
 - update_fare: 修改車資（必須有班次號和金額）
 - confirm_operation: 確認操作（用戶說「確認」「是」等）
 - cancel_operation: 取消操作（用戶說「取消」「算了」等）
+- clarify_user_intent: 澄清意圖（當用戶意圖模糊、涉及多種功能或語意衝突時調用，system會自動生成詢問）
 
 ⚠️ 重要：如果用戶只是查詢班次（沒有明確的操作意圖），不要調用任何函數！{conversation_context}"""
             

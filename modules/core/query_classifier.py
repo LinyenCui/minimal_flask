@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 STATUS_WORDS = {'待派', '準備', '已完成', '註銷', '衝突', '請假', '取消'}
 
 # 操作動詞（表示用戶想做某事，不是查詢）
-ACTION_VERBS = {'要', '想', '幫', '給', '設', '改', '變'}
+ACTION_VERBS = {'要', '想', '幫', '給', '設', '改', '變', '修', '更', '刪', '除', '置'}
 
 
 def is_status_filter_query(text: str) -> bool:
@@ -54,6 +54,12 @@ def is_status_filter_query(text: str) -> bool:
     # 狀態詢問應該走智能助手的 clarify_user_intent
     if '狀態' in text or '狀況' in text:
         logger.info(f"🤖 狀態詢問，走智能助手: {text}")
+        return False
+        
+    # 🔥 2025-12-30 修復：明確的修改/設置命令不應該被視為查詢
+    # 例如：修改#5513$140-140（班次衝突...）雖然包含「衝突」，但是是用來描述原因的
+    if text.startswith(('修改', '設為', '改', '更新', '設置')):
+        logger.info(f"🤖 明確的操作命令（修改/設為...），走智能助手: {text}")
         return False
     
     # 🔥 2025-12-18：「已完成班次」+ 日期或司機 → 不是狀態篩選，是查詢已完成的班次
