@@ -523,7 +523,7 @@ class AdvancedQueryProcessor:
             remaining = remaining.replace(status, '')
         
         # 🔥 2025-12-16 修復：移除「狀態」「狀況」「的」「查」「列出」「有哪些」「班次」等語氣詞
-        noise_words = ['狀態', '狀況', '的', '查', '列出', '有哪些', '班次', '列表']
+        noise_words = ['狀態', '狀況', '的', '查', '列出', '有哪些', '班次', '列表', '所有', '全部', '全']
         for word in noise_words:
             remaining = remaining.replace(word, '')
         

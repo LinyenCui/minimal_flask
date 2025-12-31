@@ -15,7 +15,7 @@ from modules.utils.line_bot import (
 )
 from modules.utils.response_handler import ResponseHandler
 from modules.utils.quick_reply_manager import QuickReplyManager
-from modules.handlers.trip_handler import handle_query_trips, handle_trip_details, handle_change_status, handle_record_fare, handle_modify_category, handle_completed_trip_details
+from modules.handlers.trip_handler import handle_trip_details, handle_record_fare, handle_modify_category, handle_completed_trip_details
 from modules.flex_designs.help_flex import get_help_flex
 from modules.help_system.help_handler import HelpHandler
 from modules.handlers.temp_booking_handler import (

@@ -8,10 +8,8 @@ from flask import current_app
 import traceback
 
 from modules.utils.line_bot import create_text_message, create_flex_message, reply_text, reply_message, reply_flex, reply_message_with_quick_reply
-from modules.handlers.trip_query_handler import (
-    handle_query_fixed_trips, handle_query_today_trips
-)
-from modules.handlers.trip_handler import handle_query_trips, handle_trip_details, handle_change_status
+
+from modules.handlers.trip_handler import handle_trip_details
 from modules.services.trip_detail_service import handle_trip_details_flex
 from modules.services.report_service import handle_generate_weekly_report
 from linebot.v3.messaging import QuickReply, QuickReplyItem, PostbackAction
@@ -20,6 +18,8 @@ from modules.utils.taiwan_time import get_taiwan_time, get_taiwan_date
 from modules.utils.quick_reply_manager import QuickReplyManager
 from modules.utils.response_handler import ResponseHandler
 from modules.utils.help_text import get_help_text
+from modules.services.advanced_query_processor import AdvancedQueryProcessor
+from modules.handlers.trip_status_handler import handle_update_trip_status
 
 # 建立日誌記錄器
 logger = logging.getLogger(__name__)
@@ -45,44 +45,47 @@ def handle_postback(event):
         
         if action == 'query_trips':
             # 使用Flex版本的東洋班次功能
+            # 直接使用 AdvancedQueryProcessor
             try:
-                logger.info("處理東洋班次postback，使用Flex版本")
-                from modules.services.trip_query_service import handle_query_trips_flex, handle_query_trips
+                logger.info("處理東洋班次postback，使用AdvancedQueryProcessor")
+                processor = AdvancedQueryProcessor()
+                result = processor.process_complex_query("東洋班次", user_id)
                 
-                # 調用Flex版本的東洋班次
-                flex_content, error_message = handle_query_trips_flex('東洋班次')
-                
-                if flex_content and error_message is None:
-                    # 使用Flex版本回覆
-                    reply_flex(reply_token, "班次查詢結果", flex_content)
+                if result.get('type') == 'success':
+                     reply_text(reply_token, result['message'])
+                elif result.get('type') == 'success_with_pagination':
+                     if result.get('quick_reply'):
+                         reply_message_with_quick_reply(reply_token, result['message'], result['quick_reply'])
+                     else:
+                         reply_text(reply_token, result['message'])
                 else:
-                    # 如果出錯，使用文本版本
-                    logger.warning(f"使用Flex版本失敗，回退到文本版本。錯誤: {error_message}")
-                    result = handle_query_trips('東洋班次')
-                    reply_text(reply_token, result)
+                    reply_text(reply_token, result.get('message', "查詢失敗"))
+
             except Exception as e:
-                logger.error(f"處理Flex版本東洋班次時出錯: {e}")
+                logger.error(f"處理東洋班次 postback 時出錯: {e}")
                 traceback.print_exc()
-                # 使用文本版本作為後備
-                result = handle_query_trips('東洋班次')
-                reply_text(reply_token, f"Flex消息處理錯誤，使用文本版本：\n{result}")
+                reply_text(reply_token, "班次查詢失敗")
             
         elif action == 'query_fixed_trips':
+            # 直接使用 AdvancedQueryProcessor 查詢診所班次 (或固定班次)
             try:
-                logger.info("處理查詢固定班次 postback (應通過日期選擇觸發Message) - 目標改為診所")
-                from modules.services.trip_query_service import handle_query_fixed_trips_flex, handle_query_fixed_trips
-                flex_content, error_message = handle_query_fixed_trips_flex('診所班次') 
-                if flex_content and error_message is None:
-                     reply_flex(reply_token, "診所班次查詢結果", flex_content)
+                logger.info("處理查詢固定班次 postback - 目標改為診所")
+                processor = AdvancedQueryProcessor()
+                # 假設這裡是指名查詢"診所班次"
+                result = processor.process_complex_query("診所班次", user_id)
+                
+                if result.get('type') == 'success':
+                     reply_text(reply_token, result['message'])
+                elif result.get('type') == 'success_with_pagination':
+                     if result.get('quick_reply'):
+                         reply_message_with_quick_reply(reply_token, result['message'], result['quick_reply'])
+                     else:
+                         reply_text(reply_token, result['message'])
                 else:
-                     logger.warning(f"固定班次 postback Flex 失敗，回退文本: {error_message}")
-                     result = handle_query_fixed_trips('診所班次')
-                     reply_text(reply_token, result)
+                    reply_text(reply_token, result.get('message', "查詢失敗"))
             except Exception as e:
-                logger.error(f"處理固定班次 postback 時出錯: {e}")
-                traceback.print_exc()
-                result = handle_query_fixed_trips('診所班次')
-                reply_text(reply_token, f"Flex消息處理錯誤，使用文本版本：\n{result}")
+                 logger.error(f"處理固定班次 postback 時出錯: {e}")
+                 reply_text(reply_token, "診所班次查詢失敗")
             
         elif action == 'query_clinic_trips_date_select':
             try:
@@ -125,8 +128,12 @@ def handle_postback(event):
         elif action == 'change_status' and 'trip_id' in params and 'status' in params:
             trip_id = params['trip_id']
             status = params['status']
-            result = handle_change_status(f"修改狀態 {trip_id} {status}")
-            reply_text(reply_token, result)
+            # 使用 trip_status_handler
+            result = handle_update_trip_status(f"修改狀態 {trip_id} {status}", user_id=user_id)
+            if isinstance(result, dict) and 'message' in result:
+                 reply_text(reply_token, result['message'])
+            else:
+                 reply_text(reply_token, str(result))
             
         elif action == 'help':
             help_text = get_help_text()
@@ -214,7 +221,7 @@ def handle_postback(event):
                     # 如果檢查失敗，允許繼續（向下兼容）
                 
                 # 🚨 新增：所有狀態修改都使用新的處理邏輯
-                from modules.handlers.trip_status_handler import handle_update_trip_status
+                # from modules.handlers.trip_status_handler import handle_update_trip_status # 已經在頂部導入
                 result = handle_update_trip_status(f"修改狀態 {trip_id} {new_status}", user_id=user_id)
                 
                 # 🔄 處理傳統請假功能的特殊返回格式

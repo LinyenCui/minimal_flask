@@ -455,6 +455,7 @@ def format_current_trips_range_result(trips, start_date, end_date, driver_id=Non
 
     # 統計信息
     total_trips = len(trips)
+    max_display = 20
     
     # 建立回應
     lines = []
