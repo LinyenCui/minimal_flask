@@ -438,17 +438,79 @@ def handle_query_trips_range(start_date, end_date, driver_id=None, category=None
             return {"text": text, "quick_reply": None, "meta": meta}
 
         # 混合：拆分為過去 + 現在/未來（start_date < today <= end_date）
+        # 🔥 2026-01-06：添加分頁支持，避免消息過長
+        from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+
         past_end = today - timedelta(days=1)
         completed_part = query_completed_trips_range(start_date, past_end, driver_id, category, location=location)
-        completed_text = format_completed_trips_range_result(completed_part, start_date, past_end, driver_id, category, location=location)
-
         current_part = query_current_trips_range(today, end_date, driver_id, category, location=location)
-        current_text = format_current_trips_range_result(current_part, today, end_date, driver_id, category, location=location)
+
+        total_count = len(completed_part) + len(current_part)
+        MAX_ITEMS_PER_SECTION = 8  # 每部分最多顯示 8 筆
+
+        # 格式化已完成部分（限制數量）
+        completed_display = completed_part[:MAX_ITEMS_PER_SECTION]
+        completed_text = format_completed_trips_range_result(
+            completed_display, start_date, past_end, driver_id, category, location=location
+        )
+        if len(completed_part) > MAX_ITEMS_PER_SECTION:
+            completed_text += f"\n... 還有 {len(completed_part) - MAX_ITEMS_PER_SECTION} 筆"
+
+        # 格式化現在態部分（限制數量）
+        current_display = current_part[:MAX_ITEMS_PER_SECTION]
+        current_text = format_current_trips_range_result(
+            current_display, today, end_date, driver_id, category, location=location
+        )
+        if len(current_part) > MAX_ITEMS_PER_SECTION:
+            current_text += f"\n... 還有 {len(current_part) - MAX_ITEMS_PER_SECTION} 筆"
 
         combined = "🔀 混合日期範圍（已完成 + 現在/未來）\n" + "─" * 30
+        combined += f"\n📊 共 {total_count} 筆（已完成 {len(completed_part)} + 現在態 {len(current_part)}）"
         combined += f"\n\n【已完成（過去）】\n{completed_text}\n\n【現在/未來（trips）】\n{current_text}"
 
-        return {"text": combined, "quick_reply": None, "meta": meta}
+        # 如果結果被截斷，添加 Quick Reply 按鈕
+        has_more = len(completed_part) > MAX_ITEMS_PER_SECTION or len(current_part) > MAX_ITEMS_PER_SECTION
+        quick_reply = None
+
+        if has_more:
+            combined += f"\n\n💡 點擊下方按鈕分開查詢"
+
+            # 構建查詢命令（加 / 前綴讓群組能識別）
+            driver_suffix = f" {driver_id}" if driver_id else ""
+            category_suffix = f" {category}" if category else ""
+
+            completed_cmd = f"/查已完成範圍 {start_date.month}/{start_date.day}-{past_end.month}/{past_end.day}{driver_suffix}{category_suffix}"
+            current_cmd = f"/查班次範圍 {today.month}/{today.day}-{end_date.month}/{end_date.day}{driver_suffix}{category_suffix}"
+
+            quick_reply_items = []
+
+            # 只有已完成部分有更多時才添加按鈕
+            if len(completed_part) > MAX_ITEMS_PER_SECTION:
+                quick_reply_items.append(
+                    QuickReplyItem(
+                        action=MessageAction(
+                            label=f"📦 已完成({len(completed_part)}筆)",
+                            text=completed_cmd
+                        )
+                    )
+                )
+
+            # 只有現在態部分有更多時才添加按鈕
+            if len(current_part) > MAX_ITEMS_PER_SECTION:
+                quick_reply_items.append(
+                    QuickReplyItem(
+                        action=MessageAction(
+                            label=f"⚡ 現在態({len(current_part)}筆)",
+                            text=current_cmd
+                        )
+                    )
+                )
+
+            if quick_reply_items:
+                quick_reply = QuickReply(items=quick_reply_items)
+                logger.info(f"📱 混合查詢添加 Quick Reply: {len(quick_reply_items)} 個按鈕")
+
+        return {"text": combined, "quick_reply": quick_reply, "meta": meta}
     except Exception as e:
         logger.error(f"handle_query_trips_range 失敗: {e}")
         return None
