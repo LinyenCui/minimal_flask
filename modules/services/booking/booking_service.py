@@ -218,34 +218,51 @@ def process_booking_input(user_id, message_text):
 def create_booking_record(booking_data):
     """
     創建預約記錄 (共用邏輯)
-    
+
     Args:
         booking_data: dict, 包含 date, time, start_point, via_point(opt), end_point(opt), category
-        
+
     Returns:
         tuple: (success, result)
             success: bool
             result: dict (success=True) or str (success=False, error message)
+
+    Note:
+        臨時班次的地點處理邏輯：
+        - start_point/end_point 設為 '臨時地點'（佔位符）
+        - 實際地點存入 custom_start_point/custom_end_point/custom_via_point
+        - 這是為了配合 scheduler_service.py 的轉換邏輯（trips → completed_trips）
     """
     try:
         # 創建新的班次記錄
+        # 重要：臨時班次必須使用 custom_* 欄位存儲實際地點
+        # 標準欄位設為 '臨時地點' 作為佔位符
         insert_query = """
-        INSERT INTO trips 
-        (date, time, start_point, via_point, end_point, category, status, trip_type, passenger_name, meter_fare, driver_id) 
-        VALUES 
-        (:date, :time, :start_point, :via_point, :end_point, :category, '待派', 'temp', :passenger_name, :meter_fare, :driver_id)
+        INSERT INTO trips
+        (date, time, start_point, end_point, category, status, trip_type,
+         custom_start_point, custom_end_point, custom_via_point,
+         passenger_name, meter_fare, driver_id)
+        VALUES
+        (:date, :time, '臨時地點', '臨時地點', :category, '待派', 'temp',
+         :custom_start_point, :custom_end_point, :custom_via_point,
+         :passenger_name, :meter_fare, :driver_id)
         RETURNING trip_id
         """
-        
+
+        # 處理終點：如果沒有或為特殊值，設為 None
+        end_point = booking_data.get('end_point')
+        if not end_point or end_point in ['無', '-', 'N/A', '不需要', '沒有', '無(略過)']:
+            end_point = None
+
         result = db.session.execute(
-            sql_text(insert_query), 
+            sql_text(insert_query),
             {
                 "date": booking_data['date'],
                 "time": booking_data['time'],
-                "start_point": booking_data['start_point'],
-                "via_point": booking_data.get('via_point'),
-                "end_point": booking_data.get('end_point'),
                 "category": booking_data.get('category', '診所'),
+                "custom_start_point": booking_data['start_point'],
+                "custom_end_point": end_point,
+                "custom_via_point": booking_data.get('via_point'),
                 "passenger_name": booking_data.get('passenger_name'),
                 "meter_fare": booking_data.get('meter_fare'),
                 "driver_id": booking_data.get('driver_id')
