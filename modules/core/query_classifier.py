@@ -196,16 +196,24 @@ def determine_query_table(text: str) -> str:
         # 日期範圍查詢
         start_month, start_day = int(range_match.group(1)), int(range_match.group(2))
         end_month, end_day = int(range_match.group(3)), int(range_match.group(4))
-        
+
         # 推斷年份
         year = today.year
+        current_month = today.month
         start_year = year
         end_year = year
-        
-        # 情況：12月查 "12/14 - 1/2" -> 跨年
+
+        # 智能年份判斷（跨年邏輯）
+        # 1. 如果現在是1-3月，且開始月份是10-12月，說明是去年
+        if current_month <= 3 and start_month >= 10:
+            start_year = year - 1
+            if end_month >= 10:
+                end_year = year - 1
+
+        # 2. 如果開始月份 > 結束月份，說明跨年
         if start_month > end_month:
-            end_year += 1
-            
+            end_year = start_year + 1
+
         try:
             end_date = date(end_year, end_month, end_day)
             # 如果結束日期在過去，整個範圍都是過去態
@@ -228,6 +236,13 @@ def determine_query_table(text: str) -> str:
     if single_date_match:
         month, day = int(single_date_match.group(1)), int(single_date_match.group(2))
         year = today.year
+        current_month = today.month
+
+        # 智能年份判斷（跨年邏輯）
+        # 如果現在是1-3月，且查詢月份是10-12月，說明是去年
+        if current_month <= 3 and month >= 10:
+            year = year - 1
+
         try:
             query_date = date(year, month, day)
             if query_date < today:
@@ -307,20 +322,24 @@ def parse_direct_query(text: str) -> dict:
     if range_match:
         start_month, start_day = int(range_match.group(1)), int(range_match.group(2))
         end_month, end_day = int(range_match.group(3)), int(range_match.group(4))
+
         year = today.year
-        
-        # 智能年份判斷
-        # 如果開始月份比當前月份大很多（例如在1月查12月），可能是去年？但通常查班次是查近期。
-        # 假設：
-        # 1. 跨年範圍：12月到1月 -> 結束年份+1
-        
+        current_month = today.month
         start_year = year
         end_year = year
-        
-        # 情況：12月查 "12/14 - 1/2"
+
+        # 智能年份判斷（跨年邏輯）
+        # 1. 如果現在是1-3月，且開始月份是10-12月，說明是去年
+        if current_month <= 3 and start_month >= 10:
+            start_year = year - 1
+            # 如果結束月份也是10-12月，也應該是去年
+            if end_month >= 10:
+                end_year = year - 1
+
+        # 2. 如果開始月份 > 結束月份，說明跨年
         if start_month > end_month:
-            end_year += 1
-            
+            end_year = start_year + 1
+
         try:
             result['start_date'] = date(start_year, start_month, start_day)
             result['end_date'] = date(end_year, end_month, end_day)
@@ -334,6 +353,13 @@ def parse_direct_query(text: str) -> dict:
     if single_match:
         month, day = int(single_match.group(1)), int(single_match.group(2))
         year = today.year
+        current_month = today.month
+
+        # 智能年份判斷（跨年邏輯）
+        # 如果現在是1-3月，且查詢月份是10-12月，說明是去年
+        if current_month <= 3 and month >= 10:
+            year = year - 1
+
         try:
             query_date = date(year, month, day)
             result['start_date'] = query_date
@@ -395,7 +421,7 @@ def _has_date_pattern(text: str) -> bool:
 def _has_location_pattern(text: str) -> bool:
     """檢查是否包含地點模式（排除已知關鍵字後有剩餘內容）"""
     remaining = text
-    
+
     # 移除已知關鍵字
     remove_patterns = [
         '查詢班次', '查班次', '查已完成', '統計金額',
@@ -403,18 +429,20 @@ def _has_location_pattern(text: str) -> bool:
         '診所', '東洋', '臨時',  # 類別不算地點
         '待派', '準備', '已完成', '註銷', '衝突', '請假', '取消',
         '狀態', '狀況',  # 查詢意圖詞不算地點
-        '的', '班次', '查', '列出'
+        '的', '班次', '查', '列出',
+        # 聚合關鍵字不算地點
+        '金額加總', '加總', '合計', '總額', '總和', '總計', '統計金額', '統計',
     ]
     for kw in remove_patterns:
         remaining = remaining.replace(kw, '')
-    
+
     # 移除日期格式
     remaining = re.sub(r'\d{1,2}/\d{1,2}', '', remaining)
     remaining = re.sub(r'\d{1,2}-\d{1,2}', '', remaining)
     remaining = re.sub(r'\d{1,2}月\d{1,2}', '', remaining)
     remaining = re.sub(r'司機\d+', '', remaining)
-    
+
     remaining = remaining.strip()
-    
+
     # 剩餘內容長度>=2，可能是地點
     return len(remaining) >= 2

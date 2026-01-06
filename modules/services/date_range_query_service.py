@@ -60,17 +60,109 @@ def parse_date_range(date_range_str):
         logger.error(f"解析日期範圍 '{date_range_str}' 失敗: {e}")
         return None, None
 
+def query_completed_trips_aggregation(start_date, end_date, driver_id=None, category=None, location=None):
+    """
+    聚合查詢日期範圍內的已完成班次（直接用SQL計算統計）
+
+    Args:
+        start_date: 開始日期
+        end_date: 結束日期
+        driver_id: 司機ID（可選）
+        category: 班次類別（可選）
+        location: 地點關鍵字（可選）
+
+    Returns:
+        dict: {
+            'total_count': 總筆數,
+            'filled_count': 有金額筆數,
+            'unfilled_count': 無金額筆數,
+            'sum_amount': 總金額
+        }
+    """
+    try:
+        # 基本查詢條件
+        where_conditions = ["date >= :start_date", "date <= :end_date"]
+        params = {
+            "start_date": start_date,
+            "end_date": end_date
+        }
+
+        # 添加司機ID條件
+        if driver_id:
+            where_conditions.append("driver_id = :driver_id")
+            params["driver_id"] = driver_id
+
+        # 添加類別條件
+        if category and category != "全部":
+            where_conditions.append("category = :category")
+            params["category"] = category
+
+        # 添加地點過濾條件
+        if location:
+            where_conditions.append("(start_point LIKE :location OR via_point LIKE :location OR end_point LIKE :location)")
+            params["location"] = f"%{location}%"
+
+        where_clause = " AND ".join(where_conditions)
+
+        aggregation_sql = f"""
+        SELECT
+            COUNT(*) as total_count,
+            COUNT(CASE
+                WHEN meter_fare IS NOT NULL OR extra_fare IS NOT NULL THEN 1
+            END) as filled_count,
+            COUNT(CASE
+                WHEN meter_fare IS NULL AND extra_fare IS NULL THEN 1
+            END) as unfilled_count,
+            SUM(CASE
+                WHEN meter_fare IS NULL AND extra_fare IS NULL THEN 0
+                WHEN meter_fare IS NULL THEN extra_fare
+                WHEN extra_fare IS NULL THEN meter_fare
+                ELSE meter_fare + extra_fare
+            END) as sum_amount
+        FROM completed_trips
+        WHERE {where_clause}
+        """
+
+        logger.info(f"🔍 執行聚合SQL查詢:")
+        logger.info(f"   SQL: {aggregation_sql}")
+        logger.info(f"   參數: {params}")
+
+        result = db.session.execute(text(aggregation_sql), params).fetchone()
+
+        aggregation_result = {
+            'total_count': result.total_count or 0,
+            'filled_count': result.filled_count or 0,
+            'unfilled_count': result.unfilled_count or 0,
+            'sum_amount': float(result.sum_amount or 0)
+        }
+
+        logger.info(f"📊 聚合結果: {aggregation_result}")
+
+        return aggregation_result
+
+    except Exception as e:
+        logger.error(f"聚合查詢已完成班次失敗: {e}")
+        import traceback
+        logger.error(f"詳細錯誤: {traceback.format_exc()}")
+        return {
+            'total_count': 0,
+            'filled_count': 0,
+            'unfilled_count': 0,
+            'sum_amount': 0
+        }
+
+
 def query_completed_trips_range(start_date, end_date, driver_id=None, category=None, location=None):
     """
     查詢日期範圍內的已完成班次
-    
+
     Args:
         start_date: 開始日期
-        end_date: 結束日期  
+        end_date: 結束日期
         driver_id: 司機ID（可選）
         category: 班次類別（可選）
         location: 地點關鍵字（可選）🔥 2025-12-17 新增
-    
+
     Returns:
         list: 查詢結果列表
     """
@@ -132,6 +224,61 @@ def query_completed_trips_range(start_date, end_date, driver_id=None, category=N
         import traceback
         logger.error(f"詳細錯誤: {traceback.format_exc()}")
         return []
+
+def format_aggregation_summary(agg_result, start_date, end_date, driver_id=None, category=None, location=None):
+    """
+    格式化聚合查詢結果為摘要文字
+
+    Args:
+        agg_result: 聚合結果字典 {total_count, filled_count, unfilled_count, sum_amount}
+        start_date: 開始日期
+        end_date: 結束日期
+        driver_id: 司機ID（可選）
+        category: 班次類別（可選）
+        location: 地點關鍵字（可選）
+
+    Returns:
+        str: 格式化的摘要文字
+    """
+    lines = []
+    lines.append("📊 金額統計摘要")
+    lines.append("=" * 30)
+    lines.append("")
+
+    # 查詢條件
+    filter_desc = []
+    if driver_id:
+        filter_desc.append(f"司機{driver_id}")
+    if category:
+        filter_desc.append(f"{category}班次")
+    if location:
+        filter_desc.append(f"地點「{location}」")
+
+    lines.append(f"📅 統計範圍：{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
+    if filter_desc:
+        lines.append(f"🔍 篩選條件：{' '.join(filter_desc)}")
+    lines.append("")
+
+    # 統計數據
+    total_count = agg_result.get('total_count', 0)
+    filled_count = agg_result.get('filled_count', 0)
+    unfilled_count = agg_result.get('unfilled_count', 0)
+    sum_amount = agg_result.get('sum_amount', 0)
+
+    lines.append("📈 統計結果：")
+    lines.append(f"  • 總班次數：{total_count} 筆")
+    lines.append(f"  • 已填金額：{filled_count} 筆")
+    lines.append(f"  • 未填金額：{unfilled_count} 筆")
+    lines.append("")
+    lines.append(f"💰 總金額：${sum_amount:,.0f}")
+
+    # 提示信息
+    if unfilled_count > 0:
+        lines.append("")
+        lines.append(f"⚠️ 提醒：有 {unfilled_count} 筆班次尚未填寫金額")
+
+    return "\n".join(lines)
+
 
 def query_current_trips_range(start_date, end_date, driver_id=None, category=None, location=None):
     """
@@ -200,23 +347,31 @@ def query_current_trips_range(start_date, end_date, driver_id=None, category=Non
         return []
 
 
-def handle_query_trips_range(start_date, end_date, driver_id=None, category=None, trip_type=None, user_id=None, location=None, force_completed=False):
+def handle_query_trips_range(start_date, end_date, driver_id=None, category=None, trip_type=None, user_id=None, location=None, force_completed=False, mode="list"):
     """
     薄 wrapper：統一入口供 ActionDispatcher 使用。
     - 支援混合範圍（過去→completed_trips；今天/未來→trips）
+    - 支援列表查詢（mode="list"）和聚合查詢（mode="aggregate"）
     - 回傳格式：{"text": str, "quick_reply": Optional[obj], "meta": dict}
-    
+
     🔥 2025-12-17 新增：支援 location 參數，按地點過濾班次
     🔥 2025-12-18 重要修復：支援 force_completed 參數
-    
+    🔥 2026-01-06 重要新增：支援 mode 參數，統一處理聚合查詢
+
     Args:
+        mode: "list" 列表查詢（預設）或 "aggregate" 聚合查詢
         force_completed: 若為 True，表示用戶明確指定「已完成」，
                         今天的資料應查 completed_trips 而非 trips
-    
+
     今天的時間態邊界規則：
     - 今天是一個「流動的邊界」
     - 若有「已完成」關鍵字（force_completed=True）：今天查 completed_trips
     - 若無「已完成」關鍵字（force_completed=False）：今天查 trips
+
+    聚合查詢特性：
+    - 只返回統計摘要，不返回班次列表
+    - 不保存查詢結果到對話上下文（無分頁）
+    - 直接使用 SQL 聚合函數計算
     """
     try:
         if not start_date or not end_date:
@@ -231,7 +386,29 @@ def handle_query_trips_range(start_date, end_date, driver_id=None, category=None
             "trip_type": trip_type,
             "location": location,  # 🔥 記錄地點過濾
             "force_completed": force_completed,  # 🔥 記錄是否強制查已完成
+            "mode": mode,  # 🔥 記錄查詢模式
         }
+
+        # 🔥 聚合查詢模式：只查詢 completed_trips（已完成班次才有金額統計意義）
+        if mode == "aggregate":
+            logger.info(f"📊 聚合查詢模式：start={start_date}, end={end_date}, driver={driver_id}, category={category}")
+
+            # 聚合查詢只對過去的已完成班次有意義
+            # 如果查詢範圍包含未來，自動截止到今天
+            effective_end = min(end_date, today)
+
+            # 執行聚合查詢
+            agg_result = query_completed_trips_aggregation(
+                start_date, effective_end, driver_id, category, location
+            )
+
+            # 格式化聚合摘要
+            text = format_aggregation_summary(
+                agg_result, start_date, effective_end, driver_id, category, location
+            )
+
+            # 聚合查詢不保存到上下文（不支援分頁）
+            return {"text": text, "quick_reply": None, "meta": meta}
 
         # 全過去（end_date < today）
         if end_date < today:
@@ -471,40 +648,28 @@ def format_current_trips_range_result(trips, start_date, end_date, driver_id=Non
         # 9:custom_start, 10:custom_end, 11:custom_via, 12:leave_reason
         
         t_id = trip[0]
-        # t_date = trip[1] # Unused here
+        t_date = trip[1]
         t_time = trip[2]
         t_start = trip[3]
         t_end = trip[4]
-        # t_cat = trip[5]
         t_driver = trip[6]
         t_status = trip[7]
         t_type = trip[8]
-        
-        # Handle custom points
+
         t_custom_start = trip[9] if len(trip) > 9 else None
         t_custom_end = trip[10] if len(trip) > 10 else None
-        # t_custom_via = trip[11] if len(trip) > 11 else None
-        # t_leave_reason = trip[12] if len(trip) > 12 else None
-        t_leave_reason = None # We might need to fetch this if not present? 
-        # Wait, the SELECT query in query_current_trips_range (Line 176) selects:
-        # ... passenger_leave_reason (index 13 actually? No)
-        # Ind 0:id, 1:date, 2:time, 3:start, 4:end, 5:cat, 6:dr, 7:stat, 8:type,
-        # 9:cust_start, 10:cust_end, 11:cust_via, 12:pass_leave, 13:mod_reason
-        # So yes, index 12 is passenger_leave_reason.
-        
-        if len(trip) > 12:
-            t_leave_reason = trip[12]
-            
+        t_leave_reason = trip[12] if len(trip) > 12 else None
+
         display_status = t_status
         if t_status == '準備' and t_leave_reason:
             display_status = '請假'
-            
+
         if display_status not in status_groups:
             status_groups[display_status] = []
-            
-        # Store dict for formatter
+
         status_groups[display_status].append({
             'id': t_id,
+            'date': t_date,
             'time': t_time,
             'driver': t_driver,
             'start': t_custom_start or t_start,
@@ -532,15 +697,13 @@ def format_current_trips_range_result(trips, start_date, end_date, driver_id=Non
         lines.append(f"{icon} {status} ({len(group_items)}個) :")
         
         for item in group_items:
-            # #1321 11:50-馬鎮宮->診所|🚕5386
+            # #1321 12/28 11:50-馬鎮宮->診所|🚕5386
+            date_str = item['date'].strftime('%m/%d') if item['date'] else ''
             t_str = item['time'].strftime('%H:%M') if item['time'] else '--:--'
             d_str = f"🚕{item['driver']}" if item['driver'] else "未指派"
-            
-            # Format: #ID Time-Start->End|Driver
-            # Note: User screenshot shows "⏰11:50-" (clock icon) or just "11:50-"
-            # Page 2 screenshot users "⏰11:50-Start->End|🚕Driver"
-            # I will match that format.
-            lines.append(f"#{item['id']} ⏰{t_str}-{item['start']}→{item['end']}|{d_str}")
+
+            # Format: #ID Date Time-Start->End|Driver
+            lines.append(f"#{item['id']} {date_str} ⏰{t_str}-{item['start']}→{item['end']}|{d_str}")
         
         lines.append("")
 

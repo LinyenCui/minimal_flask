@@ -653,28 +653,52 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
                 elif query_params and query_params.get('start_date') and query_params.get('end_date'):
                     from modules.services.date_range_query_service import (
                         handle_query_completed_trips_range,
-                        handle_query_current_trips_range
+                        handle_query_current_trips_range,
+                        handle_query_trips_range
                     )
-                    
+
                     start = query_params['start_date']
                     end = query_params['end_date']
-                    date_range_str = f"{start.month}/{start.day}-{end.month}/{end.day}"
-                    
-                    cmd_parts = [date_range_str]
-                    if query_params.get('driver_id'):
-                        cmd_parts.append(str(query_params['driver_id']))
-                    if query_params.get('category'):
-                        cmd_parts.append(query_params['category'])
-                    
-                    table = determine_query_table(message_text)
-                    if table == 'completed_trips':
-                        cmd = "查已完成範圍 " + " ".join(cmd_parts)
-                        result = handle_query_completed_trips_range(cmd, user_id)
+
+                    # 🔥 2026-01-06：檢測聚合關鍵字
+                    aggregation_keywords = ['金額加總', '加總', '合計', '總額', '總和', '總計', '統計金額', '統計']
+                    is_aggregation = any(kw in message_text for kw in aggregation_keywords)
+
+                    if is_aggregation:
+                        # 聚合查詢：統一走 handle_query_trips_range 的 aggregate 模式
+                        logger.info(f"📊 聚合查詢模式：{message_text}")
+                        has_completed_keyword = '已完成' in message_text
+                        result = handle_query_trips_range(
+                            start_date=start,
+                            end_date=end,
+                            driver_id=query_params.get('driver_id'),
+                            category=query_params.get('category'),
+                            user_id=user_id,
+                            force_completed=has_completed_keyword,
+                            mode="aggregate"
+                        )
+                        if result:
+                            reply_text(reply_token, result.get('text', ''))
+                            return
                     else:
-                        cmd = "查班次範圍 " + " ".join(cmd_parts)
-                        result = handle_query_current_trips_range(cmd, user_id)
-                    
-                    logger.info(f"📊 範圍查詢，走 date_range_query_service: {cmd}")
+                        # 列表查詢：原有邏輯
+                        date_range_str = f"{start.month}/{start.day}-{end.month}/{end.day}"
+
+                        cmd_parts = [date_range_str]
+                        if query_params.get('driver_id'):
+                            cmd_parts.append(str(query_params['driver_id']))
+                        if query_params.get('category'):
+                            cmd_parts.append(query_params['category'])
+
+                        table = determine_query_table(message_text)
+                        if table == 'completed_trips':
+                            cmd = "查已完成範圍 " + " ".join(cmd_parts)
+                            result = handle_query_completed_trips_range(cmd, user_id)
+                        else:
+                            cmd = "查班次範圍 " + " ".join(cmd_parts)
+                            result = handle_query_current_trips_range(cmd, user_id)
+
+                        logger.info(f"📊 範圍查詢，走 date_range_query_service: {cmd}")
                     
                     if result:
                         if isinstance(result, dict):
