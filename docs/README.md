@@ -1,68 +1,83 @@
-# 🚀 派車管理系統文檔中心
+# 文檔目錄結構
 
-歡迎來到派車管理系統的文檔中心！這裡包含了系統的完整使用指南、開發文檔和維護手冊。
-
-## 📋 快速導航
-
-### 🔧 系統核心功能
-- [📱 **Line Bot 操作指南**](./user-guides/LINE_BOT_USAGE.md) - Line Bot 的基本使用方法
-- [🤖 **AI 智能預約系統**](./user-guides/AI_BOOKING_GUIDE.md) - AI 預約功能使用說明
-- [📊 **報表生成系統**](./user-guides/REPORTS_GUIDE.md) - 各類報表的生成和使用
-- [🔄 **資料庫同步系統**](./INCREMENTAL_SYNC_GUIDE.md) - 增量資料庫同步功能
-
-### 🛠️ 開發與維護
-- [🏗️ **系統架構文檔**](./architecture/) - 系統整體架構設計
-- [⚙️ **安裝與配置**](./installation/) - 環境搭建和配置指南  
-- [🔌 **API 參考文檔**](./api/) - 系統 API 接口說明
-- [🧪 **測試指南**](./development/TESTING_GUIDE.md) - 測試框架和測試方法
-
-### 🚨 問題排除
-- [🩺 **常見問題**](./troubleshooting/FAQ.md) - 常見問題及解決方案
-- [📋 **錯誤代碼**](./troubleshooting/ERROR_CODES.md) - 系統錯誤代碼說明
-- [🔍 **調試指南**](./troubleshooting/DEBUGGING.md) - 系統調試方法
-
-### 📚 參考資料
-- [📝 **更新日誌**](./logs/) - 系統版本更新記錄
-- [🎯 **功能規劃**](./planning/) - 未來功能開發計劃
-- [📖 **術語詞彙**](./reference/GLOSSARY.md) - 系統術語解釋
-
-## 🌟 系統特色
-
-### 🤖 AI 智能調度
-- **自然語言理解**: 支援中文、日文預約指令
-- **智能路線規劃**: 自動最佳化派車路線
-- **圖片識別**: 支援圖片中的預約信息提取
-
-### 📊 三狀態數據管理
-- **future_state**: 未來行程規劃
-- **current_state**: 當前執行狀態  
-- **past_state**: 歷史記錄追蹤
-
-### 🔄 高可靠性同步
-- **增量同步**: 只同步變更數據，提高效率
-- **數據保護**: 保留本地獨有數據，避免覆蓋
-- **自動恢復**: 同步失敗時自動回滾機制
-
-### 📱 友善用戶界面
-- **Flex 訊息**: 豐富的互動式訊息界面
-- **即時通知**: 重要狀態變更即時推送
-- **多語言支援**: 支援繁體中文、日文操作
-
-## 🏃‍♂️ 快速開始
-
-1. **環境設置**: 參考 [安裝指南](./installation/SETUP_GUIDE.md)
-2. **基本配置**: 查看 [配置說明](./installation/CONFIGURATION.md)  
-3. **第一次使用**: 跟隨 [快速入門](./user-guides/QUICK_START.md)
-4. **功能探索**: 閱讀 [完整功能指南](./user-guides/)
-
-## 💡 需要幫助？
-
-- 🔍 查看 [常見問題](./troubleshooting/FAQ.md)
-- 📖 閱讀 [完整文檔](./user-guides/)
-- 🐛 [問題回報](./troubleshooting/BUG_REPORT.md)
-- 💬 聯繫開發團隊
+> **最後整理**：2026-01-13
 
 ---
 
-*最後更新: 2025-07-27*  
-*版本: v2.0*
+## 目錄說明
+
+```
+docs/
+├── architecture/       # 系統架構設計
+├── planning/          # 發展計劃與規劃（⭐ 重點）
+├── guides/            # 核心功能指南（三時間態、請假邏輯等）
+├── user-guides/       # 用戶使用手冊
+├── development/       # 開發指南（重構、清理等）
+├── installation/      # 安裝與設置指南
+├── troubleshooting/   # 故障排除
+├── design/            # 設計文檔
+├── logs/              # 開發日誌（歷史對話記錄）
+└── archive/           # 歸檔（過時但保留的文檔）
+```
+
+---
+
+## 重點文檔
+
+### 必讀
+| 文檔 | 位置 | 說明 |
+|-----|------|------|
+| **CLAUDE.md** | 根目錄 | 系統核心指南，開發前必讀 |
+| **發展計劃** | `planning/NATURAL_LANGUAGE_DB_EVOLUTION.md` | 沙盒取代主系統的遷移計劃 |
+
+### 核心概念
+| 文檔 | 位置 | 說明 |
+|-----|------|------|
+| 三時間態指南 | `guides/` | 未來態、現在態、過去態的設計 |
+| 請假邏輯 | `guides/TRIPS_LEAVE_LOGIC_GUIDE.md` | 三層障眼法設計 |
+| AI 架構 | `architecture/AI_AGENT_ARCHITECTURE.md` | Gemini 整合架構 |
+
+### 用戶指南
+| 文檔 | 位置 | 說明 |
+|-----|------|------|
+| 快速入門 | `user-guides/QUICK_START.md` | 基本使用方法 |
+| AI 使用指南 | `user-guides/AI_SIMPLE_USAGE_GUIDE.md` | 自然語言操作 |
+| 報表指南 | `user-guides/REPORTS_GUIDE.md` | 週報、月報生成 |
+
+---
+
+## 系統特色
+
+### 三時間態設計（生產線思維）
+- **未來態** (`fixed_schedules`): 模板，尚未匯入
+- **現在態** (`trips`): 生產線上的班次
+- **過去態** (`completed_trips`): 已完成的班次
+
+### AI 智能操作
+- **自然語言理解**: Gemini Function Calling
+- **沙盒系統**: 新架構試驗田
+- **雙軌制**: AI + 傳統命令並行
+
+### 請假三層障眼法
+- 用戶看：「班次已請假」
+- 系統實現：狀態維持「準備」
+- 業務邏輯：正常流轉，保持統計準確
+
+---
+
+## 快速開始
+
+1. **環境設置**: 參考 [安裝指南](./installation/SETUP_GUIDE.md)
+2. **核心概念**: 閱讀根目錄的 `CLAUDE.md`
+3. **發展方向**: 查看 `planning/NATURAL_LANGUAGE_DB_EVOLUTION.md`
+
+---
+
+## 歸檔說明
+
+`archive/` 目錄包含：
+- 過去的 Session 記錄
+- 已完成的修復摘要
+- 舊版本的設計文檔
+
+這些文檔**不再維護**，僅供歷史參考。

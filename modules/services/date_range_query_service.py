@@ -426,16 +426,72 @@ def handle_query_trips_range(start_date, end_date, driver_id=None, category=None
             return {"text": text, "quick_reply": None, "meta": meta}
 
         # 全現在/未來（start_date > today，或 start_date == today 且無 force_completed）
-        if start_date > today:
+        # 🔥 2026-01-12：添加分頁支持
+        if start_date >= today:
+            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+
             trips = query_current_trips_range(start_date, end_date, driver_id, category, location=location)
-            text = format_current_trips_range_result(trips, start_date, end_date, driver_id, category, location=location)
-            return {"text": text, "quick_reply": None, "meta": meta}
-        
-        # start_date == today（今天開始的範圍，無 force_completed）
-        if start_date == today:
-            trips = query_current_trips_range(start_date, end_date, driver_id, category, location=location)
-            text = format_current_trips_range_result(trips, start_date, end_date, driver_id, category, location=location)
-            return {"text": text, "quick_reply": None, "meta": meta}
+            MAX_DISPLAY = 20
+
+            if len(trips) > MAX_DISPLAY:
+                # 結果過多，需要分頁
+                page_info = {'current': 1, 'total_items': len(trips), 'has_more': True}
+                text = format_current_trips_range_result(
+                    trips[:MAX_DISPLAY], start_date, end_date, driver_id, category,
+                    page_info=page_info, location=location
+                )
+
+                # 構建分頁按鈕
+                date_str = f"{start_date.month}/{start_date.day}"
+                if start_date != end_date:
+                    date_str += f"-{end_date.month}/{end_date.day}"
+                driver_suffix = f" {driver_id}" if driver_id else ""
+                category_suffix = f" {category}" if category else ""
+
+                quick_reply_items = [
+                    QuickReplyItem(action=MessageAction(
+                        label="📄 下一頁",
+                        text="下一頁"
+                    ))
+                ]
+                quick_reply = QuickReply(items=quick_reply_items)
+
+                # 保存查詢結果以支持翻頁
+                if user_id:
+                    from modules.utils.conversation_context import get_conversation_context
+                    trips_dict = []
+                    for trip in trips:
+                        trips_dict.append({
+                            'trip_id': trip[0],
+                            'date': trip[1].strftime('%Y-%m-%d') if trip[1] else 'N/A',
+                            'time': trip[2],
+                            'start_point': trip[3],
+                            'end_point': trip[4],
+                            'category': trip[5],
+                            'driver_id': trip[6],
+                            'status': trip[7],
+                            'trip_type': trip[8],
+                            'passenger_leave_reason': trip[12] if len(trip) > 12 else None
+                        })
+                    context = get_conversation_context(user_id)
+                    context.save_query_result(
+                        query_type='current_trips_range',
+                        command=f"查班次範圍 {date_str}{driver_suffix}{category_suffix}",
+                        all_results=trips_dict,
+                        conditions={
+                            'start_date': start_date.strftime('%Y-%m-%d'),
+                            'end_date': end_date.strftime('%Y-%m-%d'),
+                            'driver_id': driver_id,
+                            'category': category
+                        }
+                    )
+                    logger.info(f"📱 現在態查詢保存分頁上下文: {len(trips)} 筆")
+
+                return {"text": text, "quick_reply": quick_reply, "meta": meta}
+            else:
+                # 結果不多，無需分頁
+                text = format_current_trips_range_result(trips, start_date, end_date, driver_id, category, location=location)
+                return {"text": text, "quick_reply": None, "meta": meta}
 
         # 混合：拆分為過去 + 現在/未來（start_date < today <= end_date）
         # 🔥 2026-01-06：添加分頁支持，避免消息過長
