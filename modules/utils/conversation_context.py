@@ -183,7 +183,7 @@ class ConversationContext:
                 result_text += f"📅 {date_str}\n"
                 
                 for trip in trips_by_date[date_str]:
-                    trip_id = trip.get('id', 'N/A')
+                    trip_id = trip.get('trip_id') or trip.get('id', 'N/A')
                     # date_str already used for header
                     start_point = trip.get('start_point', 'N/A')
                     end_point = trip.get('end_point', 'N/A')

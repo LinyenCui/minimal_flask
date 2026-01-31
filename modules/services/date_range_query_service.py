@@ -411,19 +411,173 @@ def handle_query_trips_range(start_date, end_date, driver_id=None, category=None
             return {"text": text, "quick_reply": None, "meta": meta}
 
         # 全過去（end_date < today）
+        # 🔥 2026-01-27：添加分頁支持
         if end_date < today:
+            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+
             trips = query_completed_trips_range(start_date, end_date, driver_id, category, location=location)
-            text = format_completed_trips_range_result(trips, start_date, end_date, driver_id, category, location=location)
-            return {"text": text, "quick_reply": None, "meta": meta}
+            MAX_DISPLAY = 20
+
+            if len(trips) > MAX_DISPLAY:
+                # 結果過多，需要分頁
+                # 🔥 先計算全部班次的總金額
+                total_fare = 0
+                for trip in trips:
+                    calculated_total = trip[7]
+                    original_total = trip[9]
+                    if original_total is not None:
+                        total_fare += original_total
+                    elif calculated_total is not None:
+                        total_fare += calculated_total
+
+                page_info = {'current': 1, 'total_items': len(trips), 'has_more': True, 'total_fare': total_fare}
+                text = format_completed_trips_range_result(
+                    trips[:MAX_DISPLAY], start_date, end_date, driver_id, category,
+                    page_info=page_info, location=location
+                )
+
+                # 構建分頁按鈕
+                quick_reply_items = [
+                    QuickReplyItem(action=MessageAction(
+                        label="📄 下一頁",
+                        text="下一頁"
+                    ))
+                ]
+                quick_reply = QuickReply(items=quick_reply_items)
+
+                # 保存查詢結果以支持翻頁
+                if user_id:
+                    from modules.utils.conversation_context import get_conversation_context
+                    trips_dict = []
+                    for trip in trips:
+                        trips_dict.append({
+                            'trip_id': trip[0],
+                            'date': trip[1].strftime('%Y-%m-%d') if hasattr(trip[1], 'strftime') else str(trip[1]),
+                            'start_point': trip[2],
+                            'end_point': trip[3],
+                            'category': trip[4],
+                            'meter_fare': trip[5],
+                            'extra_fare': trip[6],
+                            'calculated_total': trip[7],
+                            'coalesced_total': trip[8],
+                            'original_total': trip[9],
+                            'driver_id': trip[10],
+                            'modification_reason': trip[11],
+                            'trip_type': trip[12] if len(trip) > 12 else None
+                        })
+
+                    date_str = f"{start_date.month}/{start_date.day}"
+                    if start_date != end_date:
+                        date_str += f"-{end_date.month}/{end_date.day}"
+                    driver_suffix = f" 司機{driver_id}" if driver_id else ""
+                    category_suffix = f" {category}" if category else ""
+
+                    context = get_conversation_context(user_id)
+                    context.save_query_result(
+                        query_type='completed_trips_range',
+                        command=f"查已完成範圍 {date_str}{driver_suffix}{category_suffix}",
+                        all_results=trips_dict,
+                        conditions={
+                            'start_date': start_date.strftime('%Y-%m-%d'),
+                            'end_date': end_date.strftime('%Y-%m-%d'),
+                            'driver_id': driver_id,
+                            'category': category,
+                            'location': location
+                        }
+                    )
+                    logger.info(f"📱 過去態查詢保存分頁上下文: {len(trips)} 筆")
+
+                return {"text": text, "quick_reply": quick_reply, "meta": meta}
+            else:
+                # 結果不多，無需分頁
+                text = format_completed_trips_range_result(trips, start_date, end_date, driver_id, category, location=location)
+                return {"text": text, "quick_reply": None, "meta": meta}
 
         # 🔥 2025-12-18：force_completed 模式下，全部查 completed_trips
         # （這用於「12/1-12/25 司機61553 診所已完成班次」這類查詢）
+        # 🔥 2026-01-27：添加分頁支持
         if force_completed:
+            from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+
             # 只查到今天為止的已完成班次（未來不可能有已完成）
             effective_end = min(end_date, today)
             trips = query_completed_trips_range(start_date, effective_end, driver_id, category, location=location)
-            text = format_completed_trips_range_result(trips, start_date, effective_end, driver_id, category, location=location)
-            return {"text": text, "quick_reply": None, "meta": meta}
+            MAX_DISPLAY = 20
+
+            if len(trips) > MAX_DISPLAY:
+                # 結果過多，需要分頁
+                # 🔥 先計算全部班次的總金額
+                total_fare = 0
+                for trip in trips:
+                    calculated_total = trip[7]
+                    original_total = trip[9]
+                    if original_total is not None:
+                        total_fare += original_total
+                    elif calculated_total is not None:
+                        total_fare += calculated_total
+
+                page_info = {'current': 1, 'total_items': len(trips), 'has_more': True, 'total_fare': total_fare}
+                text = format_completed_trips_range_result(
+                    trips[:MAX_DISPLAY], start_date, effective_end, driver_id, category,
+                    page_info=page_info, location=location
+                )
+
+                # 構建分頁按鈕
+                quick_reply_items = [
+                    QuickReplyItem(action=MessageAction(
+                        label="📄 下一頁",
+                        text="下一頁"
+                    ))
+                ]
+                quick_reply = QuickReply(items=quick_reply_items)
+
+                # 保存查詢結果以支持翻頁
+                if user_id:
+                    from modules.utils.conversation_context import get_conversation_context
+                    trips_dict = []
+                    for trip in trips:
+                        trips_dict.append({
+                            'trip_id': trip[0],
+                            'date': trip[1].strftime('%Y-%m-%d') if hasattr(trip[1], 'strftime') else str(trip[1]),
+                            'start_point': trip[2],
+                            'end_point': trip[3],
+                            'category': trip[4],
+                            'meter_fare': trip[5],
+                            'extra_fare': trip[6],
+                            'calculated_total': trip[7],
+                            'coalesced_total': trip[8],
+                            'original_total': trip[9],
+                            'driver_id': trip[10],
+                            'modification_reason': trip[11],
+                            'trip_type': trip[12] if len(trip) > 12 else None
+                        })
+
+                    date_str = f"{start_date.month}/{start_date.day}"
+                    if start_date != effective_end:
+                        date_str += f"-{effective_end.month}/{effective_end.day}"
+                    driver_suffix = f" 司機{driver_id}" if driver_id else ""
+                    category_suffix = f" {category}" if category else ""
+
+                    context = get_conversation_context(user_id)
+                    context.save_query_result(
+                        query_type='completed_trips_range',
+                        command=f"查已完成範圍 {date_str}{driver_suffix}{category_suffix}",
+                        all_results=trips_dict,
+                        conditions={
+                            'start_date': start_date.strftime('%Y-%m-%d'),
+                            'end_date': effective_end.strftime('%Y-%m-%d'),
+                            'driver_id': driver_id,
+                            'category': category,
+                            'location': location
+                        }
+                    )
+                    logger.info(f"📱 force_completed 查詢保存分頁上下文: {len(trips)} 筆")
+
+                return {"text": text, "quick_reply": quick_reply, "meta": meta}
+            else:
+                # 結果不多，無需分頁
+                text = format_completed_trips_range_result(trips, start_date, effective_end, driver_id, category, location=location)
+                return {"text": text, "quick_reply": None, "meta": meta}
 
         # 全現在/未來（start_date > today，或 start_date == today 且無 force_completed）
         # 🔥 2026-01-12：添加分頁支持
