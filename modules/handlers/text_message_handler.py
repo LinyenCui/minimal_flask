@@ -473,6 +473,13 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
             
             
             
+        # 🔥 固定班表/固定請假 相關（委派）- 必須在 query_router 之前
+        # 因為「固定班次#ID請假」包含「請假」狀態詞，會被 is_status_filter_query 誤判
+        from modules.handlers.fixed_router import handle_fixed_commands
+        handled = handle_fixed_commands(message_text, user_id, reply_token)
+        if handled:
+            return
+        
         # 查詢相關命令（委派給輕路由）
         from modules.handlers.query_router import handle_query_commands
         handled = handle_query_commands(message_text, user_id, reply_token)
@@ -495,12 +502,6 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
         # 修改/記錄/類別 相關（委派）
         from modules.handlers.modification_router import handle_modification_commands
         handled = handle_modification_commands(message_text, user_id, reply_token)
-        if handled:
-            return
-
-        # 固定班表/固定請假 相關（委派）
-        from modules.handlers.fixed_router import handle_fixed_commands
-        handled = handle_fixed_commands(message_text, user_id, reply_token)
         if handled:
             return
 
