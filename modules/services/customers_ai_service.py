@@ -93,33 +93,81 @@ def _tool_customer_create(kwargs):
         return json.dumps({"status": "error", "message": str(e)}, ensure_ascii=False)
 
 def _tool_customer_update(kwargs):
-    """Updates a customer."""
+    """Updates a customer.
+    
+    kwargs 來自 execute_proposal 的轉換：
+    - '_identify_short_name', '_identify_name' 用於識別目標客戶（必須使用這些，不能 fallback）
+    - 其他欄位（已去除 new_ 前綴）是要更新的值
+    """
     try:
-        # Identify target. Prefer short_name or id if available, else name.
+        logger.info(f"🔧 _tool_customer_update 收到參數: {kwargs}")
+        
+        # 獲取識別用的參數（只用 _identify_* 前綴的，不要 fallback 到可能被覆蓋的值）
+        identify_short_name = kwargs.pop('_identify_short_name', None)
+        identify_name = kwargs.pop('_identify_name', None)
+        
+        logger.info(f"🔧 識別參數: short_name={identify_short_name}, name={identify_name}")
+        
+        # 如果沒有識別參數，嘗試用 name 查找（但 short_name 可能已被新值覆蓋，不能用）
+        if not identify_short_name and not identify_name:
+            # 最後手段：用 name 欄位（如果它不是要更新的值）
+            identify_name = kwargs.get('name')
+        
+        # Identify target
         target = None
-        if 'short_name' in kwargs:
-            target = CustomerSandbox.query.filter_by(short_name=kwargs['short_name']).first()
-        elif 'name' in kwargs:
-            target = CustomerSandbox.query.filter_by(name=kwargs['name']).first()
+        if identify_short_name:
+            target = CustomerSandbox.query.filter_by(short_name=identify_short_name).first()
+        if not target and identify_name:
+            # 嘗試用 name 或 short_name 查找
+            target = CustomerSandbox.query.filter_by(name=identify_name).first()
+            if not target:
+                target = CustomerSandbox.query.filter_by(short_name=identify_name).first()
+            if not target:
+                # 模糊搜索
+                target = CustomerSandbox.query.filter(
+                    db.or_(
+                        CustomerSandbox.name.ilike(f"%{identify_name}%"),
+                        CustomerSandbox.short_name.ilike(f"%{identify_name}%")
+                    )
+                ).first()
         
         if not target:
-            return json.dumps({"status": "error", "message": "Customer not found"}, ensure_ascii=False)
+            search_term = identify_short_name or identify_name or "未知"
+            return json.dumps({"status": "error", "message": f"找不到客戶：{search_term}"}, ensure_ascii=False)
         
-        # Update fields
+        # 更新欄位
         changes = []
-        for k, v in kwargs.items():
-            if k in ['name', 'short_name'] and k != 'short_name': # allow updating name if referenced by short_name?
-                # Simplify: just update whatever is passed except identity if ambiguous
-                pass
+        updatable_fields = ['name', 'short_name', 'address', 'contact_phone', 'category', 'remarks']
+        
+        for field in updatable_fields:
+            if field not in kwargs:
+                continue
             
-            if hasattr(target, k):
-                old_val = getattr(target, k)
-                if old_val != v:
-                    setattr(target, k, v)
-                    changes.append(f"{k}: {old_val} -> {v}")
+            new_value = kwargs[field]
+            
+            # 跳過識別用的值（不是要更新的）
+            if field == 'short_name' and new_value == identify_short_name:
+                continue
+            if field == 'name' and new_value == identify_name:
+                continue
+            
+            if hasattr(target, field):
+                old_val = getattr(target, field)
+                if old_val != new_value:
+                    # 檢查 short_name 唯一性
+                    if field == 'short_name':
+                        existing = CustomerSandbox.query.filter_by(short_name=new_value).first()
+                        if existing and existing.id != target.id:
+                            return json.dumps({"status": "error", "message": f"簡稱「{new_value}」已被使用"}, ensure_ascii=False)
+                    
+                    setattr(target, field, new_value)
+                    changes.append(f"{field}: {old_val} -> {new_value}")
+        
+        if not changes:
+            return json.dumps({"status": "success", "message": f"「{target.name}」沒有需要更新的內容"}, ensure_ascii=False)
         
         db.session.commit()
-        return json.dumps({"status": "success", "message": f"Updated {target.name}", "changes": changes}, ensure_ascii=False)
+        return json.dumps({"status": "success", "message": f"已更新「{target.name}」", "changes": changes}, ensure_ascii=False)
     except Exception as e:
         db.session.rollback()
         return json.dumps({"status": "error", "message": str(e)}, ensure_ascii=False)
@@ -270,6 +318,176 @@ def _tool_trip_delete(kwargs):
         return json.dumps({"status": "error", "message": str(e)}, ensure_ascii=False)
 
 
+# --- Fixed Schedule Tools ---
+
+def _tool_fixed_schedule_lookup(kwargs):
+    """查詢固定班次。支援用客戶名稱、班次ID查詢。"""
+    try:
+        schedule_id = kwargs.get('schedule_id')
+        customer_name = kwargs.get('customer_name')
+        
+        if schedule_id:
+            # 用 ID 查詢單一班次
+            query = text("""
+                SELECT id, route_number, departure_time, start_point, via_point, end_point,
+                       base_fare, surcharge, total_fare, category, driver_id, direction, status, note
+                FROM fixed_schedules WHERE id = :schedule_id
+            """)
+            results = db.session.execute(query, {"schedule_id": schedule_id}).fetchall()
+        elif customer_name:
+            # 用客戶名稱查詢相關班次
+            query = text("""
+                SELECT id, route_number, departure_time, start_point, via_point, end_point,
+                       base_fare, surcharge, total_fare, category, driver_id, direction, status, note
+                FROM fixed_schedules 
+                WHERE start_point ILIKE :name OR via_point ILIKE :name OR end_point ILIKE :name
+                ORDER BY departure_time
+                LIMIT 10
+            """)
+            results = db.session.execute(query, {"name": f"%{customer_name}%"}).fetchall()
+        else:
+            # 無條件，返回前 5 筆
+            query = text("""
+                SELECT id, route_number, departure_time, start_point, via_point, end_point,
+                       base_fare, surcharge, total_fare, category, driver_id, direction, status, note
+                FROM fixed_schedules ORDER BY departure_time LIMIT 5
+            """)
+            results = db.session.execute(query).fetchall()
+        
+        schedules = []
+        for r in results:
+            schedules.append({
+                "id": r[0],
+                "route_number": r[1],
+                "departure_time": r[2].strftime("%H:%M") if r[2] else None,
+                "start_point": r[3],
+                "via_point": r[4],
+                "end_point": r[5],
+                "base_fare": r[6],
+                "surcharge": r[7],
+                "total_fare": r[8],
+                "category": r[9],
+                "driver_id": r[10],
+                "direction": r[11],
+                "status": r[12] or "準備",
+                "note": r[13]
+            })
+        
+        return json.dumps(schedules, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Fixed schedule lookup error: {e}")
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+def _tool_fixed_schedule_leave(kwargs):
+    """設置固定班次請假。需要 schedule_id, reason, surcharge。"""
+    try:
+        schedule_id = kwargs.get('schedule_id')
+        reason = kwargs.get('reason')
+        surcharge = kwargs.get('surcharge')
+        
+        if not schedule_id:
+            return json.dumps({"status": "error", "message": "缺少固定班次 ID"}, ensure_ascii=False)
+        
+        # 查詢班次是否存在
+        check_query = text("""
+            SELECT id, status, note, surcharge, start_point, end_point, departure_time
+            FROM fixed_schedules WHERE id = :schedule_id
+        """)
+        schedule = db.session.execute(check_query, {"schedule_id": schedule_id}).fetchone()
+        
+        if not schedule:
+            return json.dumps({"status": "error", "message": f"找不到固定班次 #{schedule_id}"}, ensure_ascii=False)
+        
+        current_status = schedule[1] or '準備'
+        if current_status == '請假':
+            return json.dumps({
+                "status": "error", 
+                "message": f"固定班次 #{schedule_id} 已經是請假狀態，原因：{schedule[2] or '無'}"
+            }, ensure_ascii=False)
+        
+        # 更新為請假狀態
+        update_query = text("""
+            UPDATE fixed_schedules
+            SET status = '請假',
+                note = :reason,
+                surcharge = :surcharge,
+                modification_time = :mod_time
+            WHERE id = :schedule_id
+        """)
+        
+        db.session.execute(update_query, {
+            "schedule_id": schedule_id,
+            "reason": reason,
+            "surcharge": surcharge,
+            "mod_time": datetime.now()
+        })
+        db.session.commit()
+        
+        original_surcharge = schedule[3] or 0
+        return json.dumps({
+            "status": "success",
+            "message": f"固定班次 #{schedule_id} 已設為請假\n路線：{schedule[4]} → {schedule[5]}\n時間：{schedule[6]}\n原因：{reason}\n加成：{original_surcharge} → {surcharge}"
+        }, ensure_ascii=False)
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Fixed schedule leave error: {e}")
+        return json.dumps({"status": "error", "message": str(e)}, ensure_ascii=False)
+
+
+def _tool_fixed_schedule_restore(kwargs):
+    """恢復固定班次（從請假狀態恢復為準備）。"""
+    try:
+        schedule_id = kwargs.get('schedule_id')
+        
+        if not schedule_id:
+            return json.dumps({"status": "error", "message": "缺少固定班次 ID"}, ensure_ascii=False)
+        
+        # 查詢班次是否存在
+        check_query = text("""
+            SELECT id, status, note, start_point, end_point, departure_time
+            FROM fixed_schedules WHERE id = :schedule_id
+        """)
+        schedule = db.session.execute(check_query, {"schedule_id": schedule_id}).fetchone()
+        
+        if not schedule:
+            return json.dumps({"status": "error", "message": f"找不到固定班次 #{schedule_id}"}, ensure_ascii=False)
+        
+        current_status = schedule[1] or '準備'
+        if current_status != '請假':
+            return json.dumps({
+                "status": "error", 
+                "message": f"固定班次 #{schedule_id} 不是請假狀態，無需恢復"
+            }, ensure_ascii=False)
+        
+        # 恢復為準備狀態
+        update_query = text("""
+            UPDATE fixed_schedules
+            SET status = '準備',
+                note = NULL,
+                surcharge = 0,
+                modification_time = :mod_time
+            WHERE id = :schedule_id
+        """)
+        
+        db.session.execute(update_query, {
+            "schedule_id": schedule_id,
+            "mod_time": datetime.now()
+        })
+        db.session.commit()
+        
+        return json.dumps({
+            "status": "success",
+            "message": f"固定班次 #{schedule_id} 已恢復為準備狀態\n路線：{schedule[3]} → {schedule[4]}\n時間：{schedule[5]}\n原請假原因：{schedule[2] or '無'}"
+        }, ensure_ascii=False)
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Fixed schedule restore error: {e}")
+        return json.dumps({"status": "error", "message": str(e)}, ensure_ascii=False)
+
+
 # --- 3. Gemini Configuration ---
 
 def get_gemini_tools():
@@ -307,18 +525,22 @@ def get_gemini_tools():
 
     customer_update_func = FunctionDeclaration(
         name="customer_update",
-        description="Update an existing customer's information.",
+        description="""Update an existing customer's information.
+IMPORTANT: 
+- Use 'short_name' or 'name' to IDENTIFY which customer to update (the CURRENT value in database).
+- Use 'new_*' fields for the NEW values you want to set.
+- Example: To change customer '太子龍' short_name to '龍哥', use: short_name='太子龍', new_short_name='龍哥'""",
         parameters={
             "type": "object",
             "properties": {
-                "short_name": {"type": "string", "description": "Identify by short_name (preferred)"},
-                "name": {"type": "string", "description": "Identify by name (if short_name unknown) OR new name value"},
-                "new_address": {"type": "string", "description": "New address value"},
-                "new_phone": {"type": "string", "description": "New phone number"},
-                "new_category": {"type": "string", "description": "New category"},
-                "new_remarks": {"type": "string", "description": "New remarks"}
-                # Note: Schema slightly complicated for updates, keeping it flat for ease
-                # Mapped to kwargs in execution: new_address -> address
+                "short_name": {"type": "string", "description": "CURRENT short_name to identify the customer (the value currently in database)"},
+                "name": {"type": "string", "description": "CURRENT name to identify the customer (use if short_name unknown)"},
+                "new_name": {"type": "string", "description": "NEW name value to change to"},
+                "new_short_name": {"type": "string", "description": "NEW short_name value to change to"},
+                "new_address": {"type": "string", "description": "NEW address value to change to"},
+                "new_phone": {"type": "string", "description": "NEW phone number to change to"},
+                "new_category": {"type": "string", "description": "NEW category to change to"},
+                "new_remarks": {"type": "string", "description": "NEW remarks to change to"}
             }
         }
     )
@@ -388,6 +610,45 @@ def get_gemini_tools():
         }
     )
 
+    # --- Fixed Schedule Tools Definitions ---
+    fixed_schedule_lookup_func = FunctionDeclaration(
+        name="fixed_schedule_lookup",
+        description="Query fixed schedules (固定班次/固定班表). Use this to find recurring trip templates.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "schedule_id": {"type": "integer", "description": "Fixed schedule ID to lookup"},
+                "customer_name": {"type": "string", "description": "Customer name to search in start/via/end points"}
+            }
+        }
+    )
+
+    fixed_schedule_leave_func = FunctionDeclaration(
+        name="fixed_schedule_leave",
+        description="Set a fixed schedule to leave status (請假). Requires schedule_id, reason, and surcharge (negative adjustment like -50).",
+        parameters={
+            "type": "object",
+            "properties": {
+                "schedule_id": {"type": "integer", "description": "Fixed schedule ID"},
+                "reason": {"type": "string", "description": "Leave reason (e.g., '乘客出國', '長期住院')"},
+                "surcharge": {"type": "integer", "description": "Surcharge adjustment (usually negative, e.g., -50, -100). This affects total_fare."}
+            },
+            "required": ["schedule_id", "reason", "surcharge"]
+        }
+    )
+
+    fixed_schedule_restore_func = FunctionDeclaration(
+        name="fixed_schedule_restore",
+        description="Restore a fixed schedule from leave status back to ready (從請假恢復為準備).",
+        parameters={
+            "type": "object",
+            "properties": {
+                "schedule_id": {"type": "integer", "description": "Fixed schedule ID to restore"}
+            },
+            "required": ["schedule_id"]
+        }
+    )
+
     tools = Tool(
         function_declarations=[
             customer_lookup_func,
@@ -396,7 +657,10 @@ def get_gemini_tools():
             customer_delete_func,
             booking_create_func,
             trip_update_func,
-            trip_delete_func
+            trip_delete_func,
+            fixed_schedule_lookup_func,
+            fixed_schedule_leave_func,
+            fixed_schedule_restore_func
         ]
     )
     return tools
@@ -420,7 +684,7 @@ def process_sandbox_message(user_id, text_input, additional_context=""):
     chat = model.start_chat()
     
     prompt = f"""
-    You are a helpful assistant for managing 'customers' and 'trip bookings'.
+    You are a helpful assistant for managing 'customers', 'trip bookings', and 'fixed schedules' (固定班次).
     
     Current Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
     
@@ -433,20 +697,27 @@ def process_sandbox_message(user_id, text_input, additional_context=""):
     1. Analyze the user's intent.
        - Customer management: Create, Update, Delete, Lookup customers.
        - Trip Booking: Create (New Booking), Update, Delete/Cancel trips.
+       - Fixed Schedule (固定班次/固定班表): Lookup, Leave (請假), Restore (恢復).
     2. PROACTIVELY call the corresponding tool function.
     3. For 'customer_create', 'short_name' and 'category' are REQUIRED.
        - If missing, CALL THE TOOL ANYWAY with available data (pass null/empty).
     4. For 'booking_create':
        - 'date', 'time', and 'start_point' are REQUIRED. If missing, CALL THE TOOL ANYWAY.
        - Infer dates: "明天" -> YYYY-MM-DD.
-       - **Via Point**: Look for '經', '經過', '經由'. Extract the location but EXCLUDE the trigger word (e.g., "經文南路" -> "文南路").
+       - **Via Point**: Look for '經', '經過', '經由'. Extract the location but EXCLUDE the trigger word.
        - **Category**: Default to '東洋' if not specified.
-       - **Passenger Name**: Extract from '乘客', '送', '載' (e.g., "乘客多多良" -> "多多良").
-       - **Meter Fare**: Extract integer from '金額', '車資', '費用' (e.g., "金額680" -> 680).
+       - **Passenger Name**: Extract from '乘客', '送', '載'.
+       - **Meter Fare**: Extract integer from '金額', '車資', '費用'.
     5. For 'trip_update' / 'trip_delete':
-       - You MUST provide 'trip_id'. Infer it from Context Info if user says "that one" or "modify the booking".
-       - If trip_id is unknown/ambiguous, ASK the user to clarify instead of guessing.
-    6. Always answer in Traditional Chinese (Taiwan).
+       - You MUST provide 'trip_id'. Infer it from Context Info if user says "that one".
+       - If trip_id is unknown/ambiguous, ASK the user to clarify.
+    6. For 'fixed_schedule_leave' (固定班次請假):
+       - ALL THREE parameters are REQUIRED: schedule_id, reason, surcharge.
+       - **surcharge** is usually NEGATIVE (e.g., -50, -100) to reduce fare. If user doesn't specify, CALL THE TOOL ANYWAY to trigger missing_info.
+       - Example: "把固定班次#14設為請假，原因是出國" -> fixed_schedule_leave(schedule_id=14, reason="出國", surcharge=null)
+    7. For 'fixed_schedule_restore' (固定班次恢復):
+       - Only schedule_id is required.
+    8. Always answer in Traditional Chinese (Taiwan).
 
     Few-Shot Examples:
     - User: "預約明天下午兩點從高鐵站經文南路到東洋後門，乘客多多良，金額680"
@@ -454,6 +725,22 @@ def process_sandbox_message(user_id, text_input, additional_context=""):
     
     - User: "把剛剛那筆改成後天"
       Call: trip_update(trip_id=..., date="後天")
+    
+    - User: "查太子龍的固定班表"
+      Call: fixed_schedule_lookup(customer_name="太子龍")
+    
+    - User: "把固定班次#21設為請假，乘客出國，加成-50"
+      Call: fixed_schedule_leave(schedule_id=21, reason="乘客出國", surcharge=-50)
+    
+    - User: "恢復固定班次#21"
+      Call: fixed_schedule_restore(schedule_id=21)
+    
+    - User: "將太子龍的簡稱改成龍哥"
+      Call: customer_update(short_name="太子龍", new_short_name="龍哥")
+      NOTE: short_name="太子龍" identifies the customer, new_short_name="龍哥" is the new value.
+    
+    - User: "把增添的地址改成台南市東區"
+      Call: customer_update(name="增添", new_address="台南市東區")
     """
     
     response = chat.send_message(prompt)
@@ -469,10 +756,10 @@ def process_sandbox_message(user_id, text_input, additional_context=""):
         fc = function_call
         fname = fc.name
         fargs = dict(fc.args)
+        logger.info(f"🤖 Gemini Function Call: {fname}, args={fargs}")
         
-        # Classification
+        # Classification - Safe operations (lookup) execute immediately
         if fname == 'customer_lookup':
-            # Execute immediately
             result_json = _tool_customer_lookup(fargs)
             response2 = chat.send_message(
                 Part.from_function_response(
@@ -484,7 +771,21 @@ def process_sandbox_message(user_id, text_input, additional_context=""):
                 "type": "text_response",
                 "content": response2.text
             }
+        
+        if fname == 'fixed_schedule_lookup':
+            result_json = _tool_fixed_schedule_lookup(fargs)
+            response2 = chat.send_message(
+                Part.from_function_response(
+                    name=fname,
+                    response={"content": result_json}
+                )
+            )
+            return {
+                "type": "text_response",
+                "content": response2.text
+            }
             
+        # Unsafe operations -> PROPOSAL
         else:
             # Unsafe operations -> PROPOSAL
             
@@ -555,14 +856,75 @@ def process_sandbox_message(user_id, text_input, additional_context=""):
                 if not fargs.get('trip_id'):
                     return {"type": "text_response", "content": "請問您要修改哪一筆訂單？請提供編號或更多資訊。"}
 
+            # --- FIXED SCHEDULE LOGIC ---
+            if fname == 'fixed_schedule_leave':
+                required_fields = ["schedule_id", "reason", "surcharge"]
+                missing = [field for field in required_fields if fargs.get(field) is None]
+                if missing:
+                    field_map = {"schedule_id": "班次ID", "reason": "請假原因", "surcharge": "加成調整（通常為負數，如 -50）"}
+                    missing_zh = [field_map.get(m, m) for m in missing]
+                    return {
+                        "type": "missing_info",
+                        "content": f"固定班次請假請提供「{'、'.join(missing_zh)}」。\n\n💡 範例：出國一個月 -50",
+                        "missing_fields": missing,
+                        "draft_data": fargs
+                    }
+                # 檢查班次是否存在
+                check_query = text("SELECT id, status, start_point, end_point FROM fixed_schedules WHERE id = :sid")
+                schedule = db.session.execute(check_query, {"sid": fargs.get('schedule_id')}).fetchone()
+                if not schedule:
+                    return {"type": "text_response", "content": f"找不到固定班次 #{fargs.get('schedule_id')}"}
+                if schedule[1] == '請假':
+                    return {"type": "text_response", "content": f"固定班次 #{fargs.get('schedule_id')} 已經是請假狀態"}
+
+            if fname == 'fixed_schedule_restore':
+                if not fargs.get('schedule_id'):
+                    return {"type": "text_response", "content": "請問您要恢復哪一個固定班次？請提供班次 ID。"}
+                # 檢查班次是否存在且是請假狀態
+                check_query = text("SELECT id, status FROM fixed_schedules WHERE id = :sid")
+                schedule = db.session.execute(check_query, {"sid": fargs.get('schedule_id')}).fetchone()
+                if not schedule:
+                    return {"type": "text_response", "content": f"找不到固定班次 #{fargs.get('schedule_id')}"}
+                if schedule[1] != '請假':
+                    return {"type": "text_response", "content": f"固定班次 #{fargs.get('schedule_id')} 不是請假狀態，無需恢復"}
+
             # --- SUMMARY GENERATION ---
             summary = ""
             if fname == 'customer_create':
-                summary = f"【新增客戶】\n名稱: {fargs.get('name')}\n簡稱: {fargs.get('short_name')}\n..."
+                summary = (
+                    f"📝 新增客戶\n"
+                    f"┌─────────────\n"
+                    f"│ 名稱：{fargs.get('name', '未指定')}\n"
+                    f"│ 簡稱：{fargs.get('short_name', '未指定')}\n"
+                    f"│ 類別：{fargs.get('category', '未指定')}\n"
+                    f"│ 地址：{fargs.get('address', '未指定')}\n"
+                    f"└─────────────"
+                )
             elif fname == 'customer_update':
-                summary = f"【修改客戶】\n目標: {fargs.get('short_name') or fargs.get('name')}\n變更: {json.dumps(fargs, ensure_ascii=False)}"
+                # 美化變更顯示
+                target = fargs.get('short_name') or fargs.get('name')
+                field_map = {
+                    'new_name': '名稱',
+                    'new_short_name': '簡稱', 
+                    'new_address': '地址',
+                    'new_phone': '電話',
+                    'new_category': '類別',
+                    'new_remarks': '備註'
+                }
+                changes = []
+                for k, label in field_map.items():
+                    if fargs.get(k):
+                        changes.append(f"│ {label}：{fargs.get(k)}")
+                
+                changes_text = '\n'.join(changes) if changes else "│ （無變更）"
+                summary = (
+                    f"✏️ 修改客戶「{target}」\n"
+                    f"┌─────────────\n"
+                    f"{changes_text}\n"
+                    f"└─────────────"
+                )
             elif fname == 'customer_delete':
-                summary = f"【刪除客戶】\n目標: {fargs.get('short_name') or fargs.get('name')}"
+                summary = f"🗑️ 刪除客戶「{fargs.get('short_name') or fargs.get('name')}」"
             elif fname == 'booking_create':
                 summary = (
                     f"【預約叫車】\n"
@@ -594,6 +956,39 @@ def process_sandbox_message(user_id, text_input, additional_context=""):
                     summary = f"【修改行程 #{tid}】\n原訂:\n{trip_info}\n\n變更內容:\n{json.dumps(fargs, ensure_ascii=False, indent=2)}"
                 else:
                     summary = f"【取消行程 #{tid}】\n原訂:\n{trip_info}"
+            
+            elif fname == 'fixed_schedule_leave':
+                sid = fargs.get('schedule_id')
+                schedule_info = "（查無此班次）"
+                try:
+                    s_sql = text("SELECT departure_time, start_point, end_point, surcharge FROM fixed_schedules WHERE id = :sid")
+                    row = db.session.execute(s_sql, {"sid": sid}).fetchone()
+                    if row:
+                        s_time = row[0].strftime('%H:%M') if row[0] else "??:??"
+                        schedule_info = f"時間：{s_time}\n路線：{row[1]} → {row[2]}\n原加成：{row[3] or 0}"
+                except Exception as e:
+                    schedule_info = f"（查詢失敗: {str(e)}）"
+                
+                summary = (
+                    f"【固定班次請假 #{sid}】\n"
+                    f"{schedule_info}\n\n"
+                    f"📝 請假原因：{fargs.get('reason')}\n"
+                    f"💰 新加成：{fargs.get('surcharge')}"
+                )
+            
+            elif fname == 'fixed_schedule_restore':
+                sid = fargs.get('schedule_id')
+                schedule_info = "（查無此班次）"
+                try:
+                    s_sql = text("SELECT departure_time, start_point, end_point, note FROM fixed_schedules WHERE id = :sid")
+                    row = db.session.execute(s_sql, {"sid": sid}).fetchone()
+                    if row:
+                        s_time = row[0].strftime('%H:%M') if row[0] else "??:??"
+                        schedule_info = f"時間：{s_time}\n路線：{row[1]} → {row[2]}\n請假原因：{row[3] or '無'}"
+                except Exception as e:
+                    schedule_info = f"（查詢失敗: {str(e)}）"
+                
+                summary = f"【恢復固定班次 #{sid}】\n{schedule_info}\n\n將恢復為「準備」狀態，加成歸零"
                 
             return {
                 "type": "proposal",
@@ -615,7 +1010,29 @@ def execute_proposal(func_name, func_args):
     if func_name == 'customer_create':
         return _tool_customer_create(func_args)
     elif func_name == 'customer_update':
-        clean_args = {k[4:] if k.startswith('new_') else k: v for k, v in func_args.items()}
+        # 轉換參數：
+        # 1. 識別用：short_name/name → _identify_short_name/_identify_name
+        # 2. 更新值：new_xxx → xxx（去除 new_ 前綴）
+        clean_args = {}
+        
+        # 先提取識別用參數
+        identify_short_name = func_args.get('short_name')
+        identify_name = func_args.get('name')
+        
+        if identify_short_name:
+            clean_args['_identify_short_name'] = identify_short_name
+        if identify_name:
+            clean_args['_identify_name'] = identify_name
+        
+        # 再處理更新值（new_xxx → xxx）
+        for k, v in func_args.items():
+            if k.startswith('new_'):
+                # new_short_name → short_name, new_name → name, etc.
+                clean_key = k[4:]
+                clean_args[clean_key] = v
+            # 跳過原始的 short_name/name（已轉成 _identify_* 了）
+        
+        logger.info(f"🔧 execute_proposal 轉換後參數: {clean_args}")
         return _tool_customer_update(clean_args)
     elif func_name == 'customer_delete':
         return _tool_customer_delete(func_args)
@@ -625,5 +1042,9 @@ def execute_proposal(func_name, func_args):
         return _tool_trip_update(func_args)
     elif func_name == 'trip_delete':
         return _tool_trip_delete(func_args)
+    elif func_name == 'fixed_schedule_leave':
+        return _tool_fixed_schedule_leave(func_args)
+    elif func_name == 'fixed_schedule_restore':
+        return _tool_fixed_schedule_restore(func_args)
     else:
         return json.dumps({"status": "error", "message": "Unknown function"})

@@ -50,14 +50,17 @@ def handle_customers_ai_message(event):
     logger.info(f"Customers AI Sandbox: User {user_id} says '{text}'")
     
     # 1. Check for Pending Confirmation (Final Step)
+    logger.info(f"🔍 檢查 SANDBOX_STATES: user_id={user_id}, in_states={user_id in SANDBOX_STATES}")
     if user_id in SANDBOX_STATES:
         state = SANDBOX_STATES[user_id]
+        logger.info(f"🔍 用戶狀態: {state.get('status')}, proposal={state.get('proposal', {}).get('func_name')}")
         if state.get("status") == "PENDING_CONFIRM":
             # Normalize text for checking
             check_text = text.lower()
             if check_text.startswith('/'):
                 check_text = check_text[1:]
-                
+            
+            logger.info(f"🔍 檢查確認文字: check_text='{check_text}', is_confirm={check_text in ['確認', 'ok', 'yes', 'confirm']}")
             if check_text in ['確認', 'ok', 'yes', 'confirm']:
                 # Execute
                 proposal = state['proposal']
