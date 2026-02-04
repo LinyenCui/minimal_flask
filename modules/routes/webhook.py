@@ -37,7 +37,10 @@ def callback():
                 source_type = event.source.type
                 user_id = event.source.user_id # Restored missing definition
                 
-                # --- PATCH: Customers AI Sandbox Trigger ---
+                # --- PATCH: AI Sandbox Trigger (原 Customers AI Sandbox) ---
+                # 觸發方式：
+                # - 私聊：需要 ! 前缀
+                # - 群組：! 直接觸發（取代 /）
                 is_private = source_type == 'user'
                 trigger_sandbox = False
                 lower_text = original_message_text.lower()
@@ -48,9 +51,12 @@ def callback():
                     
                     # Logic: Determine if we should route to Sandbox
                     
-                    # 1. Check strict prefix (Always Valid)
-                    has_sandbox_prefix = (lower_text.startswith('cu') or original_message_text.startswith('客') or
-                                          lower_text.startswith('/cu') or original_message_text.startswith('/客'))
+                    # 1. Check strict prefix: ! 或 ！ (支援半角和全角驚嘆號)
+                    # 支援: "! xxx", "!xxx", "！xxx", "！ xxx", "/!" (群組兼容)
+                    has_sandbox_prefix = (original_message_text.startswith('!') or 
+                                          original_message_text.startswith('！') or
+                                          original_message_text.startswith('/!') or
+                                          original_message_text.startswith('/！'))
 
                     # 2. Check Active Sandbox Conversation (Multi-turn Memory)
                     is_active_sandbox_conv = False

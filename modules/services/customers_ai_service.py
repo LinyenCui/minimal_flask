@@ -436,6 +436,104 @@ def _tool_fixed_schedule_leave(kwargs):
         return json.dumps({"status": "error", "message": str(e)}, ensure_ascii=False)
 
 
+def _tool_fixed_schedule_update(kwargs):
+    """修改固定班次（時間、地點、車資等）。"""
+    try:
+        schedule_id = kwargs.get('schedule_id')
+        
+        if not schedule_id:
+            return json.dumps({"status": "error", "message": "缺少固定班次 ID"}, ensure_ascii=False)
+        
+        # 查詢班次是否存在
+        check_query = text("""
+            SELECT id, departure_time, start_point, via_point, end_point, 
+                   base_fare, surcharge, driver_id, category, note
+            FROM fixed_schedules WHERE id = :schedule_id
+        """)
+        schedule = db.session.execute(check_query, {"schedule_id": schedule_id}).fetchone()
+        
+        if not schedule:
+            return json.dumps({"status": "error", "message": f"找不到固定班次 #{schedule_id}"}, ensure_ascii=False)
+        
+        # 可更新的欄位
+        updatable_fields = {
+            'departure_time': ('時間', schedule[1]),
+            'start_point': ('起點', schedule[2]),
+            'via_point': ('途經', schedule[3]),
+            'end_point': ('終點', schedule[4]),
+            'base_fare': ('基本車資', schedule[5]),
+            'surcharge': ('加成', schedule[6]),
+            'driver_id': ('司機', schedule[7]),
+            'category': ('類別', schedule[8]),
+            'note': ('備註', schedule[9])
+        }
+        
+        changes = []
+        update_parts = []
+        update_params = {"schedule_id": schedule_id, "mod_time": datetime.now()}
+        
+        for field, (label, old_val) in updatable_fields.items():
+            new_val = kwargs.get(field)
+            if new_val is not None:
+                # 時間需要特別處理
+                if field == 'departure_time':
+                    # 解析時間字串（支援 "10:15", "10:30", "下午3點" 等格式）
+                    import re
+                    time_val = new_val
+                    if isinstance(new_val, str):
+                        # 嘗試解析 HH:MM 格式
+                        time_match = re.match(r'^(\d{1,2}):(\d{2})$', new_val)
+                        if time_match:
+                            hour, minute = int(time_match.group(1)), int(time_match.group(2))
+                            from datetime import time as dt_time
+                            time_val = dt_time(hour, minute)
+                        else:
+                            # 嘗試解析中文格式（下午3點、上午10點半等）
+                            cn_match = re.match(r'(上午|下午)?(\d{1,2})[:點](\d{0,2})?', new_val)
+                            if cn_match:
+                                period, hour, minute = cn_match.groups()
+                                hour = int(hour)
+                                minute = int(minute) if minute else 0
+                                if period == '下午' and hour < 12:
+                                    hour += 12
+                                from datetime import time as dt_time
+                                time_val = dt_time(hour, minute)
+                    
+                    old_display = old_val.strftime('%H:%M') if old_val else '無'
+                    new_display = time_val.strftime('%H:%M') if hasattr(time_val, 'strftime') else str(time_val)
+                    new_val = time_val
+                else:
+                    old_display = old_val if old_val is not None else '無'
+                    new_display = new_val
+                
+                update_parts.append(f"{field} = :{field}")
+                update_params[field] = new_val
+                changes.append(f"{label}：{old_display} → {new_display}")
+        
+        if not changes:
+            return json.dumps({"status": "error", "message": "沒有指定要修改的內容"}, ensure_ascii=False)
+        
+        # 執行更新
+        update_query = text(f"""
+            UPDATE fixed_schedules
+            SET {', '.join(update_parts)}, modification_time = :mod_time
+            WHERE id = :schedule_id
+        """)
+        
+        db.session.execute(update_query, update_params)
+        db.session.commit()
+        
+        return json.dumps({
+            "status": "success",
+            "message": f"固定班次 #{schedule_id} 已更新\n" + '\n'.join(changes)
+        }, ensure_ascii=False)
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Fixed schedule update error: {e}")
+        return json.dumps({"status": "error", "message": str(e)}, ensure_ascii=False)
+
+
 def _tool_fixed_schedule_restore(kwargs):
     """恢復固定班次（從請假狀態恢復為準備）。"""
     try:
@@ -637,6 +735,27 @@ IMPORTANT:
         }
     )
 
+    fixed_schedule_update_func = FunctionDeclaration(
+        name="fixed_schedule_update",
+        description="Update a fixed schedule's information (修改固定班次). Can update time, location, fare, driver, etc.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "schedule_id": {"type": "integer", "description": "Fixed schedule ID to update (required)"},
+                "departure_time": {"type": "string", "description": "New departure time (e.g., '10:15', '下午3點')"},
+                "start_point": {"type": "string", "description": "New start point"},
+                "via_point": {"type": "string", "description": "New via point"},
+                "end_point": {"type": "string", "description": "New end point"},
+                "base_fare": {"type": "integer", "description": "New base fare"},
+                "surcharge": {"type": "integer", "description": "New surcharge"},
+                "driver_id": {"type": "integer", "description": "New driver ID"},
+                "category": {"type": "string", "description": "New category"},
+                "note": {"type": "string", "description": "New note/remarks"}
+            },
+            "required": ["schedule_id"]
+        }
+    )
+
     fixed_schedule_restore_func = FunctionDeclaration(
         name="fixed_schedule_restore",
         description="Restore a fixed schedule from leave status back to ready (從請假恢復為準備).",
@@ -660,6 +779,7 @@ IMPORTANT:
             trip_delete_func,
             fixed_schedule_lookup_func,
             fixed_schedule_leave_func,
+            fixed_schedule_update_func,
             fixed_schedule_restore_func
         ]
     )
@@ -697,7 +817,7 @@ def process_sandbox_message(user_id, text_input, additional_context=""):
     1. Analyze the user's intent.
        - Customer management: Create, Update, Delete, Lookup customers.
        - Trip Booking: Create (New Booking), Update, Delete/Cancel trips.
-       - Fixed Schedule (固定班次/固定班表): Lookup, Leave (請假), Restore (恢復).
+       - Fixed Schedule (固定班次/固定班表): Lookup, Update (修改時間/地點等), Leave (請假), Restore (恢復).
     2. PROACTIVELY call the corresponding tool function.
     3. For 'customer_create', 'short_name' and 'category' are REQUIRED.
        - If missing, CALL THE TOOL ANYWAY with available data (pass null/empty).
@@ -734,6 +854,12 @@ def process_sandbox_message(user_id, text_input, additional_context=""):
     
     - User: "恢復固定班次#21"
       Call: fixed_schedule_restore(schedule_id=21)
+    
+    - User: "將固定班次32的時間改成10:15"
+      Call: fixed_schedule_update(schedule_id=32, departure_time="10:15")
+    
+    - User: "把固定班次#14的起點改成高鐵站"
+      Call: fixed_schedule_update(schedule_id=14, start_point="高鐵站")
     
     - User: "將太子龍的簡稱改成龍哥"
       Call: customer_update(short_name="太子龍", new_short_name="龍哥")
@@ -877,6 +1003,20 @@ def process_sandbox_message(user_id, text_input, additional_context=""):
                 if schedule[1] == '請假':
                     return {"type": "text_response", "content": f"固定班次 #{fargs.get('schedule_id')} 已經是請假狀態"}
 
+            if fname == 'fixed_schedule_update':
+                if not fargs.get('schedule_id'):
+                    return {"type": "text_response", "content": "請問您要修改哪一個固定班次？請提供班次 ID。"}
+                # 檢查班次是否存在
+                check_query = text("SELECT id, departure_time, start_point, end_point FROM fixed_schedules WHERE id = :sid")
+                schedule = db.session.execute(check_query, {"sid": fargs.get('schedule_id')}).fetchone()
+                if not schedule:
+                    return {"type": "text_response", "content": f"找不到固定班次 #{fargs.get('schedule_id')}"}
+                # 檢查是否有指定要修改的內容
+                update_fields = ['departure_time', 'start_point', 'via_point', 'end_point', 'base_fare', 'surcharge', 'driver_id', 'category', 'note']
+                has_update = any(fargs.get(f) is not None for f in update_fields)
+                if not has_update:
+                    return {"type": "text_response", "content": "請問您要修改什麼內容？可修改：時間、起點、途經、終點、車資、加成、司機、類別、備註"}
+
             if fname == 'fixed_schedule_restore':
                 if not fargs.get('schedule_id'):
                     return {"type": "text_response", "content": "請問您要恢復哪一個固定班次？請提供班次 ID。"}
@@ -976,6 +1116,45 @@ def process_sandbox_message(user_id, text_input, additional_context=""):
                     f"💰 新加成：{fargs.get('surcharge')}"
                 )
             
+            elif fname == 'fixed_schedule_update':
+                sid = fargs.get('schedule_id')
+                schedule_info = "（查無此班次）"
+                try:
+                    s_sql = text("SELECT departure_time, start_point, end_point FROM fixed_schedules WHERE id = :sid")
+                    row = db.session.execute(s_sql, {"sid": sid}).fetchone()
+                    if row:
+                        s_time = row[0].strftime('%H:%M') if row[0] else "??:??"
+                        schedule_info = f"時間：{s_time}\n路線：{row[1]} → {row[2]}"
+                except Exception as e:
+                    schedule_info = f"（查詢失敗: {str(e)}）"
+                
+                # 美化變更顯示
+                field_map = {
+                    'departure_time': '時間',
+                    'start_point': '起點',
+                    'via_point': '途經',
+                    'end_point': '終點',
+                    'base_fare': '基本車資',
+                    'surcharge': '加成',
+                    'driver_id': '司機',
+                    'category': '類別',
+                    'note': '備註'
+                }
+                changes = []
+                for k, label in field_map.items():
+                    if fargs.get(k) is not None:
+                        changes.append(f"│ {label}：{fargs.get(k)}")
+                
+                changes_text = '\n'.join(changes) if changes else "│ （無變更）"
+                summary = (
+                    f"✏️ 修改固定班次 #{sid}\n"
+                    f"┌─────────────\n"
+                    f"│ 原班次：{schedule_info}\n"
+                    f"├─────────────\n"
+                    f"{changes_text}\n"
+                    f"└─────────────"
+                )
+            
             elif fname == 'fixed_schedule_restore':
                 sid = fargs.get('schedule_id')
                 schedule_info = "（查無此班次）"
@@ -1044,6 +1223,8 @@ def execute_proposal(func_name, func_args):
         return _tool_trip_delete(func_args)
     elif func_name == 'fixed_schedule_leave':
         return _tool_fixed_schedule_leave(func_args)
+    elif func_name == 'fixed_schedule_update':
+        return _tool_fixed_schedule_update(func_args)
     elif func_name == 'fixed_schedule_restore':
         return _tool_fixed_schedule_restore(func_args)
     else:

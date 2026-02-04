@@ -135,17 +135,23 @@ def handle_customers_ai_message(event):
     # 3. Process Request (New or Contextual)
     clean_text = input_text
     # Remove triggers if present (only for fresh start, but safe to do always)
-    if clean_text.lower().startswith("cu"):
+    # 新前綴：! 或 ！ (支援半角和全角驚嘆號)
+    if clean_text.startswith('/!') or clean_text.startswith('/！'):
         clean_text = clean_text[2:].strip()
-    elif clean_text.startswith("客"):
+    elif clean_text.startswith('!') or clean_text.startswith('！'):
         clean_text = clean_text[1:].strip()
+    # 兼容舊前綴（過渡期）
     elif clean_text.lower().startswith("/cu"):
         clean_text = clean_text[3:].strip()
     elif clean_text.startswith("/客"):
         clean_text = clean_text[2:].strip()
+    elif clean_text.lower().startswith("cu"):
+        clean_text = clean_text[2:].strip()
+    elif clean_text.startswith("客"):
+        clean_text = clean_text[1:].strip()
         
     if not clean_text:
-        reply_text(reply_token, "Customers AI Sandbox 已啟動。\n請輸入指令，例如：\n- 查 文賢路\n- 新增 客戶 王小明...")
+        reply_text(reply_token, "🤖 AI 助手已啟動\n\n可用指令：\n• 查 [客戶/地點]\n• 固定班表 [客戶]\n• 將固定班次#ID的時間改成...\n• 預約 明天下午2點從高鐵站到東洋\n\n群組用 ! 開頭，私聊也需要 !")
         return
 
     try:
