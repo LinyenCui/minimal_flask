@@ -753,6 +753,199 @@ def handle_generate_weekly_report(text):
         return f"生成報表時出錯: {str(e)}"
 
 
+def generate_daily_report(target_date=None, category=None):
+    """
+    生成指定日期（預設昨天）的班次報表
+    
+    Args:
+        target_date: 目標日期 (date 物件)，預設為昨天
+        category: 選擇性的班次類別過濾（例如"診所"或"東洋"）
+        
+    Returns:
+        tuple: (結果消息, 生成的文件名)
+    """
+    try:
+        if target_date is None:
+            target_date = get_taiwan_date() - timedelta(days=1)
+        
+        logger.info(f"生成日報表，日期: {target_date}, 類別: {category}")
+        
+        query_params = {
+            "target_date": target_date,
+        }
+        
+        query = """
+        SELECT 
+            ct.id,
+            ct.date, 
+            ct.start_point, 
+            ct.via_point, 
+            ct.end_point, 
+            ct.meter_fare, 
+            ct.extra_fare,
+            COALESCE(ct.meter_fare, 0) + COALESCE(ct.extra_fare, 0) as actual_fare,
+            ct.driver_id,
+            ct.modification_reason,
+            ct.passenger_leave_reason
+        FROM 
+            completed_trips ct
+        WHERE 
+            ct.date = :target_date
+        """
+        
+        if category:
+            if category != "全部":
+                query += " AND ct.category = :category"
+                query_params["category"] = category
+            logger.info(f"使用類別過濾: {category}")
+            
+        query += " ORDER BY ct.id"
+        
+        with db.engine.connect() as conn:
+            result = conn.execute(text(query), query_params)
+            completed_trips = result.fetchall()
+        
+        if not completed_trips:
+            category_text = f"類別「{category}」的" if category and category != "全部" else ""
+            logger.warning(f"{target_date} 沒有{category_text}已完成的班次")
+            return f"{target_date.strftime('%m/%d')} 沒有{category_text}已完成的班次。", None
+        
+        logger.info(f"找到 {len(completed_trips)} 條班次記錄")
+        
+        df = pd.DataFrame(completed_trips)
+        df.columns = ['ID', '日期', '起點', '途經點', '終點', '錶價', '加成', '實收', '司機編號', '修改原因', '請假原因']
+        
+        def combine_remarks(row):
+            modification = row['修改原因'] if pd.notna(row['修改原因']) and row['修改原因'].strip() else ""
+            leave = row['請假原因'] if pd.notna(row['請假原因']) and row['請假原因'].strip() else ""
+            
+            if modification and leave:
+                return f"{modification}\n{leave}"
+            elif modification:
+                return modification
+            elif leave:
+                return leave
+            else:
+                return ""
+        
+        df['說明'] = df.apply(combine_remarks, axis=1)
+        
+        df['日期'] = pd.to_datetime(df['日期'])
+        weekday_map = {0: '一', 1: '二', 2: '三', 3: '四', 4: '五', 5: '六', 6: '日'}
+        df['星期'] = df['日期'].dt.dayofweek.map(weekday_map)
+        df['日期'] = df['日期'].dt.strftime('%Y-%m-%d')
+        
+        df = df[['ID', '日期', '星期', '起點', '途經點', '終點', '司機編號', '錶價', '加成', '實收', '說明']]
+        
+        driver_stats = df.groupby('司機編號').agg({
+            'ID': 'count',
+            '實收': 'sum'
+        }).reset_index()
+        driver_stats.columns = ['司機編號', '班次數', '金額']
+        
+        report_date = get_taiwan_date().strftime('%Y%m%d')
+        category_suffix = f"_{category}" if category and category != "全部" else ""
+        filename = f"daily_report{category_suffix}_{target_date.strftime('%Y%m%d')}.xlsx"
+        
+        workbook = openpyxl.Workbook()
+        worksheet = workbook.active
+        worksheet.title = '班次詳情'
+        
+        if category == "東洋":
+            title_prefix = "東洋班次日報表"
+        elif category == "診所":
+            title_prefix = "診所班次日報表"
+        else:
+            title_prefix = "班次日報表"
+        
+        weekday_name = weekday_map.get(target_date.weekday(), '')
+        title = f"{title_prefix} ({target_date.strftime('%Y/%m/%d')} 星期{weekday_name})"
+        worksheet.cell(row=1, column=1).value = title
+        worksheet.merge_cells('A1:K1')
+        
+        return _create_excel_report(worksheet, df, driver_stats, filename, target_date, target_date, "日")
+        
+    except Exception as e:
+        logger.error(f"生成日報表失敗: {str(e)}", exc_info=True)
+        return f"生成日報表失敗: {str(e)}", None
+
+
+def handle_generate_daily_report(text_input):
+    """
+    處理生成日報表命令
+    
+    支援格式：
+        生成日報表           → 昨天全部類別
+        生成日報表 診所       → 昨天指定類別
+        生成日報表 今天       → 今天全部類別
+        生成日報表 今天 診所   → 今天指定類別
+        生成日報表 3/20       → 指定日期全部類別
+        生成日報表 3/20 東洋   → 指定日期指定類別
+    
+    Args:
+        text_input: 用戶輸入的文本命令
+        
+    Returns:
+        str: 處理結果消息
+    """
+    from modules.utils.unified_date_parser import UnifiedDateParser
+    
+    parts = text_input.strip().split()
+    category = None
+    target_date = None
+    
+    known_categories = {"診所", "東洋", "全部"}
+    
+    if len(parts) > 1:
+        for part in parts[1:]:
+            if part in known_categories:
+                category = part
+            elif target_date is None:
+                try:
+                    parser = UnifiedDateParser()
+                    parsed = parser.parse(part)
+                    target_date = parsed if hasattr(parsed, 'year') else parsed.date() if hasattr(parsed, 'date') else None
+                except Exception:
+                    logger.warning(f"無法解析日期參數: {part}，嘗試作為類別")
+                    if not category:
+                        category = part
+    
+    if target_date is None:
+        target_date = get_taiwan_date() - timedelta(days=1)
+    
+    CATEGORY_FOLDER_MAPPING = {
+        "診所": "1Wwp1xIxnn9m9qlvX_BwpE30K0AgLVdYe",
+        "東洋": "1dctU8QPRWNPn57LxpcYTeKKcsGn_dLOU",
+        "全部": None
+    }
+    
+    folder_id = None
+    if category and category in CATEGORY_FOLDER_MAPPING:
+        folder_id = CATEGORY_FOLDER_MAPPING[category]
+        logger.info(f"使用類別: {category}, 對應文件夾ID: {folder_id}")
+    
+    try:
+        logger.info(f"開始生成日報表，日期: {target_date}, 類別: {category}")
+        result, filename = generate_daily_report(target_date, category)
+        
+        if not filename:
+            logger.warning("沒有生成報表文件")
+            return result
+        
+        logger.info(f"日報表生成成功，準備上傳到Google Drive: {filename}")
+        drive_url = upload_to_google_drive(filename, folder_id)
+        
+        if drive_url and not drive_url.startswith("上傳到Google Drive失敗"):
+            logger.info(f"日報表已成功上傳: {drive_url}")
+            return f"{result}\n報表已上傳到Google Drive: {drive_url}"
+        else:
+            logger.warning(f"日報表上傳失敗: {drive_url}")
+            return f"{result}\n報表已生成，但上傳到Google Drive失敗: {drive_url}"
+    except Exception as e:
+        logger.error(f"處理生成日報表命令時出錯: {str(e)}", exc_info=True)
+        return f"生成日報表時出錯: {str(e)}"
+
+
 def handle_generate_monthly_report(text):
     """
     處理生成月報表命令

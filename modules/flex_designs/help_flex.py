@@ -341,6 +341,12 @@ def get_reports_help():
             "type": "box",
             "layout": "vertical",
             "contents": [
+                {"type": "text", "text": "📋 日報表功能", "weight": "bold", "size": "sm", "color": "#0000CD"},
+                {"type": "text", "text": "• 生成日報表 [日期] [類別]", "size": "xs", "margin": "sm"},
+                {"type": "text", "text": "• 範例: 生成日報表 (預設昨天)", "size": "xs"},
+                {"type": "text", "text": "• 範例: 生成日報表 今天 診所", "size": "xs"},
+                {"type": "text", "text": "• 範例: 生成日報表 3/20 東洋", "size": "xs"},
+                {"type": "separator", "margin": "md"},
                 {"type": "text", "text": "📈 週報表功能", "weight": "bold", "size": "sm", "color": "#0000CD"},
                 {"type": "text", "text": "• 生成周報表 [類別]", "size": "xs", "margin": "sm"},
                 {"type": "text", "text": "• 範例: 生成周報表 東洋", "size": "xs"},
@@ -539,9 +545,10 @@ def get_quick_reference_help():
                 {"type": "text", "text": "📚 過去態操作", "weight": "bold", "size": "sm", "color": "#2E8B57", "margin": "md"},
                 {"type": "text", "text": "• 查已完成 [日期] [類別]", "size": "xs", "margin": "sm"},
                 {"type": "text", "text": "• 記錄車資 [ID] [錶價] [加成]", "size": "xs"},
+                {"type": "text", "text": "• 生成日報表 [日期] [類別]", "size": "xs"},
                 {"type": "text", "text": "• 生成周報表 [類別]", "size": "xs"},
                 {"type": "text", "text": "• 生成月報表 [類別]", "size": "xs"},
-                
+
                 {"type": "text", "text": "🎯 狀態快速識別", "weight": "bold", "size": "sm", "color": "#FF8C00", "margin": "md"},
                 {"type": "text", "text": "• 待派：紅色 🔴 需要指派司機", "size": "xs", "margin": "sm"},
                 {"type": "text", "text": "• 準備：綠色 🟢 已準備好執行", "size": "xs"},
@@ -650,6 +657,7 @@ def get_complete_commands_help():
                 {"type": "text", "text": "• 查已完成 [日期] [類別] - 查已完成班次", "size": "xs", "margin": "sm"},
                 {"type": "text", "text": "• 查看 [ID] - 查看已完成班次詳情", "size": "xs"},
                 {"type": "text", "text": "• 記錄車資 [ID] [錶價] [加成]", "size": "xs"},
+                {"type": "text", "text": "• 生成日報表 [日期] [類別] - 日報表", "size": "xs"},
                 {"type": "text", "text": "• 生成周報表 [類別] - 週報表", "size": "xs"},
                 {"type": "text", "text": "• 生成月報表 [類別] - 月報表", "size": "xs"},
                 
