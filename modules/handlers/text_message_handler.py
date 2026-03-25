@@ -480,6 +480,13 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
         if handled:
             return
         
+        # 報表相關命令（委派給輕路由）- 必須在 query_router 之前
+        # 因為「生成日報表 3/23 診所」會被 query_classifier 誤判為日期+類別查詢
+        from modules.handlers.report_router import handle_report_commands
+        handled = handle_report_commands(message_text, user_id, reply_token)
+        if handled:
+            return
+
         # 查詢相關命令（委派給輕路由）
         from modules.handlers.query_router import handle_query_commands
         handled = handle_query_commands(message_text, user_id, reply_token)
@@ -490,12 +497,6 @@ AI會自動理解您的自然語言描述，無需記憶固定格式！"""
         # 帳務處理（委派輕路由）
         from modules.handlers.accounting_router import handle_accounting_commands
         handled = handle_accounting_commands(message_text, user_id, reply_token)
-        if handled:
-            return
-
-        # 報表相關命令（委派給輕路由）
-        from modules.handlers.report_router import handle_report_commands
-        handled = handle_report_commands(message_text, user_id, reply_token)
         if handled:
             return
         
