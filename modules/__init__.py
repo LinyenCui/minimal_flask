@@ -24,18 +24,24 @@ def create_app():
         # 將舊的 postgres:// 改為 postgresql://（不強制指定驅動）
         if url.startswith('postgres://'):
             url = 'postgresql://' + url[len('postgres://'):]
+            
+        # 因 asyncio 在 QueuePool 下與 psycopg 發生 thread.Lock 衝擊，強制轉為 psycopg2
+        if url.startswith('postgresql+psycopg://'):
+            url = url.replace('postgresql+psycopg://', 'postgresql+psycopg2://')
+            
         # 若已指定驅動則直接返回
-        if '+psycopg' in url or '+psycopg2' in url:
+        if '+psycopg2' in url:
             return url
-        # 動態偵測可用驅動
+            
+        # 動態偵測可用驅動：優先尋找 psycopg2
         driver = None
         try:
-            import psycopg  # psycopg3
-            driver = 'psycopg'
+            import psycopg2  # noqa: F401
+            driver = 'psycopg2'
         except Exception:
             try:
-                import psycopg2  # noqa: F401
-                driver = 'psycopg2'
+                import psycopg  # psycopg3
+                driver = 'psycopg'
             except Exception:
                 driver = None
         if driver and url.startswith('postgresql://'):
@@ -70,6 +76,7 @@ def create_app():
         from modules.models import clinic_location  # noqa: F401 引入模型
         from modules.models import chat_settings   # noqa: F401 引入模型
         from modules.models import group_location_meta  # noqa: F401 引入模型
+        from modules.models import diagnosis  # noqa: F401 診斷碼模型
         from modules.models.base import db
         with app.app_context():
             db.create_all()

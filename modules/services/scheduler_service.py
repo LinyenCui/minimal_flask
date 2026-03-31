@@ -137,6 +137,15 @@ def update_single_trip(app, trip_id):
                 current_app.logger.error(f"找不到班次 #{trip_id}")
                 return
             
+            # 防禦性檢查：確保排程器沒有因為系統時間偏差或休眠原因提早觸發
+            trip_date = trip_info.get('date')
+            trip_time = trip_info.get('time')
+            current_date = now.date()
+            current_time = now.time()
+            if trip_date > current_date or (trip_date == current_date and trip_time > current_time):
+                current_app.logger.warning(f"本地端保護機制觸發！班次 #{trip_id} 尚未到達預定時間 (計劃: {trip_date} {trip_time}, 目前: {current_date} {current_time})，成功攔截異常提早寫入的行為。")
+                return
+            
             # 如果班次狀態不是可轉移狀態（準備），跳過
             if trip_info.get('status') != '準備':
                 current_app.logger.info(f"班次 #{trip_id} 狀態不是「準備」，跳過更新")

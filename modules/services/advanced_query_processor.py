@@ -180,7 +180,7 @@ class AdvancedQueryProcessor:
             
             # 保存查詢結果供翻頁使用（保存字典格式）
             context = get_conversation_context(user_id)
-            context.save_query_result('completed_trips', command, trips_dict_list, conditions)
+            context.save_query_result('completed_trips', command, trips_dict_list, conditions, page_size=10)
             self.logger.info(f"💾 保存查詢結果供翻頁使用: {len(trips_dict_list)} 個結果")
             
             # 🔥 新增：聚合查詢處理
@@ -319,7 +319,7 @@ class AdvancedQueryProcessor:
             
             # 保存查詢結果供翻頁使用（保存字典格式）
             context = get_conversation_context(user_id)
-            context.save_query_result('current_trips', command, trips_dict_list, conditions)
+            context.save_query_result('current_trips', command, trips_dict_list, conditions, page_size=10)
             self.logger.info(f"💾 保存查詢結果供翻頁使用: {len(trips_dict_list)} 個結果")
             
             # 格式化結果

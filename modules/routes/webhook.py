@@ -37,6 +37,17 @@ def callback():
                 source_type = event.source.type
                 user_id = event.source.user_id # Restored missing definition
                 
+                # --- PATCH: 診斷碼查詢 (dx / 碼 前綴) ---
+                try:
+                    from modules.handlers.diagnosis_handler import is_diagnosis_trigger, handle_diagnosis_message
+                    if is_diagnosis_trigger(original_message_text):
+                        logger.info(f"Routing to Diagnosis Query: {user_id}")
+                        handle_diagnosis_message(event)
+                        continue
+                except Exception as e:
+                    logger.error(f"Diagnosis dispatch failed: {e}", exc_info=True)
+                # --- END PATCH: 診斷碼查詢 ---
+
                 # --- PATCH: AI Sandbox Trigger (原 Customers AI Sandbox) ---
                 # 觸發方式：
                 # - 私聊：需要 ! 前缀

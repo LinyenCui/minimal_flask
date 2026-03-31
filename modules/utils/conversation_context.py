@@ -78,7 +78,7 @@ class ConversationContext:
         self.user_id = user_id
         self.state_key = f"context_{user_id}"
     
-    def save_query_result(self, query_type: str, command: str, all_results: List, conditions: Dict = None):
+    def save_query_result(self, query_type: str, command: str, all_results: List, conditions: Dict = None, page_size: int = 20):
         """保存查詢結果供翻頁使用
         
         🔥 記憶體優化：
@@ -104,7 +104,7 @@ class ConversationContext:
             'total_count': len(all_results) if all_results else 0,  # 記錄原始數量
             'conditions': conditions or {},
             'current_page': 0,
-            'page_size': 10,
+            'page_size': page_size,
             'timestamp': current_time
         }
         
@@ -136,11 +136,14 @@ class ConversationContext:
             
         return state
     
-    def get_page_results(self, page_num: int = 0, page_size: int = 10) -> Dict:
+    def get_page_results(self, page_num: int = 0, page_size: int = None) -> Dict:
         """獲取分頁結果"""
         state = self.get_query_result()
         if not state:
             return {'type': 'error', 'message': '沒有可用的查詢結果'}
+        
+        # 優先使用傳入的 page_size，若無則使用狀態保存的，最後預設 20
+        actual_page_size = page_size if page_size is not None else state.get('page_size', 20)
         
         all_results = state['all_results']
         total_results = len(all_results)
@@ -149,8 +152,8 @@ class ConversationContext:
             return {'type': 'no_results', 'message': '沒有找到符合條件的記錄'}
         
         # 計算分頁
-        start_idx = page_num * page_size
-        end_idx = start_idx + page_size
+        start_idx = page_num * actual_page_size
+        end_idx = start_idx + actual_page_size
         page_results = all_results[start_idx:end_idx]
         
         if not page_results:
@@ -327,7 +330,7 @@ class ConversationContext:
             )
             
             # 構建 Quick Reply
-            total_pages = (total_results + page_size - 1) // page_size
+            total_pages = (total_results + actual_page_size - 1) // actual_page_size
             quick_reply_items = []
             
             if page_num + 1 < total_pages:
@@ -350,7 +353,7 @@ class ConversationContext:
             }
         
         # 計算總頁數
-        total_pages = (total_results + page_size - 1) // page_size
+        total_pages = (total_results + actual_page_size - 1) // actual_page_size
         
         # 🔥 新增：為翻頁結果添加Quick Reply支持
         quick_reply_items = []
@@ -427,7 +430,7 @@ class ConversationContext:
             return None
         
         current_page = state.get('current_page', 0)
-        page_size = state.get('page_size', 10)
+        page_size = state.get('page_size', 20)
         all_results = state['all_results']
         total_results = len(all_results)
         

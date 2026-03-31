@@ -256,19 +256,13 @@ def truncate_and_copy(local_conn, render_conn, table_name):
             
             print(f"   - 正在清空本地 '{table_name}'...")
             
-            # 🔥 特殊處理：drivers 表需要避免 CASCADE 影響 completed_trips
-            if table_name == 'drivers':
-                print(f"   - 檢測到 drivers 表，使用安全清空方式避免影響 completed_trips...")
-                # 暫時禁用外鍵約束
-                local_cur.execute("SET session_replication_role = replica;")
-                local_cur.execute(f"DELETE FROM {table_name};")
-                # drivers 表沒有序列，跳過序列重置
-                print(f"   - drivers 表沒有使用序列，跳過序列重置")
-                # 恢復外鍵約束  
-                local_cur.execute("SET session_replication_role = DEFAULT;")
-            else:
-                # 其他表使用標準 TRUNCATE CASCADE
-                local_cur.execute(f"TRUNCATE TABLE {table_name} RESTART IDENTITY CASCADE;")
+            # 🔥 安全處理：避免 CASCADE 影響到 incremental sync 的表（如 completed_trips）
+            print(f"   - 使用安全清空方式，避免 CASCADE 波及其他資料表...")
+            # 暫時禁用外鍵約束
+            local_cur.execute("SET session_replication_role = replica;")
+            local_cur.execute(f"DELETE FROM {table_name};")
+            # 恢復外鍵約束  
+            local_cur.execute("SET session_replication_role = DEFAULT;")
 
             if not records:
                 print(f"   - '{table_name}' 在 Render 上沒有資料，本地資料表已清空。")

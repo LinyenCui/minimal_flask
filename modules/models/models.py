@@ -43,9 +43,9 @@ class FixedSchedule(Base):
     id = Column(Integer, primary_key=True)
     route_number = Column(String(10))
     departure_time = Column(Time, nullable=False)
-    start_point = Column(String(100), ForeignKey('customers.short_name'))
-    via_point = Column(String(100), ForeignKey('customers.short_name'))
-    end_point = Column(String(100), ForeignKey('customers.short_name'))
+    start_point = Column(String(100))
+    via_point = Column(String(100))
+    end_point = Column(String(100))
     base_fare = Column(Integer)
     surcharge = Column(Integer)
     total_fare = Column(Integer)
@@ -61,7 +61,7 @@ class Trip(Base):
     date = Column(Date)
     time = Column(Time)
     start_point = Column(String(100), ForeignKey('customers.short_name'))
-    via_point = Column(String(100), ForeignKey('customers.short_name'))
+    via_point = Column(String(100))
     end_point = Column(String(100), ForeignKey('customers.short_name'))
     meter_fare = Column(Integer)
     extra_fare = Column(Integer)
@@ -74,6 +74,13 @@ class Trip(Base):
     is_fixed = Column(Integer, default=0)  # 添加is_fixed字段
     unique_code = Column(String(50))  # 添加unique_code字段
     person_id = Column(Integer, ForeignKey('persons.id'), nullable=True)  # 添加person_id字段
+    custom_start_point = Column(String(100), nullable=True)
+    custom_via_point = Column(String(100), nullable=True)
+    custom_end_point = Column(String(100), nullable=True)
+    modified_by = Column(Text, nullable=True)
+    modification_reason = Column(Text, nullable=True)
+    modification_time = Column(Text, nullable=True) # or DateTime
+    passenger_name = Column(Text, nullable=True)
 
 class CompletedTrip(Base):
     __tablename__ = 'completed_trips'
@@ -81,7 +88,7 @@ class CompletedTrip(Base):
     id = Column(Integer, primary_key=True)
     date = Column(Date, nullable=False)
     start_point = Column(String(100), ForeignKey('customers.short_name'))
-    via_point = Column(String(100), ForeignKey('customers.short_name'))
+    via_point = Column(String(100))
     end_point = Column(String(100), ForeignKey('customers.short_name'))
     meter_fare = Column(Integer)
     extra_fare = Column(Integer)
@@ -89,4 +96,12 @@ class CompletedTrip(Base):
     category = Column(String(50))
     driver_id = Column(Integer, ForeignKey('drivers.id'))
     remarks = Column(Text)
-    created_at = Column('created_at') 
+    created_at = Column('created_at')
+    status = Column(String(20), nullable=True)
+    unique_code = Column(String(50), nullable=True)
+    trip_type = Column(String(20), nullable=True)
+    passenger_leave_reason = Column(Text, nullable=True)
+    modified_by = Column(Text, nullable=True)
+    modification_reason = Column(Text, nullable=True)
+    modification_time = Column(Text, nullable=True)
+    passenger_name = Column(Text, nullable=True)

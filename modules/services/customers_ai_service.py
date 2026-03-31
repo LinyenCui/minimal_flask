@@ -299,20 +299,28 @@ def _tool_trip_update(kwargs):
         return json.dumps({"status": "error", "message": str(e)}, ensure_ascii=False)
 
 def _tool_trip_delete(kwargs):
-    """Deletes a trip record."""
+    """Deletes one or multiple trip records."""
     try:
-        trip_id = kwargs.get('trip_id')
-        if not trip_id:
-             return json.dumps({"status": "error", "message": "Missing trip_id"}, ensure_ascii=False)
+        trip_ids = kwargs.get('trip_ids', [])
+        single_trip_id = kwargs.get('trip_id')
+        
+        # 兼容單一 trip_id 傳入的情況
+        if single_trip_id is not None and single_trip_id not in trip_ids:
+            trip_ids.append(single_trip_id)
+            
+        if not trip_ids:
+             return json.dumps({"status": "error", "message": "Missing trip_id or trip_ids"}, ensure_ascii=False)
              
-        query = text("DELETE FROM trips WHERE trip_id = :trip_id")
-        result = db.session.execute(query, {'trip_id': trip_id})
+        # SQL IN 語法需將陣列轉為 tuple
+        query = text("DELETE FROM trips WHERE trip_id IN :trip_ids")
+        result = db.session.execute(query, {'trip_ids': tuple(trip_ids)})
         db.session.commit()
         
         if result.rowcount > 0:
-            return json.dumps({"status": "success", "message": f"Deleted trip {trip_id}"}, ensure_ascii=False)
+            deleted_str = ', '.join(map(str, trip_ids))
+            return json.dumps({"status": "success", "message": f"Deleted {result.rowcount} trips: {deleted_str}"}, ensure_ascii=False)
         else:
-            return json.dumps({"status": "error", "message": f"Trip {trip_id} not found"}, ensure_ascii=False)
+            return json.dumps({"status": "error", "message": f"Trips {trip_ids} not found"}, ensure_ascii=False)
     except Exception as e:
         db.session.rollback()
         return json.dumps({"status": "error", "message": str(e)}, ensure_ascii=False)
@@ -698,13 +706,17 @@ IMPORTANT:
 
     trip_delete_func = FunctionDeclaration(
         name="trip_delete",
-        description="Delete (cancel) a trip booking.",
+        description="Delete (cancel) one or multiple trip bookings.",
         parameters={
             "type": "object",
             "properties": {
-                "trip_id": {"type": "integer", "description": "Trip ID to delete"}
-            },
-            "required": ["trip_id"]
+                "trip_id": {"type": "integer", "description": "Single Trip ID to delete"},
+                "trip_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Array of multiple Trip IDs to delete (e.g., [506, 507, 508])"
+                }
+            }
         }
     )
 
@@ -829,8 +841,9 @@ def process_sandbox_message(user_id, text_input, additional_context=""):
        - **Passenger Name**: Extract from '乘客', '送', '載'.
        - **Meter Fare**: Extract integer from '金額', '車資', '費用'.
     5. For 'trip_update' / 'trip_delete':
-       - You MUST provide 'trip_id'. Infer it from Context Info if user says "that one".
+       - You MUST provide 'trip_id' (or 'trip_ids' for delete). Infer it from Context Info if user says "that one".
        - If trip_id is unknown/ambiguous, ASK the user to clarify.
+       - For multiple deletions like "取消 506 到 509", construct an array for `trip_ids` like [506, 507, 508, 509].
     6. For 'fixed_schedule_leave' (固定班次請假):
        - ALL THREE parameters are REQUIRED: schedule_id, reason, surcharge.
        - **surcharge** is usually NEGATIVE (e.g., -50, -100) to reduce fare. If user doesn't specify, CALL THE TOOL ANYWAY to trigger missing_info.
@@ -845,6 +858,9 @@ def process_sandbox_message(user_id, text_input, additional_context=""):
     
     - User: "把剛剛那筆改成後天"
       Call: trip_update(trip_id=..., date="後天")
+    
+    - User: "取消 506 到 509 的班次"
+      Call: trip_delete(trip_ids=[506, 507, 508, 509])
     
     - User: "查太子龍的固定班表"
       Call: fixed_schedule_lookup(customer_name="太子龍")
@@ -978,9 +994,12 @@ def process_sandbox_message(user_id, text_input, additional_context=""):
                         "draft_data": fargs
                     }
             
-            if fname in ['trip_update', 'trip_delete']:
+            if fname == 'trip_update':
                 if not fargs.get('trip_id'):
-                    return {"type": "text_response", "content": "請問您要修改哪一筆訂單？請提供編號或更多資訊。"}
+                    return {"type": "text_response", "content": "請問您要修改哪一筆訂單？請提供編號。"}
+            if fname == 'trip_delete':
+                if not fargs.get('trip_id') and not fargs.get('trip_ids'):
+                    return {"type": "text_response", "content": "請問您要取消哪一筆訂單？請提供編號或範圍（如：506到509）。"}
 
             # --- FIXED SCHEDULE LOGIC ---
             if fname == 'fixed_schedule_leave':
@@ -1080,7 +1099,7 @@ def process_sandbox_message(user_id, text_input, additional_context=""):
                     summary += f"\n金額: {fargs.get('meter_fare')}"
                 if fargs.get('driver_id'):
                     summary += f"\n指定司機: {fargs.get('driver_id')}"
-            elif fname in ['trip_update', 'trip_delete']:
+            elif fname == 'trip_update':
                 tid = fargs.get('trip_id')
                 trip_info = "（查無此行程）"
                 try:
@@ -1091,11 +1110,42 @@ def process_sandbox_message(user_id, text_input, additional_context=""):
                         trip_info = f"{row[0]} {t_time}\n{row[2]} -> {row[3] or '無'}"
                 except Exception as e:
                     trip_info = f"（查詢失敗: {str(e)}）"
+                summary = f"【修改行程 #{tid}】\n原訂:\n{trip_info}\n\n變更內容:\n{json.dumps(fargs, ensure_ascii=False, indent=2)}"
 
-                if fname == 'trip_update':
-                    summary = f"【修改行程 #{tid}】\n原訂:\n{trip_info}\n\n變更內容:\n{json.dumps(fargs, ensure_ascii=False, indent=2)}"
-                else:
+            elif fname == 'trip_delete':
+                tids = fargs.get('trip_ids', [])
+                if fargs.get('trip_id') and fargs.get('trip_id') not in tids:
+                    tids.append(fargs.get('trip_id'))
+                
+                if not tids:
+                    summary = "【取消行程】（未指定任何行程 ID）"
+                elif len(tids) == 1:
+                    tid = tids[0]
+                    trip_info = "（查無此行程）"
+                    try:
+                        t_sql = text("SELECT date, time, start_point, end_point FROM trips WHERE trip_id = :tid")
+                        row = db.session.execute(t_sql, {"tid": tid}).fetchone()
+                        if row:
+                            t_time = row[1].strftime('%H:%M') if row[1] else "??:??"
+                            trip_info = f"{row[0]} {t_time}\n{row[2]} -> {row[3] or '無'}"
+                    except Exception as e:
+                        trip_info = f"（查詢失敗: {str(e)}）"
                     summary = f"【取消行程 #{tid}】\n原訂:\n{trip_info}"
+                else:
+                    trip_lines = []
+                    try:
+                        t_sql = text("SELECT trip_id, date, time, start_point, end_point FROM trips WHERE trip_id IN :tids ORDER BY trip_id")
+                        rows = db.session.execute(t_sql, {"tids": tuple(tids)}).fetchall()
+                        if rows:
+                            for r in rows:
+                                t_time = r[2].strftime('%H:%M') if r[2] else "??:??"
+                                trip_lines.append(f"#{r[0]} {r[1]} {t_time} {r[3]}->{r[4] or '無'}")
+                        else:
+                            trip_lines.append("（查無這些行程）")
+                    except Exception as e:
+                        trip_lines.append(f"（查詢失敗: {str(e)}）")
+                    
+                    summary = f"【取消多筆行程】\n共 {len(tids)} 筆：\n" + "\n".join(trip_lines)
             
             elif fname == 'fixed_schedule_leave':
                 sid = fargs.get('schedule_id')
