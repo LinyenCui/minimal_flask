@@ -255,8 +255,7 @@ class HelpSystemConfig:
                         "features": {
                             "line_bot_fix": "LINE Bot修復：輸入「/fix-sequence」或「修復序號」檢查並修復序列",
                             "reset_render": "重置Render序號：python reset_render_sequences.py（命令行工具）",
-                            "fix_after_import": "匯入後修復：python scripts/fix_sequence_after_import.py（命令行工具）",
-                            "web_admin": "網頁管理介面：訪問 /admin/database-tools 進行視覺化管理"
+                            "fix_after_import": "匯入後修復：python scripts/fix_sequence_after_import.py（命令行工具）"
                         },
                         "detailed_description": """序號管理功能用於處理資料庫序列（Sequence）的同步和重置問題。
 
@@ -289,17 +288,10 @@ class HelpSystemConfig:
 • 適用：TRUNCATE + 匯入資料後使用
 • 選項：可選擇只修復 completed_trips 或檢查所有序列
 
-4️⃣ 網頁管理介面（視覺化）
-• 路徑：/admin/database-tools
-• 功能：視覺化檢查和修復序列
-• 適用：需要詳細報告和視覺化操作
-• 特點：即時狀態檢查、一鍵修復、詳細報告
-
 💡 使用建議：
 • 日常檢查：使用 LINE Bot 的 /fix-sequence 命令
 • 清理後重置：使用 reset_render_sequences.py
 • 資料搬移後：使用 fix_sequence_after_import.py --quick
-• 詳細診斷：使用網頁管理介面
 
 ⚠️ 重要提醒：
 • 重置序號前請確認資料表狀態

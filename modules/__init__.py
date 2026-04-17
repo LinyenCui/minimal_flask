@@ -92,11 +92,7 @@ def create_app():
     # 導入並註冊藍圖
     from modules.routes.webhook import webhook_bp
     app.register_blueprint(webhook_bp)
-    
-    # 註冊管理後台藍圖
-    from modules.routes.admin_routes import admin_bp
-    app.register_blueprint(admin_bp)
-    
+
     # 設定日誌
     import logging
     from modules.utils.security import MaskSecretsFilter

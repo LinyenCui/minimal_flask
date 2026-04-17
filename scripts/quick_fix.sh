@@ -18,4 +18,3 @@ python fix_sequence_after_import.py --quick
 
 echo ""
 echo "🎉 修復完成！"
-echo "💡 提示：你也可以訪問 http://localhost:3000/admin/database-tools 使用網頁介面" 

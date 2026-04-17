@@ -425,8 +425,7 @@ class HelpContentGenerator:
             # === 序號管理功能 ===
             "line_bot_fix": "在LINE Bot中輸入「/fix-sequence」或「修復序號」，系統會自動檢查並修復序列問題",
             "reset_render": "執行 python reset_render_sequences.py，會重置Render資料庫的序號為1（需確認）",
-            "fix_after_import": "執行 python scripts/fix_sequence_after_import.py，修復資料搬移後的序列同步問題",
-            "web_admin": "訪問網頁管理介面 /admin/database-tools，進行視覺化的序列檢查和修復"
+            "fix_after_import": "執行 python scripts/fix_sequence_after_import.py，修復資料搬移後的序列同步問題"
         }
         
         return usage_guide.get(feature_name, "使用方法待補充")
@@ -498,9 +497,6 @@ class HelpContentGenerator:
             "fix_after_import": [
                 "python scripts/fix_sequence_after_import.py",
                 "python scripts/fix_sequence_after_import.py --quick"
-            ],
-            "web_admin": [
-                "訪問 http://your-domain/admin/database-tools"
             ]
         }
         
