@@ -239,32 +239,27 @@ LEDGER_PAGE_SIZE = 10
 def _fetch_ledger_page(from_date: str | None, to_date: str | None, last_ts: str | None, last_id: int | None, limit: int = LEDGER_PAGE_SIZE + 1):
     sql = sql_text(
         """
-        WITH total_balance AS (
-            -- 計算總餘額
-            SELECT COALESCE(SUM(COALESCE(a.amount_in,0) - COALESCE(a.amount_out,0)),0) AS total
-            FROM account_ledger a
-            WHERE (CAST(:from_date AS date) IS NULL OR (a.occurred_at AT TIME ZONE 'UTC')::date >= CAST(:from_date AS date))
-              AND (CAST(:to_date AS date)   IS NULL OR (a.occurred_at AT TIME ZONE 'UTC')::date <= CAST(:to_date AS date))
-        ), latest_rows AS (
-            -- 取得最新的記錄（降序）
+        WITH all_with_balance AS (
+            -- 對日期範圍內「全部」rows 由舊到新累加，得到每筆當下的真實餘額
             SELECT a.id,
                    a.occurred_at AT TIME ZONE 'UTC' AS occurred_at,
                    a.type,
                    a.counterparty,
                    COALESCE(a.amount_in,0)  AS amount_in,
                    COALESCE(a.amount_out,0) AS amount_out,
-                   (COALESCE(a.amount_in,0) - COALESCE(a.amount_out,0)) AS delta
+                   SUM(COALESCE(a.amount_in,0) - COALESCE(a.amount_out,0))
+                     OVER (ORDER BY a.occurred_at ASC, a.id ASC
+                           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_balance
             FROM account_ledger a
             WHERE (CAST(:from_date AS date) IS NULL OR (a.occurred_at AT TIME ZONE 'UTC')::date >= CAST(:from_date AS date))
               AND (CAST(:to_date AS date)   IS NULL OR (a.occurred_at AT TIME ZONE 'UTC')::date <= CAST(:to_date AS date))
-              AND (CAST(:last_ts AS timestamptz) IS NULL OR ((a.occurred_at AT TIME ZONE 'UTC'), a.id) < ((CAST(:last_ts AS timestamptz) AT TIME ZONE 'UTC'), :last_id))
-            ORDER BY (a.occurred_at AT TIME ZONE 'UTC') DESC, a.id DESC
-            LIMIT :limit
         )
-        SELECT r.*, 
-               (t.total - SUM(delta) OVER (ORDER BY r.occurred_at DESC, r.id DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) + r.delta) AS running_balance
-        FROM latest_rows r CROSS JOIN total_balance t
-        ORDER BY r.occurred_at DESC, r.id DESC;
+        SELECT *
+        FROM all_with_balance
+        WHERE (CAST(:last_ts AS timestamptz) IS NULL
+               OR (occurred_at, id) < ((CAST(:last_ts AS timestamptz) AT TIME ZONE 'UTC'), :last_id))
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT :limit;
         """
     )
 

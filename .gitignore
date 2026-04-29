@@ -51,3 +51,6 @@ __pycache__/
 venv/
 new_venv/
 *.xlsx
+
+# Claude Code 本地狀態
+.claude/
