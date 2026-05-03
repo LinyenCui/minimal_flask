@@ -22,7 +22,6 @@ Rewrite v0.1 LINE 路由 — 整合測試用入口
 import logging
 import re
 from datetime import date
-from typing import Optional
 
 from database import Session
 from modules.utils.line_bot import reply_message
@@ -79,7 +78,6 @@ _RE_TRIP_CONFLICT = re.compile(r'^班次衝突\s+(\d+)$')
 _RE_TRIP_LEAVE = re.compile(r'^班次請假\s+(\d+)$')   # 進入請假輸入模式
 _RE_TRIP_RESTORE = re.compile(r'^班次恢復\s+(\d+)$')
 _RE_TRIP_UNASSIGN = re.compile(r'^班次撤銷指派\s+(\d+)$')
-_RE_TRIP_BATCH_LEAVE = re.compile(r'^批量請假\s+(\S+)(?:\s+(\S+))?$')  # 批量請假 [日期] [類別?]
 
 # 請假輸入模式的退出命令（跟原系統一致）
 _LEAVE_ABORT_TEXTS = {'放棄操作', '放棄', '取消'}
@@ -105,19 +103,18 @@ def try_route(event) -> bool:
     # 在 input mode 中，user 任何 message 都先給 state handler 處理
     if user_id:
         state = _state_get(user_id)
-        if state and state.get('type') in ('leave_input', 'batch_leave_input'):
+        if state and state.get('type') == 'leave_input':
             return _handle_leave_input(
-                event.reply_token, user_id, text, state,
+                event.reply_token, user_id, text, state['payload']
             )
 
     # 提早退出：不像我們的命令
     rewrite_prefixes = ('查客戶', '客戶詳情', '病歷層',
                         '查班次', '診所班次', '東洋班次',
                         '班次詳情', '待派班次',
-                        # mutation 命令（quick reply 觸發）
+                        # mutation 命令（footer button 觸發）
                         '班次註銷', '班次衝突', '班次請假',
-                        '班次恢復', '班次撤銷指派',
-                        '批量請假')
+                        '班次恢復', '班次撤銷指派')
     if not text.startswith(rewrite_prefixes):
         return False
 
@@ -172,14 +169,6 @@ def try_route(event) -> bool:
         m = _RE_TRIP_UNASSIGN.match(text)
         if m:
             return _handle_trip_unassign(reply_token, session, int(m.group(1)), user_id)
-
-        m = _RE_TRIP_BATCH_LEAVE.match(text)
-        if m:
-            date_str = m.group(1)
-            category = m.group(2)
-            return _handle_trip_batch_leave(
-                reply_token, session, date_str, category, user_id,
-            )
 
         if _RE_PENDING.match(text):
             return _handle_pending_dispatch(reply_token, session)
@@ -443,20 +432,16 @@ def _handle_trip_leave(reply_token, session, trip_id: int, user_id) -> bool:
     return True
 
 
-def _handle_leave_input(reply_token, user_id, text: str, state: dict) -> bool:
+def _handle_leave_input(reply_token, user_id, text: str, payload: dict) -> bool:
     """
-    在 leave_input / batch_leave_input state 下解析用戶輸入
+    在 leave_input state 下解析用戶輸入
 
-    解析規則（兩種 state 共用）：
+    解析規則：
       - 「放棄操作」/「放棄」/「取消」 → 清 state
-      - 「[原因] [整數]」              → 執行 + 清 state
-      - 其他（沒打整數加成）            → 提示失敗 + 清 state
-
-    依 state.type 分流到單筆 / 批量執行。
+      - 「[原因] [整數]」              → passenger_leave + 清 state
+      - 其他（沒打整數加成）            → 提示失敗 + 清 state（用戶從按鈕重來）
     """
     text = text.strip()
-    state_type = state.get('type')
-    payload = state.get('payload', {})
 
     # 退出
     if text in _LEAVE_ABORT_TEXTS:
@@ -479,36 +464,20 @@ def _handle_leave_input(reply_token, user_id, text: str, state: dict) -> bool:
             pass
 
     if surcharge is None or not reason:
-        # 失敗 → 清 state
+        # 失敗 → 清 state，用戶重新按 [請假] 來
         _state_clear(user_id)
         reply_message(reply_token, {
             "type": "text",
             "text": (
                 "❌ 操作失敗\n\n"
                 "格式應為：[原因] [負加成]\n\n"
-                "請重新觸發請假操作"
+                "請從詳情卡重新點選「請假」按鈕再操作"
             ),
         })
         return True
 
     # 成功路徑
-    if state_type == 'leave_input':
-        return _execute_single_leave(
-            reply_token, user_id, payload['trip_id'], reason, surcharge,
-        )
-    elif state_type == 'batch_leave_input':
-        return _execute_batch_leave(
-            reply_token, user_id, payload['trip_ids'], reason, surcharge,
-        )
-
-    # 不該到這
-    _state_clear(user_id)
-    return True
-
-
-def _execute_single_leave(reply_token, user_id, trip_id: int,
-                           reason: str, surcharge: int) -> bool:
-    """單筆請假執行"""
+    trip_id = payload['trip_id']
     session = Session()
     try:
         r = passenger_leave(
@@ -521,48 +490,6 @@ def _execute_single_leave(reply_token, user_id, trip_id: int,
             reply_token, session, trip_id, r,
             f'請假（{reason}/{surcharge:+d}）',
         )
-    finally:
-        session.close()
-
-
-def _execute_batch_leave(reply_token, user_id, trip_ids: list,
-                          reason: str, surcharge: int) -> bool:
-    """批量請假執行（共用同個 reason / surcharge 套到 list）"""
-    session = Session()
-    try:
-        success: list = []
-        failed: list = []
-        for tid in trip_ids:
-            r = passenger_leave(
-                session=session, trip_id=tid,
-                reason=reason, surcharge=surcharge,
-                user_id=user_id, via='line_batch_input',
-                auto_commit=False,
-            )
-            if r.ok:
-                success.append(tid)
-            else:
-                failed.append((tid, r.error))
-        session.commit()
-        _state_clear(user_id)
-
-        lines = [
-            f"📋 批量請假完成",
-            f"   原因：{reason}  加成：{surcharge:+d}",
-            "",
-            f"✅ 成功 {len(success)} 筆"
-            + (f"：{', '.join(f'#{t}' for t in success)}" if success else ""),
-        ]
-        if failed:
-            lines.append("")
-            lines.append(f"❌ 失敗 {len(failed)} 筆：")
-            for tid, err in failed[:10]:
-                lines.append(f"   • #{tid}：{err[:50]}")
-            if len(failed) > 10:
-                lines.append(f"   ... 還有 {len(failed) - 10} 筆")
-
-        reply_message(reply_token, {"type": "text", "text": "\n".join(lines)})
-        return True
     finally:
         session.close()
 
@@ -583,119 +510,6 @@ def _handle_trip_unassign(reply_token, session, trip_id: int,
         user_id=user_id, via='quick_reply',
     )
     return _reply_mutation_result(reply_token, session, trip_id, r, '撤銷指派')
-
-
-def _handle_trip_batch_leave(reply_token, session, date_str: str,
-                              category: Optional[str], user_id) -> bool:
-    """
-    批量請假入口（命令：批量請假 [日期] [類別?]）
-
-    流程：
-      1. 撈當日匹配的 trips
-      2. 預檢分類：可請 / 跳過（鎖內、已完成、註銷、已請假）
-      3. 設 batch_leave_input state（payload=可請的 trip_ids）
-      4. reply 列出可請+跳過 + 提示輸入 [原因] [負加成]
-
-    格式輸入後由 _handle_leave_input → _execute_batch_leave 處理。
-    """
-    if not user_id:
-        reply_message(reply_token, {
-            "type": "text", "text": "❌ 缺 user_id，無法進入批量請假模式"})
-        return True
-
-    # 解析日期
-    try:
-        d = UnifiedDateParser.parse(date_str)
-    except Exception as e:
-        reply_message(reply_token, {
-            "type": "text",
-            "text": f"❌ 日期解析失敗：{date_str!r} ({e})\n用例：批量請假 5/4 / 批量請假 明天 診所",
-        })
-        return True
-
-    # 撈班次
-    r = query_trips(session=session, date_from=d, date_to=d, category=category)
-    if not r.ok:
-        cat_text = f' {category}' if category else ''
-        reply_message(reply_token, {
-            "type": "text",
-            "text": f"❌ {date_str}{cat_text} 找不到班次",
-        })
-        return True
-
-    trips = r.data
-
-    # 預檢分類
-    eligible: list = []
-    skipped: list = []
-    for t in trips:
-        if t.is_locked:
-            skipped.append((t.trip_id, '鎖內'))
-        elif t.display_status == '已完成':
-            skipped.append((t.trip_id, '已完成'))
-        elif t.display_status == '註銷':
-            skipped.append((t.trip_id, '註銷'))
-        elif t.display_status == '請假':
-            skipped.append((t.trip_id, '已請假'))
-        else:
-            eligible.append(t)
-
-    if not eligible:
-        reply_message(reply_token, {
-            "type": "text",
-            "text": (
-                f"❌ {date_str}{f' {category}' if category else ''} "
-                f"無可請假班次（{len(trips)} 筆全部跳過）"
-            ),
-        })
-        return True
-
-    # 設 state
-    _state_set(user_id, 'batch_leave_input', {
-        'trip_ids': [t.trip_id for t in eligible],
-    })
-
-    # 提示文字
-    cat_text = f' {category}' if category else ''
-    lines = [
-        f"📋 批量請假模式（{date_str}{cat_text}）",
-        "",
-        f"📌 可請假 {len(eligible)} 筆：",
-    ]
-    for t in eligible:
-        time_text = str(t.time)[:5] if t.time else '—:—'
-        lines.append(
-            f"   • #{t.trip_id} {time_text} "
-            f"{t.start_point or '?'}→{t.end_point or '?'} "
-            f"🚗{t.driver_id or '?'}"
-        )
-    if skipped:
-        lines.append("")
-        lines.append(f"⏭️ 跳過 {len(skipped)} 筆：")
-        for tid, reason in skipped:
-            lines.append(f"   • #{tid}（{reason}）")
-    lines.extend([
-        "",
-        "請輸入：[原因] [負加成]",
-        "",
-        "❌ 退出：點下方「放棄操作」",
-    ])
-
-    reply_message(reply_token, {
-        "type": "text",
-        "text": "\n".join(lines),
-        "quickReply": {
-            "items": [{
-                "type": "action",
-                "action": {
-                    "type": "message",
-                    "label": "❌ 放棄操作",
-                    "text": "放棄操作",
-                },
-            }]
-        },
-    })
-    return True
 
 
 def _handle_pending_dispatch(reply_token, session) -> bool:
@@ -814,31 +628,11 @@ def _handle_trip_list(reply_token, session, kind: str, arg: str) -> bool:
         label_parts.append(f' {category}')
     label = ''.join(label_parts)
 
-    msg = {
+    reply_message(reply_token, {
         "type": "flex",
         "altText": f"班次 {label}（{len(r.data)} 筆）",
         "contents": flex,
-    }
-
-    # 單日查詢 → 提供「批量請假本日」入口
-    if date_from == date_to:
-        # 命令參數：日期 + 可選類別
-        date_arg = f"{date_from.month}/{date_from.day}"
-        cmd = f"批量請假 {date_arg}"
-        if category:
-            cmd += f" {category}"
-        msg["quickReply"] = {
-            "items": [{
-                "type": "action",
-                "action": {
-                    "type": "message",
-                    "label": "🏷️ 批量請假本日",
-                    "text": cmd,
-                },
-            }]
-        }
-
-    reply_message(reply_token, msg)
+    })
     return True
 
 
