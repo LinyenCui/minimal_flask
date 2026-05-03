@@ -54,7 +54,7 @@ LOCAL_DB_CONFIG = {
 FULL_SYNC_TABLES = [
     "database_maintenance",  # 資料庫維護表，需要先同步
     "drivers",
-    "customers", 
+    # ⚠️ "customers" 暫時跳過 — 見 SKIP_TABLES（rewrite v0.1 dev 期間保護）
     "fixed_schedules",  # 移到trips之前，因為trips有外鍵參考
     "trips",
     # 🔥 新增：帳務處理流水帳與金流紀錄
@@ -63,6 +63,16 @@ FULL_SYNC_TABLES = [
     # 移除 "users" 因為本地資料庫沒有這個表
     # ... 請根據您的需求，將其他需要完全同步的資料表加到這裡
 ]
+
+# 暫時跳過同步的表（保護 dev 上特殊狀態的資料）
+# Key: 表名，Value: 跳過原因（會印在每次同步開頭，提醒用戶）
+SKIP_TABLES = {
+    "customers": (
+        "rewrite v0.1 dev：本地 schema 已升級（birthday/座標/身分證/病歷號等）"
+        "且本地 seed + 手動新增的客戶資料，直接覆蓋會洗掉。"
+        "等切換正式環境前再評估同步策略。"
+    ),
+}
 
 
 # --- 核心邏輯 ---
@@ -500,9 +510,19 @@ def main(check_only=False, force_sync=False):
             print(f"⚠️ 檢查/修正 account_ledger 欄位型別時出錯：{fix_err}")
 
         # 🔥 採用 minimal_flask_ai 的穩定順序：其他表先同步，completed_trips 最後同步
-        
-        # 步驟 1: 執行完全覆蓋同步其他表 (不包含 database_maintenance)
-        sync_tables = [table for table in FULL_SYNC_TABLES if table != 'database_maintenance']
+
+        # 列出本次跳過的表（rewrite dev 保護機制）
+        if SKIP_TABLES:
+            print("\n⏭️  以下資料表【跳過】同步：")
+            for tbl, reason in SKIP_TABLES.items():
+                print(f"   - {tbl}：{reason}")
+            print()
+
+        # 步驟 1: 執行完全覆蓋同步其他表 (不包含 database_maintenance 和 SKIP_TABLES)
+        sync_tables = [
+            table for table in FULL_SYNC_TABLES
+            if table != 'database_maintenance' and table not in SKIP_TABLES
+        ]
         for table in sync_tables:
             truncate_and_copy(local_conn, render_conn, table)
         
