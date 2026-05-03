@@ -37,6 +37,11 @@ from rewrite.tools.trip import (
     query_trip_by_id,
     query_today_trips,
     query_pending_dispatch,
+    cancel_trip,
+    mark_conflict,
+    passenger_leave,
+    restore_to_ready,
+    unassign_driver,
 )
 from rewrite.views.customer_flex import (
     render_customer_detail,
@@ -45,6 +50,7 @@ from rewrite.views.customer_flex import (
 from rewrite.views.trip_flex import (
     render_trip_detail,
     render_trip_list_carousel,
+    build_trip_quick_reply,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,6 +66,13 @@ _RE_LAYER_SUMMARY = re.compile(r'^病歷層分布$')
 _RE_TRIP_DETAIL = re.compile(r'^班次詳情\s+(\d+)$')
 _RE_TRIP_LIST = re.compile(r'^(查|診所|東洋)班次(?:\s+(.+))?$')
 _RE_PENDING = re.compile(r'^待派班次$')
+
+# 班次 mutation 命令 regex（quick reply 發出來的）
+_RE_TRIP_CANCEL = re.compile(r'^班次註銷\s+(\d+)$')
+_RE_TRIP_CONFLICT = re.compile(r'^班次衝突\s+(\d+)$')
+_RE_TRIP_LEAVE = re.compile(r'^班次請假\s+(\d+)\s+(-?\d+)\s+(.+)$')
+_RE_TRIP_RESTORE = re.compile(r'^班次恢復\s+(\d+)$')
+_RE_TRIP_UNASSIGN = re.compile(r'^班次撤銷指派\s+(\d+)$')
 
 # Postback data regex
 _RE_PB_TRIP_DETAIL = re.compile(r'^trip_detail:(\d+)$')
@@ -80,11 +93,15 @@ def try_route(event) -> bool:
     # 提早退出：不像我們的命令
     rewrite_prefixes = ('查客戶', '客戶詳情', '病歷層',
                         '查班次', '診所班次', '東洋班次',
-                        '班次詳情', '待派班次')
+                        '班次詳情', '待派班次',
+                        # mutation 命令（quick reply 觸發）
+                        '班次註銷', '班次衝突', '班次請假',
+                        '班次恢復', '班次撤銷指派')
     if not text.startswith(rewrite_prefixes):
         return False
 
     reply_token = event.reply_token
+    user_id = getattr(event.source, 'user_id', None)
     session = Session()
 
     try:
@@ -112,6 +129,30 @@ def try_route(event) -> bool:
         m = _RE_TRIP_DETAIL.match(text)
         if m:
             return _handle_trip_detail(reply_token, session, int(m.group(1)))
+
+        # ===== 班次 mutation 命令（quick reply 觸發）=====
+        m = _RE_TRIP_CANCEL.match(text)
+        if m:
+            return _handle_trip_cancel(reply_token, session, int(m.group(1)), user_id)
+
+        m = _RE_TRIP_CONFLICT.match(text)
+        if m:
+            return _handle_trip_conflict(reply_token, session, int(m.group(1)), user_id)
+
+        m = _RE_TRIP_LEAVE.match(text)
+        if m:
+            return _handle_trip_leave(
+                reply_token, session,
+                int(m.group(1)), int(m.group(2)), m.group(3).strip(), user_id,
+            )
+
+        m = _RE_TRIP_RESTORE.match(text)
+        if m:
+            return _handle_trip_restore(reply_token, session, int(m.group(1)), user_id)
+
+        m = _RE_TRIP_UNASSIGN.match(text)
+        if m:
+            return _handle_trip_unassign(reply_token, session, int(m.group(1)), user_id)
 
         if _RE_PENDING.match(text):
             return _handle_pending_dispatch(reply_token, session)
@@ -268,13 +309,87 @@ def _handle_trip_detail(reply_token, session, trip_id: int) -> bool:
     if not r.ok:
         reply_message(reply_token, {"type": "text", "text": f"❌ {r.error}"})
         return True
-    bubble = render_trip_detail(r.data)
-    reply_message(reply_token, {
-        "type": "flex",
-        "altText": f"班次 #{trip_id} 詳情",
-        "contents": bubble,
-    })
+    _send_trip_card(reply_token, r.data, alt_prefix=f"班次 #{trip_id} 詳情")
     return True
+
+
+def _send_trip_card(reply_token, trip, *, alt_prefix: str) -> None:
+    """送詳情卡（含動作 quickReply）"""
+    bubble = render_trip_detail(trip)
+    qr = build_trip_quick_reply(trip)
+    msg = {
+        "type": "flex",
+        "altText": alt_prefix,
+        "contents": bubble,
+    }
+    if qr:
+        msg["quickReply"] = qr
+    reply_message(reply_token, msg)
+
+
+def _reply_mutation_result(reply_token, session, trip_id: int, result,
+                            action_label: str) -> bool:
+    """統一 mutation reply：失敗回文字、成功回更新後的詳情卡 + quickReply"""
+    if not result.ok:
+        reply_message(reply_token, {
+            "type": "text",
+            "text": f"❌ 班次 #{trip_id} {action_label} 失敗：{result.error}",
+        })
+        return True
+    _send_trip_card(reply_token, result.data,
+                    alt_prefix=f"班次 #{trip_id} 已{action_label}")
+    return True
+
+
+def _handle_trip_cancel(reply_token, session, trip_id: int,
+                         user_id) -> bool:
+    r = cancel_trip(
+        session=session, trip_id=trip_id,
+        reason='LINE quick reply',
+        user_id=user_id, via='quick_reply',
+    )
+    return _reply_mutation_result(reply_token, session, trip_id, r, '註銷')
+
+
+def _handle_trip_conflict(reply_token, session, trip_id: int,
+                           user_id) -> bool:
+    r = mark_conflict(
+        session=session, trip_id=trip_id,
+        reason='LINE quick reply',
+        user_id=user_id, via='quick_reply',
+    )
+    return _reply_mutation_result(reply_token, session, trip_id, r, '標記衝突')
+
+
+def _handle_trip_leave(reply_token, session, trip_id: int,
+                        surcharge: int, reason: str, user_id) -> bool:
+    r = passenger_leave(
+        session=session, trip_id=trip_id,
+        reason=reason, surcharge=surcharge,
+        user_id=user_id, via='quick_reply',
+    )
+    return _reply_mutation_result(
+        reply_token, session, trip_id, r,
+        f'請假（{reason}/{surcharge:+d}）',
+    )
+
+
+def _handle_trip_restore(reply_token, session, trip_id: int,
+                          user_id) -> bool:
+    r = restore_to_ready(
+        session=session, trip_id=trip_id,
+        user_id=user_id, via='quick_reply',
+    )
+    return _reply_mutation_result(reply_token, session, trip_id, r, '恢復準備')
+
+
+def _handle_trip_unassign(reply_token, session, trip_id: int,
+                           user_id) -> bool:
+    r = unassign_driver(
+        session=session, trip_id=trip_id,
+        user_id=user_id, via='quick_reply',
+    )
+    return _reply_mutation_result(reply_token, session, trip_id, r, '撤銷指派')
 
 
 def _handle_pending_dispatch(reply_token, session) -> bool:
