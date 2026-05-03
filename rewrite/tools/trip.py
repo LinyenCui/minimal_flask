@@ -623,6 +623,175 @@ def unassign_driver(
     return query_trip_by_id(trip_id, session=session)
 
 
+# ============================================================
+# 創建（trips 增）— 取代沙盒 booking_create
+# ============================================================
+
+def _resolve_endpoint(session, raw: Optional[str]) -> tuple:
+    """
+    解析起 / 終點：FK 校驗 + 「臨時地點」fallback
+
+    回傳 (fk_value, custom_value)：
+      - raw 為空 → (None, None)
+      - raw 在 customers.short_name → (raw, raw)  雙寫（給 query + scheduler 都用）
+      - raw 不在 → ('臨時地點', raw)  FK fallback，實際值放 custom
+
+    為什麼雙寫：scheduler 對 trip_type='temp' 一律從 custom_* 取地點寫入
+    completed_trips；query_trips 的 customer_short_name 過濾是看 start/end_point。
+    雙寫讓兩邊都拿得到資料。
+    """
+    if not raw or not raw.strip():
+        return (None, None)
+    raw = raw.strip()
+    row = session.execute(
+        text("SELECT 1 FROM customers WHERE short_name = :sn"),
+        {'sn': raw}
+    ).fetchone()
+    if row:
+        return (raw, raw)
+    return ('臨時地點', raw)
+
+
+def create_trip(
+    *,
+    session,
+    trip_date: date,
+    trip_time: time,
+    start_point: str,
+    end_point: Optional[str] = None,
+    via_point: Optional[str] = None,
+    category: str = '診所',
+    driver_id: Optional[int] = None,
+    meter_fare: Optional[int] = None,
+    extra_fare: int = 0,
+    passenger_name: Optional[str] = None,
+    trip_type: str = 'temp',
+    fixed_trip_id: Optional[int] = None,
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """
+    建立新班次（trips 增）
+
+    起終點 FK 校驗（_resolve_endpoint）：
+      - 在 customers.short_name → 雙寫 start_point + custom_start_point
+      - 不在 → start_point='臨時地點' + custom_start_point=實際值
+
+    狀態：
+      - 給 driver_id → '準備'
+      - 沒給        → '待派'
+
+    自動產：
+      - unique_code = T_{trip_id}_{YYYYMMDD}（沿用 legacy 格式）
+      - week_number = 從 ISO 週次計算
+
+    R-5 鎖：不適用（新建 trip 不可能在鎖內）
+    R-6 audit：寫 'create_trip'，before_state=None，after_state=完整 snapshot
+    """
+    # ---- 基本驗證 ----
+    if not trip_date:
+        return ToolResult.fail("trip_date 必填")
+    if not trip_time:
+        return ToolResult.fail("trip_time 必填")
+    if not start_point or not start_point.strip():
+        return ToolResult.fail("start_point 必填")
+    if not isinstance(extra_fare, int):
+        return ToolResult.fail("extra_fare 必須是整數")
+    if meter_fare is not None and not isinstance(meter_fare, int):
+        return ToolResult.fail("meter_fare 必須是整數或 None")
+
+    # ---- 司機驗證 ----
+    if driver_id is not None:
+        drv = session.execute(
+            text("SELECT id FROM drivers WHERE id = :id"),
+            {'id': driver_id}
+        ).fetchone()
+        if not drv:
+            return ToolResult.fail(f"找不到司機 ID {driver_id}")
+
+    # ---- 起終點 FK 解析 ----
+    sp_fk, sp_custom = _resolve_endpoint(session, start_point)
+    ep_fk, ep_custom = _resolve_endpoint(session, end_point)
+    via_clean = via_point.strip() if via_point and via_point.strip() else None
+
+    # ---- 狀態 ----
+    new_status = '準備' if driver_id else '待派'
+
+    # ---- ISO 週次 ----
+    _, week_number, _ = trip_date.isocalendar()
+
+    # ---- INSERT ----
+    result = session.execute(text("""
+        INSERT INTO trips (
+            date, time,
+            start_point, end_point, via_point,
+            custom_start_point, custom_end_point, custom_via_point,
+            category, status, trip_type, fixed_trip_id,
+            driver_id, meter_fare, extra_fare,
+            passenger_name, week_number,
+            modified_by, modification_reason, modification_time
+        ) VALUES (
+            :date, :time,
+            :sp, :ep, :via,
+            :sp_custom, :ep_custom, :via_custom,
+            :category, :status, :trip_type, :fixed_trip_id,
+            :driver_id, :meter_fare, :extra_fare,
+            :passenger_name, :week_number,
+            :user_name, :mod_reason, CURRENT_TIMESTAMP
+        )
+        RETURNING trip_id
+    """), {
+        'date': trip_date, 'time': trip_time,
+        'sp': sp_fk, 'ep': ep_fk, 'via': via_clean,
+        'sp_custom': sp_custom, 'ep_custom': ep_custom,
+        'via_custom': via_clean,
+        'category': category, 'status': new_status,
+        'trip_type': trip_type, 'fixed_trip_id': fixed_trip_id,
+        'driver_id': driver_id,
+        'meter_fare': meter_fare, 'extra_fare': extra_fare,
+        'passenger_name': passenger_name,
+        'week_number': week_number,
+        'user_name': user_name or user_id,
+        'mod_reason': '[1] 新建班次',
+    })
+    new_trip_id = result.fetchone()[0]
+
+    # ---- unique_code ----
+    date_str = trip_date.strftime('%Y%m%d')
+    unique_code = f"T_{new_trip_id}_{date_str}"
+    session.execute(
+        text("UPDATE trips SET unique_code = :uc WHERE trip_id = :id"),
+        {'uc': unique_code, 'id': new_trip_id}
+    )
+
+    # ---- audit log ----
+    after = fetch_trip_snapshot(session=session, trip_id=new_trip_id)
+    write_audit(
+        session=session, user_id=user_id, user_name=user_name,
+        action_type='create_trip', target_table='trips',
+        target_id=new_trip_id,
+        before_state=None, after_state=after,
+        changed_fields=list(after.keys()) if after else None,
+        extra={
+            'trip_type': trip_type,
+            'fk_resolved': {
+                'start': sp_fk, 'start_custom': sp_custom,
+                'end': ep_fk, 'end_custom': ep_custom,
+                'via': via_clean,
+            },
+            'unique_code': unique_code,
+        },
+        via=via,
+    )
+
+    if auto_commit:
+        session.commit()
+
+    return query_trip_by_id(new_trip_id, session=session)
+
+
 def query_pending_dispatch(
     *,
     session,
