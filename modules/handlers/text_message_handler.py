@@ -66,9 +66,21 @@ help_handler = HelpHandler()
 def process_text_message(event):
     """處理文本消息的主函數"""
     # 傳入的 event.message.text 應該是已經過 webhook.py 處理的文本
-    message_text = event.message.text 
+    message_text = event.message.text
     reply_token = event.reply_token
-    
+
+    # ====================================================
+    # 🆕 Rewrite v0.1 路由攔截（最早入口，2026-05-03 新增）
+    # 命令：查客戶 / 客戶詳情 / 病歷層 / 病歷層分布
+    # 不匹配 → 回 False，繼續走主流程（不影響舊邏輯）
+    # ====================================================
+    try:
+        from rewrite.router import try_route as _rewrite_try_route
+        if _rewrite_try_route(event):
+            return
+    except Exception as _rew_err:
+        logger.error(f"rewrite 路由失敗（不影響主流程）: {_rew_err}", exc_info=True)
+
     # 🚨 修復：安全獲取user_id，避免Source沒有user_id屬性的錯誤
     try:
         # 🚕 車資試算（配置驅動，安全插入點）
