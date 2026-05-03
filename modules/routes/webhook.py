@@ -95,8 +95,20 @@ def callback():
                         continue
                 except Exception as e:
                     logger.error(f"Sandbox dispatch failed: {e}", exc_info=True)
-                    # Proceed to normal flow if sandbox fails to load/dispatch? 
+                    # Proceed to normal flow if sandbox fails to load/dispatch?
                     # No, safer to just log.
+                # --- END PATCH ---
+
+                # --- PATCH: Rewrite v0.1 路由（早期攔截，繞過 should_process 群組過濾）---
+                # 命令：查客戶 / 客戶詳情 / 病歷層 / 查班次 / 班次詳情 / 待派班次 / 診所班次 / 東洋班次
+                # router 內部會處理 / # 前綴的剝除（! ！ 留給 sandbox）
+                try:
+                    from rewrite.router import try_route as _rewrite_try_route
+                    if _rewrite_try_route(event):
+                        logger.info(f"Routing to Rewrite v0.1: {user_id}")
+                        continue
+                except Exception as _rew_err:
+                    logger.error(f"Rewrite dispatch failed: {_rew_err}", exc_info=True)
                 # --- END PATCH ---
 
                 should_handle, processed_text = should_process(original_message_text, source_type, user_id)

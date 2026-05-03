@@ -68,6 +68,12 @@ def try_route(event) -> bool:
     """
     text = (event.message.text or '').strip()
 
+    # 處理群組 prefix：剝掉 / 或 # （但保留 ! ！ — 那是 sandbox 的）
+    for p in ('/', '#'):
+        if text.startswith(p):
+            text = text[len(p):].lstrip()
+            break
+
     # 提早退出：不像我們的命令
     rewrite_prefixes = ('查客戶', '客戶詳情', '病歷層',
                         '查班次', '診所班次', '東洋班次',
