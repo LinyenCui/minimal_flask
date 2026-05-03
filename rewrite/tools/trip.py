@@ -342,6 +342,287 @@ def passenger_leave(
     return query_trip_by_id(trip_id, session=session)
 
 
+def _bump_modification_reason(old: Optional[str], suffix: str) -> str:
+    """累加 modification_reason"""
+    old = old or ''
+    next_idx = 1 + old.count('[')
+    new_suffix = f"[{next_idx}] {suffix}"
+    return (old + '; ' + new_suffix) if old else new_suffix
+
+
+@require_modifiable_window(allow_in_lock=False)
+def cancel_trip(
+    *,
+    session,
+    trip_id: int,
+    reason: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """註銷班次（status → '註銷'）"""
+    before = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    if not before:
+        return ToolResult.fail(f"找不到班次 #{trip_id}")
+    if before.get('status') == '已完成':
+        return ToolResult.fail(f"班次 #{trip_id} 已完成，無法註銷")
+    if before.get('status') == '註銷':
+        return ToolResult.fail(f"班次 #{trip_id} 已是註銷狀態")
+
+    new_mod = _bump_modification_reason(
+        before.get('modification_reason'),
+        f"註銷{'：' + reason if reason else ''}"
+    )
+
+    session.execute(text("""
+        UPDATE trips SET
+            status = '註銷',
+            modification_reason = :mod,
+            modified_by = :who,
+            modification_time = CURRENT_TIMESTAMP
+        WHERE trip_id = :id
+    """), {'mod': new_mod, 'who': user_name or user_id, 'id': trip_id})
+
+    after = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    write_audit(
+        session=session, user_id=user_id, user_name=user_name,
+        action_type='cancel_trip', target_table='trips', target_id=trip_id,
+        before_state=before, after_state=after,
+        changed_fields=diff_fields(before, after),
+        reason=reason, via=via,
+    )
+    if auto_commit:
+        session.commit()
+    return query_trip_by_id(trip_id, session=session)
+
+
+@require_modifiable_window(allow_in_lock=False)
+def mark_conflict(
+    *,
+    session,
+    trip_id: int,
+    reason: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """標記衝突（status → '衝突'）"""
+    before = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    if not before:
+        return ToolResult.fail(f"找不到班次 #{trip_id}")
+    if before.get('status') == '已完成':
+        return ToolResult.fail(f"班次 #{trip_id} 已完成，無法標記衝突")
+
+    new_mod = _bump_modification_reason(
+        before.get('modification_reason'),
+        f"衝突{'：' + reason if reason else ''}"
+    )
+
+    session.execute(text("""
+        UPDATE trips SET
+            status = '衝突',
+            modification_reason = :mod,
+            modified_by = :who,
+            modification_time = CURRENT_TIMESTAMP
+        WHERE trip_id = :id
+    """), {'mod': new_mod, 'who': user_name or user_id, 'id': trip_id})
+
+    after = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    write_audit(
+        session=session, user_id=user_id, user_name=user_name,
+        action_type='mark_conflict', target_table='trips', target_id=trip_id,
+        before_state=before, after_state=after,
+        changed_fields=diff_fields(before, after),
+        reason=reason, via=via,
+    )
+    if auto_commit:
+        session.commit()
+    return query_trip_by_id(trip_id, session=session)
+
+
+@require_modifiable_window(allow_in_lock=True)  # 鎖內也允許救回
+def restore_to_ready(
+    *,
+    session,
+    trip_id: int,
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """
+    改回準備（清請假/註銷/衝突 → '準備'）
+
+    - 已完成 → 拒絕
+    - 待派（無司機）→ 拒絕，請先指派司機
+    - 其他 → status='準備'、清 leave_reason、若 extra_fare<0 則歸零
+    """
+    before = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    if not before:
+        return ToolResult.fail(f"找不到班次 #{trip_id}")
+    if before.get('status') == '已完成':
+        return ToolResult.fail(f"班次 #{trip_id} 已完成，無法改回準備")
+    if before.get('status') == '待派' or not before.get('driver_id'):
+        return ToolResult.fail(f"班次 #{trip_id} 未指派司機，請先指派")
+
+    # 計算新 extra_fare（負數視為請假負加成，歸零；正數保留）
+    cur_extra = before.get('extra_fare') or 0
+    new_extra = 0 if cur_extra < 0 else cur_extra
+
+    new_mod = _bump_modification_reason(
+        before.get('modification_reason'),
+        "改回準備"
+    )
+
+    session.execute(text("""
+        UPDATE trips SET
+            status = '準備',
+            passenger_leave_reason = NULL,
+            extra_fare = :extra,
+            modification_reason = :mod,
+            modified_by = :who,
+            modification_time = CURRENT_TIMESTAMP
+        WHERE trip_id = :id
+    """), {'extra': new_extra, 'mod': new_mod, 'who': user_name or user_id, 'id': trip_id})
+
+    after = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    write_audit(
+        session=session, user_id=user_id, user_name=user_name,
+        action_type='restore_to_ready', target_table='trips', target_id=trip_id,
+        before_state=before, after_state=after,
+        changed_fields=diff_fields(before, after),
+        via=via,
+    )
+    if auto_commit:
+        session.commit()
+    return query_trip_by_id(trip_id, session=session)
+
+
+@require_modifiable_window(allow_in_lock=True)
+def assign_driver(
+    *,
+    session,
+    trip_id: int,
+    driver_id: int,
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """
+    指派司機。
+
+    - 驗證 driver_id 在 drivers 表
+    - 若原狀態為「待派」→ 升級為「準備」
+    - 若原已有司機，覆蓋（換司機）
+    """
+    before = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    if not before:
+        return ToolResult.fail(f"找不到班次 #{trip_id}")
+    if before.get('status') in ('已完成', '註銷'):
+        return ToolResult.fail(f"班次 #{trip_id} 狀態為「{before.get('status')}」，無法指派")
+
+    # 驗證司機存在
+    drv = session.execute(
+        text("SELECT id FROM drivers WHERE id = :id"),
+        {'id': driver_id}
+    ).fetchone()
+    if not drv:
+        return ToolResult.fail(f"找不到司機 ID {driver_id}")
+
+    # 待派 → 準備
+    new_status = '準備' if before.get('status') == '待派' else before.get('status')
+
+    note = f"指派司機 {driver_id}" if not before.get('driver_id') else \
+           f"換司機 {before.get('driver_id')}→{driver_id}"
+    new_mod = _bump_modification_reason(before.get('modification_reason'), note)
+
+    session.execute(text("""
+        UPDATE trips SET
+            driver_id = :driver_id,
+            status = :status,
+            modification_reason = :mod,
+            modified_by = :who,
+            modification_time = CURRENT_TIMESTAMP
+        WHERE trip_id = :id
+    """), {
+        'driver_id': driver_id, 'status': new_status,
+        'mod': new_mod, 'who': user_name or user_id, 'id': trip_id
+    })
+
+    after = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    write_audit(
+        session=session, user_id=user_id, user_name=user_name,
+        action_type='assign_driver', target_table='trips', target_id=trip_id,
+        before_state=before, after_state=after,
+        changed_fields=diff_fields(before, after),
+        extra={'new_driver_id': driver_id, 'old_driver_id': before.get('driver_id')},
+        via=via,
+    )
+    if auto_commit:
+        session.commit()
+    return query_trip_by_id(trip_id, session=session)
+
+
+@require_modifiable_window(allow_in_lock=True)
+def unassign_driver(
+    *,
+    session,
+    trip_id: int,
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """
+    撤銷司機指派（軟取消）
+
+    - driver_id → NULL
+    - status → '待派'
+    - 結果：時間到不會自動掉入 completed_trips（軟取消設計）
+    """
+    before = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    if not before:
+        return ToolResult.fail(f"找不到班次 #{trip_id}")
+    if before.get('status') in ('已完成', '註銷'):
+        return ToolResult.fail(
+            f"班次 #{trip_id} 狀態為「{before.get('status')}」，無法撤銷指派"
+        )
+    if not before.get('driver_id'):
+        return ToolResult.fail(f"班次 #{trip_id} 本來就沒指派司機")
+
+    old_driver = before.get('driver_id')
+    new_mod = _bump_modification_reason(
+        before.get('modification_reason'),
+        f"撤銷司機 {old_driver} 指派"
+    )
+
+    session.execute(text("""
+        UPDATE trips SET
+            driver_id = NULL,
+            status = '待派',
+            modification_reason = :mod,
+            modified_by = :who,
+            modification_time = CURRENT_TIMESTAMP
+        WHERE trip_id = :id
+    """), {'mod': new_mod, 'who': user_name or user_id, 'id': trip_id})
+
+    after = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    write_audit(
+        session=session, user_id=user_id, user_name=user_name,
+        action_type='unassign_driver', target_table='trips', target_id=trip_id,
+        before_state=before, after_state=after,
+        changed_fields=diff_fields(before, after),
+        extra={'old_driver_id': old_driver},
+        via=via,
+    )
+    if auto_commit:
+        session.commit()
+    return query_trip_by_id(trip_id, session=session)
+
+
 def query_pending_dispatch(
     *,
     session,
