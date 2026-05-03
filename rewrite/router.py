@@ -50,6 +50,7 @@ from rewrite.views.customer_flex import (
 from rewrite.views.trip_flex import (
     render_trip_detail,
     render_trip_list_carousel,
+    build_trip_quick_reply,
 )
 from rewrite.conversation_state import (
     set_state as _state_set,
@@ -329,13 +330,17 @@ def _handle_trip_detail(reply_token, session, trip_id: int) -> bool:
 
 
 def _send_trip_card(reply_token, trip, *, alt_prefix: str) -> None:
-    """送詳情卡（footer 已含動作 button，跟原系統一致）"""
+    """送詳情卡 + 動作 quickReply（attach 在 reply message，輸入框上方顯示）"""
     bubble = render_trip_detail(trip)
-    reply_message(reply_token, {
+    qr = build_trip_quick_reply(trip)
+    msg = {
         "type": "flex",
         "altText": alt_prefix,
         "contents": bubble,
-    })
+    }
+    if qr:
+        msg["quickReply"] = qr
+    reply_message(reply_token, msg)
 
 
 def _reply_mutation_result(reply_token, session, trip_id: int, result,
