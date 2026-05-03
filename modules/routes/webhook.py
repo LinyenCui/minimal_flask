@@ -28,6 +28,22 @@ def callback():
         for event in events:
             # 處理 Postback 事件（按鈕點擊）
             if event.type == "postback":
+                # --- Rewrite v0.1 postback 早期攔截 ---
+                # 命令：trip_detail:NNNN（班次列表卡點擊跳詳情）
+                try:
+                    from rewrite.router import try_route_postback as _rew_try_pb
+                    if _rew_try_pb(event):
+                        logger.info(
+                            f"Postback routed to Rewrite v0.1: "
+                            f"{getattr(event.source, 'user_id', '?')}"
+                        )
+                        continue
+                except Exception as _rew_pb_err:
+                    logger.error(
+                        f"Rewrite postback dispatch failed: {_rew_pb_err}",
+                        exc_info=True,
+                    )
+                # --- END Rewrite postback ---
                 handle_postback(event)
                 continue
                 

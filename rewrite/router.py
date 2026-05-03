@@ -61,6 +61,9 @@ _RE_TRIP_DETAIL = re.compile(r'^班次詳情\s+(\d+)$')
 _RE_TRIP_LIST = re.compile(r'^(查|診所|東洋)班次(?:\s+(.+))?$')
 _RE_PENDING = re.compile(r'^待派班次$')
 
+# Postback data regex
+_RE_PB_TRIP_DETAIL = re.compile(r'^trip_detail:(\d+)$')
+
 
 def try_route(event) -> bool:
     """
@@ -135,6 +138,38 @@ def try_route(event) -> bool:
         return True
     finally:
         session.close()
+
+
+def try_route_postback(event) -> bool:
+    """
+    嘗試處理 postback event。回 True 表示已處理。
+
+    支援格式：
+      trip_detail:NNNN     — 班次詳情卡跳轉
+    """
+    data = (getattr(event.postback, 'data', None) or '').strip()
+    if not data:
+        return False
+
+    m = _RE_PB_TRIP_DETAIL.match(data)
+    if m:
+        session = Session()
+        try:
+            return _handle_trip_detail(event.reply_token, session, int(m.group(1)))
+        except Exception as e:
+            logger.error(f"rewrite postback 異常 ({data!r}): {e}", exc_info=True)
+            try:
+                reply_message(event.reply_token, {
+                    "type": "text",
+                    "text": f"⚠️ postback 處理錯誤：{str(e)[:200]}"
+                })
+            except Exception:
+                pass
+            return True
+        finally:
+            session.close()
+
+    return False
 
 
 # ============================================================
