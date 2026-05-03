@@ -154,8 +154,9 @@ def render_trip_detail(t: TripView) -> dict:
         }
     }
     if footer_buttons:
+        # vertical 布局：每按鈕一排滿寬，避免手機上 horizontal 三按鈕擠到只剩 emoji
         bubble["footer"] = {
-            "type": "box", "layout": "horizontal", "spacing": "sm",
+            "type": "box", "layout": "vertical", "spacing": "xs",
             "contents": footer_buttons,
         }
     return bubble
