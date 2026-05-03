@@ -240,6 +240,108 @@ def query_today_trips(
     )
 
 
+# ============================================================
+# Mutation 工具（R-5 鎖 + R-6 audit log）
+# ============================================================
+
+from rewrite.tools.base import (
+    require_modifiable_window,
+    write_audit,
+    fetch_trip_snapshot,
+    diff_fields,
+)
+
+
+@require_modifiable_window(allow_in_lock=False)
+def passenger_leave(
+    *,
+    session,
+    trip_id: int,
+    reason: str,
+    surcharge: int = 0,
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """
+    乘客請假（三層障眼法）
+
+    - status 維持 '準備'
+    - passenger_leave_reason = reason
+    - extra_fare = surcharge（通常負，例：-100 表示乘客自己來扣 100）
+    - modification_reason 累加 '[N] 乘客請假: reason' 形式
+
+    R-5：30 分鐘鎖內拒絕（decorator）
+    R-6：寫 audit log
+    """
+    if not reason or not reason.strip():
+        return ToolResult.fail("請假原因不可空")
+    if not isinstance(surcharge, int):
+        return ToolResult.fail("加成必須是整數（通常負，如 -100）")
+
+    # 確認 trip 存在 + 取 before
+    before = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    if not before:
+        return ToolResult.fail(f"找不到班次 #{trip_id}")
+
+    # 檢查狀態：已完成 / 註銷 不可再請假
+    if before.get('status') in ('已完成', '註銷'):
+        return ToolResult.fail(
+            f"班次 #{trip_id} 狀態為「{before.get('status')}」，無法請假"
+        )
+
+    # 計算新的 modification_reason（疊加）
+    old_mod = before.get('modification_reason') or ''
+    next_idx = 1 + old_mod.count('[')
+    suffix = f"[{next_idx}] 乘客請假: {reason.strip()}"
+    new_mod = (old_mod + '; ' + suffix) if old_mod else suffix
+
+    # UPDATE
+    session.execute(
+        text("""
+            UPDATE trips SET
+                status = '準備',
+                passenger_leave_reason = :reason,
+                extra_fare = :surcharge,
+                modification_reason = :mod_reason,
+                modified_by = :user_name,
+                modification_time = CURRENT_TIMESTAMP
+            WHERE trip_id = :trip_id
+        """),
+        {
+            'reason': reason.strip(),
+            'surcharge': surcharge,
+            'mod_reason': new_mod,
+            'user_name': user_name or user_id,
+            'trip_id': trip_id,
+        }
+    )
+
+    # after snapshot
+    after = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    changed = diff_fields(before, after)
+
+    # audit log
+    write_audit(
+        session=session,
+        user_id=user_id, user_name=user_name,
+        action_type='passenger_leave',
+        target_table='trips', target_id=trip_id,
+        before_state=before, after_state=after,
+        changed_fields=changed,
+        reason=reason.strip(),
+        extra={'surcharge': surcharge},
+        via=via,
+    )
+
+    if auto_commit:
+        session.commit()
+
+    # 回傳更新後的 TripView
+    return query_trip_by_id(trip_id, session=session)
+
+
 def query_pending_dispatch(
     *,
     session,
