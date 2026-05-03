@@ -50,7 +50,11 @@ from rewrite.views.customer_flex import (
 from rewrite.views.trip_flex import (
     render_trip_detail,
     render_trip_list_carousel,
-    build_trip_quick_reply,
+)
+from rewrite.conversation_state import (
+    set_state as _state_set,
+    get_state as _state_get,
+    clear_state as _state_clear,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,12 +71,15 @@ _RE_TRIP_DETAIL = re.compile(r'^班次詳情\s+(\d+)$')
 _RE_TRIP_LIST = re.compile(r'^(查|診所|東洋)班次(?:\s+(.+))?$')
 _RE_PENDING = re.compile(r'^待派班次$')
 
-# 班次 mutation 命令 regex（quick reply 發出來的）
+# 班次 mutation 命令 regex（footer button 發出來的）
 _RE_TRIP_CANCEL = re.compile(r'^班次註銷\s+(\d+)$')
 _RE_TRIP_CONFLICT = re.compile(r'^班次衝突\s+(\d+)$')
-_RE_TRIP_LEAVE = re.compile(r'^班次請假\s+(\d+)\s+(-?\d+)\s+(.+)$')
+_RE_TRIP_LEAVE = re.compile(r'^班次請假\s+(\d+)$')   # 進入請假輸入模式
 _RE_TRIP_RESTORE = re.compile(r'^班次恢復\s+(\d+)$')
 _RE_TRIP_UNASSIGN = re.compile(r'^班次撤銷指派\s+(\d+)$')
+
+# 請假輸入模式的退出命令（跟原系統一致）
+_LEAVE_ABORT_TEXTS = {'放棄操作', '放棄', '取消'}
 
 # Postback data regex
 _RE_PB_TRIP_DETAIL = re.compile(r'^trip_detail:(\d+)$')
@@ -83,6 +90,7 @@ def try_route(event) -> bool:
     嘗試處理 event。回 True 表示已處理（不要走主流程）。
     """
     text = (event.message.text or '').strip()
+    user_id = getattr(event.source, 'user_id', None)
 
     # 處理群組 prefix：剝掉 / 或 # （但保留 ! ！ — 那是 sandbox 的）
     for p in ('/', '#'):
@@ -90,18 +98,26 @@ def try_route(event) -> bool:
             text = text[len(p):].lstrip()
             break
 
+    # ===== 優先：檢查是否在 conversation state（請假輸入模式等）=====
+    # 在 input mode 中，user 任何 message 都先給 state handler 處理
+    if user_id:
+        state = _state_get(user_id)
+        if state and state.get('type') == 'leave_input':
+            return _handle_leave_input(
+                event.reply_token, user_id, text, state['payload']
+            )
+
     # 提早退出：不像我們的命令
     rewrite_prefixes = ('查客戶', '客戶詳情', '病歷層',
                         '查班次', '診所班次', '東洋班次',
                         '班次詳情', '待派班次',
-                        # mutation 命令（quick reply 觸發）
+                        # mutation 命令（footer button 觸發）
                         '班次註銷', '班次衝突', '班次請假',
                         '班次恢復', '班次撤銷指派')
     if not text.startswith(rewrite_prefixes):
         return False
 
     reply_token = event.reply_token
-    user_id = getattr(event.source, 'user_id', None)
     session = Session()
 
     try:
@@ -142,8 +158,7 @@ def try_route(event) -> bool:
         m = _RE_TRIP_LEAVE.match(text)
         if m:
             return _handle_trip_leave(
-                reply_token, session,
-                int(m.group(1)), int(m.group(2)), m.group(3).strip(), user_id,
+                reply_token, session, int(m.group(1)), user_id,
             )
 
         m = _RE_TRIP_RESTORE.match(text)
@@ -314,22 +329,18 @@ def _handle_trip_detail(reply_token, session, trip_id: int) -> bool:
 
 
 def _send_trip_card(reply_token, trip, *, alt_prefix: str) -> None:
-    """送詳情卡（含動作 quickReply）"""
+    """送詳情卡（footer 已含動作 button，跟原系統一致）"""
     bubble = render_trip_detail(trip)
-    qr = build_trip_quick_reply(trip)
-    msg = {
+    reply_message(reply_token, {
         "type": "flex",
         "altText": alt_prefix,
         "contents": bubble,
-    }
-    if qr:
-        msg["quickReply"] = qr
-    reply_message(reply_token, msg)
+    })
 
 
 def _reply_mutation_result(reply_token, session, trip_id: int, result,
                             action_label: str) -> bool:
-    """統一 mutation reply：失敗回文字、成功回更新後的詳情卡 + quickReply"""
+    """統一 mutation reply：失敗回文字、成功回更新後的詳情卡（含新狀態的 footer button）"""
     if not result.ok:
         reply_message(reply_token, {
             "type": "text",
@@ -361,17 +372,121 @@ def _handle_trip_conflict(reply_token, session, trip_id: int,
     return _reply_mutation_result(reply_token, session, trip_id, r, '標記衝突')
 
 
-def _handle_trip_leave(reply_token, session, trip_id: int,
-                        surcharge: int, reason: str, user_id) -> bool:
-    r = passenger_leave(
-        session=session, trip_id=trip_id,
-        reason=reason, surcharge=surcharge,
-        user_id=user_id, via='quick_reply',
-    )
-    return _reply_mutation_result(
-        reply_token, session, trip_id, r,
-        f'請假（{reason}/{surcharge:+d}）',
-    )
+def _handle_trip_leave(reply_token, session, trip_id: int, user_id) -> bool:
+    """
+    [請假] button → 進入請假輸入模式（conversation state）
+
+    跟原系統一致：先預檢 trip 狀態 + 鎖，過了才設 state 跳輸入。
+    """
+    r = query_trip_by_id(trip_id, session=session)
+    if not r.ok:
+        reply_message(reply_token, {"type": "text", "text": f"❌ {r.error}"})
+        return True
+
+    t = r.data
+    if t.is_locked:
+        reply_message(reply_token, {
+            "type": "text",
+            "text": (f"⏰ 班次 #{trip_id} 距執行時間還有 {t.minutes_until_trip} 分鐘，"
+                     f"30 分鐘鎖內無法請假"),
+        })
+        return True
+    if t.display_status not in ('準備',):
+        reply_message(reply_token, {
+            "type": "text",
+            "text": f"❌ 班次 #{trip_id} 狀態為「{t.display_status}」，無法請假",
+        })
+        return True
+
+    if not user_id:
+        reply_message(reply_token, {
+            "type": "text", "text": "❌ 缺 user_id，無法進入請假模式"})
+        return True
+
+    # 進入 input mode
+    _state_set(user_id, 'leave_input', {'trip_id': trip_id})
+
+    reply_message(reply_token, {
+        "type": "text",
+        "text": (
+            f"🏷️ 班次 #{trip_id} 乘客請假\n\n"
+            f"請輸入：[原因] [負加成]\n\n"
+            f"❌ 退出：點下方「放棄操作」"
+        ),
+        "quickReply": {
+            "items": [{
+                "type": "action",
+                "action": {
+                    "type": "message",
+                    "label": "❌ 放棄操作",
+                    "text": "放棄操作",
+                },
+            }]
+        },
+    })
+    return True
+
+
+def _handle_leave_input(reply_token, user_id, text: str, payload: dict) -> bool:
+    """
+    在 leave_input state 下解析用戶輸入
+
+    解析規則：
+      - 「放棄操作」/「放棄」/「取消」 → 清 state
+      - 「[原因] [整數]」              → passenger_leave + 清 state
+      - 其他（沒打整數加成）            → 提示失敗 + 清 state（用戶從按鈕重來）
+    """
+    text = text.strip()
+
+    # 退出
+    if text in _LEAVE_ABORT_TEXTS:
+        _state_clear(user_id)
+        reply_message(reply_token, {
+            "type": "text",
+            "text": "已放棄請假操作",
+        })
+        return True
+
+    # 解析 [原因] [整數]
+    parts = text.rsplit(maxsplit=1)
+    surcharge = None
+    reason = None
+    if len(parts) == 2:
+        try:
+            surcharge = int(parts[1])
+            reason = parts[0].strip()
+        except ValueError:
+            pass
+
+    if surcharge is None or not reason:
+        # 失敗 → 清 state，用戶重新按 [請假] 來
+        _state_clear(user_id)
+        reply_message(reply_token, {
+            "type": "text",
+            "text": (
+                "❌ 操作失敗\n\n"
+                "格式應為：[原因] [負加成]\n\n"
+                "請從詳情卡重新點選「請假」按鈕再操作"
+            ),
+        })
+        return True
+
+    # 成功路徑
+    trip_id = payload['trip_id']
+    session = Session()
+    try:
+        r = passenger_leave(
+            session=session, trip_id=trip_id,
+            reason=reason, surcharge=surcharge,
+            user_id=user_id, via='line_input_mode',
+        )
+        _state_clear(user_id)
+        return _reply_mutation_result(
+            reply_token, session, trip_id, r,
+            f'請假（{reason}/{surcharge:+d}）',
+        )
+    finally:
+        session.close()
 
 
 def _handle_trip_restore(reply_token, session, trip_id: int,

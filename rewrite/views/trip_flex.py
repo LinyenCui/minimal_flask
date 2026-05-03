@@ -131,8 +131,7 @@ def render_trip_detail(t: TripView) -> dict:
             }]
         })
 
-    # 詳情卡不再含 footer button — 動作改由 quickReply 提供
-    # （見 build_trip_quick_reply + router.py 的 message 命令）
+    footer_buttons = _build_action_buttons(t)
 
     bubble: dict = {
         "type": "bubble",
@@ -153,51 +152,61 @@ def render_trip_detail(t: TripView) -> dict:
             "contents": body,
         }
     }
+    if footer_buttons:
+        bubble["footer"] = {
+            "type": "box", "layout": "horizontal", "spacing": "sm",
+            "contents": footer_buttons,
+        }
     return bubble
 
 
-def build_trip_quick_reply(t: TripView) -> Optional[dict]:
+def _build_action_buttons(t: TripView) -> List[dict]:
     """
-    依 trip 狀態產生 quickReply 物件（給 reply_message 附帶）
+    UI-2：詳情卡 footer 動作按鈕（horizontal，跟原系統視覺一致）
 
-    Quick reply 顯示於輸入框上方，按一下發送對應命令（message action）。
-    避免 horizontal button 在手機上被擠到看不到文字。
+    用 message action（不是 postback）— 按了發送 LINE message 給 bot，
+    走 router.py 的命令 dispatch。原系統就這樣，跟用戶習慣一致。
 
-    狀態決策表：
-      已完成               → 無
-      鎖內 + 有司機        → [撤銷指派]（軟取消）
-      鎖內 + 無司機        → 無
-      鎖外 + 準備          → [註銷] [衝突] + 3 個請假慣用語
-      鎖外 + 請假/衝突/註銷 → [恢復準備]
-      鎖外 + 待派          → 無（指派司機需參數，走詳細命令）
+    狀態決策表（跟 spec §3.1 鎖策略對齊）：
+      已完成                 → 無
+      鎖內 + 有司機          → [撤銷指派]（軟取消，避免落入 completed_trips）
+      鎖內 + 無司機          → 無
+      鎖外 + 準備            → [註銷] [衝突] [請假]
+      鎖外 + 請假/衝突/註銷  → [恢復準備]
+      鎖外 + 待派 / 其他     → 無
     """
-    items = []
-
     if t.display_status == '已完成':
-        return None
+        return []
 
     if t.is_locked:
         if t.driver_id:
-            items.append(_qr_msg("🚫 撤銷指派", f"班次撤銷指派 {t.trip_id}"))
-        return {"items": items} if items else None
+            return [_btn("🚫 撤銷指派",
+                         f"班次撤銷指派 {t.trip_id}",
+                         color="#455A64")]
+        return []
 
     if t.display_status == '準備':
-        items.append(_qr_msg("❌ 註銷", f"班次註銷 {t.trip_id}"))
-        items.append(_qr_msg("⚠️ 衝突", f"班次衝突 {t.trip_id}"))
-        # 3 個請假慣用語（spec §6.3 範例）
-        items.append(_qr_msg("🏷️ 自己來", f"班次請假 {t.trip_id} -100 自己來"))
-        items.append(_qr_msg("🏷️ 出國", f"班次請假 {t.trip_id} -50 出國"))
-        items.append(_qr_msg("🏷️ 生病", f"班次請假 {t.trip_id} -30 生病"))
-    elif t.display_status in ('請假', '衝突', '註銷'):
-        items.append(_qr_msg("↩️ 恢復準備", f"班次恢復 {t.trip_id}"))
+        return [
+            _btn("❌ 註銷", f"班次註銷 {t.trip_id}", color=DANGER),
+            _btn("⚠️ 衝突", f"班次衝突 {t.trip_id}", color="#F9A825"),
+            _btn("🏷️ 請假", f"班次請假 {t.trip_id}", color=PRIMARY),
+        ]
 
-    return {"items": items} if items else None
+    if t.display_status in ('請假', '衝突', '註銷'):
+        return [_btn("↩️ 恢復準備",
+                     f"班次恢復 {t.trip_id}",
+                     color=SUCCESS)]
+
+    return []
 
 
-def _qr_msg(label: str, text: str) -> dict:
-    """quickReply 的 message action item（按了發送 text 給 bot）"""
+def _btn(label: str, text: str, *, color: str) -> dict:
+    """horizontal footer button（深色填底 + 自訂 color，跟原系統一致）"""
     return {
-        "type": "action",
+        "type": "button",
+        "style": "primary",
+        "color": color,
+        "height": "sm",
         "action": {"type": "message", "label": label, "text": text},
     }
 
