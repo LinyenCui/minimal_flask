@@ -207,14 +207,21 @@ def _build_action_buttons(t: TripView) -> List[dict]:
 # 2. 班次列表 carousel（按日分組）
 # ============================================================
 
+PER_BUBBLE = 13   # 一張 bubble 最多裝 13 筆班次（同日超過會拆頁）
+MAX_BUBBLES = 12  # carousel 最多 12 張 bubble
+
+
 def render_trip_list_carousel(trips: List[TripView], *,
                                header_title: Optional[str] = None) -> dict:
     """
-    多筆班次 → carousel（每日 1 bubble）
+    多筆班次 → carousel
 
-    1 筆 → 詳情卡
-    2-12 天 → carousel
-    > 12 天 → 取前 11 + 「還 N 天」
+    分頁規則：
+      1 筆               → 詳情卡
+      同日 ≤ 13 筆        → 1 張 bubble
+      同日 > 13 筆        → 拆多張 bubble，header 標 「第 X/Y 頁」
+      跨日多筆            → 每日依上述規則展開
+      總 bubble > 12     → 截 11 + 「還 N 頁」提示
     """
     if not trips:
         return _empty_bubble(header_title or "查詢結果")
@@ -230,10 +237,21 @@ def render_trip_list_carousel(trips: List[TripView], *,
             order.append(t.date)
         groups[t.date].append(t)
 
-    bubbles = [_render_day_bubble(d, groups[d]) for d in order[:12]]
+    # 展開：每日依 PER_BUBBLE 拆頁
+    bubbles = []
+    for d in order:
+        day_trips = groups[d]
+        n_pages = (len(day_trips) + PER_BUBBLE - 1) // PER_BUBBLE
+        for i in range(n_pages):
+            page = day_trips[i * PER_BUBBLE:(i + 1) * PER_BUBBLE]
+            page_info = (i + 1, n_pages, len(day_trips)) if n_pages > 1 else None
+            bubbles.append(_render_day_bubble(d, page, page_info=page_info))
 
-    if len(order) > 12:
-        bubbles[-1] = _render_more_indicator(len(order) - 11, total_trips=len(trips))
+    # carousel 上限 12 張
+    if len(bubbles) > MAX_BUBBLES:
+        bubbles = bubbles[:MAX_BUBBLES - 1] + [
+            _render_more_indicator(len(bubbles) - (MAX_BUBBLES - 1), total_trips=len(trips))
+        ]
 
     if len(bubbles) == 1:
         return bubbles[0]
@@ -254,18 +272,19 @@ def _empty_bubble(title: str) -> dict:
     }
 
 
-def _render_day_bubble(d, trips_of_day: List[TripView]) -> dict:
-    """一天的班次 bubble（每筆可 tap 至詳情）"""
-    rows = []
-    for t in trips_of_day[:13]:  # 一張卡最多 13 行
-        rows.append(_trip_row(t))
+def _render_day_bubble(d, trips_of_day: List[TripView], *,
+                        page_info: Optional[tuple] = None) -> dict:
+    """
+    一天的班次 bubble（每筆可 tap 至詳情）
 
-    if len(trips_of_day) > 13:
-        rows.append({
-            "type": "text",
-            "text": f"⋯ 還 {len(trips_of_day) - 13} 筆",
-            "color": MUTED, "size": "xs", "align": "center", "margin": "sm",
-        })
+    page_info: (page_no, total_pages, total_count)，None 表單頁
+    """
+    rows = [_trip_row(t) for t in trips_of_day]
+
+    sub_text = f"{len(trips_of_day)} 筆"
+    if page_info:
+        page_no, total_pages, total_count = page_info
+        sub_text = f"第 {page_no}/{total_pages} 頁（共 {total_count} 筆）"
 
     return {
         "type": "bubble",
@@ -278,11 +297,11 @@ def _render_day_bubble(d, trips_of_day: List[TripView]) -> dict:
             "contents": [{
                 "type": "text",
                 "text": f"📅 {_format_date_with_weekday(d)}",
-                "weight": "bold", "size": "md", "color": "#ffffff",
+                "weight": "bold", "size": "sm", "color": "#ffffff",
             }, {
                 "type": "text",
-                "text": f"{len(trips_of_day)} 筆",
-                "size": "xs", "color": "#E0E0E0",
+                "text": sub_text,
+                "size": "xxs", "color": "#E0E0E0",
             }]
         },
         "body": {
@@ -312,20 +331,21 @@ def _trip_row(t: TripView) -> dict:
             "displayText": f"班次詳情 {t.trip_id}",
         },
         "contents": [
-            {"type": "text", "text": t.status_emoji, "flex": 0, "size": "sm"},
-            {"type": "text", "text": f"#{t.trip_id}", "flex": 2, "size": "xs",
+            {"type": "text", "text": t.status_emoji, "flex": 0, "size": "xs"},
+            {"type": "text", "text": f"#{t.trip_id}", "flex": 2, "size": "xxs",
              "color": color, "weight": "bold"},
-            {"type": "text", "text": time_text, "flex": 2, "size": "xs",
+            {"type": "text", "text": time_text, "flex": 2, "size": "xxs",
              "color": BLACK},
-            {"type": "text", "text": route_text, "flex": 5, "size": "xs",
+            {"type": "text", "text": route_text, "flex": 5, "size": "xxs",
              "color": BLACK, "wrap": False},
-            {"type": "text", "text": driver_text, "flex": 2, "size": "xs",
+            {"type": "text", "text": driver_text, "flex": 2, "size": "xxs",
              "color": MUTED, "align": "end"},
         ]
     }
 
 
-def _render_more_indicator(remaining_days: int, total_trips: int) -> dict:
+def _render_more_indicator(remaining_bubbles: int, total_trips: int) -> dict:
+    """超過 carousel 上限的提示 bubble（取代被截掉的最後一頁）"""
     return {
         "type": "bubble",
         "size": "kilo",
@@ -333,11 +353,11 @@ def _render_more_indicator(remaining_days: int, total_trips: int) -> dict:
             "type": "box", "layout": "vertical",
             "alignItems": "center", "justifyContent": "center",
             "contents": [
-                {"type": "text", "text": f"還有 {remaining_days} 天",
-                 "weight": "bold", "size": "xl", "color": ACCENT},
+                {"type": "text", "text": f"還有 {remaining_bubbles} 頁",
+                 "weight": "bold", "size": "lg", "color": ACCENT},
                 {"type": "text",
-                 "text": f"（共 {total_trips} 筆，請縮小範圍）",
-                 "size": "sm", "color": MUTED, "margin": "md", "wrap": True},
+                 "text": f"（共 {total_trips} 筆，請縮小日期範圍）",
+                 "size": "xs", "color": MUTED, "margin": "md", "wrap": True},
             ]
         }
     }
