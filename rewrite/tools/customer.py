@@ -256,6 +256,68 @@ def get_customer_by_id(
     return ToolResult.fail(f"找不到 customer #{customer_id}")
 
 
+def query_customers_by_birthday_day(
+    *,
+    session,
+    day: int,
+    mask_id: bool = True,
+) -> ToolResult:
+    """
+    依「生日的日」查客戶（病歷層查詢）
+
+    用途：門診人員看到生日的日就知道病歷在哪一層，
+         需要列出某一層的所有客戶（例如「病歷層 23 日」有誰）。
+
+    Args:
+        day: 1–31
+
+    回傳：依完整生日（年月日）排序的客戶列表。
+    """
+    if not isinstance(day, int) or not 1 <= day <= 31:
+        return ToolResult.fail(f"day 必須是 1-31 的整數，收到: {day!r}")
+
+    rows = session.execute(
+        text(f"""
+            {_SELECT_ALL}
+            WHERE birthday IS NOT NULL
+              AND EXTRACT(DAY FROM birthday)::int = :day
+            ORDER BY birthday
+        """),
+        {'day': day}
+    ).fetchall()
+
+    if not rows:
+        return ToolResult.fail(f"沒有客戶生日是 {day} 日（病歷層 {day} 為空）")
+
+    return ToolResult.success(
+        data=[CustomerView.from_row(r, mask_id=mask_id) for r in rows],
+        day=day,
+        count=len(rows),
+        matched_by='birthday_day',
+    )
+
+
+def query_birthday_day_summary(*, session) -> ToolResult:
+    """
+    病歷層總覽：每一層各有多少客戶
+
+    回傳：[(day, count), ...]
+    """
+    rows = session.execute(text("""
+        SELECT EXTRACT(DAY FROM birthday)::int AS day, COUNT(*) AS cnt
+        FROM customers
+        WHERE birthday IS NOT NULL
+        GROUP BY EXTRACT(DAY FROM birthday)
+        ORDER BY day
+    """)).fetchall()
+    summary = [(r[0], r[1]) for r in rows]
+    return ToolResult.success(
+        data=summary,
+        total_layers=len(summary),
+        total_customers_with_birthday=sum(c for _, c in summary),
+    )
+
+
 # ============================================================
 # 變更工具：create / update / delete
 # ============================================================
