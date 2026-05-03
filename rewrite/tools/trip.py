@@ -624,6 +624,152 @@ def unassign_driver(
 
 
 # ============================================================
+# 小型 mutation（鎖內可、不需確認）— spec §3.1
+# ============================================================
+
+@require_modifiable_window(allow_in_lock=True)
+def update_passenger_name(
+    *,
+    session,
+    trip_id: int,
+    passenger_name: Optional[str],
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """
+    改乘客名稱（鎖內可、不需確認，spec §3.1）
+
+    傳 None / 空白 → 清空（passenger_name=NULL）
+    沒變動 → fail，避免無意義 audit
+    """
+    before = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    if not before:
+        return ToolResult.fail(f"找不到班次 #{trip_id}")
+
+    new_name = (passenger_name.strip() if passenger_name else None) or None
+    old_name = before.get('passenger_name')
+    if old_name == new_name:
+        return ToolResult.fail("乘客名稱沒變動")
+
+    note = f"改乘客名: {old_name!r} → {new_name!r}"
+    new_mod = _bump_modification_reason(before.get('modification_reason'), note)
+
+    session.execute(text("""
+        UPDATE trips SET
+            passenger_name = :name,
+            modification_reason = :mod,
+            modified_by = :who,
+            modification_time = CURRENT_TIMESTAMP
+        WHERE trip_id = :id
+    """), {'name': new_name, 'mod': new_mod,
+           'who': user_name or user_id, 'id': trip_id})
+
+    after = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    write_audit(
+        session=session, user_id=user_id, user_name=user_name,
+        action_type='update_passenger_name', target_table='trips',
+        target_id=trip_id,
+        before_state=before, after_state=after,
+        changed_fields=diff_fields(before, after),
+        extra={'old_name': old_name, 'new_name': new_name},
+        via=via,
+    )
+    if auto_commit:
+        session.commit()
+    return query_trip_by_id(trip_id, session=session)
+
+
+@require_modifiable_window(allow_in_lock=True)
+def record_fare_current(
+    *,
+    session,
+    trip_id: int,
+    meter_fare: Optional[int] = None,
+    extra_fare: Optional[int] = None,
+    reason: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """
+    記錄現在態車資（trips 表）— spec §3.1
+
+    至少給 meter_fare 或 extra_fare 其中一個。沒變動 → fail。
+    鎖內可、不需確認。
+
+    ⚠️ 跟過去態車資（completed_trips 的 record_fare_completed）不同，
+    那是 v0.2 的工作。此函數只動 trips。
+    """
+    if meter_fare is None and extra_fare is None:
+        return ToolResult.fail("至少要給 meter_fare 或 extra_fare 其中一個")
+    if meter_fare is not None and not isinstance(meter_fare, int):
+        return ToolResult.fail("meter_fare 必須是整數")
+    if extra_fare is not None and not isinstance(extra_fare, int):
+        return ToolResult.fail("extra_fare 必須是整數")
+
+    before = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    if not before:
+        return ToolResult.fail(f"找不到班次 #{trip_id}")
+
+    # 動態 SET：只更新有給的欄位
+    sets = []
+    params: dict = {'id': trip_id}
+    diffs: list = []
+
+    if meter_fare is not None and before.get('meter_fare') != meter_fare:
+        sets.append('meter_fare = :meter_fare')
+        params['meter_fare'] = meter_fare
+        diffs.append(f"錶價 {before.get('meter_fare')}→{meter_fare}")
+
+    if extra_fare is not None and before.get('extra_fare') != extra_fare:
+        sets.append('extra_fare = :extra_fare')
+        params['extra_fare'] = extra_fare
+        diffs.append(f"加成 {before.get('extra_fare')}→{extra_fare}")
+
+    if not diffs:
+        return ToolResult.fail("車資沒變動")
+
+    note = "改車資: " + ", ".join(diffs)
+    if reason:
+        note += f" ({reason})"
+    new_mod = _bump_modification_reason(before.get('modification_reason'), note)
+
+    sets.extend([
+        'modification_reason = :mod',
+        'modified_by = :who',
+        'modification_time = CURRENT_TIMESTAMP',
+    ])
+    params['mod'] = new_mod
+    params['who'] = user_name or user_id
+
+    sql = f"UPDATE trips SET {', '.join(sets)} WHERE trip_id = :id"
+    session.execute(text(sql), params)
+
+    after = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    write_audit(
+        session=session, user_id=user_id, user_name=user_name,
+        action_type='record_fare_current', target_table='trips',
+        target_id=trip_id,
+        before_state=before, after_state=after,
+        changed_fields=diff_fields(before, after),
+        reason=reason,
+        extra={
+            'old_meter': before.get('meter_fare'),
+            'new_meter': meter_fare,
+            'old_extra': before.get('extra_fare'),
+            'new_extra': extra_fare,
+        },
+        via=via,
+    )
+    if auto_commit:
+        session.commit()
+    return query_trip_by_id(trip_id, session=session)
+
+
+# ============================================================
 # 創建（trips 增）— 取代沙盒 booking_create
 # ============================================================
 
