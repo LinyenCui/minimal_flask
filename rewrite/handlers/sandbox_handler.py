@@ -26,7 +26,14 @@ from rewrite.ai.skills.trip_query import build_trip_query_skill
 from rewrite.conversation_state import (
     set_state as _state_set,
     get_state as _state_get,
+    clear_state as _state_clear,
 )
+
+
+# 用戶主動結束對話的關鍵字
+_END_CONVERSATION_TEXTS = {
+    '結束', '結束對話', '退出', '退出對話', 'exit', 'quit', 'bye',
+}
 
 
 # Sandbox active state — rewrite agent 處理完訊息後設此 state，
@@ -109,7 +116,18 @@ def try_handle_sandbox(event) -> bool:
 
     short_uid = (user_id or 'anon')[:8]
 
-    # 0. Hard fall-through 關鍵字（rewrite 明確沒做的功能）
+    # 0. 用戶主動結束對話模式
+    if text in _END_CONVERSATION_TEXTS:
+        if user_id:
+            _state_clear(user_id)
+        reply_message(event.reply_token, {
+            'type': 'text',
+            'text': '👋 已結束對話模式',
+        })
+        logger.info(f"[rewrite sandbox] {short_uid} ended conversation by user")
+        return True
+
+    # 0b. Hard fall-through 關鍵字（rewrite 明確沒做的功能）
     if _should_hard_fallthrough(text):
         logger.info(
             f"[rewrite sandbox] {short_uid} text={text!r} → hard fall-through "
@@ -162,7 +180,11 @@ def try_handle_sandbox(event) -> bool:
         )
         return False  # error 也 fall-through legacy
 
-    # 3. reply
+    # 3. 給 reply 加「對話模式進行中」提示 + 結束按鈕
+    #    （只對 type=text 加，flex 訊息保留原本的 quickReply 不擠掉）
+    _decorate_with_conversation_hint(msg)
+
+    # 4. reply
     try:
         reply_message(event.reply_token, msg)
         logger.info(
@@ -172,7 +194,7 @@ def try_handle_sandbox(event) -> bool:
             f"[rewrite sandbox] {short_uid} reply failed: {e}", exc_info=True)
         return True  # 已執行 mutation／LLM call，不再 fall-through 避免重複
 
-    # 4. 設 sandbox-active state（下一句不需前綴會被攔截）
+    # 5. 設 sandbox-active state（下一句不需前綴會被攔截）
     #    + 存上一輪對話 context（供下一輪 classifier hint + agent prompt prefix）
     if user_id:
         # 抽 AI 的回覆當 last_ai_text（給下一輪 prompt prefix 看）
@@ -194,3 +216,41 @@ def try_handle_sandbox(event) -> bool:
             ttl_minutes=SANDBOX_ACTIVE_TTL_MINUTES,
         )
     return True
+
+
+def _decorate_with_conversation_hint(msg: dict) -> None:
+    """
+    給 reply 加「對話模式進行中」視覺提示（in-place）：
+      - text 訊息：append 提示文字 + quickReply [❌ 結束對話]
+      - flex 訊息：不動（避免擠掉原 quickReply 如 [註銷] [衝突] [請假]）
+
+    用戶可隨時打「結束」「結束對話」「退出」清掉 sandbox-active state。
+    """
+    if not isinstance(msg, dict):
+        return
+    if msg.get('type') != 'text':
+        return  # flex 訊息不處理
+
+    # append 進行中提示
+    original = msg.get('text', '')
+    if '對話模式' not in original:
+        msg['text'] = original.rstrip() + (
+            f"\n\n💬 對話模式進行中（{int(SANDBOX_ACTIVE_TTL_MINUTES * 60)}秒內回覆繼續）"
+        )
+
+    # 加 quickReply [❌ 結束對話]（若已有別的 quickReply 就 append）
+    qr = msg.setdefault('quickReply', {})
+    items = qr.setdefault('items', [])
+    has_end_btn = any(
+        i.get('action', {}).get('text') in _END_CONVERSATION_TEXTS
+        for i in items
+    )
+    if not has_end_btn:
+        items.append({
+            'type': 'action',
+            'action': {
+                'type': 'message',
+                'label': '❌ 結束對話',
+                'text': '結束對話',
+            },
+        })
