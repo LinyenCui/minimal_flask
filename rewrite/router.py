@@ -84,6 +84,7 @@ _LEAVE_ABORT_TEXTS = {'放棄操作', '放棄', '取消'}
 
 # Postback data regex
 _RE_PB_TRIP_DETAIL = re.compile(r'^trip_detail:(\d+)$')
+_RE_PB_CUSTOMER_EDIT = re.compile(r'^customer_edit:(\d+)$')
 
 
 def try_route(event) -> bool:
@@ -222,6 +223,29 @@ def try_route_postback(event) -> bool:
                 })
             except Exception:
                 pass
+            return True
+        finally:
+            session.close()
+
+    # customer_edit:N — 客戶詳情卡的「編輯」按鈕
+    # rewrite v0.1 暫不做 postback 編輯流程，提示用戶用自然語言走 sandbox
+    m = _RE_PB_CUSTOMER_EDIT.match(data)
+    if m:
+        cid = int(m.group(1))
+        session = Session()
+        try:
+            r = get_customer_by_id(cid, session=session, mask_id=True)
+            name = r.data.short_name or r.data.name if r.ok else f'#{cid}'
+            reply_message(event.reply_token, {
+                "type": "text",
+                "text": (
+                    f"💡 編輯客戶 #{cid} {name}\n\n"
+                    f"請用自然語言（沙盒）：\n"
+                    f"  !{name}改地址 XXX\n"
+                    f"  !{name}改名 XXX\n"
+                    f"  !{name}改類別 XXX"
+                ),
+            })
             return True
         finally:
             session.close()

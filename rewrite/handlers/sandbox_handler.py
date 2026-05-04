@@ -23,7 +23,10 @@ from rewrite.ai.skills.customer import build_customer_skill
 from rewrite.ai.skills.fixed_schedule import build_fixed_schedule_skill
 from rewrite.ai.skills.trip_mutation import build_trip_mutation_skill
 from rewrite.ai.skills.trip_query import build_trip_query_skill
-from rewrite.conversation_state import set_state as _state_set
+from rewrite.conversation_state import (
+    set_state as _state_set,
+    get_state as _state_get,
+)
 
 
 # Sandbox active state — rewrite agent 處理完訊息後設此 state，
@@ -114,9 +117,21 @@ def try_handle_sandbox(event) -> bool:
         )
         return False
 
-    # 1. 分類意圖
+    # 0.5 取上一輪 context（給 classifier hint + agent prompt prefix 用）
+    last_skill = None
+    last_user_text = None
+    last_ai_text = None
+    if user_id:
+        prev = _state_get(user_id)
+        if prev and prev.get('type') == SANDBOX_ACTIVE_STATE_TYPE:
+            payload = prev.get('payload') or {}
+            last_skill = payload.get('last_skill')
+            last_user_text = payload.get('last_user_text')
+            last_ai_text = payload.get('last_ai_text')
+
+    # 1. 分類意圖（帶 last_skill 當 hint，處理 ambiguous follow-up）
     try:
-        intent = classify(_llm, text)
+        intent = classify(_llm, text, last_skill=last_skill)
     except Exception as e:
         logger.error(f"[rewrite sandbox] classify failed for {short_uid}: {e}",
                      exc_info=True)
@@ -127,10 +142,19 @@ def try_handle_sandbox(event) -> bool:
             f"[rewrite sandbox] {short_uid} text={text!r} → {intent}, fall-through")
         return False
 
-    # 2. 跑對應 skill（含 multi-turn tool loop）
+    # 2. 跑對應 skill（含 multi-turn tool loop + 跨輪對話 context）
     try:
         agent = Agent(_llm, _skills[intent])
-        msg = agent.process(text, user_id)
+        # 把上一輪對話塞進 prompt，讓 AI 有上下文
+        text_for_agent = text
+        if last_user_text and last_ai_text and last_skill == intent:
+            text_for_agent = (
+                f"[上一輪對話]\n"
+                f"用戶說：{last_user_text}\n"
+                f"你回：{last_ai_text[:300]}\n"
+                f"[本輪用戶說]\n{text}"
+            )
+        msg = agent.process(text_for_agent, user_id)
     except Exception as e:
         logger.error(
             f"[rewrite sandbox] {short_uid} skill={intent} failed: {e}",
@@ -148,12 +172,25 @@ def try_handle_sandbox(event) -> bool:
             f"[rewrite sandbox] {short_uid} reply failed: {e}", exc_info=True)
         return True  # 已執行 mutation／LLM call，不再 fall-through 避免重複
 
-    # 4. 設 sandbox-active state，下一句不需前綴也會被攔截到 rewrite
+    # 4. 設 sandbox-active state（下一句不需前綴會被攔截）
+    #    + 存上一輪對話 context（供下一輪 classifier hint + agent prompt prefix）
     if user_id:
+        # 抽 AI 的回覆當 last_ai_text（給下一輪 prompt prefix 看）
+        ai_text_summary: str = ''
+        if isinstance(msg, dict):
+            mt = msg.get('type')
+            if mt == 'text':
+                ai_text_summary = msg.get('text', '')[:300]
+            elif mt == 'flex':
+                ai_text_summary = f"[flex] {msg.get('altText', '')}"
         _state_set(
             user_id,
             SANDBOX_ACTIVE_STATE_TYPE,
-            {'last_skill': intent},
+            {
+                'last_skill': intent,
+                'last_user_text': text[:300],
+                'last_ai_text': ai_text_summary,
+            },
             ttl_minutes=SANDBOX_ACTIVE_TTL_MINUTES,
         )
     return True
