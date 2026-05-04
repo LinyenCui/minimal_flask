@@ -20,30 +20,42 @@ _SYSTEM_PROMPT = """\
 你是意圖分類器。看用戶的訊息，回傳該交給哪個專業助手處理。
 
 可用助手：
-- trip_query：查班次（如「明天龍埔街的狀態」「今天診所班次」「待派班次」「班次詳情1077」）
-- trip_mutation：改班次（如「1077請假化療-30」「99502註銷」「指派司機533給1077」「改乘客名」「改車資」）
-- customer：客戶資料（如「查太子龍」「龍埔街是誰」「新增客戶」「太子龍改地址」「病歷層15」「病歷層分布」）
-- unknown：不屬以上（如閒聊、問機器人功能、固定班次、報表生成、預約叫車等）
+- trip_query：查現在態班次（trips 表）
+  例：「明天龍埔街的狀態」「今天診所班次」「待派班次」「班次詳情1077」
+- trip_mutation：改現在態班次
+  例：「1077請假化療-30」「99502註銷」「指派司機533給1077」「改乘客名」「改車資」
+- customer：客戶資料 CRUD
+  例：「查太子龍」「龍埔街是誰」「新增客戶」「太子龍改地址」「病歷層15」「病歷層分布」
+- fixed_schedule：未來態固定班次模板（每週重複）
+  例：「太子龍的固定班次」「固定班次21修改時間」「固定班次14請假」「恢復固定班次5」
+  ⚠️ 「匯入固定班次 本週」這種匯入動作 → unknown（rewrite 還沒做匯入）
+- unknown：不屬以上（如閒聊、機器人功能、報表生成、預約叫車、匯入固定班次等）
 
-📌 規則：
+📌 關鍵規則：
 - 只回一個詞，全部小寫，不加標點。
-- 「狀態」+ 客戶名 = trip_query（不是 mutation）
+- 用戶說「班次」+ 數字 = trips（trip_query / trip_mutation）
+- 用戶說「固定班次」+ 數字 = fixed_schedule
+- 「狀態」+ 客戶名 = trip_query
 - 創建/修改/刪除「客戶」資料 = customer
-- 「請假」「註銷」「衝突」「指派司機」=  trip_mutation
-- 「預約」「booking」「新增班次」= unknown（rewrite 還沒做這個）
-- 「固定班次」= unknown（rewrite 還沒做這個）
+- 「請假」要看 context：
+  * 「班次X請假」「乘客請假」 → trip_mutation
+  * 「固定班次X請假」「客戶長期請假」「客戶出國」 → fixed_schedule
+- 「匯入」「booking 預約」「報表」 → unknown
 
 範例：
-用戶：「明天龍埔街的狀態」 → trip_query
-用戶：「1077化療-30」 → trip_mutation
-用戶：「查太子龍」 → customer
-用戶：「!新增客戶 王小明」 → customer
-用戶：「!匯入固定班次 本週」 → unknown
-用戶：「你好嗎？」 → unknown
+「明天龍埔街的狀態」 → trip_query
+「1077化療-30」 → trip_mutation
+「查太子龍」 → customer
+「太子龍的固定班次」 → fixed_schedule
+「固定班次14設為請假」 → fixed_schedule
+「匯入固定班次 本週」 → unknown
+「你好嗎？」 → unknown
 """
 
 
-VALID_INTENTS: Set[str] = {'trip_query', 'trip_mutation', 'customer', 'unknown'}
+VALID_INTENTS: Set[str] = {
+    'trip_query', 'trip_mutation', 'customer', 'fixed_schedule', 'unknown',
+}
 
 
 def classify(llm: LLMClient, text: str) -> str:

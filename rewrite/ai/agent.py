@@ -25,6 +25,7 @@ from rewrite.ai.skill import Skill
 from rewrite.tools.base import ToolResult
 from rewrite.tools.trip import TripView
 from rewrite.tools.customer import CustomerView
+from rewrite.tools.fixed_schedule import FixedScheduleView
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +287,35 @@ class Agent:
             lines = ["📋 病歷層分布"]
             for d, n in data:
                 lines.append(f"  {d:2d} 日: {'█' * min(n, 20)} ({n})")
+            return {'type': 'text', 'text': '\n'.join(lines)}
+
+        # ----- FixedScheduleView -----
+        if isinstance(data, FixedScheduleView):
+            lines = [f"📅 固定班次 #{data.id}"]
+            lines.append(f"  路線：{data.short_route()}")
+            lines.append(f"  時間：{data.departure_time}")
+            lines.append(f"  方向：{data.direction or '—'}")
+            lines.append(f"  類別：{data.category or '—'}")
+            lines.append(f"  司機：{data.driver_id or '—'}")
+            lines.append(f"  狀態：{data.status_emoji} {data.status or '—'}")
+            if data.base_fare is not None:
+                lines.append(f"  基本車資：{data.base_fare} 元")
+            if data.surcharge is not None and data.surcharge != 0:
+                lines.append(f"  加成：{data.surcharge:+d} 元")
+            if data.note:
+                lines.append(f"  備註：{data.note}")
+            return {'type': 'text', 'text': '\n'.join(lines)}
+
+        if isinstance(data, list) and data and isinstance(data[0], FixedScheduleView):
+            lines = [f"📅 找到 {len(data)} 筆固定班次："]
+            for fs in data[:20]:
+                lines.append(
+                    f"  {fs.status_emoji} #{fs.id} {fs.departure_time} "
+                    f"{fs.short_route()} "
+                    f"({fs.direction or '—'}) 司機{fs.driver_id or '—'}"
+                )
+            if len(data) > 20:
+                lines.append(f"  …還有 {len(data) - 20} 筆")
             return {'type': 'text', 'text': '\n'.join(lines)}
 
         # ----- 空 list 或 None -----

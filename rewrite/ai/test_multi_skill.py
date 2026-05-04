@@ -39,6 +39,12 @@ cases = [
     ('病歷層 15', 'customer'),
     ('病歷層分布', 'customer'),
     ('刪除客戶測試', 'customer'),
+    # 固定班次
+    ('太子龍的固定班次', 'fixed_schedule'),
+    ('固定班次21修改時間到 10:15', 'fixed_schedule'),
+    ('固定班次14設為請假，出國，-50', 'fixed_schedule'),
+    ('恢復固定班次5', 'fixed_schedule'),
+    # unknown
     ('匯入固定班次 本週', 'unknown'),
     ('預約明天下午兩點', 'unknown'),
     ('生成週報表', 'unknown'),

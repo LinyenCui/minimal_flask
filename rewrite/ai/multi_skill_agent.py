@@ -32,8 +32,9 @@ _UNKNOWN_REPLY = (
     "目前我能處理：\n"
     "  • 班次查詢（如「明天龍埔街的狀態」「待派班次」）\n"
     "  • 班次修改（如「1077請假化療-30」「99502註銷」）\n"
-    "  • 客戶資料（如「查太子龍」「病歷層15」）\n\n"
-    "💡 其他功能（預約、固定班次、報表等）請用既有命令"
+    "  • 客戶資料（如「查太子龍」「病歷層15」）\n"
+    "  • 固定班次（如「太子龍的固定班次」「固定班次14請假」）\n\n"
+    "💡 其他功能（預約叫車、匯入固定班次、報表等）請用既有命令"
 )
 
 
@@ -78,6 +79,7 @@ def build_default_multi_skill_agent(llm: Optional[LLMClient] = None) -> MultiSki
     from rewrite.ai.skills.trip_query import build_trip_query_skill
     from rewrite.ai.skills.trip_mutation import build_trip_mutation_skill
     from rewrite.ai.skills.customer import build_customer_skill
+    from rewrite.ai.skills.fixed_schedule import build_fixed_schedule_skill
 
     return MultiSkillAgent(
         llm=llm or GeminiClient(),
@@ -85,5 +87,6 @@ def build_default_multi_skill_agent(llm: Optional[LLMClient] = None) -> MultiSki
             'trip_query': build_trip_query_skill(),
             'trip_mutation': build_trip_mutation_skill(),
             'customer': build_customer_skill(),
+            'fixed_schedule': build_fixed_schedule_skill(),
         },
     )
