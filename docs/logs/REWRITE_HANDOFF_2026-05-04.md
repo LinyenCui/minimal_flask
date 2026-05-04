@@ -207,6 +207,7 @@ rewrite/
 - **handoff 自我更新**：每次 session 收尾前 +5 行 commit log 跟業務邏輯
 
 ### 中期
+- **LIFF 表單建置**（用戶確認方向）：客戶/班次/門診記錄表等多場景受惠 — 詳見 §12
 - **Phase 6 e2e 測試**：spec §7，跑端到端模擬 LINE webhook
 - **過去態 completed_trips（v0.2）**：spec §11
 - **Phase 7 Render 切換**：spec §7，dev_line_channel 切到 Render，main 退役
@@ -287,3 +288,101 @@ git log -20 看最新狀態。
 
 *v4 建檔者：Claude，2026-05-04 對話接近 context 上限時整理*
 *下個 Claude：你看到的應該已經是被拷進新對話的純文字。先讀 §0 §1 §8 三節，再 git log，再開工。*
+
+---
+
+## 12. LIFF 表單建置規劃（用戶確認方向）
+
+### 12.1 為什麼要做
+
+對話式 AI（沙盒）+ Flex Message 對「欄位多」的場景吃緊：
+- 客戶資料 11 欄（name/short_name/address/category/phone/remarks/birthday/gender/national_id/medical_record_no/insurance_type）
+- 用戶用自然語言「!新增客戶...」很容易漏欄位、要 AI 回問多輪
+- LIFF 提供原生 form：dropdown / 日期選擇器 / 即時驗證 / 一次提交
+
+### 12.2 適用場景（用戶提的 + 將來會遇到的）
+
+| 場景 | 為什麼 LIFF 較合適 |
+|-----|-----------------|
+| 客戶 CRUD（新增 / 編輯）| 11 欄太多、AI 漏欄常見 |
+| 臨時班次新增（booking_create）| 日期 + 時間 + 起終點 + 司機 + 車資 ≥ 7 欄 + 可選欄位 |
+| 固定班次修改 | 同上，且有 dropdown（類別 / 方向 / 司機） |
+| **門診記錄表**（用戶將來要做）| 多欄醫療記錄資料、需結構化欄位 |
+| 報表參數選擇 | 日期區間選擇器 / 司機 multi-select / 類別 / 格式 |
+| 將來：車資修改、請假理由收集等 | 比 conversation state 多輪輸入 UX 好 |
+
+### 12.3 技術選型
+
+```
+LINE App
+  ├─ 用戶打「!新增客戶」
+  ├─ bot 回 Flex bubble 含 [📝 開填寫表單] 按鈕（URI action 指向 LIFF URL）
+  ├─ LIFF webview 開啟（LINE 內嵌瀏覽器）
+  │   ├─ HTML form：欄位 + dropdown + datepicker + validation
+  │   ├─ LIFF SDK 自動拿 LINE userId（liff.getProfile()）
+  │   └─ 用戶按 [送出] → JS POST 到後端
+  ├─ Flask /liff/customer/create
+  │   ├─ 驗證 LIFF idToken（liff.getIDToken）
+  │   ├─ 呼叫 rewrite/tools/customer.py:create_customer
+  │   └─ 回 JSON 結果
+  └─ liff.closeWindow() 或顯示成功 + push 訊息給 user
+```
+
+**選型**：
+- 前端：vanilla HTML/JS（簡單場景）or Vue（多場景時組件化）— 先 vanilla 看
+- 後端：Flask 加 `/liff/...` blueprint，**重用既有 atomic tools**（不重做業務邏輯）
+- 認證：LIFF idToken 驗證（保證請求來自 LINE 用戶）
+- 部署：HTTPS（Render 已有；dev 用 ngrok）
+
+### 12.4 實作 roadmap（建議分 3 個 Phase）
+
+**Phase A — 基礎建設**（半天）：
+1. LINE Developer Console 建立 LIFF App，拿 `LIFF_ID`（5 分鐘點擊）
+2. Flask 加 `modules/routes/liff.py` 或 `rewrite/handlers/liff/` blueprint
+3. 寫 LIFF auth 中間件：
+   - 驗 idToken
+   - 從 LINE 拿 userId
+   - 確保 user 有權限（同 LINE channel 的成員）
+4. 靜態檔目錄 `static/liff/` 放 HTML/JS/CSS
+
+**Phase B — 第一個表單：客戶新增/編輯**（半天-1 天）：
+1. `static/liff/customer_form.html` — name/short_name/address/category 下拉/phone/birthday/gender/national_id/medical_record_no/insurance_type
+2. 提交 POST `/liff/customer/create` 或 `/liff/customer/<id>/update`
+3. 後端 wrapper 呼叫 `rewrite.tools.customer.create_customer` / `update_customer`
+4. 回應後 `liff.closeWindow()` + LINE push 訊息「✅ 已新增客戶 #X」
+
+**Phase C — 其他場景按需擴**（每個場景半天-1 天）：
+- 臨時班次新增（重用 `rewrite.tools.trip.create_trip`）
+- 固定班次修改（重用 `rewrite.tools.fixed_schedule.update_fixed_schedule`）
+- 門診記錄表（**新領域，要先設計 DB schema**）
+- 報表參數選擇
+
+### 12.5 跟現有 rewrite 的整合
+
+LIFF **不取代** AI 沙盒，而是並存：
+- 簡單操作（查詢、單欄位 mutation、follow-up）→ AI 沙盒（`!XXX`）
+- 複雜表單（欄位多、需要結構化選項）→ LIFF
+
+入口：用戶在 LINE 打「!新增客戶」 → AI 看到「想新增客戶」 → reply 含 LIFF 按鈕的 Flex（取代當前的「請給簡稱地址類別」回問）
+
+### 12.6 不做的
+
+- ❌ Flex Message 假裝 form（LINE Flex 不支援真 input，硬做用按鈕 mock 體驗很差）
+- ❌ 完全用 LIFF 取代 AI 沙盒（簡單對話用 LIFF 太重）
+- ❌ 不要在 LIFF 裡重做業務邏輯 — 一律呼叫 atomic tools
+
+### 12.7 接手 Claude 啟動 LIFF 工作的步驟
+
+1. **跟用戶確認場景優先順序**：客戶？門診？班次？哪個先做？
+2. **跟用戶要 LINE Developer Console 帳號權限**或請用戶代建 LIFF App，拿 `LIFF_ID` + `LINE_LOGIN_CHANNEL_ID`（不是 messaging API channel ID）
+3. **環境變數加**：`LIFF_ID=...`、`LINE_LOGIN_CHANNEL_ID=...`（給 idToken 驗證用）
+4. **Phase A 先做**（建設） → Phase B（第一表單） → 用戶實機驗一輪
+5. **Phase C 按用戶優先級擴**
+
+### 12.8 給用戶的問題（接手後問）
+
+接手 Claude 第一輪該問用戶：
+- 「LIFF 第一個要做哪個 form？客戶 CRUD / 門診記錄表 / 班次新增 / ...」
+- 「LINE Developer Console 是你的還是另一個帳號？要不要我列建 LIFF App 的步驟給你？」
+- 「門診記錄表的欄位有哪些？這是新 DB schema，要先設計」
+- 「客戶 form 是新增 + 編輯都要、還是先做新增？」
