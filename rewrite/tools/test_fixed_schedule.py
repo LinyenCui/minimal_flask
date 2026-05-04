@@ -132,18 +132,23 @@ try:
     print(f'  ✅ {r.error}')
 
     # ============================================================
-    # T9: restore_fixed_schedule
+    # T9: restore_fixed_schedule（清 status + note + surcharge）
     # ============================================================
     banner('T9: restore_fixed_schedule(99702) → 從請假恢復')
+    # 確認 T7/T8 後 99702 是 status=請假, note=出國, surcharge=-50
     r = restore_fixed_schedule(
         session=session, schedule_id=99702,
         user_id='test', user_name='Linyan',
     )
     assert r.ok
     fs = r.data
-    assert fs.status == '準備'
-    assert fs.note is None
-    print(f'  ✅ #{fs.id} status={fs.status}, note 已清')
+    assert fs.status == '準備', f'status 應為 準備：{fs.status}'
+    assert fs.note is None, f'note 應清：{fs.note!r}'
+    assert fs.surcharge is None, (
+        f'surcharge 應清為 NULL（fixed_schedule 是模板層，殘留會跟到 trips）：'
+        f'{fs.surcharge}'
+    )
+    print(f'  ✅ #{fs.id} status={fs.status}, note 已清, surcharge 已清為 NULL')
 
     # ============================================================
     # T10: restore 已是準備 → 拒

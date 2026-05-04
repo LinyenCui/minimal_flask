@@ -337,7 +337,19 @@ def restore_fixed_schedule(
     via: str = 'unknown',
     auto_commit: bool = True,
 ) -> ToolResult:
-    """從請假/註銷恢復為「準備」狀態（清 note，surcharge 不動由用戶後續決定）"""
+    """
+    從請假/註銷恢復為「準備」狀態，並一併清 note + surcharge（NULL）。
+
+    為什麼一律清 surcharge：
+      fixed_schedules 是「每週匯入到 trips 的模板」，模板上的 surcharge
+      99% 是請假設的負加成（避免每週匯入後再一筆一筆請假）。模板恢復成
+      「準備」就代表客戶恢復服務，殘留 -50 會在下次匯入時跟著進 trips
+      變成 trip.extra_fare=-50 → 帳目錯。
+
+      用戶確認：固定班次 restore 一律清 surcharge=NULL。
+      （跟 trips.restore_to_ready 不同 — trips 的 extra_fare 可能是
+       等候費等正常加成，所以 trips 那邊只清負數、保留正數。）
+    """
     before = _fetch_schedule_snapshot(session=session, schedule_id=schedule_id)
     if not before:
         return ToolResult.fail(f"找不到固定班次 #{schedule_id}")
@@ -350,6 +362,7 @@ def restore_fixed_schedule(
             UPDATE fixed_schedules
             SET status = '準備',
                 note = NULL,
+                surcharge = NULL,
                 modified_by = :modified_by,
                 modification_time = CURRENT_TIMESTAMP
             WHERE id = :id
