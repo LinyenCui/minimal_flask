@@ -215,24 +215,27 @@ def try_handle_sandbox(event) -> bool:
         )
         return False  # error 也 fall-through legacy
 
-    # 3. 給 reply 加「對話模式進行中」提示 + 結束按鈕
-    #    （只對 type=text 加，flex 訊息保留原本的 quickReply 不擠掉）
-    _decorate_with_conversation_hint(msg)
+    # 3. 判斷 AI 是否在等 follow-up
+    #    是 → decorate（進度條 + 結束按鈕）+ 設 sandbox-active state（90 秒可不加 !）
+    #    否 → 不 decorate、不設 state（用戶下一句要 ! 前綴）
+    waiting_followup = _ai_is_waiting_for_followup(msg)
+    if waiting_followup:
+        _decorate_with_conversation_hint(msg)
 
     # 4. reply
     try:
         reply_message(event.reply_token, msg)
         logger.info(
-            f"[rewrite sandbox] {short_uid} text={text!r} skill={intent} ✅")
+            f"[rewrite sandbox] {short_uid} text={text!r} skill={intent} "
+            f"followup={waiting_followup} ✅")
     except Exception as e:
         logger.error(
             f"[rewrite sandbox] {short_uid} reply failed: {e}", exc_info=True)
         return True  # 已執行 mutation／LLM call，不再 fall-through 避免重複
 
-    # 5. 設 sandbox-active state（下一句不需前綴會被攔截）
-    #    + 存上一輪對話 context（供下一輪 classifier hint + agent prompt prefix）
-    if user_id:
-        # 抽 AI 的回覆當 last_ai_text（給下一輪 prompt prefix 看）
+    # 5. 只有 AI 在等 follow-up 時才設 sandbox-active state
+    #    （AI 完成單一動作就 reply 完了，不該再攔下一句訊息）
+    if user_id and waiting_followup:
         ai_text_summary: str = ''
         if isinstance(msg, dict):
             mt = msg.get('type')
@@ -253,10 +256,47 @@ def try_handle_sandbox(event) -> bool:
     return True
 
 
+# AI 是否在等 follow-up 的判斷字眼
+_FOLLOWUP_INDICATOR_KEYWORDS = (
+    '請問', '請提供', '請輸入', '請告訴', '請告知', '請說明', '請確認',
+    '請給', '請填', '請補充', '請選擇',
+    '是否確認', '是否要', '確定要', '確認要',
+    '需要', '想要', '想知道',
+)
+
+
+def _ai_is_waiting_for_followup(msg: dict) -> bool:
+    """
+    判斷 AI 的 reply 是否在等用戶 follow-up（如缺資訊、要確認等）
+
+    啟發式：
+    - 結尾有問號 (？/?)
+    - 含「請問」「請提供」「請輸入」「請確認」「是否要」等請求字眼
+    - flex 訊息（詳情卡 / 列表）視為「結果回覆」，不算 follow-up
+
+    用於決定是否：
+    1. 在 reply 加「對話模式進行中」提示 + 結束按鈕
+    2. 設 sandbox-active state（90 秒攔下一句免 ! 前綴）
+    """
+    if not isinstance(msg, dict) or msg.get('type') != 'text':
+        return False
+    text = (msg.get('text') or '').strip()
+    if not text:
+        return False
+    # 結尾問號 → 等回答
+    if text.rstrip().endswith(('？', '?')):
+        return True
+    # 含請求字眼
+    return any(kw in text for kw in _FOLLOWUP_INDICATOR_KEYWORDS)
+
+
 def _decorate_with_conversation_hint(msg: dict) -> None:
     """
     給 reply 加「對話模式進行中」視覺提示（in-place）：
-      - text 訊息：append 提示文字 + quickReply [❌ 結束對話]
+      - text 訊息：append 提示文字 + Quick Reply [❌ 結束對話]
+        ⚠️ legacy modules/utils/line_bot.py reply_message 對 type=text
+           不處理 quickReply 欄位，只認 type=quick_reply + quick_reply（snake_case）。
+           所以這裡把 type 改成 quick_reply（不是 LINE API 原生格式但 main 自定義）。
       - flex 訊息：不動（避免擠掉原 quickReply 如 [註銷] [衝突] [請假]）
 
     用戶可隨時打「結束」「結束對話」「退出」清掉 sandbox-active state。
@@ -270,12 +310,15 @@ def _decorate_with_conversation_hint(msg: dict) -> None:
     original = msg.get('text', '')
     if '對話模式' not in original:
         msg['text'] = original.rstrip() + (
-            f"\n\n💬 對話模式進行中（{int(SANDBOX_ACTIVE_TTL_MINUTES * 60)}秒內回覆繼續）"
+            f"\n\n💬 對話模式進行中（{int(SANDBOX_ACTIVE_TTL_MINUTES * 60)}秒內可不加 ! 前綴回覆）"
         )
 
-    # 加 quickReply [❌ 結束對話]（若已有別的 quickReply 就 append）
-    qr = msg.setdefault('quickReply', {})
-    items = qr.setdefault('items', [])
+    # 切到 type=quick_reply 讓 line_bot.py 的 quickReply 邏輯生效
+    msg['type'] = 'quick_reply'
+
+    # 收 quickReply / quick_reply 兩種 key 寫法都接
+    qr_dict = msg.pop('quickReply', None) or msg.get('quick_reply') or {}
+    items = list(qr_dict.get('items') or [])
     has_end_btn = any(
         i.get('action', {}).get('text') in _END_CONVERSATION_TEXTS
         for i in items
@@ -289,3 +332,4 @@ def _decorate_with_conversation_hint(msg: dict) -> None:
                 'text': '結束對話',
             },
         })
+    msg['quick_reply'] = {'items': items}
