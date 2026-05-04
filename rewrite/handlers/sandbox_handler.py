@@ -98,6 +98,41 @@ def _should_hard_fallthrough(text: str) -> bool:
     return any(kw in lower for kw in _HARD_FALLTHROUGH_KEYWORDS)
 
 
+# 已知的「快速命令」前綴（包含 rewrite + legacy 常用）
+# sandbox-active 期間，用戶若打這類命令 → 不該攔，讓他做別的事
+_QUICK_COMMAND_PREFIXES = (
+    # rewrite quick commands
+    '查客戶', '客戶詳情', '病歷層',
+    '查班次', '診所班次', '東洋班次',
+    '班次詳情', '待派班次',
+    '班次註銷', '班次衝突', '班次請假',
+    '班次恢復', '班次撤銷指派',
+    '批量請假',
+    # legacy 常用快速命令
+    '資料庫同步', '確認同步', '取消同步',
+    '生成日報表', '生成週報表', '生成周報表',
+    '匯入固定班次',
+    '修改狀態', '指派司機', '撤銷指派',
+    '記錄車資',
+    '幫助', 'help',
+)
+
+
+def looks_like_quick_command(text: str) -> bool:
+    """
+    訊息是否看起來像「快速命令」（不該被 sandbox-active state 攔下）
+
+    用戶在 sandbox-active 90 秒期間想做別的事（查班次、同步、生成報表等）
+    打這些命令時不該被當成 follow-up 攔到 rewrite agent — 讓它走原本的
+    快速命令路徑。
+    """
+    if not text:
+        return False
+    # 剝掉 / # 前綴（群組命令格式）
+    cleaned = text.strip().lstrip('/').lstrip('#').strip()
+    return cleaned.startswith(_QUICK_COMMAND_PREFIXES)
+
+
 def try_handle_sandbox(event) -> bool:
     """
     試處理 sandbox event；rewrite 不認識 → 回 False（讓 caller fall-through）

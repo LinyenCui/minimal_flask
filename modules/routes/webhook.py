@@ -92,13 +92,18 @@ def callback():
                          is_active_sandbox_conv = True
 
                     # 2b. Check rewrite v0.1 sandbox-active state（無前綴多輪續對話）
+                    # 但若訊息看起來是「快速命令」（查班次、資料庫同步等）→ 不攔，
+                    # 讓用戶在 90 秒對話 window 內仍能做別的事，不會被卡住
                     is_rewrite_sandbox_active = False
                     try:
                         from rewrite.conversation_state import get_state as _rew_state_get
-                        from rewrite.handlers.sandbox_handler import SANDBOX_ACTIVE_STATE_TYPE
+                        from rewrite.handlers.sandbox_handler import (
+                            SANDBOX_ACTIVE_STATE_TYPE, looks_like_quick_command,
+                        )
                         _rew_st = _rew_state_get(user_id) if user_id else None
                         if _rew_st and _rew_st.get('type') == SANDBOX_ACTIVE_STATE_TYPE:
-                            is_rewrite_sandbox_active = True
+                            if not looks_like_quick_command(original_message_text):
+                                is_rewrite_sandbox_active = True
                     except Exception:
                         pass
 
