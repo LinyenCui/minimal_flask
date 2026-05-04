@@ -237,20 +237,34 @@ def detect_sequence_conflicts(local_conn, render_conn):
     return conflicts
 
 def calibrate_sequence(conn, table_name, id_column='id'):
-    """校準指定資料表的序列計數器"""
-    sequence_name = f"{table_name}_{id_column}_seq"
+    """
+    校準指定資料表的序列計數器
+
+    用 pg_get_serial_sequence 動態查實際 sequence 名稱，避免 schema 變動
+    導致序列名稱不符標準格式（如 trips_trip_id_seq1 而非 trips_trip_id_seq）
+    時跳過校準的 bug — 這個 bug 之前讓 trips / completed_trips 的 sequence
+    永遠落後於 max(id)，造成 INSERT 撞 PK 而 trips 卡在「準備」狀態無法
+    流轉到 completed_trips。
+    """
     with conn.cursor() as cur:
         try:
+            cur.execute(
+                "SELECT pg_get_serial_sequence(%s, %s)",
+                (table_name, id_column),
+            )
+            sequence_name = cur.fetchone()[0]
+            if not sequence_name:
+                print(f"   - ⚠️ {table_name}.{id_column} 沒有對應 sequence，跳過")
+                return
             print(f"   - 正在校準序列 '{sequence_name}'...")
-            # 使用 COALESCE 處理空表的情況，如果沒有最大ID，就設為1
-            cur.execute(f"SELECT setval('{sequence_name}', COALESCE((SELECT MAX({id_column}) FROM {table_name}), 1));")
+            cur.execute(
+                f"SELECT setval('{sequence_name}', "
+                f"COALESCE((SELECT MAX({id_column}) FROM {table_name}), 1))"
+            )
             conn.commit()
-            print(f"   - ✅ 序列 '{sequence_name}' 已校準。")
-        except psycopg2.errors.UndefinedTable:
-             print(f"   - ⚠️ 找不到序列 '{sequence_name}'，跳過校準。可能是因為資料表沒有使用標準序列。")
-             conn.rollback()
+            print(f"   - ✅ 序列 '{sequence_name}' 已校準")
         except Exception as e:
-            print(f"❌ 校準序列 '{sequence_name}' 時發生錯誤: {e}", file=sys.stderr)
+            print(f"❌ 校準 {table_name}.{id_column} 序列時發生錯誤: {e}", file=sys.stderr)
             conn.rollback()
             raise
 
