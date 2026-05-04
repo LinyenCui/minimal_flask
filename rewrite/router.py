@@ -607,6 +607,7 @@ def _handle_trip_list(reply_token, session, kind: str, arg: str) -> bool:
         date_to=date_to,
         driver_id=driver_id,
         category=category,
+        exclude_status=['已完成'],  # 跟原系統一致：列表預設不顯示已完成（無意義資料）
     )
     if not r.ok:
         # 空也用 carousel 顯示（產生 empty bubble）
