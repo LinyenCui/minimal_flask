@@ -23,15 +23,20 @@ _TTL = timedelta(minutes=30)
 _LOCK = threading.Lock()
 
 
-def set_state(user_id: str, state_type: str, payload: dict) -> None:
-    """設定 user 的對話狀態（會覆蓋既有的）"""
+def set_state(user_id: str, state_type: str, payload: dict,
+              ttl_minutes: Optional[float] = None) -> None:
+    """設定 user 的對話狀態（會覆蓋既有的）
+
+    ttl_minutes：自訂 TTL（分鐘），None = 預設 30 分鐘
+    """
+    ttl = timedelta(minutes=ttl_minutes) if ttl_minutes is not None else _TTL
     with _LOCK:
         _STATES[user_id] = {
             'type': state_type,
             'payload': dict(payload),
-            'expires_at': datetime.now() + _TTL,
+            'expires_at': datetime.now() + ttl,
         }
-    logger.info(f"[conversation_state] set {user_id[:8]}.. type={state_type} payload={payload}")
+    logger.info(f"[conversation_state] set {user_id[:8]}.. type={state_type} ttl={ttl} payload={payload}")
 
 
 def get_state(user_id: str) -> Optional[dict]:

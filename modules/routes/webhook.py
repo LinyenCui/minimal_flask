@@ -91,6 +91,17 @@ def callback():
                     if active_conv and active_conv.conversation_type == 'customer_sandbox':
                          is_active_sandbox_conv = True
 
+                    # 2b. Check rewrite v0.1 sandbox-active state（無前綴多輪續對話）
+                    is_rewrite_sandbox_active = False
+                    try:
+                        from rewrite.conversation_state import get_state as _rew_state_get
+                        from rewrite.handlers.sandbox_handler import SANDBOX_ACTIVE_STATE_TYPE
+                        _rew_st = _rew_state_get(user_id) if user_id else None
+                        if _rew_st and _rew_st.get('type') == SANDBOX_ACTIVE_STATE_TYPE:
+                            is_rewrite_sandbox_active = True
+                    except Exception:
+                        pass
+
                     # --- DECISION TREE ---
                     if has_sandbox_prefix:
                         trigger_sandbox = True
@@ -99,6 +110,9 @@ def callback():
                         trigger_sandbox = True
                     # If user is in a multi-turn flow (e.g. filling missing info), intercept.
                     elif is_active_sandbox_conv:
+                        trigger_sandbox = True
+                    # rewrite v0.1: 用戶剛跟 rewrite agent 對話完，下一句不需前綴
+                    elif is_rewrite_sandbox_active:
                         trigger_sandbox = True
                     
                     # NOTE: We REVERTED the "Smart Router" (Prefix-less for private chat) 
