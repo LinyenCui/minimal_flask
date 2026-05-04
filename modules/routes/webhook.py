@@ -106,6 +106,25 @@ def callback():
                     # Safety first -> Require prefix or active context.
                         
                     if trigger_sandbox:
+                        # --- Rewrite v0.1 sandbox 早期攔截 ---
+                        # 已在 legacy state 的維持 legacy（保多輪流程連續）
+                        # 新進 sandbox 的先試 rewrite，unknown / error → fall-through
+                        in_legacy_state = (
+                            user_id in SANDBOX_STATES or is_active_sandbox_conv
+                        )
+                        if not in_legacy_state:
+                            try:
+                                from rewrite.handlers.sandbox_handler import try_handle_sandbox
+                                if try_handle_sandbox(event):
+                                    logger.info(f"Sandbox routed to Rewrite v0.1: {user_id}")
+                                    continue
+                            except Exception as _rew_err:
+                                logger.error(
+                                    f"Rewrite sandbox dispatch failed: {_rew_err}",
+                                    exc_info=True,
+                                )
+                        # --- END Rewrite sandbox ---
+
                         logger.info(f"Routing to Customers AI Sandbox: {user_id} (Prefix={has_sandbox_prefix}, Active={is_active_sandbox_conv})")
                         handle_customers_ai_message(event)
                         continue
