@@ -26,6 +26,7 @@ from rewrite.tools.base import ToolResult
 from rewrite.tools.trip import TripView
 from rewrite.tools.customer import CustomerView
 from rewrite.tools.fixed_schedule import FixedScheduleView
+from rewrite.tools.completed_trip import CompletedTripView
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,29 @@ def _to_json_safe(obj: Any) -> Any:
     if hasattr(obj, 'isoformat'):
         return obj.isoformat()
     return obj
+
+
+def _summarize_filters(args: dict) -> Optional[str]:
+    """args dict → 「4/26-5/2 東洋」這類副標。給 aggregate_card header 用"""
+    if not args:
+        return None
+    parts: list = []
+    df, dt = args.get('date_from'), args.get('date_to')
+    if df and dt:
+        df_s = df.isoformat() if hasattr(df, 'isoformat') else str(df)
+        dt_s = dt.isoformat() if hasattr(dt, 'isoformat') else str(dt)
+        parts.append(f"{df_s} ~ {dt_s}" if df_s != dt_s else df_s)
+    elif df:
+        parts.append(str(df))
+    if args.get('driver_id'):
+        parts.append(f"司機{args['driver_id']}")
+    if args.get('category'):
+        parts.append(args['category'])
+    if args.get('customer_short_name'):
+        parts.append(args['customer_short_name'])
+    if args.get('location'):
+        parts.append(f"~{args['location']}")
+    return ' · '.join(parts) if parts else None
 
 
 class Agent:
@@ -226,11 +250,46 @@ class Agent:
             render_customer_detail,
             render_birthday_layer_carousel,
         )
+        from rewrite.views.completed_trip_flex import (
+            render_completed_trip_detail,
+            render_completed_trip_list_carousel,
+            render_aggregate_card,
+        )
 
         if not result.ok:
             return {'type': 'text', 'text': f'❌ {result.error}'}
 
         data = result.data
+
+        # ----- CompletedTripView -----
+        if isinstance(data, CompletedTripView):
+            bubble = render_completed_trip_detail(data)
+            return {
+                'type': 'flex',
+                'altText': f'已完成班次 #{data.id}',
+                'contents': bubble,
+            }
+
+        if isinstance(data, list) and data and isinstance(data[0], CompletedTripView):
+            flex = render_completed_trip_list_carousel(
+                data,
+                truncated=bool(result.meta.get('truncated')),
+            )
+            return {
+                'type': 'flex',
+                'altText': f'查到 {len(data)} 筆已完成班次',
+                'contents': flex,
+            }
+
+        # ----- aggregate dict（aggregate_completed_trips 回傳）-----
+        if isinstance(data, dict) and 'sum_amount' in data:
+            filters_text = _summarize_filters(args)
+            bubble = render_aggregate_card(data, filters_text=filters_text)
+            return {
+                'type': 'flex',
+                'altText': f'金額統計 {data.get("sum_amount", 0):,} 元',
+                'contents': bubble,
+            }
 
         # ----- TripView -----
         if isinstance(data, TripView):

@@ -19,6 +19,7 @@ from modules.utils.line_bot import reply_message
 from rewrite.ai.agent import Agent
 from rewrite.ai.client import GeminiClient
 from rewrite.ai.intent import classify
+from rewrite.ai.skills.completed_trip import build_completed_trip_skill
 from rewrite.ai.skills.customer import build_customer_skill
 from rewrite.ai.skills.fixed_schedule import build_fixed_schedule_skill
 from rewrite.ai.skills.trip_mutation import build_trip_mutation_skill
@@ -94,6 +95,7 @@ def _init():
         _skills = {
             'trip_query': build_trip_query_skill(),
             'trip_mutation': build_trip_mutation_skill(),
+            'completed_trip': build_completed_trip_skill(),
             'customer': build_customer_skill(),
             'fixed_schedule': build_fixed_schedule_skill(),
         }

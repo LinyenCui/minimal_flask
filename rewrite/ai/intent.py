@@ -24,6 +24,9 @@ _SYSTEM_PROMPT = """\
   例：「明天龍埔街的狀態」「今天診所班次」「待派班次」「班次詳情1077」
 - trip_mutation：改現在態班次
   例：「1077請假化療-30」「99502註銷」「指派司機533給1077」「改乘客名」「改車資」
+- completed_trip：查過去態已完成班次（completed_trips 表）+ 金額統計
+  例：「查已完成 昨天」「4/26-5/2 東洋班次加總」「查看 820」「司機5386本月車資總和」
+       「昨天診所班次」「上週司機533收入」「7月東洋總計」
 - customer：客戶資料 CRUD
   例：「查太子龍」「龍埔街是誰」「新增客戶」「太子龍改地址」「病歷層15」「病歷層分布」
 - fixed_schedule：未來態固定班次模板（每週重複）
@@ -41,6 +44,11 @@ _SYSTEM_PROMPT = """\
   * 「班次X請假」「乘客請假」 → trip_mutation
   * 「固定班次X請假」「客戶長期請假」「客戶出國」 → fixed_schedule
 - 「匯入」「booking 預約」「報表」 → unknown
+- 過去態 vs 現在態的判定（**重要**）：
+  * 含「已完成」「查已完成」「查看 N」「加總」「統計金額」「車資總和」「收入」 → completed_trip
+  * 純過去日期（昨天/前天/上週/上個月/具體日期早於今天） + 班次/金額查詢 → completed_trip
+  * 「今天」「明天」「下週」「待派」「班次詳情 N」 → trip_query（除非明示「已完成」）
+  * 「修改 #N 金額」「記錄車資」「修改類別」 → 暫歸 trip_mutation（過去態 mutation Tier 2 未做）
 
 範例：
 「明天龍埔街的狀態」 → trip_query
@@ -50,11 +58,16 @@ _SYSTEM_PROMPT = """\
 「固定班次14設為請假」 → fixed_schedule
 「匯入固定班次 本週」 → unknown
 「你好嗎？」 → unknown
+「查已完成 昨天」 → completed_trip
+「4/26-5/2 東洋班次加總」 → completed_trip
+「查看 820」 → completed_trip
+「上週司機533收入」 → completed_trip
 """
 
 
 VALID_INTENTS: Set[str] = {
-    'trip_query', 'trip_mutation', 'customer', 'fixed_schedule', 'unknown',
+    'trip_query', 'trip_mutation', 'completed_trip',
+    'customer', 'fixed_schedule', 'unknown',
 }
 
 

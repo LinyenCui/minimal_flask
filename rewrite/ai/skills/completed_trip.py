@@ -1,0 +1,176 @@
+"""
+completed_trip_skill — 過去態（completed_trips）查詢 + 統計
+
+包：3 個 query 工具的 schema + 領域 system prompt。
+
+不含 mutation — 純查詢。Mutation（記錄車資、修改類別）走 trip_mutation_skill 將來補。
+
+Trigger 條件（intent classifier 已篩過）：
+  - 含「已完成」/「查已完成」/「查看 N」關鍵字
+  - 純過去日期（例「昨天」「上週」「4/21」相對 today）
+  - 含「加總」「統計金額」（aggregate mode）
+"""
+from datetime import date
+
+from rewrite.ai.skill import Skill
+from rewrite.tools.completed_trip import (
+    query_completed_trips,
+    query_completed_trip_by_id,
+    aggregate_completed_trips,
+)
+
+
+def _system_prompt() -> str:
+    today = date.today()
+    weekdays = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
+    return f"""\
+你是「過去態 completed_trips」助手 — 已完成班次的查詢與金額統計。
+
+🏭 三時間態世界觀：
+- 過去態 completed_trips：已執行完的班次 ← 你只能查這個
+- 現在態 trips：生產線上的班次（含今天 + 已匯入未來）（不歸你管）
+- 未來態 fixed_schedules：模板（不歸你管）
+
+📅 時間參考：
+- 今天 = {today.isoformat()} ({weekdays[today.weekday()]})
+- 「昨天」「前天」「上週」「上個月」「3天前」等都要轉成 YYYY-MM-DD
+- 「7月」這類沒明確年份的，預設今年 ({today.year})
+
+🛠️ 工具選擇：
+- 用戶給「completed_trip_id / 查看 820 / #820」 → query_completed_trip_by_id
+- 用戶問「加總/統計金額/總計多少」 → aggregate_completed_trips
+- 其他條件查詢（日期/司機/類別/客戶/地點）→ query_completed_trips
+
+📌 參數提示（**很重要：分清 category vs location**）：
+- **category**：班次的「業務類別」整批分類，目前只有「診所」「東洋」「臨時」幾個固定值
+  - 觸發：「診所班次」「東洋班次」「診所總計」「東洋加總」「診所類別」這類「類別+班次/類別+總計」組合
+- **location / start_location / end_location**：地點欄位的字串模糊比對（ILIKE）
+  - 觸發：「從 X 出發」「到 X」「經過 X」「跟 X 有關」這類**動詞**句
+  - 「從 X 出發」/「X 起點」 → 用 `start_location='X'`
+  - 「到 X」/「X 終點」 → 用 `end_location='X'`
+  - 「經過 X」/「跟 X 有關」 → 用 `location='X'`（任一欄）
+- 中文歧義字（**特別注意**）：
+  - 「診所」「東洋」既是 category 名也可能是地點關鍵字
+  - 「診所班次」/「東洋班次」 → category（類別+「班次」是固定詞）
+  - 「**從**診所出發」/「**到**診所」/「從**東洋後門**出發」 → start_location/end_location（看動詞）
+  - 「跟診所相關」 → location（萬用比對）
+- customer_short_name：客戶簡稱完整且確定（如「龍埔街」「太子龍」），exact match 起/途/終
+- driver_id：司機編號（純整數，例 5386, 533）
+- has_fare=False：「未記錄車資的班次」這類查詢
+
+⚠️ 規則：
+- ID 區別：trips.trip_id 跟 completed_trips.id **不一樣**。本 skill 的 ID 是 completed_trips.id
+- 過去態都已完成，**沒有 status filter**
+- 結果太多（meta.truncated=True / 上限警示）→ 建議用戶縮日期或加 filter，或改用「加總」
+- 完成查詢直接回報結果，**不主動追問下一步**、不說「請問還想看什麼」這類客套句
+"""
+
+
+# ============================================================
+# Tool schemas（給 Gemini FunctionDeclaration 用）
+# ============================================================
+
+QUERY_COMPLETED_TRIPS_SCHEMA = {
+    'description': (
+        "Query completed_trips (past tense). Use for date/driver/category/customer/location list queries. "
+        "Default for 「查已完成」「昨天班次」etc."
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'date_from': {'type': 'string', 'description': "Start date YYYY-MM-DD"},
+            'date_to': {'type': 'string', 'description': "End date YYYY-MM-DD (omit if single day)"},
+            'driver_id': {'type': 'integer', 'description': "Driver ID (e.g. 5386, 533)"},
+            'category': {
+                'type': 'string',
+                'description': (
+                    "業務類別 enum：『診所』『東洋』『臨時』之一。"
+                    "**只在用戶明說『診所班次』『東洋班次』『X類別』時才填**。"
+                    "若用戶說『從診所出發』『到東洋』這類動詞句，**不要**填 category，"
+                    "改用 start_location/end_location"
+                ),
+            },
+            'customer_short_name': {
+                'type': 'string',
+                'description': "客戶簡稱完整（exact，比對起/途/終任一）；不確定就用 location",
+            },
+            'location': {
+                'type': 'string',
+                'description': (
+                    "萬用地點模糊比對（ILIKE 任一 start/via/end）。"
+                    "用於『經過 X』『跟 X 有關』。「從 X 出發/到 X」要用 start_location/end_location"
+                ),
+            },
+            'start_location': {
+                'type': 'string',
+                'description': "起點模糊比對（ILIKE start_point）。「從 X 出發」「X 起點」用這個",
+            },
+            'end_location': {
+                'type': 'string',
+                'description': "終點模糊比對（ILIKE end_point）。「到 X」「X 結束」用這個",
+            },
+            'has_fare': {
+                'type': 'boolean',
+                'description': "True=已記錄車資，False=未記錄。「未記錄車資」傳 False",
+            },
+            'limit': {'type': 'integer', 'description': "Max rows，預設 80"},
+        },
+    },
+}
+
+QUERY_COMPLETED_TRIP_BY_ID_SCHEMA = {
+    'description': (
+        "Query single completed trip by completed_trip_id. "
+        "Use when user says「查看 820」「#820」「明細 820」etc."
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'completed_trip_id': {
+                'type': 'integer',
+                'description': "completed_trips.id（不是 trips.trip_id）",
+            },
+        },
+        'required': ['completed_trip_id'],
+    },
+}
+
+AGGREGATE_COMPLETED_TRIPS_SCHEMA = {
+    'description': (
+        "Aggregate completed_trips fares (sum/count). "
+        "Use when user wants total amount over a range — 「加總」「統計金額」「總計」「本月共多少」."
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'date_from': {'type': 'string', 'description': "Start date YYYY-MM-DD"},
+            'date_to': {'type': 'string', 'description': "End date YYYY-MM-DD"},
+            'driver_id': {'type': 'integer', 'description': "Driver ID"},
+            'category': {
+                'type': 'string',
+                'description': (
+                    "業務類別『診所』『東洋』『臨時』之一。"
+                    "只在『診所總計』『東洋加總』時填；"
+                    "『從X出發的金額』要用 start_location"
+                ),
+            },
+            'customer_short_name': {'type': 'string'},
+            'location': {'type': 'string', 'description': "萬用地點模糊（任一欄）"},
+            'start_location': {'type': 'string', 'description': "起點模糊比對"},
+            'end_location': {'type': 'string', 'description': "終點模糊比對"},
+        },
+        'required': ['date_from', 'date_to'],
+    },
+}
+
+
+def build_completed_trip_skill() -> Skill:
+    return Skill(
+        name='completed_trip',
+        system_prompt=_system_prompt(),
+        tools=[
+            (query_completed_trips, QUERY_COMPLETED_TRIPS_SCHEMA),
+            (query_completed_trip_by_id, QUERY_COMPLETED_TRIP_BY_ID_SCHEMA),
+            (aggregate_completed_trips, AGGREGATE_COMPLETED_TRIPS_SCHEMA),
+        ],
+    )
