@@ -80,11 +80,12 @@ def render_trip_detail(t: TripView) -> dict:
     body.append(_row("日期", _format_date_with_weekday(t.date)))
     body.append(_row("時間", str(t.time)[:5] if t.time else '—'))
 
-    # 路線
-    body.append(_row("起點", t.start_point or '—'))
-    if t.via_point:
-        body.append(_row("途經", t.via_point))
-    body.append(_row("終點", t.end_point or '—'))
+    # 路線（temp 班次用 custom_*，避開「臨時地點」placeholder）
+    sp, vp, ep = t.display_route()
+    body.append(_row("起點", sp or '—'))
+    if vp:
+        body.append(_row("途經", vp))
+    body.append(_row("終點", ep or '—'))
 
     body.append(_separator())
 
@@ -305,7 +306,8 @@ def _trip_row(t: TripView) -> dict:
     """Carousel 內一行班次（可 tap）"""
     time_text = str(t.time)[:5] if t.time else '—:—'
     driver_text = f"🚗{t.driver_id}" if t.driver_id else "🚗?"
-    route_text = f"{t.start_point or '?'}→{t.end_point or '?'}"
+    sp, _, ep = t.display_route()
+    route_text = f"{sp or '?'}→{ep or '?'}"
     color = STATUS_COLOR.get(t.display_status, BLACK)
 
     return {

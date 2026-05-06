@@ -69,6 +69,40 @@ def _serve_form(customer_id: int | None):
     )
 
 
+def _push_customer_to_user(user_id: str | None, view, action_label: str) -> None:
+    """存完 push 一則 text + 客戶詳情 Flex 給用戶（1-on-1 with bot）。
+
+    失敗只 log warning，不 raise — push 不該擋住 LIFF 回應。
+    """
+    if not user_id:
+        return
+    try:
+        from linebot.v3.messaging import (
+            FlexContainer,
+            FlexMessage,
+            PushMessageRequest,
+            TextMessage,
+        )
+        from modules.utils.line_bot import get_line_bot_api
+        from rewrite.views.customer_flex import render_customer_detail
+
+        api = get_line_bot_api()
+        display = view.short_name or view.name or f'#{view.id}'
+        text_msg = TextMessage(text=f"✅ 已{action_label}客戶 #{view.id} {display}")
+        flex_dict = render_customer_detail(view)
+        flex_msg = FlexMessage(
+            alt_text=f"客戶詳情 #{view.id}",
+            contents=FlexContainer.from_dict(flex_dict),
+        )
+        api.push_message(PushMessageRequest(
+            to=user_id,
+            messages=[text_msg, flex_msg],
+        ))
+        logger.info(f"[LIFF] pushed customer #{view.id} ({action_label}) to {user_id[:8]}")
+    except Exception as e:
+        logger.warning(f"[LIFF] push customer detail failed: {e}")
+
+
 # ---------- HTML 殼 ----------
 
 @liff_bp.route('/customer/form', methods=['GET'])
@@ -122,6 +156,7 @@ def customer_create():
 
     customer_data = _customer_to_jsonable(result.data)
     logger.info(f"[LIFF] customer #{customer_data.get('id')} created by {request.line_user_id}")
+    _push_customer_to_user(request.line_user_id, result.data, '新增')
     return jsonify({'ok': True, 'customer': customer_data}), 201
 
 
@@ -152,4 +187,5 @@ def customer_update(customer_id):
 
     customer_data = _customer_to_jsonable(result.data)
     logger.info(f"[LIFF] customer #{customer_id} updated by {request.line_user_id}")
+    _push_customer_to_user(request.line_user_id, result.data, '更新')
     return jsonify({'ok': True, 'customer': customer_data})

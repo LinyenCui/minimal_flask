@@ -11,8 +11,19 @@
   - 結合計算欄位（病歷層、年齡）強化視覺辨識
 """
 
+import os
 from typing import List, Optional
 from rewrite.tools.customer import CustomerView
+
+
+def _liff_url(customer_id: Optional[int] = None) -> str:
+    """組 LIFF URL，帶 customer_id 就是編輯模式。
+
+    讀 LIFF_ID 在 call 時取（不是 import 時），方便 .env 重載 / 測試替換。
+    """
+    liff_id = os.environ.get('LIFF_ID', '')
+    base = f"https://liff.line.me/{liff_id}"
+    return f"{base}?customer_id={customer_id}" if customer_id else base
 
 
 # ============================================================
@@ -87,39 +98,38 @@ def render_customer_detail(c: CustomerView) -> dict:
     # 簡稱
     body_contents.append(_row("簡稱", c.short_name or '—'))
 
-    # 生日 + 病歷層 (高亮)
+    # 醫療資料區塊（門診客戶才有；診所/東洋 一般接送客戶通常空）
+    # 全空就跳過整段（含 separator）
+    medical_rows: List[dict] = []
     if c.birthday:
-        body_contents.append(_row(
+        medical_rows.append(_row(
             "🎂 生日", _format_birthday(c),
             value_color=PRIMARY, value_weight="bold"
         ))
-        # 病歷層獨立一行強調
-        body_contents.append(_row(
+        medical_rows.append(_row(
             "📋 病歷層", f"{c.birthday_day} 日",
             value_color=ACCENT, value_weight="bold"
         ))
-    else:
-        body_contents.append(_row(
-            "🎂 生日", "未填", value_color=MUTED
+    if c.insurance_type:
+        medical_rows.append(_row("健保", c.insurance_type))
+    if c.medical_record_no:
+        medical_rows.append(_row("病歷號", c.medical_record_no))
+    if c.national_id:
+        nid_label = "身分證(遮罩)" if c.is_masked else "身分證"
+        medical_rows.append(_row(
+            nid_label, c.national_id,
+            value_color=MUTED if c.is_masked else BLACK
         ))
+    if medical_rows:
+        body_contents.append(_separator())
+        body_contents.extend(medical_rows)
 
     body_contents.append(_separator())
 
-    # 業務資料
-    body_contents.append(_row("類別", c.category or '—'))
-    body_contents.append(_row("健保", c.insurance_type or '—'))
-    body_contents.append(_row("病歷號", c.medical_record_no or '—'))
+    # 類別 + 聯絡資料
+    if c.category:
+        body_contents.append(_row("類別", c.category))
 
-    # 身分證
-    nid_label = "身分證(遮罩)" if c.is_masked else "身分證"
-    body_contents.append(_row(
-        nid_label, c.national_id or '—',
-        value_color=MUTED if c.is_masked else BLACK
-    ))
-
-    body_contents.append(_separator())
-
-    # 聯絡資料
     addr = c.address or '—'
     body_contents.append(_row(
         "地址", addr,
@@ -166,10 +176,9 @@ def render_customer_detail(c: CustomerView) -> dict:
         "height": "sm",
         "color": PRIMARY,
         "action": {
-            "type": "postback",
+            "type": "uri",
             "label": "編輯",
-            "data": f"customer_edit:{c.id}",
-            "displayText": f"編輯客戶 #{c.id}",
+            "uri": _liff_url(c.id),
         }
     })
 
@@ -201,6 +210,58 @@ def render_customer_detail(c: CustomerView) -> dict:
             "spacing": "sm",
             "contents": footer_buttons,
         }
+    }
+
+
+# ============================================================
+# 1b. 新增客戶入口（!新增客戶 → 開 LIFF 表單）
+# ============================================================
+
+def render_new_customer_entry() -> dict:
+    """!新增客戶 觸發的 Flex：點按鈕開 LIFF 新增表單"""
+    return {
+        "type": "bubble",
+        "size": "kilo",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": PRIMARY,
+            "paddingAll": "md",
+            "contents": [{
+                "type": "text",
+                "text": "🪪 新增客戶",
+                "weight": "bold",
+                "size": "lg",
+                "color": "#ffffff",
+            }],
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "sm",
+            "contents": [{
+                "type": "text",
+                "text": "點下方按鈕開填寫表單",
+                "size": "sm",
+                "color": MUTED,
+                "wrap": True,
+            }],
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [{
+                "type": "button",
+                "style": "primary",
+                "height": "sm",
+                "color": PRIMARY,
+                "action": {
+                    "type": "uri",
+                    "label": "📝 開填寫表單",
+                    "uri": _liff_url(),
+                },
+            }],
+        },
     }
 
 

@@ -46,6 +46,8 @@ _SYSTEM_PROMPT = """\
 3. 修改前可先 query 確認班次內容
 4. 不要混淆 trips 和 fixed_schedules — 用戶說「班次 1077 請假」是 trips，
    說「固定班次 21 請假」才是 fixed_schedules
+5. 完成單一操作後直接回報結果，**不主動追問下一步**、不說「請問您需要什麼協助？」
+   這類客套句 — 用戶下一輪自然會打字。
 
 📝 用詞：
 - 「下週起暫停」「暫時不來」「長期不來」 → apply_fixed_schedule_leave

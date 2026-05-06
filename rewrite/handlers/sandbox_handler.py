@@ -35,6 +35,40 @@ _END_CONVERSATION_TEXTS = {
     '結束', '結束對話', '退出', '退出對話', 'exit', 'quit', 'bye',
 }
 
+# 觸發 LIFF 新增客戶表單入口（純無參數，AI 自然語言路徑不受影響）
+_NEW_CUSTOMER_LIFF_TRIGGERS = {
+    '新增客戶', '加客戶', '建檔', '新增客戶 表單', '新增客戶表單',
+}
+
+# 短 follow-up 詞：sandbox-active 狀態下這類訊息 classifier 常判 unknown，
+# 但其實是上一輪 AI 問題的回答（確認/拒絕/補資訊）→ 直接帶 last_skill 走
+_SHORT_FOLLOWUP_TOKENS = {
+    '是', '否', '對', '不', '要', '不要', '可以', '不可以',
+    '確認', '確定', '取消', '好', '好的', '繼續',
+    'y', 'n', 'yes', 'no', 'ok', 'cancel', 'confirm',
+}
+
+
+def _is_short_followup(text: str) -> bool:
+    """判斷是否為短 follow-up 回覆（確認 / 補資訊 / 選編號）
+
+    用於 sandbox-active state 下 bypass classifier — 因為 classifier 對
+    這類短訊息常判 unknown 導致 fall-through 到 legacy，破壞對話連續性。
+    """
+    s = (text or '').strip()
+    if not s:
+        return False
+    if s.lower() in _SHORT_FOLLOWUP_TOKENS:
+        return True
+    # 純數字 / 加減數字（補加成 -50、選編號 1）
+    cleaned = s.replace('-', '').replace('+', '').replace('.', '')
+    if cleaned.isdigit():
+        return True
+    # 短訊息（≤4 chars）多半是補資訊型 follow-up
+    if len(s) <= 4:
+        return True
+    return False
+
 
 # Sandbox active state — rewrite agent 處理完訊息後設此 state，
 # webhook 看到此 state 的用戶下一句訊息**不需 ! 前綴**也會被攔截，
@@ -170,10 +204,27 @@ def try_handle_sandbox(event) -> bool:
         )
         return False
 
+    # 0c. !新增客戶（無參數）→ 回 LIFF 表單入口 Flex（點按鈕開 LIFF webview）
+    #     有參數時繼續走 AI（自然語言新增 — 既有行為）
+    if text in _NEW_CUSTOMER_LIFF_TRIGGERS:
+        from rewrite.views.customer_flex import render_new_customer_entry
+        bubble = render_new_customer_entry()
+        reply_message(event.reply_token, {
+            'type': 'flex',
+            'altText': '新增客戶 — 點按鈕開表單',
+            'contents': bubble,
+        })
+        logger.info(f"[rewrite sandbox] {short_uid} → LIFF new-customer Flex")
+        return True
+
     # 0.5 取上一輪 context（給 classifier hint + agent prompt prefix 用）
+    #     history 是跨輪累積（含本輪前的 user/ai 對），讓 AI 看到完整脈絡
+    #     例：「!固定班次29請假」→「原因？」→「出國」→「加成？」→「-50」
+    #         turn 3 必須看得到 turn 1 的 schedule_id=29
     last_skill = None
     last_user_text = None
     last_ai_text = None
+    history: list = []
     if user_id:
         prev = _state_get(user_id)
         if prev and prev.get('type') == SANDBOX_ACTIVE_STATE_TYPE:
@@ -181,32 +232,50 @@ def try_handle_sandbox(event) -> bool:
             last_skill = payload.get('last_skill')
             last_user_text = payload.get('last_user_text')
             last_ai_text = payload.get('last_ai_text')
+            history = payload.get('history') or []
 
-    # 1. 分類意圖（帶 last_skill 當 hint，處理 ambiguous follow-up）
-    try:
-        intent = classify(_llm, text, last_skill=last_skill)
-    except Exception as e:
-        logger.error(f"[rewrite sandbox] classify failed for {short_uid}: {e}",
-                     exc_info=True)
-        return False
-
-    if intent == 'unknown' or intent not in _skills:
+    # 1. 分類意圖
+    #    1a. sandbox-active + 短 follow-up → 直接用 last_skill，bypass classifier
+    #        （classifier 對「是」「確認」「14」常判 unknown，會破壞對話連續）
+    if last_skill and last_skill in _skills and _is_short_followup(text):
+        intent = last_skill
         logger.info(
-            f"[rewrite sandbox] {short_uid} text={text!r} → {intent}, fall-through")
-        return False
+            f"[rewrite sandbox] {short_uid} short follow-up text={text!r} → "
+            f"bypass classifier, use last_skill={intent}")
+    else:
+        try:
+            intent = classify(_llm, text, last_skill=last_skill)
+        except Exception as e:
+            logger.error(f"[rewrite sandbox] classify failed for {short_uid}: {e}",
+                         exc_info=True)
+            return False
+
+        if intent == 'unknown' or intent not in _skills:
+            logger.info(
+                f"[rewrite sandbox] {short_uid} text={text!r} → {intent}, "
+                f"fall-through")
+            return False
 
     # 2. 跑對應 skill（含 multi-turn tool loop + 跨輪對話 context）
     try:
         agent = Agent(_llm, _skills[intent])
-        # 把上一輪對話塞進 prompt，讓 AI 有上下文
+        # 把跨輪對話塞進 prompt，讓 AI 看到完整脈絡（含 turn 1 的 schedule_id 等）
         text_for_agent = text
-        if last_user_text and last_ai_text and last_skill == intent:
-            text_for_agent = (
-                f"[上一輪對話]\n"
-                f"用戶說：{last_user_text}\n"
-                f"你回：{last_ai_text[:300]}\n"
-                f"[本輪用戶說]\n{text}"
-            )
+        if history and last_skill == intent:
+            lines = []
+            for h in history:
+                u = (h.get('user') or '').strip()
+                a = (h.get('ai') or '').strip()
+                if u:
+                    lines.append(f"用戶：{u}")
+                if a:
+                    lines.append(f"你：{a[:200]}")
+            if lines:
+                text_for_agent = (
+                    "[最近對話歷程 — 跨多輪 follow-up]\n"
+                    + "\n".join(lines)
+                    + f"\n[本輪用戶說]\n{text}"
+                )
         msg = agent.process(text_for_agent, user_id)
     except Exception as e:
         logger.error(
@@ -239,10 +308,19 @@ def try_handle_sandbox(event) -> bool:
         ai_text_summary: str = ''
         if isinstance(msg, dict):
             mt = msg.get('type')
-            if mt == 'text':
-                ai_text_summary = msg.get('text', '')[:300]
+            # decoration 會把 type 從 text 改成 quick_reply，兩個都認
+            if mt in ('text', 'quick_reply'):
+                ai_text_summary = (msg.get('text') or '')[:300]
             elif mt == 'flex':
                 ai_text_summary = f"[flex] {msg.get('altText', '')}"
+
+        # 累積 history：本輪 user + ai 追加進去，但不同 skill 切換時清掉重來
+        if last_skill != intent:
+            history = []
+        history = history + [{'user': text[:300], 'ai': ai_text_summary}]
+        # cap 最近 5 輪，避免 prompt 撐爆
+        history = history[-5:]
+
         _state_set(
             user_id,
             SANDBOX_ACTIVE_STATE_TYPE,
@@ -250,6 +328,7 @@ def try_handle_sandbox(event) -> bool:
                 'last_skill': intent,
                 'last_user_text': text[:300],
                 'last_ai_text': ai_text_summary,
+                'history': history,
             },
             ttl_minutes=SANDBOX_ACTIVE_TTL_MINUTES,
         )

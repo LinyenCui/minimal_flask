@@ -53,6 +53,12 @@ class TripView:
     via_point: Optional[str] = None
     end_point: Optional[str] = None
 
+    # 預約班次（trip_type='temp'）的真實地點 — 避開 start_point 對 customer
+    # short_name 的約束（DB 寫「臨時地點」placeholder，custom_* 才是真值）
+    custom_start_point: Optional[str] = None
+    custom_via_point: Optional[str] = None
+    custom_end_point: Optional[str] = None
+
     # 司機 / 車資
     driver_id: Optional[int] = None
     meter_fare: Optional[int] = None
@@ -115,12 +121,27 @@ class TripView:
     def to_dict(self) -> dict:
         return asdict(self)
 
+    def display_route(self) -> tuple:
+        """回傳該顯示的 (起點, 途經, 終點)。
+
+        - trip_type='temp' → 用 custom_*（真實地址；start_point 在 DB 是「臨時地點」placeholder）
+        - trip_type='fixed' / 其他 → 直接用 start_point / via_point / end_point
+        """
+        if self.trip_type == 'temp':
+            return (
+                self.custom_start_point or self.start_point,
+                self.custom_via_point or self.via_point,
+                self.custom_end_point or self.end_point,
+            )
+        return (self.start_point, self.via_point, self.end_point)
+
     def short_route(self) -> str:
         """簡短路線：起點→終點（含途經括號）"""
-        parts = [self.start_point or '?']
-        if self.via_point:
-            parts.append(f"經{self.via_point}")
-        parts.append(self.end_point or '?')
+        sp, vp, ep = self.display_route()
+        parts = [sp or '?']
+        if vp:
+            parts.append(f"經{vp}")
+        parts.append(ep or '?')
         return '→'.join(p for p in parts if p)
 
 
@@ -130,6 +151,7 @@ class TripView:
 
 _SELECT_ALL = """
     SELECT trip_id, date, time, start_point, via_point, end_point,
+           custom_start_point, custom_via_point, custom_end_point,
            driver_id, meter_fare, extra_fare, actual_fare, category,
            status, passenger_leave_reason, passenger_name,
            modified_by, modification_reason, modification_time,

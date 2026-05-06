@@ -101,7 +101,23 @@
 
   <script>
     const LIFF_ID = "{{ liff_id }}";
-    const CUSTOMER_ID = {{ customer_id|tojson }};  // null 表示新增模式
+    const SERVER_CUSTOMER_ID = {{ customer_id|tojson }};
+
+    // LIFF URL 帶 ?customer_id=N 進編輯模式（手機從 Flex 編輯按鈕進來時）
+    function _readQueryCustomerId() {
+      const params = new URLSearchParams(window.location.search);
+      let cid = params.get('customer_id');
+      if (cid) return parseInt(cid, 10) || null;
+      // LIFF 有時把 query 包進 ?liff.state=...
+      const ls = params.get('liff.state');
+      if (ls) {
+        const stripped = ls.startsWith('?') ? ls.slice(1) : ls;
+        cid = new URLSearchParams(stripped).get('customer_id');
+        if (cid) return parseInt(cid, 10) || null;
+      }
+      return null;
+    }
+    const CUSTOMER_ID = SERVER_CUSTOMER_ID || _readQueryCustomerId();
     const MODE = CUSTOMER_ID ? 'edit' : 'create';
 
     const loadingEl = document.getElementById('loading');
