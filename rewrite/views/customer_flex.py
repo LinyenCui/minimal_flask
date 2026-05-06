@@ -16,13 +16,14 @@ from typing import List, Optional
 from rewrite.tools.customer import CustomerView
 
 
-def _liff_url(customer_id: Optional[int] = None) -> str:
-    """組 LIFF URL，帶 customer_id 就是編輯模式。
+def _liff_id() -> str:
+    """讀 LIFF_ID 環境變數（call 時取而非 import 時，方便 .env 重載）"""
+    return os.environ.get('LIFF_ID', '').strip()
 
-    讀 LIFF_ID 在 call 時取（不是 import 時），方便 .env 重載 / 測試替換。
-    """
-    liff_id = os.environ.get('LIFF_ID', '')
-    base = f"https://liff.line.me/{liff_id}"
+
+def _liff_url(customer_id: Optional[int] = None) -> str:
+    """組 LIFF URL，帶 customer_id 就是編輯模式。"""
+    base = f"https://liff.line.me/{_liff_id()}"
     return f"{base}?customer_id={customer_id}" if customer_id else base
 
 
@@ -218,7 +219,38 @@ def render_customer_detail(c: CustomerView) -> dict:
 # ============================================================
 
 def render_new_customer_entry() -> dict:
-    """!新增客戶 觸發的 Flex：點按鈕開 LIFF 新增表單"""
+    """!新增客戶 觸發的 Flex：點按鈕開 LIFF 新增表單
+
+    LIFF_ID 環境變數未設時 → 回錯誤 bubble（避免按了無反應的 broken URL）。
+    """
+    if not _liff_id():
+        return {
+            "type": "bubble",
+            "size": "kilo",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#D32F2F",
+                "paddingAll": "md",
+                "contents": [{
+                    "type": "text",
+                    "text": "⚠️ LIFF 未設定",
+                    "weight": "bold", "size": "lg", "color": "#ffffff",
+                }],
+            },
+            "body": {
+                "type": "box", "layout": "vertical", "spacing": "sm",
+                "contents": [
+                    {"type": "text",
+                     "text": "LIFF_ID 環境變數沒載入，新增客戶表單暫不可用",
+                     "size": "sm", "color": BLACK, "wrap": True},
+                    {"type": "text",
+                     "text": "💡 請確認 .env.dev 存在且含 LIFF_ID，並重啟 Flask",
+                     "size": "xs", "color": MUTED, "wrap": True, "margin": "md"},
+                ],
+            },
+        }
+
     return {
         "type": "bubble",
         "size": "kilo",

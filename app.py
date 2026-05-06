@@ -11,25 +11,34 @@ try:
 except AttributeError:
     pass  # Windows不支持這個函數
 
-# 檢查是否在本地運行
-is_local = os.environ.get('FLASK_ENV') == 'development'
+# 環境變量加載邏輯（一勞永逸版，不再依賴 FLASK_ENV）
+# - Render 平台會自動注入 RENDER=true（不可偽造）→ 跳過 .env，用 dashboard 環境變數
+# - 本地有 .env.dev → 兩段載入：.env 當 base（sync 腳本要的 RENDER_DB_*）
+#                              + .env.dev override（LIFF / dev channel / localhost DB）
+# - 本地只有 .env → 載 .env（向後相容）
+on_render = bool(os.environ.get('RENDER'))
 
-# 環境變量加載邏輯
-if is_local:
-    print("本地開發環境：加載 .env.dev")
-    load_dotenv('.env.dev', override=True)
-elif not os.environ.get('RENDER'):  # 如果不是在 Render 上運行
-    print("非 Render 環境：加載 .env")
+if on_render:
+    print("Render 環境：使用 Render dashboard 環境變數")
+elif os.path.exists('.env.dev'):
+    if os.path.exists('.env'):
+        load_dotenv('.env', override=False)   # base：共用設定（如 RENDER_DB_* for sync）
+    load_dotenv('.env.dev', override=True)    # 本地 override：LIFF / dev channel / DB
+    print("本地開發環境：載 .env（base）+ .env.dev（override）")
+elif os.path.exists('.env'):
     load_dotenv('.env', override=True)
+    print("非 Render 環境：載入 .env（沒 .env.dev）")
 else:
-    print("Render 環境：使用 Render 環境變量")
+    print("⚠️ 無 .env 檔，僅用 OS 環境變數")
 
 # 驗證配置
 from modules.utils.security import mask_value  # for early masking in startup prints
 secret = os.environ.get('LINE_CHANNEL_SECRET')
 token = os.environ.get('LINE_CHANNEL_TOKEN')
-print(f"使用的 Channel Secret: {mask_value(secret)}" if secret else "未设置")
-print(f"使用的 Channel Token: {mask_value(token)}" if token else "未设置")
+liff_id = os.environ.get('LIFF_ID')
+print(f"使用的 Channel Secret: {mask_value(secret)}" if secret else "未设置 LINE_CHANNEL_SECRET")
+print(f"使用的 Channel Token: {mask_value(token)}" if token else "未设置 LINE_CHANNEL_TOKEN")
+print(f"使用的 LIFF_ID: {liff_id[:8]}…" if liff_id else "⚠️ 未设置 LIFF_ID（!新增客戶 LIFF 表單會壞）")
 
 # 其他的 import
 import logging

@@ -22,7 +22,17 @@ from datetime import date, datetime
 from typing import Optional, List
 from sqlalchemy import text
 
-from rewrite.tools.base import ToolResult
+from rewrite.tools.base import (
+    ToolResult,
+    write_audit,
+    diff_fields,
+)
+# legacy 共用：modification_reason 累加 + modified_by/time 寫入
+from modules.utils.modification_utils import append_modification_reason
+from modules.utils.taiwan_time import get_taiwan_time
+
+# 過去態 category 受限值（對齊 legacy handle_modify_category）
+VALID_CATEGORIES = ('診所', '東洋', '臨時')
 
 
 # ============================================================
@@ -309,3 +319,211 @@ def aggregate_completed_trips(
         },
         filters={k: str(v)[:50] for k, v in params.items()},
     )
+
+
+# ============================================================
+# Mutation 工具（無 R-5 鎖：過去態無時間鎖意義）
+# 共用：modification_reason 累加（[N] 格式）+ modified_by + time 寫入
+#       audit log（R-6）
+# ============================================================
+
+def _fetch_completed_trip_snapshot(
+    *, session, completed_trip_id: int,
+) -> Optional[dict]:
+    """取一筆 completed_trip 完整 row 當 audit before/after 快照"""
+    row = session.execute(
+        text("SELECT * FROM completed_trips WHERE id = :id"),
+        {'id': completed_trip_id}
+    ).fetchone()
+    return dict(row._mapping) if row else None
+
+
+def update_completed_trip_fare(
+    *,
+    session,
+    completed_trip_id: int,
+    meter_fare: Optional[int] = None,
+    extra_fare: Optional[int] = None,
+    reason: str,
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """
+    記錄/修改過去態班次車資（對應 legacy「記錄車資 [id] 錶價 加成 原因」）。
+
+    對齊 0013.txt log 第 90-95 行的 trip 820 修改流程：
+      - 比較 DB 現值 vs 新值，沒變動 → fail（避免無意義 audit）
+      - modification_reason 累加：'[N] 改車資: 錶價 0→1250, 加成 0→750 (等候3小時)'
+      - 更新 modified_by, modification_time（沿用 legacy modification_utils 慣例）
+      - 寫 audit log
+
+    Args:
+        completed_trip_id: completed_trips.id（不是 trips.trip_id）
+        meter_fare: 新錶價（None=不改；至少 meter/extra 其中一個要給）
+        extra_fare: 新加成（同上）
+        reason: 修改原因（必填，合規）— 空字串 → fail，AI follow-up 收原因
+
+    R-5 鎖：不適用（過去態已完成）
+    """
+    if not reason or not reason.strip():
+        return ToolResult.fail("請提供修改原因")
+    if meter_fare is None and extra_fare is None:
+        return ToolResult.fail("至少要給 meter_fare 或 extra_fare 其中一個")
+    if meter_fare is not None and not isinstance(meter_fare, int):
+        return ToolResult.fail("meter_fare 必須是整數")
+    if extra_fare is not None and not isinstance(extra_fare, int):
+        return ToolResult.fail("extra_fare 必須是整數")
+
+    before = _fetch_completed_trip_snapshot(
+        session=session, completed_trip_id=completed_trip_id,
+    )
+    if not before:
+        return ToolResult.fail(f"找不到已完成班次 #{completed_trip_id}")
+
+    # 動態 SET：只更新有給且有變動的欄位
+    sets: list = []
+    params: dict = {'id': completed_trip_id}
+    diffs: list = []
+
+    if meter_fare is not None and before.get('meter_fare') != meter_fare:
+        sets.append('meter_fare = :meter_fare')
+        params['meter_fare'] = meter_fare
+        diffs.append(f"錶價 {before.get('meter_fare')}→{meter_fare}")
+
+    if extra_fare is not None and before.get('extra_fare') != extra_fare:
+        sets.append('extra_fare = :extra_fare')
+        params['extra_fare'] = extra_fare
+        diffs.append(f"加成 {before.get('extra_fare')}→{extra_fare}")
+
+    if not diffs:
+        return ToolResult.fail("車資沒變動")
+
+    note = f"改車資: {', '.join(diffs)} ({reason.strip()})"
+    new_mod = append_modification_reason(
+        before.get('modification_reason'), note, table_name='completed_trips',
+    )
+
+    sets.extend([
+        'modification_reason = :mod',
+        'modified_by = :who',
+        'modification_time = :mtime',
+    ])
+    params['mod'] = new_mod
+    params['who'] = user_name or user_id or '系統'
+    params['mtime'] = get_taiwan_time()
+
+    sql = f"UPDATE completed_trips SET {', '.join(sets)} WHERE id = :id"
+    session.execute(text(sql), params)
+
+    after = _fetch_completed_trip_snapshot(
+        session=session, completed_trip_id=completed_trip_id,
+    )
+    write_audit(
+        session=session,
+        user_id=user_id, user_name=user_name,
+        action_type='update_completed_trip_fare',
+        target_table='completed_trips', target_id=completed_trip_id,
+        before_state=before, after_state=after,
+        changed_fields=diff_fields(before, after),
+        reason=reason.strip(),
+        extra={
+            'old_meter': before.get('meter_fare'),
+            'new_meter': meter_fare,
+            'old_extra': before.get('extra_fare'),
+            'new_extra': extra_fare,
+        },
+        via=via,
+    )
+
+    if auto_commit:
+        session.commit()
+    return query_completed_trip_by_id(completed_trip_id, session=session)
+
+
+def update_completed_trip_category(
+    *,
+    session,
+    completed_trip_id: int,
+    new_category: str,
+    reason: str,
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """
+    修改過去態班次類別（對應 legacy「修改類別 [id] [新類別]」）。
+
+    跟 legacy 不同的是：legacy 只 SET category（沒留軌跡），這版會：
+      - 累加 modification_reason（'[N] 改類別: 東洋→診所 (報帳分類錯誤)'）
+      - 寫 modified_by + modification_time
+      - audit log
+
+    Args:
+        new_category: '診所' / '東洋' / '臨時' 之一
+        reason: 修改原因（必填）
+
+    R-5 鎖：不適用
+    """
+    if not reason or not reason.strip():
+        return ToolResult.fail("請提供修改原因")
+    if not new_category or not new_category.strip():
+        return ToolResult.fail("new_category 不可空")
+    new_category = new_category.strip()
+    if new_category not in VALID_CATEGORIES:
+        return ToolResult.fail(
+            f"無效的類別 '{new_category}'，必須是：{', '.join(VALID_CATEGORIES)}"
+        )
+
+    before = _fetch_completed_trip_snapshot(
+        session=session, completed_trip_id=completed_trip_id,
+    )
+    if not before:
+        return ToolResult.fail(f"找不到已完成班次 #{completed_trip_id}")
+
+    old_category = before.get('category')
+    if old_category == new_category:
+        return ToolResult.fail(
+            f"班次 #{completed_trip_id} 類別已是『{new_category}』，無需修改"
+        )
+
+    note = f"改類別: {old_category}→{new_category} ({reason.strip()})"
+    new_mod = append_modification_reason(
+        before.get('modification_reason'), note, table_name='completed_trips',
+    )
+
+    session.execute(text("""
+        UPDATE completed_trips SET
+            category = :cat,
+            modification_reason = :mod,
+            modified_by = :who,
+            modification_time = :mtime
+        WHERE id = :id
+    """), {
+        'cat': new_category,
+        'mod': new_mod,
+        'who': user_name or user_id or '系統',
+        'mtime': get_taiwan_time(),
+        'id': completed_trip_id,
+    })
+
+    after = _fetch_completed_trip_snapshot(
+        session=session, completed_trip_id=completed_trip_id,
+    )
+    write_audit(
+        session=session,
+        user_id=user_id, user_name=user_name,
+        action_type='update_completed_trip_category',
+        target_table='completed_trips', target_id=completed_trip_id,
+        before_state=before, after_state=after,
+        changed_fields=diff_fields(before, after),
+        reason=reason.strip(),
+        extra={'old_category': old_category, 'new_category': new_category},
+        via=via,
+    )
+
+    if auto_commit:
+        session.commit()
+    return query_completed_trip_by_id(completed_trip_id, session=session)

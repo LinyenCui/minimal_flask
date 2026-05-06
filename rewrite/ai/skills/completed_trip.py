@@ -17,6 +17,8 @@ from rewrite.tools.completed_trip import (
     query_completed_trips,
     query_completed_trip_by_id,
     aggregate_completed_trips,
+    update_completed_trip_fare,
+    update_completed_trip_category,
 )
 
 
@@ -24,7 +26,7 @@ def _system_prompt() -> str:
     today = date.today()
     weekdays = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
     return f"""\
-你是「過去態 completed_trips」助手 — 已完成班次的查詢與金額統計。
+你是「過去態 completed_trips」助手 — 已完成班次的查詢、統計與修改。
 
 🏭 三時間態世界觀：
 - 過去態 completed_trips：已執行完的班次 ← 你只能查這個
@@ -40,6 +42,8 @@ def _system_prompt() -> str:
 - 用戶給「completed_trip_id / 查看 820 / #820」 → query_completed_trip_by_id
 - 用戶問「加總/統計金額/總計多少」 → aggregate_completed_trips
 - 其他條件查詢（日期/司機/類別/客戶/地點）→ query_completed_trips
+- 「修改 #N 金額/加成」「記錄車資 N」 → update_completed_trip_fare
+- 「修改類別 #N」「#N 改類別」 → update_completed_trip_category
 
 📌 參數提示（**很重要：分清 category vs location**）：
 - **category**：班次的「業務類別」整批分類，目前只有「診所」「東洋」「臨時」幾個固定值
@@ -62,7 +66,9 @@ def _system_prompt() -> str:
 - ID 區別：trips.trip_id 跟 completed_trips.id **不一樣**。本 skill 的 ID 是 completed_trips.id
 - 過去態都已完成，**沒有 status filter**
 - 結果太多（meta.truncated=True / 上限警示）→ 建議用戶縮日期或加 filter，或改用「加總」
-- 完成查詢直接回報結果，**不主動追問下一步**、不說「請問還想看什麼」這類客套句
+- **mutation 必須給 reason**（合規）。用戶若沒給原因，tool 會 fail 「請提供修改原因」，
+  你**主動問用戶**：「請給修改原因」— 等用戶補完再 call tool。
+- 完成單一動作直接回報結果，**不主動追問下一步**、不說「請問還想看什麼」這類客套句
 """
 
 
@@ -164,6 +170,54 @@ AGGREGATE_COMPLETED_TRIPS_SCHEMA = {
 }
 
 
+UPDATE_COMPLETED_TRIP_FARE_SCHEMA = {
+    'description': (
+        "Record/modify fare on a completed trip. "
+        "Triggers: 「修改 #N 金額 X 加成 Y」「記錄車資 N X Y 原因」「#N 車資改為 X」. "
+        "Reason is REQUIRED — if user didn't give one, ask for it before calling."
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'completed_trip_id': {
+                'type': 'integer',
+                'description': "completed_trips.id（不是 trip_id）",
+            },
+            'meter_fare': {'type': 'integer', 'description': "新錶價（None=不改）"},
+            'extra_fare': {'type': 'integer', 'description': "新加成（None=不改）"},
+            'reason': {
+                'type': 'string',
+                'description': "修改原因（必填，合規）。例：「等候3小時」「報帳分類錯誤」",
+            },
+        },
+        'required': ['completed_trip_id', 'reason'],
+    },
+}
+
+UPDATE_COMPLETED_TRIP_CATEGORY_SCHEMA = {
+    'description': (
+        "Modify category of a completed trip (用於 key 錯類別需要更正). "
+        "Triggers: 「修改類別 N 新類別 原因」「#N 改類別為 診所」. "
+        "Reason REQUIRED."
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'completed_trip_id': {'type': 'integer'},
+            'new_category': {
+                'type': 'string',
+                'description': "『診所』『東洋』『臨時』之一",
+            },
+            'reason': {
+                'type': 'string',
+                'description': "修改原因（必填）",
+            },
+        },
+        'required': ['completed_trip_id', 'new_category', 'reason'],
+    },
+}
+
+
 def build_completed_trip_skill() -> Skill:
     return Skill(
         name='completed_trip',
@@ -172,5 +226,7 @@ def build_completed_trip_skill() -> Skill:
             (query_completed_trips, QUERY_COMPLETED_TRIPS_SCHEMA),
             (query_completed_trip_by_id, QUERY_COMPLETED_TRIP_BY_ID_SCHEMA),
             (aggregate_completed_trips, AGGREGATE_COMPLETED_TRIPS_SCHEMA),
+            (update_completed_trip_fare, UPDATE_COMPLETED_TRIP_FARE_SCHEMA),
+            (update_completed_trip_category, UPDATE_COMPLETED_TRIP_CATEGORY_SCHEMA),
         ],
     )

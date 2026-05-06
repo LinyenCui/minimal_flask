@@ -252,7 +252,19 @@ def try_handle_sandbox(event) -> bool:
                          exc_info=True)
             return False
 
-        if intent == 'unknown' or intent not in _skills:
+        # 1b. 對話模式保護：sandbox-active 期間 classifier 判 unknown
+        #     + 訊息不像快速命令 → 留 last_skill 不 fall-through。
+        #     防止用戶補資訊式訊息（如 '$235（一般記賬）'、'一般紀錄'）長度過長
+        #     沒被 _is_short_followup 抓到，被 classifier 判 unknown 後
+        #     hijack 到 legacy 的 booking_create / customer_sandbox。
+        #     用戶想切換主題：(a) 打 `!` + 新指令；(b) 打「結束對話」清 state
+        if (intent == 'unknown' and last_skill and last_skill in _skills
+                and not looks_like_quick_command(text)):
+            logger.info(
+                f"[rewrite sandbox] {short_uid} text={text!r} → unknown but "
+                f"sandbox-active({last_skill}) → 留 last_skill 保護對話")
+            intent = last_skill
+        elif intent == 'unknown' or intent not in _skills:
             logger.info(
                 f"[rewrite sandbox] {short_uid} text={text!r} → {intent}, "
                 f"fall-through")

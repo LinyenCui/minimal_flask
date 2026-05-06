@@ -703,6 +703,88 @@ def update_passenger_name(
     return query_trip_by_id(trip_id, session=session)
 
 
+VALID_TRIP_CATEGORIES = ('診所', '東洋', '臨時')
+
+
+@require_modifiable_window(allow_in_lock=True)  # 鎖內也可（key 錯類別不影響執行）
+def update_trip_category(
+    *,
+    session,
+    trip_id: int,
+    new_category: str,
+    reason: str,
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """
+    修改現在態班次類別（key 錯時用，跟 completed_trip 對稱）。
+
+    legacy 沒這個工具（只有過去態的 handle_modify_category）；rewrite 補齊。
+
+    Args:
+        new_category: '診所' / '東洋' / '臨時'
+        reason: 修改原因（必填）
+
+    R-5 鎖：allow_in_lock=True（改類別不影響時間執行）
+    """
+    if not reason or not reason.strip():
+        return ToolResult.fail("請提供修改原因")
+    if not new_category or not new_category.strip():
+        return ToolResult.fail("new_category 不可空")
+    new_category = new_category.strip()
+    if new_category not in VALID_TRIP_CATEGORIES:
+        return ToolResult.fail(
+            f"無效的類別 '{new_category}'，必須是：{', '.join(VALID_TRIP_CATEGORIES)}"
+        )
+
+    before = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    if not before:
+        return ToolResult.fail(f"找不到班次 #{trip_id}")
+
+    old_category = before.get('category')
+    if old_category == new_category:
+        return ToolResult.fail(
+            f"班次 #{trip_id} 類別已是『{new_category}』，無需修改"
+        )
+
+    note = f"改類別: {old_category}→{new_category} ({reason.strip()})"
+    new_mod = _bump_modification_reason(
+        before.get('modification_reason'), note,
+    )
+
+    session.execute(text("""
+        UPDATE trips SET
+            category = :cat,
+            modification_reason = :mod,
+            modified_by = :who,
+            modification_time = CURRENT_TIMESTAMP
+        WHERE trip_id = :id
+    """), {
+        'cat': new_category,
+        'mod': new_mod,
+        'who': user_name or user_id,
+        'id': trip_id,
+    })
+
+    after = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    write_audit(
+        session=session, user_id=user_id, user_name=user_name,
+        action_type='update_trip_category',
+        target_table='trips', target_id=trip_id,
+        before_state=before, after_state=after,
+        changed_fields=diff_fields(before, after),
+        reason=reason.strip(),
+        extra={'old_category': old_category, 'new_category': new_category},
+        via=via,
+    )
+
+    if auto_commit:
+        session.commit()
+    return query_trip_by_id(trip_id, session=session)
+
+
 @require_modifiable_window(allow_in_lock=True)
 def record_fare_current(
     *,

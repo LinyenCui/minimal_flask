@@ -25,6 +25,7 @@ from rewrite.tools.trip import (
     unassign_driver,
     update_passenger_name,
     record_fare_current,
+    update_trip_category,
 )
 
 
@@ -47,6 +48,7 @@ def _system_prompt() -> str:
 - 撤銷司機指派（軟取消，避免落入已完成）→ unassign_driver
 - 改乘客名 → update_passenger_name
 - 記錄/修改現在態車資（錶價/加成）→ record_fare_current
+- 改類別（key 錯時用，例「東洋」改「診所」）→ update_trip_category（reason 必填）
 
 ⚠️ 規則：
 1. trip_id 必填。用戶說「那筆」「剛剛那班」這種，問清楚再執行
@@ -172,6 +174,29 @@ RECORD_FARE_CURRENT_SCHEMA = {
     },
 }
 
+UPDATE_TRIP_CATEGORY_SCHEMA = {
+    'description': (
+        "Modify category of a current trip (用於 key 錯類別需要更正). "
+        "Triggers: 「修改類別 [trip_id] 新類別」「#N 改類別為 診所」(現在態 / 未完成班次). "
+        "Reason REQUIRED."
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'trip_id': {'type': 'integer', 'description': "Trip ID（現在態 trips.trip_id）"},
+            'new_category': {
+                'type': 'string',
+                'description': "『診所』『東洋』『臨時』之一",
+            },
+            'reason': {
+                'type': 'string',
+                'description': "修改原因（必填）",
+            },
+        },
+        'required': ['trip_id', 'new_category', 'reason'],
+    },
+}
+
 
 # 也讓 mutation skill 能呼叫 query 類工具（規則 3：多筆 mutation 前先 query 確認）
 QUERY_TRIPS_SCHEMA = {
@@ -213,6 +238,7 @@ def build_trip_mutation_skill() -> Skill:
             (unassign_driver, UNASSIGN_DRIVER_SCHEMA),
             (update_passenger_name, UPDATE_PASSENGER_NAME_SCHEMA),
             (record_fare_current, RECORD_FARE_CURRENT_SCHEMA),
+            (update_trip_category, UPDATE_TRIP_CATEGORY_SCHEMA),
             # 規則 3 用：mutation 前先 query 確認
             (query_trips, QUERY_TRIPS_SCHEMA),
             (query_trip_by_id, QUERY_TRIP_BY_ID_SCHEMA),
