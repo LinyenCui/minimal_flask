@@ -49,7 +49,7 @@
 <body>
   <div id="loading" class="loading">載入中…</div>
   <div id="content" hidden>
-    <h2>📅 新增固定班次模板</h2>
+    <h2 id="form-title">📅 新增固定班次模板</h2>
     <div id="alert"></div>
     <form id="schedule-form" novalidate>
 
@@ -141,10 +141,27 @@
 
   <script>
     const LIFF_ID = "{{ liff_id }}";
+    const SERVER_SCHEDULE_ID = {{ schedule_id|tojson }};
+
+    function _readQueryId() {
+      const params = new URLSearchParams(window.location.search);
+      let id = params.get('id');
+      if (id) return parseInt(id, 10) || null;
+      const ls = params.get('liff.state');
+      if (ls) {
+        const stripped = ls.startsWith('?') ? ls.slice(1) : ls;
+        id = new URLSearchParams(stripped).get('id');
+        if (id) return parseInt(id, 10) || null;
+      }
+      return null;
+    }
+    const SCHEDULE_ID = SERVER_SCHEDULE_ID || _readQueryId();
+    const MODE = SCHEDULE_ID ? 'edit' : 'create';
 
     const loadingEl = document.getElementById('loading');
     const contentEl = document.getElementById('content');
     const alertEl = document.getElementById('alert');
+    const titleEl = document.getElementById('form-title');
     const form = document.getElementById('schedule-form');
     const submitBtn = document.getElementById('btn-submit');
     const cancelBtn = document.getElementById('btn-cancel');
@@ -153,6 +170,40 @@
     function clearAlert() { alertEl.innerHTML = ''; }
     function setLoading(t) { loadingEl.textContent = t; loadingEl.hidden = false; contentEl.hidden = true; }
     function showContent() { loadingEl.hidden = true; contentEl.hidden = false; }
+
+    async function loadSchedule(id) {
+      const idToken = liff.getIDToken();
+      const resp = await fetch(`/liff/fixed_schedule/${id}`, {
+        headers: { 'Authorization': 'Bearer ' + idToken },
+      });
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      return data.schedule;
+    }
+
+    function fillForm(s) {
+      // route_number ('147') → checkbox 勾選對應 weekday
+      const rn = s.route_number || '';
+      form.querySelectorAll('input[name=weekday]').forEach(el => {
+        el.checked = rn.includes(el.value);
+      });
+      // 其他欄位
+      const setVal = (name, val) => {
+        const el = form.elements.namedItem(name);
+        if (el && val !== null && val !== undefined) el.value = val;
+      };
+      // departure_time 可能是 'HH:MM:SS'，input type=time 接受 HH:MM 或 HH:MM:SS
+      setVal('departure_time', (s.departure_time || '').slice(0, 5));
+      setVal('category', s.category);
+      setVal('start_point', s.start_point);
+      setVal('via_point', s.via_point);
+      setVal('end_point', s.end_point);
+      setVal('driver_id', s.driver_id);
+      setVal('direction', s.direction);
+      setVal('base_fare', s.base_fare);
+      setVal('surcharge', s.surcharge);
+      setVal('note', s.note);
+    }
 
     async function init() {
       if (!LIFF_ID) { setLoading('LIFF_ID 未設定'); return; }
@@ -165,6 +216,18 @@
       if (!liff.isLoggedIn()) {
         liff.login({ redirectUri: window.location.href });
         return;
+      }
+      // 編輯模式預填
+      if (MODE === 'edit') {
+        titleEl.textContent = `📅 編輯固定班次 #${SCHEDULE_ID}`;
+        submitBtn.textContent = '儲存變更';
+        try {
+          const s = await loadSchedule(SCHEDULE_ID);
+          fillForm(s);
+        } catch (e) {
+          setLoading('載入失敗：' + e.message);
+          return;
+        }
       }
       showContent();
     }
@@ -183,18 +246,18 @@
         .map(el => el.value)
         .sort()
         .join('');
-      if (!weekdays) {
+      if (MODE === 'create' && !weekdays) {
         showAlert('err', '❌ 請至少選一個星期幾');
         return;
       }
 
       submitBtn.disabled = true;
-      submitBtn.textContent = '建立中…';
+      submitBtn.textContent = MODE === 'edit' ? '儲存中…' : '建立中…';
       try {
         const idToken = liff.getIDToken();
         const fd = new FormData(form);
         const payload = {
-          route_number: weekdays,
+          route_number: weekdays || null,
           departure_time: fd.get('departure_time'),
           start_point: fd.get('start_point'),
           via_point: fd.get('via_point') || null,
@@ -206,7 +269,10 @@
           surcharge: fd.get('surcharge') ? parseInt(fd.get('surcharge'), 10) : null,
           note: fd.get('note') || null,
         };
-        const resp = await fetch('/liff/fixed_schedule', {
+        const url = MODE === 'edit'
+          ? `/liff/fixed_schedule/${SCHEDULE_ID}`
+          : '/liff/fixed_schedule';
+        const resp = await fetch(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -218,17 +284,18 @@
         if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
 
         const sid = data.schedule && data.schedule.id;
+        const action = MODE === 'edit' ? '更新' : '建立';
         const inClient = liff.isInClient && liff.isInClient();
         if (inClient) {
-          showAlert('ok', `✅ 已建立固定班次 #${sid}（1.5 秒後關閉）`);
+          showAlert('ok', `✅ 已${action}固定班次 #${sid}（1.5 秒後關閉）`);
           setTimeout(() => liff.closeWindow(), 1500);
         } else {
-          showAlert('ok', `✅ 已建立固定班次 #${sid}（可關閉視窗）`);
+          showAlert('ok', `✅ 已${action}固定班次 #${sid}（可關閉視窗）`);
         }
       } catch (err) {
         showAlert('err', '❌ ' + err.message);
         submitBtn.disabled = false;
-        submitBtn.textContent = '建立模板';
+        submitBtn.textContent = MODE === 'edit' ? '儲存變更' : '建立模板';
       }
     });
 

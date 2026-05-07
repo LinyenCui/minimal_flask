@@ -121,6 +121,25 @@ def customer_form_new():
         'import': '/liff/import/form',
         'new_schedule': '/liff/fixed_schedule/form',
     }
+    # 動態目標（含 ID）：edit_schedule / leave_schedule
+    sched_id = request.args.get('id')
+    if form_kind == 'edit_schedule' and sched_id:
+        try:
+            sid = int(sched_id)
+            qs = request.query_string.decode('utf-8')
+            target = f'/liff/fixed_schedule/{sid}/form'
+            return redirect(f"{target}?{qs}" if qs else target, code=302)
+        except ValueError:
+            pass
+    if form_kind == 'leave_schedule' and sched_id:
+        try:
+            sid = int(sched_id)
+            qs = request.query_string.decode('utf-8')
+            target = f'/liff/fixed_schedule/{sid}/leave_form'
+            return redirect(f"{target}?{qs}" if qs else target, code=302)
+        except ValueError:
+            pass
+
     if form_kind in redirect_targets:
         # 把其他 query string 一起轉過去（保留 liff.state、未來其他參數）
         qs = request.query_string.decode('utf-8')
