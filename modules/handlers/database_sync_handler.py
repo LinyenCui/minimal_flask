@@ -151,12 +151,12 @@ def handle_database_sync_request(event, line_bot_api):
     if conflict_result.get("has_conflicts"):
         confirm_buttons = [
             {"label": "⚡ 強制同步", "text": "確認序號覆蓋", "type": "message"},
-            {"label": "❌ 放棄操作", "text": "放棄", "type": "message"}
+            {"label": "❌ 取消同步", "text": "取消同步", "type": "message"}
         ]
     else:
         confirm_buttons = [
             {"label": "✅ 確認同步", "text": "確認同步", "type": "message"},
-            {"label": "❌ 放棄操作", "text": "放棄", "type": "message"}
+            {"label": "❌ 取消同步", "text": "取消同步", "type": "message"}
         ]
     
     return QuickReplyManager.create_text_response(response_text, confirm_buttons)

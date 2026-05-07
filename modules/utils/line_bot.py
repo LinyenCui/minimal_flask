@@ -106,45 +106,52 @@ def reply_message(reply_token, messages):
                 # 如果是字典格式，根據type轉換為對應的消息對象
                 if msg.get("type") == "text":
                     processed_messages.append(TextMessage(text=msg.get("text", "")))
-                elif msg.get("type") == "flex":
-                    # 處理Flex Message
-                    flex_container = FlexContainer.from_dict(msg.get("contents", {}))
+                elif msg.get("type") in ("flex", "flex_with_quick_reply", "flex_only"):
+                    # 處理 Flex Message（含 QuickReplyManager 的別名 type）
+                    # QuickReplyManager 用 flex_message + alt_text + quick_reply（snake_case）
+                    # 既有 flex 用 contents + altText + quickReply（camelCase）
+                    # 兩種都認
+                    contents = msg.get("contents") or msg.get("flex_message") or {}
+                    alt_text = msg.get("altText") or msg.get("alt_text") or "Flex Message"
+                    flex_container = FlexContainer.from_dict(contents)
                     flex_msg = FlexMessage(
-                        alt_text=msg.get("altText", "Flex Message"),
+                        alt_text=alt_text,
                         contents=flex_container
                     )
-                    
-                    # 如果有QuickReply，以正確方式添加
-                    if "quickReply" in msg and "items" in msg["quickReply"]:
-                        # 創建QuickReply項目
+
+                    # QuickReply：兩種 key 名都接（quickReply / quick_reply）
+                    qr_dict = msg.get("quickReply") or msg.get("quick_reply") or {}
+                    if "items" in qr_dict:
+                        # 創建QuickReply項目（同 type=quick_reply 路徑邏輯，支援 message/uri/postback）
                         quick_reply_items = []
-                        
-                        logger.info(f"處理QuickReply項目: {msg['quickReply']['items']}")
-                        
-                        for item in msg["quickReply"]["items"]:
-                            if "action" in item and item["action"].get("type") == "message":
-                                action_data = item["action"]
-                                action = MessageAction(
-                                    label=action_data.get("label", ""),
-                                    text=action_data.get("text", "")
+                        logger.info(f"處理 Flex QuickReply 項目: {qr_dict['items']}")
+
+                        for item in qr_dict["items"]:
+                            if "action" not in item:
+                                continue
+                            ad = item["action"]
+                            at = ad.get("type")
+                            if at == "message":
+                                action = MessageAction(label=ad.get("label", ""), text=ad.get("text", ""))
+                            elif at == "uri":
+                                action = URIAction(label=ad.get("label", ""), uri=ad.get("uri", ""))
+                            elif at == "postback":
+                                action = PostbackAction(
+                                    label=ad.get("label", ""),
+                                    data=ad.get("data", ""),
+                                    display_text=ad.get("displayText"),
                                 )
-                                quick_reply_items.append(
-                                    QuickReplyItem(action=action)
-                                )
-                                logger.info(f"添加QuickReply項目: {action_data.get('label')}, 文本: {action_data.get('text')}")
-                        
-                        # 創建QuickReply並賦值
+                            else:
+                                logger.warning(f"未知 Flex QR action type: {at!r}, skip")
+                                continue
+                            quick_reply_items.append(QuickReplyItem(action=action))
+
                         if quick_reply_items:
-                            # 直接手動構建QuickReply屬性
-                            qr = QuickReply(items=quick_reply_items)
-                            logger.info(f"創建QuickReply對象: {qr}")
-                            # 賦值給flex_msg
-                            flex_msg.quick_reply = qr
-                            logger.info(f"成功設置QuickReply屬性")
-                    
+                            flex_msg.quick_reply = QuickReply(items=quick_reply_items)
+
                     processed_messages.append(flex_msg)
                     logger.info(f"添加Flex消息到處理列表: {flex_msg}")
-                elif msg.get("type") == "quick_reply":
+                elif msg.get("type") in ("quick_reply", "text_with_quick_reply"):
                     # 處理帶有Quick Reply的文字訊息
                     text_msg = TextMessage(text=msg.get("text", ""))
 

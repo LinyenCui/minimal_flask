@@ -68,9 +68,8 @@ FULL_SYNC_TABLES = [
 # Key: 表名，Value: 跳過原因（會印在每次同步開頭，提醒用戶）
 SKIP_TABLES = {
     "customers": (
-        "rewrite v0.1 dev：本地 schema 已升級（birthday/座標/身分證/病歷號等）"
-        "且本地 seed + 手動新增的客戶資料，直接覆蓋會洗掉。"
-        "等切換正式環境前再評估同步策略。"
+        "本地開發中新增客戶表，本地資料**比 Render 多**，同步會洗掉本地新加的。"
+        "暫時阻擋直到開發穩定後再評估同步策略。"
     ),
 }
 
@@ -327,37 +326,94 @@ def truncate_and_copy(local_conn, render_conn, table_name):
             raise
 
 def incremental_sync_completed_trips(local_conn, render_conn):
-    """增量同步 completed_trips 資料表，使用時間戳保護本地歷史數據"""
+    """增量同步 completed_trips（時間錨點 + NULL 補漏，不洗本地修改）
+
+    設計理由（**保留 incremental 精神**，by design）：
+      - 本地是「累積版」要保留 Render 已手動清掉的歷史
+      - 用 created_at > last_sync_time 抓「Render 新增的」即可
+      - 不要全抓 — 會把 Render NULL 的舊 row 用 Render 內容覆蓋本地修改
+
+    ⚠️ Bug 修正（2026-05-08）：Render 上 60%+ 的 completed_trips
+    `created_at IS NULL`（schema 升級舊資料）。舊邏輯只用
+    `WHERE created_at > last_sync_time` → NULL 全部過濾掉 →
+    本地永遠缺這些 row（4/26-5/2 28 筆漏失就是這個）。
+
+    新邏輯雙路徑：
+      路徑 1: created_at > last_sync_time → 抓 Render 新加的（標準 incremental）
+      路徑 2: created_at IS NULL **且本地沒這個 id** → 補漏失 NULL row
+              （本地已有這個 id 的不抓，避免覆蓋本地修改）
+    """
     table_name = "completed_trips"
-    print(f"--- 開始增量同步資料表: {table_name} (基於時間戳保護本地歷史數據) ---")
+    print(f"--- 開始增量同步資料表: {table_name}（時間錨點 + NULL 補漏） ---")
 
     with local_conn.cursor() as local_cur, render_conn.cursor(cursor_factory=DictCursor) as render_cur:
         try:
-            # 1. 從 Render 的 database_maintenance 表獲取上次同步時間
-            render_cur.execute("SELECT value FROM database_maintenance WHERE key = 'last_completed_trips_sync';")
+            # ----- 路徑 1: 時間錨點抓新增 -----
+            render_cur.execute(
+                "SELECT value FROM database_maintenance WHERE key = 'last_completed_trips_sync';"
+            )
             last_sync_result = render_cur.fetchone()
-            
             if last_sync_result:
                 last_sync_time = last_sync_result['value']
                 print(f"   - 上次同步時間: {last_sync_time}")
             else:
-                # 如果沒有記錄，設定一個很早的時間
                 last_sync_time = '2000-01-01 00:00:00'
-                print("   - 沒有找到上次同步記錄，將同步所有數據")
+                print("   - 沒有上次同步記錄，將同步所有有 created_at 的紀錄")
 
-            # 2. 從 Render 讀取所有 created_at > 上次同步時間的資料
-            print(f"   - 正在從 Render 讀取 created_at > '{last_sync_time}' 的新紀錄...")
-            render_cur.execute(f"SELECT * FROM {table_name} WHERE created_at > %s ORDER BY created_at, id;", (last_sync_time,))
-            new_records = render_cur.fetchall()
+            print(f"   - [路徑1] 抓 Render created_at > '{last_sync_time}' 的新紀錄...")
+            render_cur.execute(
+                f"SELECT * FROM {table_name} WHERE created_at > %s ORDER BY id;",
+                (last_sync_time,),
+            )
+            records_by_time = list(render_cur.fetchall())
+            description_full = render_cur.description  # cache（後續 SELECT id 會覆寫）
+            print(f"   - [路徑1] 找到 {len(records_by_time)} 筆")
 
+            # ----- 路徑 2: 補本地沒的 NULL row -----
+            # Render 上 NULL row 是 schema 升級遺留，數量固定（不會新增）
+            # 本地已有的 id 不抓，避免蓋掉本地修改
+            print("   - [路徑2] 抓 Render created_at IS NULL **且本地沒此 id** 的補漏...")
+            render_cur.execute(
+                f"SELECT id FROM {table_name} WHERE created_at IS NULL ORDER BY id;"
+            )
+            render_null_ids = [r['id'] for r in render_cur.fetchall()]
+
+            if render_null_ids:
+                local_cur.execute(
+                    f"SELECT id FROM {table_name} WHERE id = ANY(%s)",
+                    (render_null_ids,),
+                )
+                local_existing_null_ids = {r[0] for r in local_cur.fetchall()}
+                missing_null_ids = [
+                    i for i in render_null_ids if i not in local_existing_null_ids
+                ]
+                print(f"   - [路徑2] Render NULL: {len(render_null_ids)}, "
+                      f"本地已有: {len(local_existing_null_ids)}, "
+                      f"待補: {len(missing_null_ids)}")
+
+                if missing_null_ids:
+                    render_cur.execute(
+                        f"SELECT * FROM {table_name} WHERE id = ANY(%s) ORDER BY id",
+                        (missing_null_ids,),
+                    )
+                    records_null_missing = list(render_cur.fetchall())
+                    description_full = render_cur.description  # SELECT * 重新 cache
+                else:
+                    records_null_missing = []
+            else:
+                print("   - [路徑2] Render 上沒 NULL row")
+                records_null_missing = []
+
+            # ----- 合併 -----
+            new_records = records_by_time + records_null_missing
             if not new_records:
-                print("   - ✅ 在 Render 上沒有找到需要同步的新紀錄。")
+                print("   - ✅ 沒有需要同步的新紀錄")
                 return
+            print(f"   - 總共需同步 {len(new_records)} 筆 "
+                  f"(路徑1 新增 {len(records_by_time)} + 路徑2 NULL 補漏 {len(records_null_missing)})")
 
-            print(f"   - 從 Render 找到 {len(new_records)} 筆新紀錄需要同步。")
-
-            # 3. 過濾生成欄位和本地特有欄位，避免插入錯誤
-            all_cols = [desc[0] for desc in render_cur.description]
+            # 3. 過濾生成欄位（用 cached description，避免被 path 2 的 SELECT id 覆寫）
+            all_cols = [desc[0] for desc in description_full]
             # completed_trips: 過濾生成欄位和本地特有欄位
             if table_name == 'completed_trips':
                 excluded_columns = ['actual_fare', 'total_fare', 'original_trip_id']
@@ -464,6 +520,86 @@ def incremental_sync_completed_trips(local_conn, render_conn):
             local_conn.rollback()
             print(f"❌ 增量同步 '{table_name}' 時發生錯誤: {e}", file=sys.stderr)
             raise
+
+def upsert_customers(local_conn, render_conn):
+    """UPSERT customers（保留本地升級欄位不被覆蓋）
+
+    本地 schema 升級了 birthday / gender / national_id / medical_record_no /
+    insurance_type / latitude / longitude / created_at / updated_at 等欄位，
+    Render 上沒有。直接 truncate_and_copy 會洗掉本地補的這些欄位。
+
+    解法：UPSERT
+      - INSERT 用 Render 既有欄位（升級欄位走本地 schema default 為 NULL）
+      - ON CONFLICT (id) DO UPDATE 只更新「Render 既有欄位」（render_cols 自然
+        不含本地升級欄位 → 升級欄位不會被 update → 自動保留）
+      - 本地獨有 id（seed 5 筆 + 手動加）→ Render 沒這 id → 不會被刪/動
+      - short_name 衝突（Render id=10 short_name='李四'，本地 id=999 short_name='李四'）
+        → savepoint per-row，violation 跳過 + log
+
+    必須在 trips / fixed_schedules 同步**之前**執行（兩者 FK 指 customers.short_name）。
+    """
+    table = 'customers'
+    print(f"--- UPSERT 資料表: {table}（保留本地升級欄位） ---")
+
+    with local_conn.cursor() as local_cur, render_conn.cursor(cursor_factory=DictCursor) as render_cur:
+        try:
+            # 從 Render 抓所有 customers（48 筆左右，無增量必要）
+            render_cur.execute(f"SELECT * FROM {table} ORDER BY id;")
+            records = render_cur.fetchall()
+            if not records:
+                print(f"   - Render 上沒 {table}，跳過")
+                return
+
+            render_cols = [d[0] for d in render_cur.description]
+            print(f"   - 從 Render 抓到 {len(records)} 筆，欄位: {render_cols}")
+
+            # 自動生成欄位排除（即使 Render 有此欄也不寫）
+            generated = {'actual_fare', 'total_fare'}
+            insert_cols = [c for c in render_cols if c not in generated]
+            col_indices = [render_cols.index(c) for c in insert_cols]
+
+            # ON CONFLICT 只 update Render 有的欄位（自然不含本地升級欄位）
+            update_cols = [c for c in insert_cols if c != 'id']
+            update_set = ', '.join(f'{c} = EXCLUDED.{c}' for c in update_cols)
+            placeholders = ', '.join(['%s'] * len(insert_cols))
+            insert_sql = (
+                f"INSERT INTO {table} ({', '.join(insert_cols)}) "
+                f"VALUES ({placeholders}) "
+                f"ON CONFLICT (id) DO UPDATE SET {update_set}"
+            )
+
+            inserted = updated = skipped_unique = 0
+            sn_idx = insert_cols.index('short_name') if 'short_name' in insert_cols else None
+            id_idx = insert_cols.index('id')
+
+            # savepoint per-row 處理 short_name unique violation
+            for rec in records:
+                row = [rec[i] for i in col_indices]
+                # 用 SAVEPOINT 隔離 unique 衝突（不會 abort 整個 transaction）
+                local_cur.execute("SAVEPOINT row_save")
+                try:
+                    local_cur.execute(insert_sql, row)
+                    # rowcount: INSERT new = 1, UPDATE existing = 1（PG 對 ON CONFLICT 都是 1）
+                    # 用 SELECT xmax 區分太繁，直接判斷本地 id 在/不在
+                    local_cur.execute("RELEASE SAVEPOINT row_save")
+                    inserted += 1  # 計總改動，不細分 INSERT vs UPDATE
+                except psycopg2.errors.UniqueViolation as e:
+                    local_cur.execute("ROLLBACK TO SAVEPOINT row_save")
+                    sn = row[sn_idx] if sn_idx is not None else '?'
+                    rid = row[id_idx]
+                    print(f"   - ⚠️ 跳過 id={rid} short_name={sn!r}: 本地有同 short_name 不同 id "
+                          f"（保留本地版）")
+                    skipped_unique += 1
+
+            local_conn.commit()
+            print(f"   - ✅ UPSERT 完成: 同步 {inserted} 筆，short_name 衝突跳過 {skipped_unique} 筆")
+            print(f"   - ℹ️ 本地獨有的 customer id（seed/手動加）保留不動")
+
+        except Exception as e:
+            local_conn.rollback()
+            print(f"❌ UPSERT '{table}' 失敗: {e}", file=sys.stderr)
+            raise
+
 
 def main(check_only=False, force_sync=False):
     """主函數"""

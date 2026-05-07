@@ -21,11 +21,11 @@ KNOWN_COMMANDS = {
     "確認修改", "取消修改", "確認請假", "取消操作", "全部請假",  # 🔥 FC 確認/取消操作
     "fix-sequence",   # Database sequence repair command
     "批量加成", "batch-allowance",   # Batch allowance command
-    "資料庫同步", "確認同步", "同步結果", "取消",   # Database sync and maintenance commands
+    "資料庫同步", "確認同步", "取消同步", "放棄同步", "同步結果", "取消",   # Database sync and maintenance commands
     # 🔥 新增：分頁相關命令
     "更多", "下一頁", "更多結果", "next", "more",
     # 🔥 修復：請假模式的放棄操作
-    "放棄操作", "放棄AI修改",
+    "放棄", "放棄操作", "放棄AI修改",  # 「放棄」單獨也認，跟「取消」對稱（群組按鈕送「放棄」不被偷走）
     # 帳務處理主選單與快捷入口
     "帳務處理", "➕ 記錄入金", "記錄入金", "💵 記錄上週扣款", "記錄上週扣款",
     # 帳務處理事件代碼
