@@ -383,3 +383,124 @@ def restore_fixed_schedule(
     if auto_commit:
         session.commit()
     return get_fixed_schedule_by_id(schedule_id, session=session)
+
+
+# ============================================================
+# Create — 新增固定班次模板（legacy 沒對應，rewrite 補齊）
+# ============================================================
+
+VALID_CATEGORIES = ('診所', '東洋', '臨時')
+VALID_DIRECTIONS = ('來', '回', '單')
+
+def create_fixed_schedule(
+    *,
+    session,
+    route_number: str,
+    departure_time: time,
+    start_point: str,
+    category: str,
+    via_point: Optional[str] = None,
+    end_point: Optional[str] = None,
+    base_fare: Optional[int] = None,
+    surcharge: Optional[int] = None,
+    driver_id: Optional[str] = None,
+    direction: Optional[str] = None,
+    note: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """新增固定班次模板（legacy 沒對應 UI，本地手動 INSERT 痛點）。
+
+    必填:
+        route_number: 含星期幾的字串（'1234567' 表週一到週日）
+                      legacy import_handler 用 LIKE '%{weekday}%' 過濾
+        departure_time: 出發時間
+        start_point: 起點客戶簡稱
+        category: 診所 / 東洋 / 臨時
+
+    選填: via_point/end_point/base_fare/surcharge/driver_id/direction/note
+
+    自動: status='準備'、modified_by、modification_time
+    """
+    # ---- 驗證 ----
+    if not route_number or not route_number.strip():
+        return ToolResult.fail("route_number 必填（含星期幾數字，如 '147' 表週一週四週日）")
+    rn = route_number.strip()
+    if not rn.isdigit() or any(c not in '1234567' for c in rn):
+        return ToolResult.fail(f"route_number 只能含 1-7 數字（給的是 {rn!r}）")
+
+    if not departure_time:
+        return ToolResult.fail("departure_time 必填")
+
+    if not start_point or not start_point.strip():
+        return ToolResult.fail("start_point 必填")
+
+    if not category or category not in VALID_CATEGORIES:
+        return ToolResult.fail(
+            f"category 必填且必須是 {VALID_CATEGORIES} 之一（給的是 {category!r}）"
+        )
+
+    if direction is not None and direction not in VALID_DIRECTIONS:
+        return ToolResult.fail(
+            f"direction 必須是 {VALID_DIRECTIONS} 之一（給的是 {direction!r}）"
+        )
+
+    if base_fare is not None and not isinstance(base_fare, int):
+        return ToolResult.fail("base_fare 必須是整數或 None")
+    if surcharge is not None and not isinstance(surcharge, int):
+        return ToolResult.fail("surcharge 必須是整數或 None")
+
+    # ---- INSERT ----
+    result = session.execute(text("""
+        INSERT INTO fixed_schedules (
+            route_number, departure_time,
+            start_point, via_point, end_point,
+            base_fare, surcharge,
+            category, driver_id, direction,
+            note, status,
+            modified_by, modification_time
+        ) VALUES (
+            :route_number, :departure_time,
+            :start_point, :via_point, :end_point,
+            :base_fare, :surcharge,
+            :category, :driver_id, :direction,
+            :note, '準備',
+            :modified_by, CURRENT_TIMESTAMP
+        )
+        RETURNING id
+    """), {
+        'route_number': rn,
+        'departure_time': departure_time,
+        'start_point': start_point.strip(),
+        'via_point': (via_point or '').strip() or None,
+        'end_point': (end_point or '').strip() or None,
+        'base_fare': base_fare,
+        'surcharge': surcharge,
+        'category': category,
+        'driver_id': (driver_id or '').strip() or None if isinstance(driver_id, str) else driver_id,
+        'direction': direction,
+        'note': (note or '').strip() or None,
+        'modified_by': user_name or user_id,
+    })
+    new_id = result.fetchone()[0]
+
+    # audit log
+    after = _fetch_schedule_snapshot(session=session, schedule_id=new_id)
+    write_audit(
+        session=session, user_id=user_id, user_name=user_name,
+        action_type='create_fixed_schedule',
+        target_table='fixed_schedules', target_id=new_id,
+        before_state=None, after_state=after,
+        changed_fields=list(after.keys()) if after else None,
+        extra={
+            'route_number': rn, 'category': category,
+            'start_point': start_point,
+        },
+        via=via,
+    )
+
+    if auto_commit:
+        session.commit()
+    return get_fixed_schedule_by_id(new_id, session=session)

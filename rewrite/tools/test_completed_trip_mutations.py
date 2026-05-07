@@ -43,18 +43,36 @@ try:
         print(f'  trips trip_id={row[0]}, category={row[1]!r}')
 
     # ============================================================
-    # update_completed_trip_fare — 用 trip 820（log 已知 meter=1250 extra=750）
+    # update_completed_trip_fare — 動態抓現存 completed_trip
+    # （hardcoded id 會被同步的 unique_code 衝突邏輯洗掉，改 dynamic 一勞永逸）
+    # 優先挑有 modification_reason 的 row 測累加邏輯
     # ============================================================
-    banner('M1: update_completed_trip_fare(820)')
-    r = query_completed_trip_by_id(820, session=s)
-    assert r.ok, f'820 應存在: {r.error}'
+    target_row = s.execute(text("""
+        SELECT id FROM completed_trips
+        WHERE modification_reason IS NOT NULL
+        ORDER BY id DESC LIMIT 1
+    """)).fetchone()
+    if not target_row:
+        # 沒有 modification_reason 的話退而求其次
+        target_row = s.execute(text(
+            "SELECT id FROM completed_trips ORDER BY id DESC LIMIT 1"
+        )).fetchone()
+    assert target_row, 'completed_trips 沒資料，無法測試'
+    TARGET_ID = target_row[0]
+    banner(f'M1: update_completed_trip_fare({TARGET_ID})')
+    r = query_completed_trip_by_id(TARGET_ID, session=s)
+    assert r.ok, f'{TARGET_ID} 應存在: {r.error}'
     before = r.data
+    # 算原本 [N] 編號數，加完應該 N+1
+    import re
+    existing_marks = len(re.findall(r'\[(\d+)\]', before.modification_reason or ''))
+    expected_next = existing_marks + 1
     print(f'  before: meter={before.meter_fare} extra={before.extra_fare} '
           f'mod={before.modification_reason!r}')
 
     # M1a: reason 空 → fail
     r = update_completed_trip_fare(
-        session=s, completed_trip_id=820,
+        session=s, completed_trip_id=TARGET_ID,
         meter_fare=1250, extra_fare=750,
         reason='', user_name='test',
         auto_commit=False,
@@ -64,7 +82,7 @@ try:
 
     # M1b: 都沒給 → fail
     r = update_completed_trip_fare(
-        session=s, completed_trip_id=820,
+        session=s, completed_trip_id=TARGET_ID,
         reason='測試', user_name='test',
         auto_commit=False,
     )
@@ -73,7 +91,7 @@ try:
 
     # M1c: 同樣的值 → fail（沒變動）
     r = update_completed_trip_fare(
-        session=s, completed_trip_id=820,
+        session=s, completed_trip_id=TARGET_ID,
         meter_fare=before.meter_fare, extra_fare=before.extra_fare,
         reason='測試', user_name='test',
         auto_commit=False,
@@ -83,7 +101,7 @@ try:
 
     # M1d: 改成 1500+800 → 應 success
     r = update_completed_trip_fare(
-        session=s, completed_trip_id=820,
+        session=s, completed_trip_id=TARGET_ID,
         meter_fare=1500, extra_fare=800,
         reason='測試: 加班計算錯誤', user_name='測試員',
         auto_commit=False,
@@ -94,28 +112,31 @@ try:
     print(f'  modification_reason: {after.modification_reason!r}')
     assert after.meter_fare == 1500
     assert after.extra_fare == 800
-    assert '[2]' in after.modification_reason  # 累加成功
+    assert f'[{expected_next}]' in after.modification_reason, \
+        f'累加應該變 [{expected_next}], 實際 mod: {after.modification_reason!r}'
     assert '改車資' in after.modification_reason
     assert '加班計算錯誤' in after.modification_reason
 
     # ============================================================
     # update_completed_trip_category — 改類別
     # ============================================================
-    banner('M2: update_completed_trip_category(820)')
+    banner(f'M2: update_completed_trip_category({TARGET_ID})')
+    # 算「不同 category」當改後目標
+    other_category = '診所' if before.category != '診所' else '東洋'
 
     # M2a: reason 空 → fail
     r = update_completed_trip_category(
-        session=s, completed_trip_id=820,
-        new_category='診所', reason='',
+        session=s, completed_trip_id=TARGET_ID,
+        new_category=other_category, reason='',
         auto_commit=False,
     )
     print(f'  reason 空 → ok={r.ok} error={r.error!r}')
     assert not r.ok
 
-    # M2b: 同類別 → fail（從 M1 之後 820 還是東洋）
+    # M2b: 同類別（before.category）→ fail
     r = update_completed_trip_category(
-        session=s, completed_trip_id=820,
-        new_category='東洋', reason='測試',
+        session=s, completed_trip_id=TARGET_ID,
+        new_category=before.category, reason='測試',
         auto_commit=False,
     )
     print(f'  同類別 → ok={r.ok} error={r.error!r}')
@@ -123,25 +144,26 @@ try:
 
     # M2c: 無效類別 → fail
     r = update_completed_trip_category(
-        session=s, completed_trip_id=820,
+        session=s, completed_trip_id=TARGET_ID,
         new_category='飛機', reason='測試',
         auto_commit=False,
     )
     print(f'  無效類別 → ok={r.ok} error={r.error!r}')
     assert not r.ok and '無效' in r.error
 
-    # M2d: 改成診所 → success
+    # M2d: 改成 other_category → success
     r = update_completed_trip_category(
-        session=s, completed_trip_id=820,
-        new_category='診所', reason='測試: 報帳分類錯誤',
+        session=s, completed_trip_id=TARGET_ID,
+        new_category=other_category, reason='測試: 報帳分類錯誤',
         user_name='測試員',
         auto_commit=False,
     )
     assert r.ok, f'M2d failed: {r.error}'
-    print(f'  category: 東洋 → {r.data.category}')
+    print(f'  category: {before.category} → {r.data.category}')
     print(f'  modification_reason: {r.data.modification_reason!r}')
-    assert r.data.category == '診所'
-    assert '[3]' in r.data.modification_reason  # 累加 [3]
+    assert r.data.category == other_category
+    # category 的累加 = 上面 fare 的 expected_next + 1
+    assert f'[{expected_next + 1}]' in r.data.modification_reason
     assert '改類別' in r.data.modification_reason
 
     # ============================================================
@@ -193,14 +215,14 @@ try:
     s.rollback()
     print('\n✅ 全部 mutation pass，已 rollback')
 
-    # 確認 820 回到原樣
-    r = query_completed_trip_by_id(820, session=s)
+    # 確認 TARGET_ID 回到原樣
+    r = query_completed_trip_by_id(TARGET_ID, session=s)
     assert r.ok
     final = r.data
     assert final.meter_fare == before.meter_fare, f'rollback 失敗: {final.meter_fare}'
     assert final.extra_fare == before.extra_fare
     assert final.category == before.category
-    print(f'   820 回原狀: meter={final.meter_fare} extra={final.extra_fare} '
+    print(f'   {TARGET_ID} 回原狀: meter={final.meter_fare} extra={final.extra_fare} '
           f'category={final.category}')
 
 finally:

@@ -51,6 +51,12 @@ _IMPORT_LIFF_TRIGGERS = {
     '匯入固定班次', '匯入', 'import', '匯入班次', '匯入班表',
 }
 
+# 觸發 LIFF 新增固定班次模板表單入口
+_NEW_FIXED_SCHEDULE_LIFF_TRIGGERS = {
+    '新增固定班次', '新增模板', '加固定班次', '建固定班次',
+    '新增固定班表', '新增班表', '建班表',
+}
+
 # 短 follow-up 詞：sandbox-active 狀態下這類訊息 classifier 常判 unknown，
 # 但其實是上一輪 AI 問題的回答（確認/拒絕/補資訊）→ 直接帶 last_skill 走
 _SHORT_FOLLOWUP_TOKENS = {
@@ -230,6 +236,12 @@ def try_handle_sandbox(event) -> bool:
         from rewrite.views.import_flex import render_import_entry
         reply_message(event.reply_token, render_import_entry())
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF import entry")
+        return True
+
+    if text in _NEW_FIXED_SCHEDULE_LIFF_TRIGGERS:
+        from rewrite.views.fixed_schedule_flex import render_new_fixed_schedule_entry
+        reply_message(event.reply_token, render_new_fixed_schedule_entry())
+        logger.info(f"[rewrite sandbox] {short_uid} → LIFF new-fixed-schedule entry")
         return True
 
     # 0c. Hard fall-through 關鍵字（rewrite 明確沒做的功能 / 帶參數的舊 booking 流程）

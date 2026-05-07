@@ -119,6 +119,7 @@ def customer_form_new():
     redirect_targets = {
         'booking': '/liff/booking/form',
         'import': '/liff/import/form',
+        'new_schedule': '/liff/fixed_schedule/form',
     }
     if form_kind in redirect_targets:
         # 把其他 query string 一起轉過去（保留 liff.state、未來其他參數）

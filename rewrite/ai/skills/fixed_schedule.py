@@ -22,6 +22,7 @@ from rewrite.tools.fixed_schedule import (
     update_fixed_schedule,
     apply_fixed_schedule_leave,
     restore_fixed_schedule,
+    create_fixed_schedule,
 )
 from rewrite.utils.sun_week import sun_week_info
 
@@ -38,6 +39,9 @@ _SYSTEM_PROMPT = """\
 - 用戶說「修改」「改時間」「改地點」「改車資」→ update_fixed_schedule
 - 用戶說「請假」「長期請假」「出國」「住院」→ apply_fixed_schedule_leave
 - 用戶說「恢復」「改回準備」「不請假了」→ restore_fixed_schedule
+- 用戶說「新增固定班次」「建模板」（**通常該走 LIFF 表單**，欄位多 AI 容易漏，
+  建議引導用戶打「新增固定班次」觸發 LIFF；若用戶堅持自然語言給齊欄位才 call）
+  → create_fixed_schedule（必填: route_number/departure_time/start_point/category）
 
 ⚠️ 規則：
 1. schedule_id 必填（schedule_id 不是 trip_id！這是模板層）
@@ -138,6 +142,34 @@ RESTORE_SCHEMA = {
 }
 
 
+CREATE_FIXED_SCHEDULE_SCHEMA = {
+    'description': (
+        "Create a new fixed schedule template. Most users should use LIFF form "
+        "(打「新增固定班次」會回 LIFF 按鈕). 只有用戶自然語言給齊所有必填才 call 這個。"
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'route_number': {
+                'type': 'string',
+                'description': "週幾組合，1-7 數字（'147' = 週一週四週日）",
+            },
+            'departure_time': {'type': 'string', 'description': "HH:MM"},
+            'start_point': {'type': 'string'},
+            'category': {'type': 'string', 'description': "診所/東洋/臨時"},
+            'via_point': {'type': 'string'},
+            'end_point': {'type': 'string'},
+            'base_fare': {'type': 'integer'},
+            'surcharge': {'type': 'integer'},
+            'driver_id': {'type': 'string'},
+            'direction': {'type': 'string', 'description': "來/回/單"},
+            'note': {'type': 'string'},
+        },
+        'required': ['route_number', 'departure_time', 'start_point', 'category'],
+    },
+}
+
+
 SUN_WEEK_INFO_SCHEMA = {
     'description': (
         "Get sun-week (Sunday-first) info. Use when user asks「本週是哪一週」"
@@ -167,5 +199,6 @@ def build_fixed_schedule_skill() -> Skill:
             (update_fixed_schedule, UPDATE_FIXED_SCHEDULE_SCHEMA),
             (apply_fixed_schedule_leave, APPLY_LEAVE_SCHEMA),
             (restore_fixed_schedule, RESTORE_SCHEMA),
+            (create_fixed_schedule, CREATE_FIXED_SCHEDULE_SCHEMA),
         ],
     )
