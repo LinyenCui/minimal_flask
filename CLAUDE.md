@@ -1,6 +1,6 @@
 # 智能 LINE Bot 派班管理系統 - Claude 實作指南
 
-> **最後更新**：2026-01-12
+> **最後更新**：2026-05-07
 
 這是一個結合真實 AI 技術與三時間態架構的 Taiwan 計程車調度平台，支援自然語言交互、智能路由決策和企業級派班解決方案。
 
@@ -22,6 +22,82 @@
 - **關鍵業務功能必須有傳統處理路徑**，不能完全依賴 AI
 - 任何新功能都必須考慮降級機制
 - 修改現有功能時必須確保向後兼容
+
+---
+
+## 遷移策略：sandbox 取代 legacy（長期規劃）
+
+> ⚠️ **這個策略 override 過去 v4 / v5 handoff 的「C 路線（不重做）」判斷。**
+> 不再有「永遠走 legacy」的功能；雙軌制只是過渡期。
+
+### 終局目標
+
+`rewrite/`（sandbox）補齊 legacy 所有功能 → 砍 legacy → 拆掉 `!` 前綴 → rewrite 變成預設行為 → 推上 Render。
+
+### 推論規則
+
+- `_HARD_FALLTHROUGH_KEYWORDS` 是**待淘汰清單**，不是「rewrite 永遠不做」的功能
+- v4 / v5 handoff 寫的「C 路線（不重做）」是過渡期判斷，遷移期所有 fall-through 功能都要做
+- 「YAGNI」對「砍 legacy 必要的功能」**不適用** — 不做就遷移卡死
+
+### Phase 路徑
+
+| Phase | 動作 | 狀態（2026-05-07）|
+|-------|------|-----|
+| 1 | sandbox 接管 query / mutation / 客戶 CRUD / booking | ✅ 已完成 |
+| 2 | sandbox 接管 import / 報表 / 新增刪除 fixed_schedule | 🚧 進行中 |
+| 3 | 拆 `_HARD_FALLTHROUGH_KEYWORDS`（清空） | 待 |
+| 4 | 拆 `!` 前綴判斷邏輯（webhook 一律走 rewrite） | 待 |
+| 5 | 刪 legacy（temp_booking_handler / import_handler / fixed_router / customers_ai_service 等） | 待 |
+| 6 | 推 Render（env loading 已一勞永逸） | 待 |
+
+每個 Phase → 1-2 天用戶實機驗 → 才推下一 Phase。
+
+### 截至 2026-05-07 砍 legacy 還缺什麼
+
+| 缺口 | 對應 hard fallthrough keyword |
+|-----|----|
+| 匯入固定班次到 trips | `匯入` / `import` |
+| 日 / 週 / 月報表生成 | `報表` / `日報` / `週報` / `周報` |
+| 新增 fixed_schedule（legacy 也沒做，業務需要） | — |
+| 刪除 fixed_schedule（兩端都沒） | — |
+
+---
+
+## 業務週定義：太陽週（星期日 → 星期六）
+
+> **業務術語**：診所 + 東洋兩大客戶都**週結算**，週的定義必須一致。
+
+- **太陽週起點 = 星期日**（**不是**星期一，跟 ISO 8601 不同）
+- 範例：今天 2026-05-07（星期四）→ 本週 = 5/3（日）~ 5/9（六）
+
+### 多功能需要凸顯太陽週
+
+- **匯入固定班次**：「本週」/「下週」/「+3 週」要解析成太陽週的 7 天日期範圍
+- **過去態查詢加總**：「本週司機5386東洋班次」「上週司機533收入」「xx 週 X 班次加總」
+- **報表生成**：日 / 週 / 月報表的「週」也走太陽週
+- **直接問**：「本週是哪一週」「上週是哪一週」 — 系統要能直接答出日期範圍
+
+### 實作要點
+
+- 用 `(weekday + 1) % 7` 計算週內第幾天（星期日為 0；Python `datetime.weekday()` 是星期一為 0 要轉換）
+- **不要**用 ISO `isocalendar().week`（那是星期一起算 ≠ 業務週）
+- legacy `modules/handlers/import_handler.py:parse_week_parameter` 已實作太陽週邏輯，rewrite 可重用 / 重做
+- rewrite 應建立 `rewrite/utils/sun_week.py` helper（暴露 `current_week()` / `parse_week_phrase()`），給多 skill / LIFF / atomic tool 共用
+
+### AI 該理解的講法（指 2026-05-07 為今天）
+
+| 用戶說 | 系統解釋 |
+|-------|---------|
+| 「本週」 | 5/3（日）~ 5/9（六）|
+| 「上週」 | 4/26（日）~ 5/2（六）|
+| 「下週」 | 5/10（日）~ 5/16（六）|
+| 「+3 週」 | 5/24（日）~ 5/30（六）|
+| 「本週是哪一週」 | 「本週 5/3-5/9」直接回答 |
+
+### 業務 ops 細節
+
+- fixed_schedule 目前**沒有 UI 入口可建**（admin 網頁 commit `a59114f` 已移除），用戶手動進 PostgreSQL DB INSERT — 這是 Phase 2 要補的 LIFF 表單
 
 ---
 
