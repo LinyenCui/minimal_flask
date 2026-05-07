@@ -116,10 +116,14 @@ def customer_form_new():
     這樣多種表單共用同一個 LIFF App / LIFF_ID，不用每加表單就去 Console 開新 App。
     """
     form_kind = (request.args.get('form') or 'customer').strip().lower()
-    if form_kind == 'booking':
+    redirect_targets = {
+        'booking': '/liff/booking/form',
+        'import': '/liff/import/form',
+    }
+    if form_kind in redirect_targets:
         # 把其他 query string 一起轉過去（保留 liff.state、未來其他參數）
         qs = request.query_string.decode('utf-8')
-        target = '/liff/booking/form'
+        target = redirect_targets[form_kind]
         if qs:
             target = f"{target}?{qs}"
         return redirect(target, code=302)

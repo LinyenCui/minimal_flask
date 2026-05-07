@@ -7,4 +7,4 @@ from flask import Blueprint
 
 liff_bp = Blueprint('liff', __name__, url_prefix='/liff')
 
-from rewrite.handlers.liff import health, customer, booking  # noqa: E402, F401
+from rewrite.handlers.liff import health, customer, booking, import_form  # noqa: E402, F401

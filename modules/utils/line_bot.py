@@ -13,6 +13,7 @@ from linebot.v3.messaging import (
     FlexContainer,
     PostbackAction,
     MessageAction,
+    URIAction,
     QuickReply,
     QuickReplyItem
 )
@@ -146,31 +147,53 @@ def reply_message(reply_token, messages):
                 elif msg.get("type") == "quick_reply":
                     # 處理帶有Quick Reply的文字訊息
                     text_msg = TextMessage(text=msg.get("text", ""))
-                    
-                    # 處理Quick Reply
+
+                    # 處理Quick Reply（支援 message / uri / postback action 三種）
                     if "quick_reply" in msg and "items" in msg["quick_reply"]:
                         quick_reply_items = []
-                        
+
                         logger.info(f"處理Quick Reply文字訊息項目: {msg['quick_reply']['items']}")
-                        
+
                         for item in msg["quick_reply"]["items"]:
-                            if "action" in item and item["action"].get("type") == "message":
-                                action_data = item["action"]
+                            if "action" not in item:
+                                continue
+                            action_data = item["action"]
+                            action_type = action_data.get("type")
+                            action = None
+                            if action_type == "message":
                                 action = MessageAction(
                                     label=action_data.get("label", ""),
                                     text=action_data.get("text", "")
                                 )
-                                quick_reply_items.append(
-                                    QuickReplyItem(action=action)
+                            elif action_type == "uri":
+                                # LIFF entry 用：點按鈕直接開 https://liff.line.me/<id>?form=...
+                                action = URIAction(
+                                    label=action_data.get("label", ""),
+                                    uri=action_data.get("uri", "")
                                 )
-                                logger.info(f"添加Quick Reply項目: {action_data.get('label')}, 文本: {action_data.get('text')}")
-                        
+                            elif action_type == "postback":
+                                action = PostbackAction(
+                                    label=action_data.get("label", ""),
+                                    data=action_data.get("data", ""),
+                                    display_text=action_data.get("displayText"),
+                                )
+                            else:
+                                logger.warning(
+                                    f"未知 quick_reply action type: {action_type!r}, skip"
+                                )
+                                continue
+                            quick_reply_items.append(QuickReplyItem(action=action))
+                            logger.info(
+                                f"添加 Quick Reply 項目: type={action_type} "
+                                f"label={action_data.get('label')!r}"
+                            )
+
                         # 創建QuickReply並賦值
                         if quick_reply_items:
                             qr = QuickReply(items=quick_reply_items)
                             text_msg.quick_reply = qr
                             logger.info(f"成功為文字訊息設置QuickReply")
-                    
+
                     processed_messages.append(text_msg)
                     logger.info(f"添加帶Quick Reply的文字訊息到處理列表")
                 else:

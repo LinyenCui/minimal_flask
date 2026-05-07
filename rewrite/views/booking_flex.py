@@ -23,63 +23,29 @@ def _booking_liff_url() -> str:
 
 
 def render_booking_entry() -> dict:
-    """!預約叫車 觸發的 Flex：點按鈕開 LIFF 預約表單
+    """!預約叫車 觸發的 LINE message：text + Quick Reply（uri 開 LIFF）
 
-    LIFF_ID 環境變數未設時 → 回錯誤 bubble。
+    Quick Reply 按完即消失，不留歷史殘留。
+    LIFF_ID 環境變數未設時 → 回錯誤 Flex bubble。
     """
     if not _liff_id():
+        from rewrite.views.customer_flex import _liff_unavailable_bubble
         return {
-            "type": "bubble",
-            "size": "kilo",
-            "header": {
-                "type": "box", "layout": "vertical",
-                "backgroundColor": DANGER, "paddingAll": "md",
-                "contents": [{
-                    "type": "text", "text": "⚠️ LIFF 未設定",
-                    "weight": "bold", "size": "lg", "color": "#ffffff",
-                }],
-            },
-            "body": {
-                "type": "box", "layout": "vertical", "spacing": "sm",
-                "contents": [
-                    {"type": "text",
-                     "text": "LIFF_ID 環境變數沒載入，預約表單暫不可用",
-                     "size": "sm", "color": BLACK, "wrap": True},
-                    {"type": "text",
-                     "text": "💡 請確認 .env.dev 存在且含 LIFF_ID，並重啟 Flask",
-                     "size": "xs", "color": MUTED, "wrap": True, "margin": "md"},
-                ],
-            },
+            'type': 'flex',
+            'altText': '⚠️ LIFF 未設定',
+            'contents': _liff_unavailable_bubble('預約表單'),
         }
 
     return {
-        "type": "bubble",
-        "size": "kilo",
-        "header": {
-            "type": "box", "layout": "vertical",
-            "backgroundColor": PRIMARY, "paddingAll": "md",
-            "contents": [{
-                "type": "text", "text": "📅 預約叫車",
-                "weight": "bold", "size": "lg", "color": "#ffffff",
-            }],
-        },
-        "body": {
-            "type": "box", "layout": "vertical", "spacing": "sm",
-            "contents": [{
-                "type": "text",
-                "text": "點下方按鈕開填寫表單",
-                "size": "sm", "color": MUTED, "wrap": True,
-            }],
-        },
-        "footer": {
-            "type": "box", "layout": "vertical",
-            "contents": [{
-                "type": "button", "style": "primary", "height": "sm",
-                "color": ACCENT,
-                "action": {
-                    "type": "uri",
-                    "label": "📝 開填寫表單",
-                    "uri": _booking_liff_url(),
+        'type': 'quick_reply',
+        'text': '📅 點下方按鈕預約叫車',
+        'quick_reply': {
+            'items': [{
+                'type': 'action',
+                'action': {
+                    'type': 'uri',
+                    'label': '📝 開填寫表單',
+                    'uri': _booking_liff_url(),
                 },
             }],
         },

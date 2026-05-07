@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>匯入固定班次</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang TC", "Microsoft JhengHei", sans-serif; padding: 16px; line-height: 1.5; color: #222; max-width: 600px; margin: 0 auto; font-size: 16px; }
+    h2 { margin: 0 0 16px; font-size: 20px; }
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 14px; color: #444; }
+    .field select, .field input {
+      width: 100%; padding: 10px 12px; font-size: 16px; border: 1px solid #ccc;
+      border-radius: 6px; background: #fff;
+    }
+    .field select:focus, .field input:focus { outline: none; border-color: #06c755; }
+    .actions { margin-top: 24px; display: flex; gap: 8px; }
+    button { flex: 1; padding: 12px; font-size: 16px; border-radius: 6px; border: 0; cursor: pointer; }
+    button[type=submit] { background: #06c755; color: #fff; font-weight: 600; }
+    button[type=submit]:disabled { background: #aaa; }
+    button.secondary { background: #f3f3f3; color: #333; }
+    .alert { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 14px; }
+    .alert.err { background: #fdecea; color: #c0392b; border: 1px solid #f5c2bf; }
+    .alert.ok { background: #e8f5e9; color: #1a7a1a; border: 1px solid #b8e0bb; }
+    .alert.warn { background: #fff8e1; color: #b85c00; border: 1px solid #ffd180; }
+    .loading { text-align: center; color: #666; padding: 40px 0; }
+    .preview-card {
+      margin: 16px 0; padding: 14px; border: 1px solid #e0e0e0;
+      border-radius: 8px; background: #fafafa; font-size: 14px;
+    }
+    .preview-card .label { color: #666; }
+    .preview-card .num { font-weight: 700; color: #1565c0; }
+    .preview-card .num.warn { color: #b85c00; }
+    .preview-card .row { margin: 6px 0; display: flex; justify-content: space-between; }
+    .checkbox-row { padding: 8px 0; display: flex; align-items: center; gap: 8px; }
+    .checkbox-row input { width: auto; }
+  </style>
+</head>
+<body>
+  <div id="loading" class="loading">載入中…</div>
+  <div id="content" hidden>
+    <h2>📥 匯入固定班次</h2>
+    <div id="alert"></div>
+
+    <form id="import-form" novalidate>
+      <div class="field">
+        <label>週次（太陽週：星期日 ~ 星期六）</label>
+        <select name="week_offset" id="sel-week">
+          {% for opt in week_options %}
+          <option value="{{ opt.value }}"{% if loop.first %} selected{% endif %}>{{ opt.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label>類別</label>
+        <select name="category" id="sel-category">
+          <option value="診所" selected>診所</option>
+          <option value="東洋">東洋</option>
+          <option value="臨時">臨時</option>
+        </select>
+      </div>
+
+      <div id="preview-card" class="preview-card" hidden>
+        <div class="row"><span class="label">週次</span><span class="num" id="pv-range">—</span></div>
+        <div class="row"><span class="label">將匯入</span><span class="num" id="pv-insert">—</span></div>
+        <div class="row" id="row-leave" hidden>
+          <span class="label">└ 含請假</span><span class="num warn" id="pv-leave">—</span>
+        </div>
+        <div class="row" id="row-existing" hidden>
+          <span class="label">⚠️ 既有衝突</span><span class="num warn" id="pv-existing">—</span>
+        </div>
+        <div class="row" id="row-purgeable" hidden>
+          <span class="label">🗑️ 過去週可清</span><span class="num warn" id="pv-purgeable">—</span>
+        </div>
+      </div>
+
+      <div class="checkbox-row" id="overwrite-row" hidden>
+        <input type="checkbox" id="cb-overwrite" name="overwrite">
+        <label for="cb-overwrite" style="font-weight: normal;">覆蓋既有班次（會清除原班次的修改！）</label>
+      </div>
+
+      <div class="checkbox-row" id="purge-row" hidden>
+        <input type="checkbox" id="cb-purge" name="purge_past">
+        <label for="cb-purge" style="font-weight: normal;">順便清理過去週同類別 stuck 班次</label>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="secondary" id="btn-cancel">取消</button>
+        <button type="submit" id="btn-submit" disabled>執行匯入</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    const LIFF_ID = "{{ liff_id }}";
+
+    const loadingEl = document.getElementById('loading');
+    const contentEl = document.getElementById('content');
+    const alertEl = document.getElementById('alert');
+    const form = document.getElementById('import-form');
+    const submitBtn = document.getElementById('btn-submit');
+    const cancelBtn = document.getElementById('btn-cancel');
+    const selWeek = document.getElementById('sel-week');
+    const selCategory = document.getElementById('sel-category');
+    const cbOverwrite = document.getElementById('cb-overwrite');
+    const overwriteRow = document.getElementById('overwrite-row');
+    const cbPurge = document.getElementById('cb-purge');
+    const purgeRow = document.getElementById('purge-row');
+    const previewCard = document.getElementById('preview-card');
+    const pvRange = document.getElementById('pv-range');
+    const pvInsert = document.getElementById('pv-insert');
+    const pvLeave = document.getElementById('pv-leave');
+    const pvExisting = document.getElementById('pv-existing');
+    const pvPurgeable = document.getElementById('pv-purgeable');
+    const rowLeave = document.getElementById('row-leave');
+    const rowExisting = document.getElementById('row-existing');
+    const rowPurgeable = document.getElementById('row-purgeable');
+
+    let currentPreview = null;
+
+    function showAlert(type, msg) { alertEl.innerHTML = `<div class="alert ${type}">${msg}</div>`; }
+    function clearAlert() { alertEl.innerHTML = ''; }
+    function setLoading(t) { loadingEl.textContent = t; loadingEl.hidden = false; contentEl.hidden = true; }
+    function showContent() { loadingEl.hidden = true; contentEl.hidden = false; }
+
+    async function refreshPreview() {
+      clearAlert();
+      previewCard.hidden = true;
+      submitBtn.disabled = true;
+      submitBtn.textContent = '預覽中…';
+
+      const idToken = liff.getIDToken();
+      const payload = {
+        week_offset: parseInt(selWeek.value, 10),
+        category: selCategory.value,
+      };
+      try {
+        const resp = await fetch('/liff/import/preview', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + idToken,
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+        currentPreview = data.preview;
+        const p = data.preview;
+
+        // 顯示「W18 5/3-5/9」這樣（太陽週號 + 範圍）
+        const wn = p.sun_week_number != null ? `W${p.sun_week_number} ` : '';
+        pvRange.textContent = `${wn}${p.week_label} ${p.week_range}`;
+        pvInsert.textContent = `${p.will_insert} 筆`;
+
+        if (p.leave_count > 0) {
+          pvLeave.textContent = `${p.leave_count} 筆`;
+          rowLeave.hidden = false;
+        } else {
+          rowLeave.hidden = true;
+        }
+
+        if (p.existing > 0) {
+          pvExisting.textContent = `${p.existing} 筆已匯入`;
+          rowExisting.hidden = false;
+          overwriteRow.hidden = false;
+        } else {
+          rowExisting.hidden = true;
+          overwriteRow.hidden = true;
+          cbOverwrite.checked = false;
+        }
+
+        if (p.purge_past_count > 0) {
+          pvPurgeable.textContent = `${p.purge_past_count} 筆`;
+          rowPurgeable.hidden = false;
+          purgeRow.hidden = false;
+        } else {
+          rowPurgeable.hidden = true;
+          purgeRow.hidden = true;
+          cbPurge.checked = false;
+        }
+
+        previewCard.hidden = false;
+        // 衝突沒勾覆蓋 → submit 仍 disable
+        updateSubmitButton();
+      } catch (e) {
+        showAlert('err', '❌ 預覽失敗：' + e.message);
+        submitBtn.textContent = '執行匯入';
+      }
+    }
+
+    function updateSubmitButton() {
+      if (!currentPreview) return;
+      const p = currentPreview;
+      const canSubmit = (p.existing === 0) || cbOverwrite.checked;
+      submitBtn.disabled = !canSubmit || (p.will_insert === 0 && !cbPurge.checked);
+
+      let label;
+      if (p.existing > 0 && cbOverwrite.checked) {
+        label = `覆蓋並匯入 ${p.will_insert} 筆`;
+      } else if (p.will_insert > 0) {
+        label = `執行匯入 ${p.will_insert} 筆`;
+      } else {
+        label = '執行';
+      }
+      if (cbPurge.checked && p.purge_past_count > 0) {
+        label += ` + 清 ${p.purge_past_count}`;
+      }
+      submitBtn.textContent = label;
+    }
+
+    selWeek.addEventListener('change', refreshPreview);
+    selCategory.addEventListener('change', refreshPreview);
+    cbOverwrite.addEventListener('change', updateSubmitButton);
+    cbPurge.addEventListener('change', updateSubmitButton);
+
+    cancelBtn.addEventListener('click', () => {
+      if (liff.isInClient && liff.isInClient()) liff.closeWindow();
+      else history.back();
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!currentPreview) return;
+      if (currentPreview.existing > 0 && !cbOverwrite.checked) {
+        showAlert('warn', '⚠️ 既有班次衝突，請勾選「覆蓋」才能繼續');
+        return;
+      }
+      if (currentPreview.existing > 0 && cbOverwrite.checked) {
+        if (!confirm(`會清除 ${currentPreview.existing} 筆既有班次（含原本對該週班次的修改），確定要覆蓋嗎？`)) {
+          return;
+        }
+      }
+      if (cbPurge.checked && currentPreview.purge_past_count > 0) {
+        if (!confirm(`會永久刪除 ${currentPreview.purge_past_count} 筆過去週 ${currentPreview.category} 班次（fixed/temp），確定？`)) {
+          return;
+        }
+      }
+
+      clearAlert();
+      submitBtn.disabled = true;
+      submitBtn.textContent = '匯入中…';
+      try {
+        const idToken = liff.getIDToken();
+        const payload = {
+          week_offset: parseInt(selWeek.value, 10),
+          category: selCategory.value,
+          overwrite: cbOverwrite.checked,
+          purge_past: cbPurge.checked,
+        };
+        const resp = await fetch('/liff/import', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + idToken,
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+        const r = data.result;
+        const wn = r.sun_week_number != null ? `W${r.sun_week_number} ` : '';
+        let msg = `✅ 已匯入 ${r.inserted} 筆（${wn}${r.week_label} ${r.week_range} ${r.category}）`;
+        if (r.overwritten > 0) msg += `\n🔄 覆蓋 ${r.overwritten} 筆原有`;
+        if (r.purged_past > 0) msg += `\n🗑️ 清理過去週 ${r.purged_past} 筆`;
+        if (r.leave_count > 0) msg += `\n🏷️ 含請假 ${r.leave_count} 筆`;
+        if (r.skipped_dup > 0) msg += `\n⏭️ 跳過重複 ${r.skipped_dup} 筆`;
+
+        const inClient = liff.isInClient && liff.isInClient();
+        if (inClient) {
+          showAlert('ok', msg + '\n（2 秒後關閉）');
+          setTimeout(() => liff.closeWindow(), 2000);
+        } else {
+          showAlert('ok', msg + '\n（可關閉視窗）');
+        }
+      } catch (err) {
+        showAlert('err', '❌ ' + err.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = '執行匯入';
+      }
+    });
+
+    async function init() {
+      if (!LIFF_ID) { setLoading('LIFF_ID 未設定'); return; }
+      try {
+        await liff.init({ liffId: LIFF_ID });
+      } catch (e) {
+        setLoading('LIFF init 失敗：' + e.message);
+        return;
+      }
+      if (!liff.isLoggedIn()) {
+        liff.login({ redirectUri: window.location.href });
+        return;
+      }
+      showContent();
+      await refreshPreview();
+    }
+
+    init();
+  </script>
+</body>
+</html>

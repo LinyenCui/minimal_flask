@@ -46,6 +46,11 @@ _BOOKING_LIFF_TRIGGERS = {
     '預約叫車', '預約', '新增班次', '預約班次', '叫車', '預約叫車表單',
 }
 
+# 觸發 LIFF 匯入固定班次表單入口
+_IMPORT_LIFF_TRIGGERS = {
+    '匯入固定班次', '匯入', 'import', '匯入班次', '匯入班表',
+}
+
 # 短 follow-up 詞：sandbox-active 狀態下這類訊息 classifier 常判 unknown，
 # 但其實是上一輪 AI 問題的回答（確認/拒絕/補資訊）→ 直接帶 last_skill 走
 _SHORT_FOLLOWUP_TOKENS = {
@@ -204,28 +209,27 @@ def try_handle_sandbox(event) -> bool:
         return True
 
     # 0b. LIFF 表單 exact-match 觸發詞（要在 hard fall-through 之前 check）
-    #     rewrite 已用 LIFF 接管 booking → 訊息 in _BOOKING_LIFF_TRIGGERS
-    #     會被 hard_fallthrough 的「預約」keyword 偷走，所以順序要調整
+    #     rewrite 已用 LIFF 接管 customer/booking/import → 訊息 in *_LIFF_TRIGGERS
+    #     會被 hard_fallthrough 的「預約」/「匯入」keyword 偷走，所以順序要調整。
+    #
+    #     entry render 函數回完整 message dict（type=quick_reply 帶 LIFF uri action）。
+    #     Quick Reply 按完即消失，不留歷史殘留 — 比 Flex bubble 體驗好。
     if text in _NEW_CUSTOMER_LIFF_TRIGGERS:
         from rewrite.views.customer_flex import render_new_customer_entry
-        bubble = render_new_customer_entry()
-        reply_message(event.reply_token, {
-            'type': 'flex',
-            'altText': '新增客戶 — 點按鈕開表單',
-            'contents': bubble,
-        })
-        logger.info(f"[rewrite sandbox] {short_uid} → LIFF new-customer Flex")
+        reply_message(event.reply_token, render_new_customer_entry())
+        logger.info(f"[rewrite sandbox] {short_uid} → LIFF new-customer entry")
         return True
 
     if text in _BOOKING_LIFF_TRIGGERS:
         from rewrite.views.booking_flex import render_booking_entry
-        bubble = render_booking_entry()
-        reply_message(event.reply_token, {
-            'type': 'flex',
-            'altText': '預約叫車 — 點按鈕開表單',
-            'contents': bubble,
-        })
-        logger.info(f"[rewrite sandbox] {short_uid} → LIFF booking Flex")
+        reply_message(event.reply_token, render_booking_entry())
+        logger.info(f"[rewrite sandbox] {short_uid} → LIFF booking entry")
+        return True
+
+    if text in _IMPORT_LIFF_TRIGGERS:
+        from rewrite.views.import_flex import render_import_entry
+        reply_message(event.reply_token, render_import_entry())
+        logger.info(f"[rewrite sandbox] {short_uid} → LIFF import entry")
         return True
 
     # 0c. Hard fall-through 關鍵字（rewrite 明確沒做的功能 / 帶參數的舊 booking 流程）
