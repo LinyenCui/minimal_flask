@@ -41,6 +41,11 @@ _NEW_CUSTOMER_LIFF_TRIGGERS = {
     '新增客戶', '加客戶', '建檔', '新增客戶 表單', '新增客戶表單',
 }
 
+# 觸發 LIFF 預約叫車表單入口
+_BOOKING_LIFF_TRIGGERS = {
+    '預約叫車', '預約', '新增班次', '預約班次', '叫車', '預約叫車表單',
+}
+
 # 短 follow-up 詞：sandbox-active 狀態下這類訊息 classifier 常判 unknown，
 # 但其實是上一輪 AI 問題的回答（確認/拒絕/補資訊）→ 直接帶 last_skill 走
 _SHORT_FOLLOWUP_TOKENS = {
@@ -198,16 +203,9 @@ def try_handle_sandbox(event) -> bool:
         logger.info(f"[rewrite sandbox] {short_uid} ended conversation by user")
         return True
 
-    # 0b. Hard fall-through 關鍵字（rewrite 明確沒做的功能）
-    if _should_hard_fallthrough(text):
-        logger.info(
-            f"[rewrite sandbox] {short_uid} text={text!r} → hard fall-through "
-            f"(keyword match)"
-        )
-        return False
-
-    # 0c. !新增客戶（無參數）→ 回 LIFF 表單入口 Flex（點按鈕開 LIFF webview）
-    #     有參數時繼續走 AI（自然語言新增 — 既有行為）
+    # 0b. LIFF 表單 exact-match 觸發詞（要在 hard fall-through 之前 check）
+    #     rewrite 已用 LIFF 接管 booking → 訊息 in _BOOKING_LIFF_TRIGGERS
+    #     會被 hard_fallthrough 的「預約」keyword 偷走，所以順序要調整
     if text in _NEW_CUSTOMER_LIFF_TRIGGERS:
         from rewrite.views.customer_flex import render_new_customer_entry
         bubble = render_new_customer_entry()
@@ -218,6 +216,26 @@ def try_handle_sandbox(event) -> bool:
         })
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF new-customer Flex")
         return True
+
+    if text in _BOOKING_LIFF_TRIGGERS:
+        from rewrite.views.booking_flex import render_booking_entry
+        bubble = render_booking_entry()
+        reply_message(event.reply_token, {
+            'type': 'flex',
+            'altText': '預約叫車 — 點按鈕開表單',
+            'contents': bubble,
+        })
+        logger.info(f"[rewrite sandbox] {short_uid} → LIFF booking Flex")
+        return True
+
+    # 0c. Hard fall-through 關鍵字（rewrite 明確沒做的功能 / 帶參數的舊 booking 流程）
+    #     用戶若打「!預約 明天3點台北」這種帶參數版仍走 legacy（rewrite LIFF 是空 form 起步）
+    if _should_hard_fallthrough(text):
+        logger.info(
+            f"[rewrite sandbox] {short_uid} text={text!r} → hard fall-through "
+            f"(keyword match)"
+        )
+        return False
 
     # 0.5 取上一輪 context（給 classifier hint + agent prompt prefix 用）
     #     history 是跨輪累積（含本輪前的 user/ai 對），讓 AI 看到完整脈絡

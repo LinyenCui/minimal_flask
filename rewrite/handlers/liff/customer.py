@@ -15,7 +15,7 @@ import os
 from datetime import date, datetime
 from typing import Any
 
-from flask import jsonify, render_template, request
+from flask import jsonify, redirect, render_template, request
 from sqlalchemy.exc import SQLAlchemyError
 
 from database import Session
@@ -107,6 +107,22 @@ def _push_customer_to_user(user_id: str | None, view, action_label: str) -> None
 
 @liff_bp.route('/customer/form', methods=['GET'])
 def customer_form_new():
+    """LIFF 入口頁（dispatcher）
+
+    LINE Console 設的 endpoint URL 寫死 /liff/customer/form，所以這裡承擔 dispatch 角色：
+      - ?form=booking → redirect 到 booking 表單
+      - ?form=customer 或無 → 維持新增客戶表單（既有行為）
+
+    這樣多種表單共用同一個 LIFF App / LIFF_ID，不用每加表單就去 Console 開新 App。
+    """
+    form_kind = (request.args.get('form') or 'customer').strip().lower()
+    if form_kind == 'booking':
+        # 把其他 query string 一起轉過去（保留 liff.state、未來其他參數）
+        qs = request.query_string.decode('utf-8')
+        target = '/liff/booking/form'
+        if qs:
+            target = f"{target}?{qs}"
+        return redirect(target, code=302)
     return _serve_form(customer_id=None)
 
 

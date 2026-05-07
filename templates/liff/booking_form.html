@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>預約叫車</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang TC", "Microsoft JhengHei", sans-serif; padding: 16px; line-height: 1.5; color: #222; max-width: 600px; margin: 0 auto; font-size: 16px; }
+    h2 { margin: 0 0 16px; font-size: 20px; }
+    .field { margin-bottom: 14px; }
+    .field.row { display: flex; gap: 8px; }
+    .field.row > div { flex: 1; }
+    .field label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 14px; color: #444; }
+    .field .req { color: #c0392b; margin-left: 2px; }
+    .field input, .field select, .field textarea {
+      width: 100%; padding: 10px 12px; font-size: 16px; border: 1px solid #ccc;
+      border-radius: 6px; background: #fff;
+    }
+    .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: #06c755; }
+    .actions { margin-top: 24px; display: flex; gap: 8px; }
+    button { flex: 1; padding: 12px; font-size: 16px; border-radius: 6px; border: 0; cursor: pointer; }
+    button[type=submit] { background: #06c755; color: #fff; font-weight: 600; }
+    button[type=submit]:disabled { background: #aaa; }
+    button.secondary { background: #f3f3f3; color: #333; }
+    .alert { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 14px; }
+    .alert.err { background: #fdecea; color: #c0392b; border: 1px solid #f5c2bf; }
+    .alert.ok { background: #e8f5e9; color: #1a7a1a; border: 1px solid #b8e0bb; }
+    .loading { text-align: center; color: #666; padding: 40px 0; }
+    details { margin-bottom: 14px; border: 1px solid #eee; border-radius: 6px; padding: 8px 12px; }
+    details summary { font-weight: 600; cursor: pointer; padding: 4px 0; color: #555; }
+    details[open] { background: #fafafa; }
+  </style>
+</head>
+<body>
+  <div id="loading" class="loading">載入中…</div>
+  <div id="content" hidden>
+    <h2>📅 預約叫車</h2>
+    <div id="alert"></div>
+    <form id="booking-form" novalidate>
+      <div class="field row">
+        <div>
+          <label>日期<span class="req">*</span></label>
+          <input name="date" type="date" required>
+        </div>
+        <div>
+          <label>時間<span class="req">*</span></label>
+          <input name="time" type="time" required>
+        </div>
+      </div>
+      <div class="field">
+        <label>起點<span class="req">*</span></label>
+        <input name="start_point" type="text" required maxlength="100" placeholder="例：龍埔街、群創D3哨、東洋後門">
+      </div>
+      <div class="field">
+        <label>終點</label>
+        <input name="end_point" type="text" maxlength="100" placeholder="（選填）">
+      </div>
+      <div class="field">
+        <label>途經</label>
+        <input name="via_point" type="text" maxlength="100" placeholder="（選填）">
+      </div>
+      <div class="field">
+        <label>類別</label>
+        <select name="category">
+          <option value="東洋" selected>東洋</option>
+          <option value="診所">診所</option>
+          <option value="臨時">臨時</option>
+        </select>
+      </div>
+
+      <details>
+        <summary>選填欄位（司機 / 車資 / 乘客）</summary>
+        <div class="field" style="margin-top: 10px;">
+          <label>指派司機 ID</label>
+          <input name="driver_id" type="number" min="1" placeholder="（選填，例 5386）">
+        </div>
+        <div class="field row">
+          <div>
+            <label>錶價</label>
+            <input name="meter_fare" type="number" min="0" placeholder="（選填）">
+          </div>
+          <div>
+            <label>加成</label>
+            <input name="extra_fare" type="number" placeholder="0（可正可負）">
+          </div>
+        </div>
+        <div class="field">
+          <label>乘客姓名</label>
+          <input name="passenger_name" type="text" maxlength="50" placeholder="（選填）">
+        </div>
+      </details>
+
+      <div class="actions">
+        <button type="button" class="secondary" id="btn-cancel">取消</button>
+        <button type="submit" id="btn-submit">建立預約</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    const LIFF_ID = "{{ liff_id }}";
+
+    const loadingEl = document.getElementById('loading');
+    const contentEl = document.getElementById('content');
+    const alertEl = document.getElementById('alert');
+    const form = document.getElementById('booking-form');
+    const submitBtn = document.getElementById('btn-submit');
+    const cancelBtn = document.getElementById('btn-cancel');
+
+    function showAlert(type, msg) { alertEl.innerHTML = `<div class="alert ${type}">${msg}</div>`; }
+    function clearAlert() { alertEl.innerHTML = ''; }
+    function setLoading(text) { loadingEl.textContent = text; loadingEl.hidden = false; contentEl.hidden = true; }
+    function showContent() { loadingEl.hidden = true; contentEl.hidden = false; }
+
+    function _today() {
+      const d = new Date();
+      const yy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yy}-${mm}-${dd}`;
+    }
+
+    async function init() {
+      if (!LIFF_ID) { setLoading('LIFF_ID 未設定'); return; }
+      try {
+        await liff.init({ liffId: LIFF_ID });
+      } catch (e) {
+        setLoading('LIFF init 失敗：' + e.message);
+        return;
+      }
+      if (!liff.isLoggedIn()) {
+        liff.login({ redirectUri: window.location.href });
+        return;
+      }
+      // 預設日期 = 今天，且 picker 最早只能選今天（過去日期擋掉，避免誤選）
+      const dateEl = form.elements.namedItem('date');
+      dateEl.value = _today();
+      dateEl.min = _today();
+      showContent();
+    }
+
+    cancelBtn.addEventListener('click', () => {
+      if (liff.isInClient && liff.isInClient()) liff.closeWindow();
+      else history.back();
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearAlert();
+
+      // 過去時間防呆：date+time 早於現在 → 跳 confirm（給「補登過去班次」彈性，但不靜默通過）
+      const fd = new FormData(form);
+      const dateStr = fd.get('date');
+      const timeStr = fd.get('time');
+      if (dateStr && timeStr) {
+        const target = new Date(`${dateStr}T${timeStr}`);
+        const now = new Date();
+        // 5 分鐘容錯（手機/server 時鐘漂移）
+        if (target.getTime() < now.getTime() - 5 * 60 * 1000) {
+          if (!confirm(`預約時間 ${dateStr} ${timeStr} 已過，仍要建立嗎？\n（補登過去班次才按確定）`)) {
+            return;
+          }
+        }
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = '建立中…';
+      try {
+        const idToken = liff.getIDToken();
+        const payload = Object.fromEntries(fd.entries());
+        const resp = await fetch('/liff/booking', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + idToken,
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        const inClient = liff.isInClient && liff.isInClient();
+        const tid = data.trip && data.trip.trip_id;
+        if (inClient) {
+          showAlert('ok', `✅ 已建立預約 #${tid}（1.5 秒後關閉）`);
+          setTimeout(() => liff.closeWindow(), 1500);
+        } else {
+          showAlert('ok', `✅ 已建立預約 #${tid}（可關閉視窗）`);
+        }
+      } catch (err) {
+        showAlert('err', '❌ ' + err.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = '建立預約';
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>
