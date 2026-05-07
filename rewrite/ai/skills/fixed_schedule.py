@@ -23,6 +23,7 @@ from rewrite.tools.fixed_schedule import (
     apply_fixed_schedule_leave,
     restore_fixed_schedule,
 )
+from rewrite.utils.sun_week import sun_week_info
 
 
 _SYSTEM_PROMPT = """\
@@ -52,6 +53,10 @@ _SYSTEM_PROMPT = """\
 📝 用詞：
 - 「下週起暫停」「暫時不來」「長期不來」 → apply_fixed_schedule_leave
 - 「恢復服務」「重新開始」「請假結束」 → restore_fixed_schedule
+
+🗓 太陽週（Sunday-first）— 用戶問週次直接用 sun_week_info 答：
+- 「本週是哪一週」「上週幾號到幾號」「W17 是哪幾天」 → call sun_week_info 回答
+- 太陽週 = 星期日 ~ 星期六（**不是 ISO 週一起算**），不要自己算
 """
 
 
@@ -133,11 +138,30 @@ RESTORE_SCHEMA = {
 }
 
 
+SUN_WEEK_INFO_SCHEMA = {
+    'description': (
+        "Get sun-week (Sunday-first) info. Use when user asks「本週是哪一週」"
+        "「上週幾號到幾號」「W17 是哪幾天」. AI must NOT compute these — "
+        "LLM defaults to ISO week which is OFF BY ONE DAY for this business."
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'week_number': {'type': 'integer', 'description': "整年第 N 週"},
+            'week_offset': {'type': 'integer', 'description': "0=本週/-1=上週/1=下週"},
+            'target_date': {'type': 'string', 'description': "YYYY-MM-DD 任一日期"},
+            'year': {'type': 'integer'},
+        },
+    },
+}
+
+
 def build_fixed_schedule_skill() -> Skill:
     return Skill(
         name='fixed_schedule',
         system_prompt=_SYSTEM_PROMPT,
         tools=[
+            (sun_week_info, SUN_WEEK_INFO_SCHEMA),
             (query_fixed_schedule, QUERY_FIXED_SCHEDULE_SCHEMA),
             (get_fixed_schedule_by_id, GET_FIXED_SCHEDULE_BY_ID_SCHEMA),
             (update_fixed_schedule, UPDATE_FIXED_SCHEDULE_SCHEMA),

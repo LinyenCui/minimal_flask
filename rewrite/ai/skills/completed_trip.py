@@ -20,6 +20,7 @@ from rewrite.tools.completed_trip import (
     update_completed_trip_fare,
     update_completed_trip_category,
 )
+from rewrite.utils.sun_week import sun_week_info
 
 
 def _system_prompt() -> str:
@@ -35,10 +36,20 @@ def _system_prompt() -> str:
 
 📅 時間參考：
 - 今天 = {today.isoformat()} ({weekdays[today.weekday()]})
-- 「昨天」「前天」「上週」「上個月」「3天前」等都要轉成 YYYY-MM-DD
-- 「7月」這類沒明確年份的，預設今年 ({today.year})
+- 「昨天」「前天」「3天前」「7月」這類**單純日期** → 自己算 YYYY-MM-DD
+- 「7月」沒明確年份的，預設今年 ({today.year})
+
+🗓 **太陽週（Sunday-first）— 業務週定義，不是 ISO 8601**：
+- 太陽週 = 星期日 ~ 星期六（不是週一起算！）
+- 任何「本週/上週/下週/+N週/第 N 週/W{{N}}」**一律 call sun_week_info 拿正確 dates**，
+  **不要自己算**（LLM 預設算成 ISO 週，會差一天）
+- 例：用戶「本週」「W18」「第 18 週」 → 先 call sun_week_info → 拿到 5/3-5/9 →
+  再 call aggregate / query 帶 date_from=5/3, date_to=5/9
+- 用戶單純問「本週是哪一週？」「W17 是哪幾天？」 → 只 call sun_week_info 回答即可
 
 🛠️ 工具選擇：
+- 用戶提到週次（本週/上週/+N週/第 N 週/W{{N}}） → **先 call sun_week_info** 拿 dates
+- 用戶問「本週是哪一週」「W17 是哪幾天」這種純查週資訊 → 只 call sun_week_info
 - 用戶給「completed_trip_id / 查看 820 / #820」 → query_completed_trip_by_id
 - 用戶問「加總/統計金額/總計多少」 → aggregate_completed_trips
 - 其他條件查詢（日期/司機/類別/客戶/地點）→ query_completed_trips
@@ -218,11 +229,44 @@ UPDATE_COMPLETED_TRIP_CATEGORY_SCHEMA = {
 }
 
 
+SUN_WEEK_INFO_SCHEMA = {
+    'description': (
+        "Get sun-week (Sunday-first) info for date/range conversion. "
+        "Use this BEFORE query/aggregate when user mentions 「本週/上週/下週/+N週/第 N 週/W{N}」. "
+        "Returns date_start (Sunday) + date_end (Saturday) + week_number + label. "
+        "AI must NOT compute these dates itself — LLM defaults to ISO week (Mon-first), "
+        "which is OFF BY ONE DAY for this business."
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'week_number': {
+                'type': 'integer',
+                'description': "整年第 N 週（太陽週號 strftime '%U'，1-based）。例：用戶說「第 17 週」傳 17",
+            },
+            'week_offset': {
+                'type': 'integer',
+                'description': "0=本週、-1=上週、1=下週、2=下下週、-2=兩週前 ... 用戶說「本週/上週/下週/+3週」用這個",
+            },
+            'target_date': {
+                'type': 'string',
+                'description': "YYYY-MM-DD 任一日期，回該日所在週。用戶說「5/7 那週」用這個",
+            },
+            'year': {
+                'type': 'integer',
+                'description': "year 預設今年；跨年查詢才指定",
+            },
+        },
+    },
+}
+
+
 def build_completed_trip_skill() -> Skill:
     return Skill(
         name='completed_trip',
         system_prompt=_system_prompt(),
         tools=[
+            (sun_week_info, SUN_WEEK_INFO_SCHEMA),
             (query_completed_trips, QUERY_COMPLETED_TRIPS_SCHEMA),
             (query_completed_trip_by_id, QUERY_COMPLETED_TRIP_BY_ID_SCHEMA),
             (aggregate_completed_trips, AGGREGATE_COMPLETED_TRIPS_SCHEMA),

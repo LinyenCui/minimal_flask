@@ -55,6 +55,9 @@ _SYSTEM_PROMPT = """\
     - 注意：「修改 N」沒指明就走 completed_trip — 改車資/改類別都是過去態最常見
   * 「請假/註銷/衝突/指派司機/改乘客名」+ trip_id（現在態動作）→ trip_mutation
   * 明示「現在態 N / 未完成 N / 生產線 N」+ 修改動作 → trip_mutation
+- **太陽週純查詢**（沒接其他業務操作，只問週次資訊本身）：
+  * 「本週是哪一週」「上週是哪幾天」「W17 是哪幾天」「下週幾號到幾號」「第 N 週是哪幾天」→ completed_trip
+    （completed_trip skill 內含 sun_week_info 工具會回答）
 
 範例：
 「明天龍埔街的狀態」 → trip_query
@@ -73,6 +76,9 @@ _SYSTEM_PROMPT = """\
 「已完成班次820改類別診所」 → completed_trip
 「修改935」 → completed_trip （沒指明就預設過去態：改車資/改類別最常見）
 「修改過去態935班次 $235」 → completed_trip
+「本週是哪一週」 → completed_trip （太陽週純查詢，sun_week_info 工具會答）
+「W17 是哪幾天」 → completed_trip
+「上週幾號到幾號」 → completed_trip
 「現在態班次1077改類別東洋」 → trip_mutation
 「1077指派司機533」 → trip_mutation
 「1077請假化療 -30」 → trip_mutation

@@ -31,6 +31,23 @@ from rewrite.tools.completed_trip import CompletedTripView
 logger = logging.getLogger(__name__)
 
 
+def _is_quota_error(e: Exception) -> bool:
+    """偵測 Vertex AI 429 / quota / resource exhausted 錯誤
+
+    Gemini 在 google.api_core 拋 ResourceExhausted；也可能是 grpc 層的
+    StatusCode.RESOURCE_EXHAUSTED 包裝後的 RuntimeError。用字串 fallback 抓。
+    """
+    try:
+        from google.api_core.exceptions import ResourceExhausted, TooManyRequests
+        if isinstance(e, (ResourceExhausted, TooManyRequests)):
+            return True
+    except ImportError:
+        pass
+    msg = str(e).lower()
+    return ('429' in msg or 'resource exhausted' in msg or 'quota' in msg
+            or 'rate limit' in msg)
+
+
 def _to_json_safe(obj: Any) -> Any:
     """date / datetime / 其他物件 → JSON 友善 (給 LLM tool_response 用)"""
     if isinstance(obj, dict):
@@ -96,6 +113,13 @@ class Agent:
         try:
             return self._chat_with_tool_loop(text, user_id)
         except Exception as e:
+            # Vertex AI 429 配額/burst 用友善訊息，技術細節進 log
+            if _is_quota_error(e):
+                logger.warning(f"[Agent] Vertex AI 429: {str(e)[:200]}")
+                return {
+                    'type': 'text',
+                    'text': '⏳ AI 目前忙線中（Gemini 配額瞬間 burst），請稍候 30 秒再試一次。',
+                }
             logger.error(f"[Agent] tool loop failed: {e}", exc_info=True)
             return {'type': 'text', 'text': f'⚠️ AI 處理錯誤：{str(e)[:120]}'}
 
@@ -280,6 +304,10 @@ class Agent:
                 'altText': f'查到 {len(data)} 筆已完成班次',
                 'contents': flex,
             }
+
+        # ----- sun_week_info dict（純查週資訊「本週是哪一週」）-----
+        if isinstance(data, dict) and 'week_number' in data and 'description' in data:
+            return {'type': 'text', 'text': '🗓 ' + data['description']}
 
         # ----- aggregate dict（aggregate_completed_trips 回傳）-----
         if isinstance(data, dict) and 'sum_amount' in data:
