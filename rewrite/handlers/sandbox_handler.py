@@ -83,37 +83,8 @@ _ACCOUNTING_LEDGER_TRIGGERS = {
 # 帳務明細「篩選區間」觸發詞（進日期 input mode）
 _ACCOUNTING_LEDGER_RANGE_TRIGGER = 'acct_ledger_range'
 
-# 帳務明細翻頁 cursor prefix（payload 用 rsplit 處理因為 ts 含 :）
-_ACCT_LEDGER_NEXT_PREFIX = 'acct_ledger_next:'
-
 # 帳務明細日期區間 input state type
 ACCT_LEDGER_RANGE_INPUT_STATE_TYPE = 'rewrite_acct_ledger_range_input'
-
-
-def _parse_acct_ledger_next(text: str) -> Optional[tuple]:
-    """parse acct_ledger_next:<ts>:<id>:<fd>:<td>（ts 可能含 :）
-
-    對齊 main：rsplit(':', 3) 從右切 3 刀，避免 ISO ts 內的 : 干擾。
-
-    Returns (last_ts, last_id, from_date, to_date) 或 None
-    """
-    if not text.startswith(_ACCT_LEDGER_NEXT_PREFIX):
-        return None
-    payload = text[len(_ACCT_LEDGER_NEXT_PREFIX):]
-    parts = payload.rsplit(':', 3)
-    try:
-        if len(parts) == 2:
-            return parts[0], int(parts[1]), None, None
-        if len(parts) == 4:
-            return (
-                parts[0],
-                int(parts[1] or 0),
-                parts[2] or None,
-                parts[3] or None,
-            )
-    except ValueError:
-        return None
-    return None
 
 # 觸發 LIFF 批量加成表單入口
 _BATCH_ALLOWANCE_LIFF_TRIGGERS = {
@@ -424,8 +395,8 @@ def try_handle_sandbox(event) -> bool:
         return True
 
     if text in _ACCOUNTING_LEDGER_TRIGGERS:
-        # 查看明細第 1 頁
-        _render_ledger_page(event, short_uid, page_no=1)
+        # 查看明細：carousel 橫向翻頁（仿診所班次）
+        _render_ledger_carousel(event, short_uid)
         return True
 
     if text == _ACCOUNTING_LEDGER_RANGE_TRIGGER:
@@ -449,18 +420,6 @@ def try_handle_sandbox(event) -> bool:
             },
         })
         logger.info(f"[rewrite sandbox] {short_uid} → 帳務明細 input range mode")
-        return True
-
-    # 翻頁：acct_ledger_next:ts:id:fd:td（ts 含 : 用 rsplit 解）
-    parsed = _parse_acct_ledger_next(text)
-    if parsed:
-        next_ts, next_id, fd, td = parsed
-        _render_ledger_page(
-            event, short_uid,
-            page_no=0,  # 翻頁顯示「續」
-            last_ts=next_ts, last_id=next_id,
-            from_date_str=fd, to_date_str=td,
-        )
         return True
 
     # 帳務明細日期區間 input mode follow-up
@@ -1025,52 +984,46 @@ def _execute_batch_passenger_leave(
 # 帳務明細：cursor pagination + 日期區間篩選（對齊 main 版完整功能）
 # ============================================================
 
-def _render_ledger_page(
+def _render_ledger_carousel(
     event, short_uid: str,
     *,
-    page_no: int = 0,  # 0 = 翻頁(顯示「續」)，>=1 = 第 N 頁
-    last_ts: Optional[str] = None,
-    last_id: Optional[int] = None,
     from_date_str: Optional[str] = None,
     to_date_str: Optional[str] = None,
 ) -> None:
-    """通用帳務明細頁渲染：第 1 頁、翻頁、區間篩選都共用"""
+    """帳務明細 carousel 渲染（橫向翻頁，仿診所班次風格）
+
+    一次撈 LEDGER_CAROUSEL_MAX_ROWS 筆，view 切成 12 bubbles × 10 筆
+    超過上限最後一張 bubble 顯「還有 N+ 筆」提示。
+    """
     from database import Session
-    from rewrite.tools.accounting import query_ledger_page
-    from rewrite.views.accounting_flex import render_ledger_text
+    from rewrite.tools.accounting import query_balance, query_ledger_carousel
+    from rewrite.views.accounting_flex import render_ledger_carousel as render_carousel
 
     fd = _date.fromisoformat(from_date_str) if from_date_str else None
     td = _date.fromisoformat(to_date_str) if to_date_str else None
 
     sess = Session()
     try:
-        r = query_ledger_page(
-            session=sess,
-            from_date=fd, to_date=td,
-            last_ts=last_ts, last_id=last_id,
-        )
+        r_bal = query_balance(session=sess)
+        r_log = query_ledger_carousel(session=sess, from_date=fd, to_date=td)
     finally:
         sess.close()
 
-    if not r.ok:
-        reply_message(event.reply_token, {
-            'type': 'text', 'text': f'❌ 帳務明細查詢失敗: {r.error}',
-        })
-        return
+    balance = r_bal.data.get('balance', 0) if r_bal.ok else 0
+    rows = r_log.data if r_log.ok else []
+    has_more = bool(r_log.meta.get('has_more')) if r_log.ok else False
 
-    rows = r.data
-    next_cursor = r.meta.get('next_cursor')
-    msg = render_ledger_text(
+    msg = render_carousel(
         rows,
-        page_no=page_no if page_no > 0 else 0,  # 0 顯示「續」
-        next_cursor=next_cursor,
+        balance=balance,
         from_date=from_date_str,
         to_date=to_date_str,
+        has_more=has_more,
     )
     reply_message(event.reply_token, msg)
     logger.info(
-        f"[rewrite sandbox] {short_uid} 帳務明細 page={page_no} "
-        f"rows={len(rows)} has_more={next_cursor is not None}"
+        f"[rewrite sandbox] {short_uid} 帳務明細 carousel "
+        f"rows={len(rows)} has_more={has_more} range={from_date_str}~{to_date_str}"
     )
 
 
@@ -1119,11 +1072,10 @@ def _handle_ledger_range_input(event, user_id: str, short_uid: str, text: str) -
         })
         return True
 
-    # 套用篩選 → 第 1 頁
+    # 套用篩選 → carousel
     _state_clear(user_id)
-    _render_ledger_page(
+    _render_ledger_carousel(
         event, short_uid,
-        page_no=1,
         from_date_str=fd.isoformat(),
         to_date_str=td.isoformat(),
     )

@@ -43,6 +43,52 @@ def query_balance(*, session) -> ToolResult:
 
 
 LEDGER_PAGE_SIZE = 10
+LEDGER_CAROUSEL_MAX_ROWS = 120  # 12 bubbles × 10 rows / bubble
+
+
+def query_ledger_carousel(
+    *,
+    session,
+    from_date: Optional[_date] = None,
+    to_date: Optional[_date] = None,
+    limit: int = LEDGER_CAROUSEL_MAX_ROWS,
+) -> ToolResult:
+    """撈 carousel 用的 ledger（一次 N 筆，含 running_balance）
+
+    跟 query_ledger_page 共用同一條 SQL，但不分頁；給 carousel view 用。
+    """
+    sql = text("""
+        WITH all_with_balance AS (
+            SELECT a.id,
+                   a.occurred_at AT TIME ZONE 'UTC' AS occurred_at,
+                   a.type,
+                   a.counterparty,
+                   COALESCE(a.amount_in, 0)  AS amount_in,
+                   COALESCE(a.amount_out, 0) AS amount_out,
+                   SUM(COALESCE(a.amount_in, 0) - COALESCE(a.amount_out, 0))
+                     OVER (ORDER BY a.occurred_at ASC, a.id ASC
+                           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_balance
+            FROM account_ledger a
+            WHERE (CAST(:from_date AS date) IS NULL
+                   OR (a.occurred_at AT TIME ZONE 'UTC')::date >= CAST(:from_date AS date))
+              AND (CAST(:to_date AS date) IS NULL
+                   OR (a.occurred_at AT TIME ZONE 'UTC')::date <= CAST(:to_date AS date))
+        )
+        SELECT *
+        FROM all_with_balance
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT :limit
+    """)
+    rows = session.execute(sql, {
+        'from_date': from_date,
+        'to_date': to_date,
+        'limit': limit + 1,  # +1 判斷 has_more
+    }).fetchall()
+
+    has_more = len(rows) > limit
+    page_rows = rows[:limit]
+    data = [dict(r._mapping) for r in page_rows]
+    return ToolResult.success(data=data, has_more=has_more)
 
 
 def query_ledger_page(
