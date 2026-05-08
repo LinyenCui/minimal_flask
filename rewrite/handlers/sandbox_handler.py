@@ -74,6 +74,12 @@ _ACCOUNTING_LIFF_TRIGGERS = {
     '帳務處理', '帳務', '餘額', '查餘額', '帳戶餘額',
 }
 
+# 帳務明細查詢觸發詞（主選單「📒 查看明細」按鈕送 acct_ledger_start）
+_ACCOUNTING_LEDGER_TRIGGERS = {
+    'acct_ledger_start',  # 按鈕的 message text
+    '帳務明細', '查看明細', '明細',
+}
+
 # 觸發 LIFF 批量加成表單入口
 _BATCH_ALLOWANCE_LIFF_TRIGGERS = {
     '批量加成', '批次加成', '批量改加成', 'batch-allowance',
@@ -380,6 +386,23 @@ def try_handle_sandbox(event) -> bool:
         balance = r.data.get('balance', 0) if r.ok else 0
         reply_message(event.reply_token, render_accounting_menu(balance))
         logger.info(f"[rewrite sandbox] {short_uid} → 帳務處理 menu (餘額 {balance})")
+        return True
+
+    if text in _ACCOUNTING_LEDGER_TRIGGERS:
+        # 查看明細：列出最近 N 筆 account_ledger 紀錄 + 顯示餘額
+        from database import Session
+        from rewrite.tools.accounting import query_balance, query_recent_ledger
+        from rewrite.views.accounting_flex import render_ledger_list
+        sess = Session()
+        try:
+            r_bal = query_balance(session=sess)
+            r_log = query_recent_ledger(session=sess, limit=15)
+        finally:
+            sess.close()
+        balance = r_bal.data.get('balance', 0) if r_bal.ok else 0
+        rows = r_log.data if r_log.ok else []
+        reply_message(event.reply_token, render_ledger_list(rows, balance=balance))
+        logger.info(f"[rewrite sandbox] {short_uid} → 帳務明細 ({len(rows)} 筆)")
         return True
 
     if text in _BATCH_ALLOWANCE_LIFF_TRIGGERS:

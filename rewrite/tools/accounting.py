@@ -42,6 +42,34 @@ def query_balance(*, session) -> ToolResult:
     )
 
 
+def query_recent_ledger(*, session, limit: int = 15) -> ToolResult:
+    """回最近 N 筆 account_ledger 明細（依 occurred_at desc）
+
+    Returns:
+        data=[{
+            'id', 'occurred_at' (ISO str), 'type', 'counterparty',
+            'amount_in', 'amount_out', 'memo'
+        }, ...]
+    """
+    rows = session.execute(text("""
+        SELECT id, occurred_at, type, counterparty,
+               COALESCE(amount_in, 0) AS amount_in,
+               COALESCE(amount_out, 0) AS amount_out,
+               memo
+        FROM account_ledger
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT :limit
+    """), {'limit': limit}).fetchall()
+
+    data = []
+    for r in rows:
+        d = dict(r._mapping)
+        if d.get('occurred_at'):
+            d['occurred_at'] = d['occurred_at'].isoformat()
+        data.append(d)
+    return ToolResult.success(data=data, count=len(data))
+
+
 def _last_saturday_2359() -> datetime:
     """上週六 23:59 — 對齊 legacy last_saturday_2359"""
     now_tw = get_taiwan_time()
