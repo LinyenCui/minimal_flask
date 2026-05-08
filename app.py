@@ -372,16 +372,6 @@ def memory_stats():
     except Exception as e:
         stats['conversation_states'] = {'error': str(e)}
     
-    # temp_booking_states 統計
-    try:
-        from modules.handlers.temp_booking_handler import temp_booking_states
-        stats['temp_booking_states'] = {
-            'count': len(temp_booking_states),
-            'keys_sample': list(temp_booking_states.keys())[:10]
-        }
-    except Exception as e:
-        stats['temp_booking_states'] = {'error': str(e)}
-    
     # helpers.user_states 統計
     try:
         from modules.utils.helpers import user_states
@@ -391,26 +381,21 @@ def memory_stats():
         }
     except Exception as e:
         stats['user_states'] = {'error': str(e)}
-    
-    # 其他狀態字典
-    try:
-        from modules.services.booking.booking_service import booking_states
-        stats['booking_states'] = {'count': len(booking_states)}
-    except:
-        pass
-    
+
+    # admin 工具狀態（sequence_fix）
     try:
         from modules.handlers.sequence_fix_handler import sequence_fix_states
         stats['sequence_fix_states'] = {'count': len(sequence_fix_states)}
-    except:
+    except Exception:
         pass
-    
+
+    # rewrite v0.1 conversation states
     try:
-        from modules.handlers.batch_allowance_handler import batch_allowance_states
-        stats['batch_allowance_states'] = {'count': len(batch_allowance_states)}
-    except:
+        from rewrite.conversation_state import state_count
+        stats['rewrite_states'] = {'count': state_count()}
+    except Exception:
         pass
-    
+
     return jsonify(stats)
 
 

@@ -5,7 +5,6 @@ import traceback
 import logging
 
 from modules.utils.line_bot import get_parser, reply_text
-from modules.services.postback_service import handle_postback
 
 # 創建藍圖
 webhook_bp = Blueprint('webhook', __name__)
@@ -25,25 +24,25 @@ def callback():
         events = parser.parse(body, signature)
         
         for event in events:
-            # 處理 Postback 事件（按鈕點擊）
+            # 處理 Postback 事件（按鈕點擊）— 全交給 rewrite/router
             if event.type == "postback":
-                # --- Rewrite v0.1 postback 早期攔截 ---
-                # 命令：trip_detail:NNNN（班次列表卡點擊跳詳情）
                 try:
                     from rewrite.router import try_route_postback as _rew_try_pb
                     if _rew_try_pb(event):
                         logger.info(
-                            f"Postback routed to Rewrite v0.1: "
+                            f"Postback routed to rewrite: "
                             f"{getattr(event.source, 'user_id', '?')}"
                         )
-                        continue
+                    else:
+                        logger.info(
+                            f"Postback not handled by rewrite: "
+                            f"{getattr(event.postback, 'data', '?')!r}"
+                        )
                 except Exception as _rew_pb_err:
                     logger.error(
-                        f"Rewrite postback dispatch failed: {_rew_pb_err}",
+                        f"Postback dispatch failed: {_rew_pb_err}",
                         exc_info=True,
                     )
-                # --- END Rewrite postback ---
-                handle_postback(event)
                 continue
                 
             # 處理文本消息
