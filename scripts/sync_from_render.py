@@ -54,7 +54,9 @@ LOCAL_DB_CONFIG = {
 FULL_SYNC_TABLES = [
     "database_maintenance",  # 資料庫維護表，需要先同步
     "drivers",
-    # ⚠️ "customers" 暫時跳過 — 見 SKIP_TABLES（rewrite v0.1 dev 期間保護）
+    # 🔥 2026-05-08: customers 加回同步（兩邊 schema 已對齊 + 已透過
+    # reverse_sync_customers.py 把本地累積資料推到 Render；以後可正常同步）
+    "customers",
     "fixed_schedules",  # 移到trips之前，因為trips有外鍵參考
     "trips",
     # 🔥 新增：帳務處理流水帳與金流紀錄
@@ -67,10 +69,8 @@ FULL_SYNC_TABLES = [
 # 暫時跳過同步的表（保護 dev 上特殊狀態的資料）
 # Key: 表名，Value: 跳過原因（會印在每次同步開頭，提醒用戶）
 SKIP_TABLES = {
-    "customers": (
-        "本地開發中新增客戶表，本地資料**比 Render 多**，同步會洗掉本地新加的。"
-        "暫時阻擋直到開發穩定後再評估同步策略。"
-    ),
+    # 目前沒有需要跳過的表
+    # （customers 之前因 schema 不一致 + 本地資料較多被擋；現已對齊解除）
 }
 
 
