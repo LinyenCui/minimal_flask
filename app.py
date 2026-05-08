@@ -253,38 +253,8 @@ def render_diagnosis():
         except Exception as e:
             results['date_parsing'] = {'error': str(e), 'traceback': traceback.format_exc()}
         
-        # 5. 測試AI車資服務解析
-        try:
-            from modules.services.ai_fare_service import CompletedTripMatcher
-            
-            matcher = CompletedTripMatcher()
-            
-            test_queries = [
-                '查已完成 昨天 診所',
-                '查已完成 7/25 診所',
-                '查已完成 前天 診所',
-                '查已完成 7/24 診所'
-            ]
-            
-            query_results = {}
-            for query in test_queries:
-                try:
-                    criteria = matcher.parse_natural_query(query)
-                    # 將日期轉換為字符串以便JSON序列化
-                    criteria_serializable = {}
-                    for key, value in criteria.items():
-                        if isinstance(value, date):
-                            criteria_serializable[key] = value.isoformat()
-                        else:
-                            criteria_serializable[key] = value
-                    query_results[query] = criteria_serializable
-                except Exception as e:
-                    query_results[query] = {'error': str(e)}
-            
-            results['query_parsing'] = query_results
-        except Exception as e:
-            results['query_parsing'] = {'error': str(e), 'traceback': traceback.format_exc()}
-        
+        # 5. 測試AI車資服務解析（已移除：ai_fare_service legacy 砍掉）
+
         # 6. 測試數據庫查詢（簡化版）
         try:
             from modules import db

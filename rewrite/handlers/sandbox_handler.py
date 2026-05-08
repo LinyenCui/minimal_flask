@@ -90,6 +90,40 @@ _DB_SYNC_TRIGGERS = {
     '同步結果',            # 查詢上次同步結果
 }
 
+# 幫助命令（取代 legacy help_router）
+_HELP_TRIGGERS = {'幫助', 'help', 'Help', '指令', '說明', '?', '？'}
+
+_HELP_TEXT = """🤖 派班小幫手指令清單
+（群組需 / 開頭，私聊不用）
+
+📋 查詢
+  查太子龍 / 客戶詳情 5
+  病歷層 15
+  今天診所班次 / 今天東洋班次
+  班次詳情 1234 / 待派班次
+  查已完成 昨天 司機5386
+
+🎯 狀態管理（最常用）
+  今天X的狀態  / 5/9 X的狀態
+   → 列班次 + 批次按鈕：請假 / 註銷 / 衝突 / 改回準備
+
+✏️ 修改（自然語言）
+  1234 化療 -30          請假
+  1234 註銷 / 衝突        改狀態
+  派司機 5386 給 #1234    指派
+  記錄車資 1234 380       車資
+
+📝 LIFF 表單
+  新增客戶 / 預約叫車 / 匯入固定班次
+  生成週報表 / 月報表
+  帳務處理 / 批量加成
+  新增固定班次 / 編輯固定班次
+
+⚙️ 系統
+  資料庫同步 / 同步結果
+
+💡 多輪對話 90 秒內可不加 / 前綴回覆"""
+
 
 # ====== 「[date][location]的狀態」狀態管理流程 ======
 # 用戶常用：「!今天二井家的狀態」「!5/9馬鎮宮的狀態」
@@ -373,6 +407,12 @@ def try_handle_sandbox(event) -> bool:
         from rewrite.views.batch_allowance_flex import render_batch_allowance_entry
         reply_message(event.reply_token, render_batch_allowance_entry())
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF batch_allowance entry")
+        return True
+
+    # 0b'''. 幫助命令（取代 legacy help_router）
+    if text in _HELP_TRIGGERS:
+        reply_message(event.reply_token, {'type': 'text', 'text': _HELP_TEXT})
+        logger.info(f"[rewrite sandbox] {short_uid} → help")
         return True
 
     # 0b''. admin 命令橋接：資料庫同步（保留 legacy database_sync_handler 業務邏輯）
