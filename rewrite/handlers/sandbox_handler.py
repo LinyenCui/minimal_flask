@@ -79,6 +79,17 @@ _BATCH_ALLOWANCE_LIFF_TRIGGERS = {
     '批量加成', '批次加成', '批量改加成', 'batch-allowance',
 }
 
+# 觸發資料庫同步流程（admin 工具，橋接呼叫 legacy database_sync_handler）
+# 設計選擇：admin 工具不重寫 atomic-tool 風格（580 行業務邏輯 + sysadmin only），
+#          rewrite 沙盒只認 trigger，dispatch 給既有 legacy handler 處理
+_DB_SYNC_TRIGGERS = {
+    '資料庫同步',          # 入口：列出 Render 狀態 + Quick Reply [確認同步/取消同步]
+    '確認同步',            # 確認執行
+    '確認序號覆蓋',        # 強制同步（序號衝突時）
+    '取消同步', '放棄同步',  # 取消
+    '同步結果',            # 查詢上次同步結果
+}
+
 
 # ====== 「[date][location]的狀態」狀態管理流程 ======
 # 用戶常用：「!今天二井家的狀態」「!5/9馬鎮宮的狀態」
@@ -202,11 +213,14 @@ def _init():
 
 
 def _strip_prefix(text: str) -> str:
-    """剝掉 sandbox 前綴：!  ！  /!  /！"""
+    """剝掉群組指令前綴 / # 跟舊 sandbox 前綴 ! ！
+
+    Phase B 後群組統一用 / 開頭；! ! / 等保留只是過渡期相容（用戶習慣）。
+    """
     if not text:
         return ''
     text = text.strip()
-    for p in ('/!', '/！', '!', '！'):
+    for p in ('/!', '/！', '/', '#', '!', '！'):
         if text.startswith(p):
             return text[len(p):].lstrip()
     return text
@@ -359,6 +373,20 @@ def try_handle_sandbox(event) -> bool:
         from rewrite.views.batch_allowance_flex import render_batch_allowance_entry
         reply_message(event.reply_token, render_batch_allowance_entry())
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF batch_allowance entry")
+        return True
+
+    # 0b''. admin 命令橋接：資料庫同步（保留 legacy database_sync_handler 業務邏輯）
+    if text in _DB_SYNC_TRIGGERS:
+        from modules.handlers.sync_router import handle_sync_commands
+        try:
+            handle_sync_commands(text, user_id, event.reply_token)
+            logger.info(f"[rewrite sandbox] {short_uid} → DB sync bridge: {text!r}")
+        except Exception as e:
+            logger.error(f"[rewrite sandbox] {short_uid} DB sync bridge failed: {e}",
+                         exc_info=True)
+            reply_message(event.reply_token, {
+                'type': 'text', 'text': f'❌ 資料庫同步失敗: {e}',
+            })
         return True
 
     # 0b'. 「[date][location]的狀態」入口（regex match，搬 legacy clarify_user_intent）
