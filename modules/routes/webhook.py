@@ -5,8 +5,6 @@ import traceback
 import logging
 
 from modules.utils.line_bot import get_parser, reply_text
-from modules.services.postback_service import handle_postback
-from modules.handlers.message_handler import should_process
 
 # 創建藍圖
 webhook_bp = Blueprint('webhook', __name__)
@@ -26,9 +24,25 @@ def callback():
         events = parser.parse(body, signature)
         
         for event in events:
-            # 處理 Postback 事件（按鈕點擊）
+            # 處理 Postback 事件（按鈕點擊）— 全交給 rewrite/router
             if event.type == "postback":
-                handle_postback(event)
+                try:
+                    from rewrite.router import try_route_postback as _rew_try_pb
+                    if _rew_try_pb(event):
+                        logger.info(
+                            f"Postback routed to rewrite: "
+                            f"{getattr(event.source, 'user_id', '?')}"
+                        )
+                    else:
+                        logger.info(
+                            f"Postback not handled by rewrite: "
+                            f"{getattr(event.postback, 'data', '?')!r}"
+                        )
+                except Exception as _rew_pb_err:
+                    logger.error(
+                        f"Postback dispatch failed: {_rew_pb_err}",
+                        exc_info=True,
+                    )
                 continue
                 
             # 處理文本消息
@@ -48,68 +62,74 @@ def callback():
                     logger.error(f"Diagnosis dispatch failed: {e}", exc_info=True)
                 # --- END PATCH: 診斷碼查詢 ---
 
-                # --- PATCH: AI Sandbox Trigger (原 Customers AI Sandbox) ---
-                # 觸發方式：
-                # - 私聊：需要 ! 前缀
-                # - 群組：! 直接觸發（取代 /）
-                is_private = source_type == 'user'
-                trigger_sandbox = False
-                lower_text = original_message_text.lower()
-                
+                # ============================================================
+                # Phase B（拆沙盒）：新路由規則
+                # ============================================================
+                # 私聊（user）→ 不需前綴，所有訊息都認
+                # 群組（group/room）→ 必須 / 開頭，或在 rewrite-active state 中
+                #   （多輪對話 follow-up / Quick Reply 按鈕回傳值通常無 / 前綴）
+                # 處理順序：
+                #   1. rewrite/router.try_route — 快速命令（查客戶 / 班次詳情 / etc）
+                #   2. rewrite/sandbox_handler.try_handle_sandbox — LIFF / 狀態 picker / AI
+                #   3. (過渡) legacy text_message_handler — Phase C 後刪除
+                # ============================================================
+                is_bot_addressed = False
+                if source_type == 'user':
+                    # 私聊全收
+                    is_bot_addressed = True
+                elif source_type in ('group', 'room'):
+                    if original_message_text.lstrip().startswith('/'):
+                        is_bot_addressed = True
+                    else:
+                        # 群組無 / 開頭 — 唯一例外：用戶剛回應 bot（rewrite-active state）
+                        try:
+                            from rewrite.conversation_state import get_state as _rew_state_get
+                            from rewrite.handlers.sandbox_handler import (
+                                SANDBOX_ACTIVE_STATE_TYPE,
+                                TRIP_STATUS_PICKER_STATE_TYPE,
+                                TRIP_STATUS_LEAVE_INPUT_STATE_TYPE,
+                                ACCT_LEDGER_RANGE_INPUT_STATE_TYPE,
+                                looks_like_quick_command,
+                            )
+                            _rew_st = _rew_state_get(user_id) if user_id else None
+                            _active_types = (
+                                SANDBOX_ACTIVE_STATE_TYPE,
+                                TRIP_STATUS_PICKER_STATE_TYPE,
+                                TRIP_STATUS_LEAVE_INPUT_STATE_TYPE,
+                                ACCT_LEDGER_RANGE_INPUT_STATE_TYPE,
+                            )
+                            if _rew_st and _rew_st.get('type') in _active_types:
+                                # 在多輪對話狀態 — 但若像快速命令就讓用戶切話題不攔
+                                if not looks_like_quick_command(original_message_text):
+                                    is_bot_addressed = True
+                        except Exception:
+                            pass
+
+                if not is_bot_addressed:
+                    logger.info(f"Skip {source_type} non-/ message: {original_message_text!r}")
+                    continue
+
+                # 1. rewrite/router 快速命令（exact match，cheap dispatch，沒 AI 成本）
                 try:
-                    from modules.handlers.customers_ai_handler import SANDBOX_STATES, handle_customers_ai_message
-                    from modules.utils.conversation_context import conversation_manager
-                    
-                    # Logic: Determine if we should route to Sandbox
-                    
-                    # 1. Check strict prefix: ! 或 ！ (支援半角和全角驚嘆號)
-                    # 支援: "! xxx", "!xxx", "！xxx", "！ xxx", "/!" (群組兼容)
-                    has_sandbox_prefix = (original_message_text.startswith('!') or 
-                                          original_message_text.startswith('！') or
-                                          original_message_text.startswith('/!') or
-                                          original_message_text.startswith('/！'))
-
-                    # 2. Check Active Sandbox Conversation (Multi-turn Memory)
-                    is_active_sandbox_conv = False
-                    active_conv = conversation_manager.get_active_conversation(user_id)
-                    if active_conv and active_conv.conversation_type == 'customer_sandbox':
-                         is_active_sandbox_conv = True
-
-                    # --- DECISION TREE ---
-                    if has_sandbox_prefix:
-                        trigger_sandbox = True
-                    # If the user is in the middle of a Sandbox confirmation (Legacy state), intercept.
-                    elif user_id in SANDBOX_STATES:
-                        trigger_sandbox = True
-                    # If user is in a multi-turn flow (e.g. filling missing info), intercept.
-                    elif is_active_sandbox_conv:
-                        trigger_sandbox = True
-                    
-                    # NOTE: We REVERTED the "Smart Router" (Prefix-less for private chat) 
-                    # because it conflicted with legacy commands with arguments (e.g. "診所班次 今天").
-                    # Safety first -> Require prefix or active context.
-                        
-                    if trigger_sandbox:
-                        logger.info(f"Routing to Customers AI Sandbox: {user_id} (Prefix={has_sandbox_prefix}, Active={is_active_sandbox_conv})")
-                        handle_customers_ai_message(event)
+                    from rewrite.router import try_route as _rewrite_try_route
+                    if _rewrite_try_route(event):
+                        logger.info(f"Routing to rewrite/router: {user_id}")
                         continue
-                except Exception as e:
-                    logger.error(f"Sandbox dispatch failed: {e}", exc_info=True)
-                    # Proceed to normal flow if sandbox fails to load/dispatch? 
-                    # No, safer to just log.
-                # --- END PATCH ---
+                except Exception as _rew_err:
+                    logger.error(f"rewrite/router dispatch failed: {_rew_err}", exc_info=True)
 
-                should_handle, processed_text = should_process(original_message_text, source_type, user_id)
-                
-                if should_handle:
-                    # --- 恢復直接修改 event 對象 --- 
-                    event.message.text = processed_text 
-                    logger.info(f"Passing processed text '{processed_text}' to handler.")
-                    # --- 調用原始的處理函數 --- 
-                    handle_text_message(event) 
-                else:
-                    logger.info(f"Skipping message from {source_type} due to handler rules: {original_message_text}")
-                    continue 
+                # 2. rewrite/sandbox_handler（LIFF / 狀態 picker / AI agent / DB 同步橋接）
+                # rewrite 是唯一處理路徑：不認得就回友善訊息，不再 fall-through legacy
+                try:
+                    from rewrite.handlers.sandbox_handler import try_handle_sandbox
+                    if try_handle_sandbox(event):
+                        logger.info(f"Routing to rewrite/sandbox_handler: {user_id}")
+                    else:
+                        # rewrite 不認得 — sandbox 已 reply 友善訊息（unknown handler）
+                        logger.info(f"Rewrite did not handle: {original_message_text!r}")
+                except Exception as _rew_err:
+                    logger.error(f"sandbox_handler dispatch failed: {_rew_err}", exc_info=True)
+                continue
 
             # 處理位置消息（LocationMessage）
             if event.type == "message" and getattr(event.message, 'type', None) == "location":
@@ -132,9 +152,3 @@ def callback():
         abort(500)
         
     return 'OK'
-
-# 恢復原始的 handle_text_message 函數 (如果之前被註釋或刪除)
-def handle_text_message(event):
-    """處理文本消息"""
-    from modules.handlers.text_message_handler import process_text_message
-    process_text_message(event)

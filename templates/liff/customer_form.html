@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>客戶資料</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang TC", "Microsoft JhengHei", sans-serif; padding: 16px; line-height: 1.5; color: #222; max-width: 600px; margin: 0 auto; font-size: 16px; }
+    h2 { margin: 0 0 16px; font-size: 20px; }
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 14px; color: #444; }
+    .field .req { color: #c0392b; margin-left: 2px; }
+    .field input, .field select, .field textarea {
+      width: 100%; padding: 10px 12px; font-size: 16px; border: 1px solid #ccc;
+      border-radius: 6px; background: #fff;
+    }
+    .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: #06c755; }
+    .field textarea { resize: vertical; min-height: 60px; }
+    .radio-row { display: flex; gap: 16px; padding: 6px 0; }
+    .radio-row label { font-weight: normal; display: inline-flex; align-items: center; gap: 6px; }
+    .radio-row input[type=radio] { width: auto; }
+    .actions { margin-top: 24px; display: flex; gap: 8px; }
+    button { flex: 1; padding: 12px; font-size: 16px; border-radius: 6px; border: 0; cursor: pointer; }
+    button[type=submit] { background: #06c755; color: #fff; font-weight: 600; }
+    button[type=submit]:disabled { background: #aaa; }
+    button.secondary { background: #f3f3f3; color: #333; }
+    .alert { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 14px; }
+    .alert.err { background: #fdecea; color: #c0392b; border: 1px solid #f5c2bf; }
+    .alert.ok { background: #e8f5e9; color: #1a7a1a; border: 1px solid #b8e0bb; }
+    .loading { text-align: center; color: #666; padding: 40px 0; }
+    fieldset { border: 0; padding: 0; margin: 0; }
+    details { margin-bottom: 14px; border: 1px solid #eee; border-radius: 6px; padding: 8px 12px; }
+    details summary { font-weight: 600; cursor: pointer; padding: 4px 0; color: #555; }
+    details[open] { background: #fafafa; }
+  </style>
+</head>
+<body>
+  <div id="loading" class="loading">載入中…</div>
+  <div id="content" hidden>
+    <h2 id="form-title">客戶資料</h2>
+    <div id="alert"></div>
+    <form id="customer-form" novalidate>
+      <div class="field">
+        <label>姓名<span class="req">*</span></label>
+        <input name="name" type="text" required maxlength="100">
+      </div>
+      <div class="field">
+        <label>簡稱<span class="req">*</span><small style="font-weight:normal;color:#888;">（唯一）</small></label>
+        <input name="short_name" type="text" required maxlength="50">
+      </div>
+      <div class="field">
+        <label>地址<span class="req">*</span></label>
+        <input name="address" type="text" required maxlength="200">
+      </div>
+      <div class="field">
+        <label>類別<span class="req">*</span></label>
+        <select name="category" required>
+          <option value="">（請選擇）</option>
+          <option value="診所">診所</option>
+          <option value="東洋">東洋</option>
+          <option value="臨時">臨時</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>聯絡電話</label>
+        <input name="contact_phone" type="tel" maxlength="20" placeholder="例：0912-345-678">
+      </div>
+      <div class="field">
+        <label>備註</label>
+        <textarea name="remarks" rows="3" maxlength="500" placeholder="（自費、特殊情況、注意事項…）"></textarea>
+      </div>
+
+      <details>
+        <summary>填寫更多資料（生日 / 性別 / 病歷號）</summary>
+        <div class="field" style="margin-top: 10px;">
+          <label>生日</label>
+          <input name="birthday" type="date">
+        </div>
+        <div class="field">
+          <label>性別</label>
+          <fieldset class="radio-row">
+            <label><input type="radio" name="gender" value="" checked>不填</label>
+            <label><input type="radio" name="gender" value="M">男</label>
+            <label><input type="radio" name="gender" value="F">女</label>
+          </fieldset>
+        </div>
+        <div class="field">
+          <label>病歷號</label>
+          <input name="medical_record_no" type="text" maxlength="50">
+        </div>
+      </details>
+
+      <div class="actions">
+        <button type="button" class="secondary" id="btn-cancel">取消</button>
+        <button type="submit" id="btn-submit">儲存</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    const LIFF_ID = "{{ liff_id }}";
+    const SERVER_CUSTOMER_ID = {{ customer_id|tojson }};
+
+    // LIFF URL 帶 ?customer_id=N 進編輯模式（手機從 Flex 編輯按鈕進來時）
+    function _readQueryCustomerId() {
+      const params = new URLSearchParams(window.location.search);
+      let cid = params.get('customer_id');
+      if (cid) return parseInt(cid, 10) || null;
+      // LIFF 有時把 query 包進 ?liff.state=...
+      const ls = params.get('liff.state');
+      if (ls) {
+        const stripped = ls.startsWith('?') ? ls.slice(1) : ls;
+        cid = new URLSearchParams(stripped).get('customer_id');
+        if (cid) return parseInt(cid, 10) || null;
+      }
+      return null;
+    }
+    const CUSTOMER_ID = SERVER_CUSTOMER_ID || _readQueryCustomerId();
+    const MODE = CUSTOMER_ID ? 'edit' : 'create';
+
+    const loadingEl = document.getElementById('loading');
+    const contentEl = document.getElementById('content');
+    const titleEl = document.getElementById('form-title');
+    const alertEl = document.getElementById('alert');
+    const form = document.getElementById('customer-form');
+    const submitBtn = document.getElementById('btn-submit');
+    const cancelBtn = document.getElementById('btn-cancel');
+    const advancedDetails = document.querySelector('details');
+
+    function showAlert(type, msg) {
+      alertEl.innerHTML = `<div class="alert ${type}">${msg}</div>`;
+    }
+
+    function clearAlert() { alertEl.innerHTML = ''; }
+
+    function setLoading(text) { loadingEl.textContent = text; loadingEl.hidden = false; contentEl.hidden = true; }
+    function showContent() { loadingEl.hidden = true; contentEl.hidden = false; }
+
+    // 編輯模式 prefill 時，若進階欄位有資料就把 details 預設展開
+    function _expandAdvancedIfHasData(c) {
+      if (advancedDetails && (c.birthday || c.gender || c.medical_record_no)) {
+        advancedDetails.open = true;
+      }
+    }
+
+    function fillForm(c) {
+      for (const [k, v] of Object.entries(c)) {
+        const el = form.elements.namedItem(k);
+        if (!el) continue;
+        if (el instanceof RadioNodeList) {
+          // gender radio group
+          form.querySelectorAll(`input[name="${k}"]`).forEach(r => {
+            r.checked = (r.value === (v ?? ''));
+          });
+        } else {
+          el.value = v ?? '';
+        }
+      }
+      _expandAdvancedIfHasData(c);
+    }
+
+    async function loadCustomer(id) {
+      const idToken = liff.getIDToken();
+      const resp = await fetch(`/liff/customer/${id}`, {
+        headers: { 'Authorization': 'Bearer ' + idToken },
+      });
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      return data.customer;
+    }
+
+    async function init() {
+      if (!LIFF_ID) { setLoading('LIFF_ID 未設定'); return; }
+      try {
+        await liff.init({ liffId: LIFF_ID });
+      } catch (e) {
+        setLoading('LIFF init 失敗：' + e.message);
+        return;
+      }
+      if (!liff.isLoggedIn()) {
+        liff.login({ redirectUri: window.location.href });
+        return;
+      }
+      titleEl.textContent = MODE === 'edit' ? `編輯客戶 #${CUSTOMER_ID}` : '新增客戶';
+      if (MODE === 'edit') {
+        try {
+          const c = await loadCustomer(CUSTOMER_ID);
+          fillForm(c);
+        } catch (e) {
+          setLoading('載入客戶資料失敗：' + e.message);
+          return;
+        }
+      }
+      showContent();
+    }
+
+    cancelBtn.addEventListener('click', () => {
+      if (liff.isInClient && liff.isInClient()) liff.closeWindow();
+      else history.back();
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearAlert();
+
+      // HTML5 必填驗證（name / short_name / address / category）
+      if (!form.checkValidity()) {
+        showAlert('err', '❌ 請完整填寫必填欄位（姓名 / 簡稱 / 地址 / 類別）');
+        form.reportValidity();
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = '儲存中…';
+      try {
+        const idToken = liff.getIDToken();
+        const fd = new FormData(form);
+        const payload = Object.fromEntries(fd.entries());
+        const url = MODE === 'edit' ? `/liff/customer/${CUSTOMER_ID}` : '/liff/customer';
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + idToken,
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        const inClient = liff.isInClient && liff.isInClient();
+        const action = MODE === 'edit' ? '更新' : '新增';
+        if (inClient) {
+          showAlert('ok', `✅ 已${action}客戶 #${data.customer.id}（1.5 秒後關閉）`);
+          setTimeout(() => liff.closeWindow(), 1500);
+        } else {
+          showAlert('ok', `✅ 已${action}客戶 #${data.customer.id}（可關閉視窗）`);
+        }
+      } catch (err) {
+        showAlert('err', '❌ ' + err.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = '儲存';
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>

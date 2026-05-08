@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>產生報表</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang TC", "Microsoft JhengHei", sans-serif; padding: 16px; line-height: 1.5; color: #222; max-width: 600px; margin: 0 auto; font-size: 16px; }
+    h2 { margin: 0 0 16px; font-size: 20px; }
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 14px; color: #444; }
+    .field input, .field select {
+      width: 100%; padding: 10px 12px; font-size: 16px; border: 1px solid #ccc;
+      border-radius: 6px; background: #fff;
+    }
+    .field input:focus, .field select:focus { outline: none; border-color: #1565c0; }
+    .helper { font-size: 12px; color: #888; margin-top: 4px; }
+    .actions { margin-top: 24px; display: flex; gap: 8px; }
+    button { flex: 1; padding: 12px; font-size: 16px; border-radius: 6px; border: 0; cursor: pointer; }
+    button[type=submit] { background: #1565c0; color: #fff; font-weight: 600; }
+    button[type=submit]:disabled { background: #aaa; }
+    button.secondary { background: #f3f3f3; color: #333; }
+    .alert { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 14px; }
+    .alert.err { background: #fdecea; color: #c0392b; border: 1px solid #f5c2bf; }
+    .alert.ok { background: #e8f5e9; color: #1a7a1a; border: 1px solid #b8e0bb; }
+    .alert.info { background: #e3f2fd; color: #0d47a1; border: 1px solid #90caf9; }
+    .loading { text-align: center; color: #666; padding: 40px 0; }
+    .drive-link {
+      display: block; margin-top: 12px; padding: 12px; background: #e8f5e9;
+      border: 1px solid #c8e6c9; border-radius: 6px; color: #1a7a1a;
+      text-decoration: none; font-weight: 600; word-break: break-all;
+    }
+    .drive-link:hover { background: #c8e6c9; }
+    .progress {
+      margin-top: 12px; padding: 14px; background: #fff8e1;
+      border: 1px solid #ffd180; border-radius: 6px; color: #b85c00;
+      font-size: 14px;
+    }
+    .progress::before {
+      content: ""; display: inline-block; width: 14px; height: 14px;
+      border: 2px solid #b85c00; border-top-color: transparent;
+      border-radius: 50%; margin-right: 8px; vertical-align: middle;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #date-row { display: none; }
+  </style>
+</head>
+<body>
+  <div id="loading" class="loading">載入中…</div>
+  <div id="content" hidden>
+    <h2>📊 產生報表</h2>
+    <div id="alert"></div>
+
+    <form id="report-form" novalidate>
+      <div class="field">
+        <label>報表類型</label>
+        <select name="report_type" id="sel-type" required>
+          <option value="daily">📆 日報表</option>
+          <option value="weekly" selected>🗓️ 週報表（預設上週）</option>
+          <option value="monthly">📅 月報表（預設上月）</option>
+        </select>
+      </div>
+
+      <div class="field" id="date-row">
+        <label>日期（不填預設昨天）</label>
+        <input name="target_date" id="input-date" type="date">
+        <div class="helper">日報表才用 — 指定要產哪一天的報表</div>
+      </div>
+
+      <div class="field">
+        <label>類別</label>
+        <select name="category">
+          <option value="全部" selected>全部</option>
+          <option value="診所">診所</option>
+          <option value="東洋">東洋</option>
+        </select>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="secondary" id="btn-cancel">取消</button>
+        <button type="submit" id="btn-submit">產生報表</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    const LIFF_ID = "{{ liff_id }}";
+
+    const loadingEl = document.getElementById('loading');
+    const contentEl = document.getElementById('content');
+    const alertEl = document.getElementById('alert');
+    const form = document.getElementById('report-form');
+    const submitBtn = document.getElementById('btn-submit');
+    const cancelBtn = document.getElementById('btn-cancel');
+    const selType = document.getElementById('sel-type');
+    const dateRow = document.getElementById('date-row');
+    const dateInput = document.getElementById('input-date');
+
+    function showAlert(html) { alertEl.innerHTML = html; }
+    function clearAlert() { alertEl.innerHTML = ''; }
+    function setLoading(t) { loadingEl.textContent = t; loadingEl.hidden = false; contentEl.hidden = true; }
+    function showContent() { loadingEl.hidden = true; contentEl.hidden = false; }
+
+    function toggleDateRow() {
+      dateRow.style.display = selType.value === 'daily' ? 'block' : 'none';
+    }
+    selType.addEventListener('change', toggleDateRow);
+
+    async function init() {
+      if (!LIFF_ID) { setLoading('LIFF_ID 未設定'); return; }
+      try {
+        await liff.init({ liffId: LIFF_ID });
+      } catch (e) {
+        setLoading('LIFF init 失敗：' + e.message);
+        return;
+      }
+      if (!liff.isLoggedIn()) {
+        liff.login({ redirectUri: window.location.href });
+        return;
+      }
+      toggleDateRow();
+      showContent();
+    }
+
+    cancelBtn.addEventListener('click', () => {
+      if (liff.isInClient && liff.isInClient()) liff.closeWindow();
+      else history.back();
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearAlert();
+      submitBtn.disabled = true;
+      submitBtn.textContent = '產生中…';
+      showAlert('<div class="progress">⏳ 報表產生中（拉資料 + 建 Excel + 上傳 Drive，預計 5-30 秒）…</div>');
+      try {
+        const idToken = liff.getIDToken();
+        const fd = new FormData(form);
+        const payload = {
+          report_type: fd.get('report_type'),
+          category: fd.get('category'),
+          target_date: fd.get('report_type') === 'daily' && fd.get('target_date')
+            ? fd.get('target_date') : null,
+        };
+        const resp = await fetch('/liff/report', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + idToken,
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+        let html = '<div class="alert ok">✅ 報表已產生！</div>';
+        if (data.drive_url) {
+          html += `<a class="drive-link" href="${data.drive_url}" target="_blank">📂 點此開啟 Google Drive 連結</a>`;
+        }
+        if (data.result_text) {
+          // 顯示完整訊息（含統計），但連結那行因為已單獨展示就裁掉
+          const cleanText = data.result_text
+            .split('\n')
+            .filter(l => !l.includes('http'))
+            .join('\n');
+          html += `<pre style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 4px; font-size: 12px; white-space: pre-wrap;">${cleanText}</pre>`;
+        }
+        showAlert(html);
+        submitBtn.disabled = false;
+        submitBtn.textContent = '再產一次';
+      } catch (err) {
+        showAlert('<div class="alert err">❌ ' + err.message + '</div>');
+        submitBtn.disabled = false;
+        submitBtn.textContent = '產生報表';
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>

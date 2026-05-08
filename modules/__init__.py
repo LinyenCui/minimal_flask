@@ -93,6 +93,10 @@ def create_app():
     from modules.routes.webhook import webhook_bp
     app.register_blueprint(webhook_bp)
 
+    # LIFF blueprint（客戶 form 等）
+    from rewrite.handlers.liff import liff_bp
+    app.register_blueprint(liff_bp)
+
     # 設定日誌
     import logging
     from modules.utils.security import MaskSecretsFilter

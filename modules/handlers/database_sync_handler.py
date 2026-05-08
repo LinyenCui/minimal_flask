@@ -151,12 +151,12 @@ def handle_database_sync_request(event, line_bot_api):
     if conflict_result.get("has_conflicts"):
         confirm_buttons = [
             {"label": "⚡ 強制同步", "text": "確認序號覆蓋", "type": "message"},
-            {"label": "❌ 放棄操作", "text": "放棄", "type": "message"}
+            {"label": "❌ 取消同步", "text": "取消同步", "type": "message"}
         ]
     else:
         confirm_buttons = [
             {"label": "✅ 確認同步", "text": "確認同步", "type": "message"},
-            {"label": "❌ 放棄操作", "text": "放棄", "type": "message"}
+            {"label": "❌ 取消同步", "text": "取消同步", "type": "message"}
         ]
     
     return QuickReplyManager.create_text_response(response_text, confirm_buttons)
@@ -228,6 +228,33 @@ def handle_database_sync_confirm(event, line_bot_api_passed=None):
             check=False
         )
 
+        # 同步成功後，自動補本地測試 seed（不影響 Render）
+        # 詳見 scripts/post_sync_seed.py
+        seed_msg = ""
+        if process.returncode == 0:
+            try:
+                seed_process = subprocess.run(
+                    [python_executable, "scripts/post_sync_seed.py"],
+                    capture_output=True, text=True, timeout=15, check=False,
+                )
+                if seed_process.returncode == 0:
+                    # 從 seed stdout 抓「範例患者: 新增 X 筆、更新 Y 筆」
+                    seed_msg = "\n🌱 補種子完成"
+                    for line in seed_process.stdout.splitlines():
+                        if '範例患者' in line:
+                            seed_msg = f"\n🌱 {line.strip()}"
+                            break
+                    logger.info(f"post_sync_seed 完成: {seed_msg}")
+                else:
+                    seed_msg = f"\n⚠️ 補種子失敗 (exit {seed_process.returncode})"
+                    logger.warning(f"post_sync_seed stderr: {seed_process.stderr[:300]}")
+            except subprocess.TimeoutExpired:
+                seed_msg = "\n⚠️ 補種子超時 (>15s)"
+                logger.error("post_sync_seed 超時")
+            except Exception as seed_err:
+                seed_msg = f"\n⚠️ 補種子異常: {str(seed_err)[:100]}"
+                logger.error(f"post_sync_seed 異常: {seed_err}")
+
         # 準備結果訊息
         if process.returncode == 0:
             final_response_text = "🎉 資料庫同步完成！\n\n"
@@ -243,6 +270,10 @@ def handle_database_sync_confirm(event, line_bot_api_passed=None):
         
         if process.stderr:
             final_response_text += f"\n⚠️ 警告: {process.stderr[:500]}"
+
+        # 把 post_sync_seed 結果附加到回覆
+        if seed_msg:
+            final_response_text += seed_msg
 
     except subprocess.TimeoutExpired:
         logger.error("同步腳本執行超時")

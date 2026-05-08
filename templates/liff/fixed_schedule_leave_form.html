@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>固定班次請假</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang TC", "Microsoft JhengHei", sans-serif; padding: 16px; line-height: 1.5; color: #222; max-width: 600px; margin: 0 auto; font-size: 16px; }
+    h2 { margin: 0 0 16px; font-size: 20px; }
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 14px; color: #444; }
+    .field .req { color: #c0392b; margin-left: 2px; }
+    .field input, .field textarea {
+      width: 100%; padding: 10px 12px; font-size: 16px; border: 1px solid #ccc;
+      border-radius: 6px; background: #fff;
+    }
+    .field input:focus, .field textarea:focus { outline: none; border-color: #06c755; }
+    .helper { font-size: 12px; color: #888; margin-top: 4px; }
+    .schedule-info {
+      background: #f3e5f5; border: 1px solid #ce93d8; border-radius: 6px;
+      padding: 10px 12px; margin-bottom: 14px; font-size: 14px;
+    }
+    .actions { margin-top: 24px; display: flex; gap: 8px; }
+    button { flex: 1; padding: 12px; font-size: 16px; border-radius: 6px; border: 0; cursor: pointer; }
+    button[type=submit] { background: #7B1FA2; color: #fff; font-weight: 600; }
+    button[type=submit]:disabled { background: #aaa; }
+    button.secondary { background: #f3f3f3; color: #333; }
+    .alert { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 14px; }
+    .alert.err { background: #fdecea; color: #c0392b; border: 1px solid #f5c2bf; }
+    .alert.ok { background: #e8f5e9; color: #1a7a1a; border: 1px solid #b8e0bb; }
+    .loading { text-align: center; color: #666; padding: 40px 0; }
+    .preset-buttons { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .preset-buttons button {
+      flex: 0 0 auto; padding: 6px 10px; font-size: 13px;
+      background: #fff; color: #555; border: 1px solid #ccc; border-radius: 4px;
+      cursor: pointer; font-weight: normal;
+    }
+    .preset-buttons button:hover { background: #f0f0f0; }
+  </style>
+</head>
+<body>
+  <div id="loading" class="loading">載入中…</div>
+  <div id="content" hidden>
+    <h2>🏷️ 固定班次請假</h2>
+    <div id="schedule-info" class="schedule-info">載入班次資訊中…</div>
+    <div id="alert"></div>
+    <form id="leave-form" novalidate>
+
+      <div class="field">
+        <label>請假原因<span class="req">*</span></label>
+        <input name="reason" type="text" required maxlength="100" placeholder="例：出國度假 / 住院 / 化療 / 自己來">
+        <div class="preset-buttons">
+          <button type="button" data-reason="出國">出國</button>
+          <button type="button" data-reason="住院">住院</button>
+          <button type="button" data-reason="化療">化療</button>
+          <button type="button" data-reason="自己來">自己來</button>
+          <button type="button" data-reason="搬家">搬家</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>加成（負數 = 自己負擔扣除金額）</label>
+        <input name="surcharge" type="number" value="0" placeholder="0">
+        <div class="preset-buttons">
+          <button type="button" data-fare="0">0</button>
+          <button type="button" data-fare="-30">-30</button>
+          <button type="button" data-fare="-50">-50</button>
+          <button type="button" data-fare="-100">-100</button>
+          <button type="button" data-fare="-200">-200</button>
+        </div>
+        <div class="helper">空白或 0 = 不扣加成；自己來常用 -100；化療常用 -30/-50</div>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="secondary" id="btn-cancel">取消</button>
+        <button type="submit" id="btn-submit">確認請假</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    const LIFF_ID = "{{ liff_id }}";
+    const SCHEDULE_ID = {{ schedule_id|tojson }};
+
+    const loadingEl = document.getElementById('loading');
+    const contentEl = document.getElementById('content');
+    const alertEl = document.getElementById('alert');
+    const infoEl = document.getElementById('schedule-info');
+    const form = document.getElementById('leave-form');
+    const submitBtn = document.getElementById('btn-submit');
+    const cancelBtn = document.getElementById('btn-cancel');
+
+    function showAlert(type, msg) { alertEl.innerHTML = `<div class="alert ${type}">${msg}</div>`; }
+    function clearAlert() { alertEl.innerHTML = ''; }
+    function setLoading(t) { loadingEl.textContent = t; loadingEl.hidden = false; contentEl.hidden = true; }
+    function showContent() { loadingEl.hidden = true; contentEl.hidden = false; }
+
+    // preset 按鈕綁定
+    form.querySelectorAll('button[data-reason]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        form.elements.namedItem('reason').value = btn.dataset.reason;
+      });
+    });
+    form.querySelectorAll('button[data-fare]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        form.elements.namedItem('surcharge').value = btn.dataset.fare;
+      });
+    });
+
+    async function loadSchedule(id) {
+      const idToken = liff.getIDToken();
+      const resp = await fetch(`/liff/fixed_schedule/${id}`, {
+        headers: { 'Authorization': 'Bearer ' + idToken },
+      });
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      return data.schedule;
+    }
+
+    function renderInfo(s) {
+      const wdMap = { '1': '一', '2': '二', '3': '三', '4': '四',
+                      '5': '五', '6': '六', '7': '日' };
+      const rn = s.route_number || '';
+      const wdStr = [...rn].map(c => wdMap[c] || c).join('/');
+      infoEl.innerHTML = `
+        <div><strong>#${s.id}</strong> 每週${wdStr || '?'} ${(s.departure_time || '').slice(0, 5)}</div>
+        <div>${s.start_point || '?'} → ${s.end_point || '?'}（${s.category || '?'}）</div>
+        <div style="color: ${s.status === '請假' ? '#7B1FA2' : '#2E7D32'};">
+          目前狀態：${s.status || '?'}
+        </div>
+      `;
+    }
+
+    async function init() {
+      if (!LIFF_ID) { setLoading('LIFF_ID 未設定'); return; }
+      try {
+        await liff.init({ liffId: LIFF_ID });
+      } catch (e) {
+        setLoading('LIFF init 失敗：' + e.message);
+        return;
+      }
+      if (!liff.isLoggedIn()) {
+        liff.login({ redirectUri: window.location.href });
+        return;
+      }
+      try {
+        const s = await loadSchedule(SCHEDULE_ID);
+        renderInfo(s);
+      } catch (e) {
+        setLoading('載入班次資訊失敗：' + e.message);
+        return;
+      }
+      showContent();
+    }
+
+    cancelBtn.addEventListener('click', () => {
+      if (liff.isInClient && liff.isInClient()) liff.closeWindow();
+      else history.back();
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearAlert();
+
+      const reason = (form.elements.namedItem('reason').value || '').trim();
+      if (!reason) {
+        showAlert('err', '❌ 請填請假原因');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = '提交中…';
+      try {
+        const idToken = liff.getIDToken();
+        const fd = new FormData(form);
+        const payload = {
+          reason: reason,
+          surcharge: fd.get('surcharge') ? parseInt(fd.get('surcharge'), 10) : 0,
+        };
+        const resp = await fetch(`/liff/fixed_schedule/${SCHEDULE_ID}/leave`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + idToken,
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+        const inClient = liff.isInClient && liff.isInClient();
+        if (inClient) {
+          showAlert('ok', `✅ 已將固定班次 #${SCHEDULE_ID} 設為請假（1.5 秒後關閉）`);
+          setTimeout(() => liff.closeWindow(), 1500);
+        } else {
+          showAlert('ok', `✅ 已將固定班次 #${SCHEDULE_ID} 設為請假（可關閉視窗）`);
+        }
+      } catch (err) {
+        showAlert('err', '❌ ' + err.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = '確認請假';
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>

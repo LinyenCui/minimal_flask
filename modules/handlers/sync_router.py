@@ -58,6 +58,11 @@ def handle_sync_commands(message_text: str, user_id: str, reply_token: str) -> b
             handle_database_sync_confirm(mock_event, None)
             return True
 
+        if message_text in ("取消同步", "放棄同步"):
+            logger.info(f"用戶 {user_id} 取消資料庫同步")
+            reply_text(reply_token, "✅ 已取消資料庫同步")
+            return True
+
         if message_text == "同步結果":
             logger.info(f"用戶 {user_id} 查詢同步結果")
             from modules.handlers.database_sync_handler import handle_sync_result_query

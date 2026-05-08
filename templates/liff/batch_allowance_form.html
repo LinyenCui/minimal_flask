@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>批量加成</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang TC", "Microsoft JhengHei", sans-serif; padding: 16px; line-height: 1.5; color: #222; max-width: 600px; margin: 0 auto; font-size: 16px; }
+    h2 { margin: 0 0 16px; font-size: 20px; }
+    .field { margin-bottom: 14px; }
+    .field.row { display: flex; gap: 8px; }
+    .field.row > div { flex: 1; }
+    .field label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 14px; color: #444; }
+    .field .req { color: #c0392b; margin-left: 2px; }
+    .field input, .field select, .field textarea {
+      width: 100%; padding: 10px 12px; font-size: 16px; border: 1px solid #ccc;
+      border-radius: 6px; background: #fff;
+    }
+    .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: #FF6D00; }
+    .helper { font-size: 12px; color: #888; margin-top: 4px; }
+    .actions { margin-top: 24px; display: flex; gap: 8px; }
+    button { flex: 1; padding: 12px; font-size: 16px; border-radius: 6px; border: 0; cursor: pointer; }
+    button[type=submit] { background: #FF6D00; color: #fff; font-weight: 600; }
+    button[type=submit]:disabled { background: #aaa; }
+    button.secondary { background: #f3f3f3; color: #333; }
+    .alert { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 14px; }
+    .alert.err { background: #fdecea; color: #c0392b; border: 1px solid #f5c2bf; }
+    .alert.ok { background: #e8f5e9; color: #1a7a1a; border: 1px solid #b8e0bb; }
+    .alert.info { background: #e3f2fd; color: #0d47a1; border: 1px solid #90caf9; }
+    .loading { text-align: center; color: #666; padding: 40px 0; }
+    .preview-card {
+      margin: 16px 0; padding: 14px; border: 1px solid #ffcc80;
+      border-radius: 8px; background: #fff8e1; font-size: 14px;
+    }
+    .preview-card .summary { font-weight: 600; color: #b85c00; margin-bottom: 8px; }
+    .preview-card ul { margin: 6px 0; padding-left: 20px; font-size: 12px; }
+    .preview-card li { margin: 2px 0; }
+    .estimate { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #ffcc80; }
+    .preset-buttons { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .preset-buttons button {
+      flex: 0 0 auto; padding: 6px 10px; font-size: 13px; font-weight: normal;
+      background: #fff; color: #555; border: 1px solid #ccc; border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading" class="loading">載入中…</div>
+  <div id="content" hidden>
+    <h2>💰 批量加成</h2>
+    <div id="alert"></div>
+    <form id="batch-form" novalidate>
+      <div class="field row">
+        <div>
+          <label>起日<span class="req">*</span></label>
+          <input name="date_from" type="date" required>
+        </div>
+        <div>
+          <label>迄日<span class="req">*</span></label>
+          <input name="date_to" type="date" required>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>類別</label>
+        <select name="category">
+          <option value="全部" selected>全部</option>
+          <option value="診所">診所</option>
+          <option value="東洋">東洋</option>
+          <option value="臨時">臨時</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>加成金額（可正可負）<span class="req">*</span></label>
+        <input name="amount" type="number" required placeholder="例：50（颱風）/ -100（自己來）">
+        <div class="preset-buttons">
+          <button type="button" data-amt="50">+50</button>
+          <button type="button" data-amt="100">+100</button>
+          <button type="button" data-amt="200">+200</button>
+          <button type="button" data-amt="-30">-30</button>
+          <button type="button" data-amt="-50">-50</button>
+          <button type="button" data-amt="-100">-100</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>原因<span class="req">*</span></label>
+        <input name="reason" type="text" required maxlength="100" placeholder="例：颱風假期 / 春節加成 / 自己來">
+        <div class="preset-buttons">
+          <button type="button" data-reason="颱風假期">颱風假期</button>
+          <button type="button" data-reason="春節加成">春節加成</button>
+          <button type="button" data-reason="自己來">自己來</button>
+          <button type="button" data-reason="月底結算">月底結算</button>
+        </div>
+      </div>
+
+      <div id="preview-card" class="preview-card" hidden>
+        <div class="summary" id="pv-summary">—</div>
+        <ul id="pv-list"></ul>
+        <div class="estimate" id="pv-estimate">—</div>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="secondary" id="btn-cancel">取消</button>
+        <button type="submit" id="btn-submit" disabled>先預覽</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    const LIFF_ID = "{{ liff_id }}";
+
+    const loadingEl = document.getElementById('loading');
+    const contentEl = document.getElementById('content');
+    const alertEl = document.getElementById('alert');
+    const form = document.getElementById('batch-form');
+    const submitBtn = document.getElementById('btn-submit');
+    const cancelBtn = document.getElementById('btn-cancel');
+    const previewCard = document.getElementById('preview-card');
+    const pvSummary = document.getElementById('pv-summary');
+    const pvList = document.getElementById('pv-list');
+    const pvEstimate = document.getElementById('pv-estimate');
+
+    let currentPreview = null;  // 預覽結果
+    let stage = 'preview';      // 'preview' | 'execute'
+
+    function showAlert(type, msg) { alertEl.innerHTML = `<div class="alert ${type}">${msg}</div>`; }
+    function clearAlert() { alertEl.innerHTML = ''; }
+    function setLoading(t) { loadingEl.textContent = t; loadingEl.hidden = false; contentEl.hidden = true; }
+    function showContent() { loadingEl.hidden = true; contentEl.hidden = false; }
+
+    // preset buttons
+    form.querySelectorAll('button[data-amt]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        form.elements.namedItem('amount').value = btn.dataset.amt;
+        resetToPreview();
+      });
+    });
+    form.querySelectorAll('button[data-reason]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        form.elements.namedItem('reason').value = btn.dataset.reason;
+      });
+    });
+
+    function resetToPreview() {
+      stage = 'preview';
+      submitBtn.textContent = '先預覽';
+      previewCard.hidden = true;
+      currentPreview = null;
+      checkSubmit();
+    }
+
+    function checkSubmit() {
+      const fd = new FormData(form);
+      const ok = fd.get('date_from') && fd.get('date_to') && fd.get('amount');
+      submitBtn.disabled = !ok;
+    }
+
+    form.addEventListener('input', () => {
+      // 任意欄位改 → 重置回預覽階段
+      if (stage === 'execute') resetToPreview();
+      else checkSubmit();
+    });
+
+    cancelBtn.addEventListener('click', () => {
+      if (liff.isInClient && liff.isInClient()) liff.closeWindow();
+      else history.back();
+    });
+
+    async function init() {
+      if (!LIFF_ID) { setLoading('LIFF_ID 未設定'); return; }
+      try { await liff.init({ liffId: LIFF_ID }); }
+      catch (e) { setLoading('LIFF init 失敗：' + e.message); return; }
+      if (!liff.isLoggedIn()) {
+        liff.login({ redirectUri: window.location.href });
+        return;
+      }
+      // 預設今天 - 7
+      const today = new Date();
+      const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      const past = new Date(today); past.setDate(past.getDate() - 7);
+      form.elements.namedItem('date_from').value = fmt(past);
+      form.elements.namedItem('date_to').value = fmt(today);
+      checkSubmit();
+      showContent();
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearAlert();
+
+      if (stage === 'preview') {
+        // 階段 1：呼叫 preview
+        submitBtn.disabled = true;
+        submitBtn.textContent = '查詢中…';
+        try {
+          const idToken = liff.getIDToken();
+          const fd = new FormData(form);
+          const payload = {
+            date_from: fd.get('date_from'),
+            date_to: fd.get('date_to'),
+            category: fd.get('category'),
+          };
+          const resp = await fetch('/liff/batch_allowance/preview', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + idToken,
+            },
+            body: JSON.stringify(payload),
+          });
+          const data = await resp.json();
+          if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+          currentPreview = data;
+          if (data.count === 0) {
+            showAlert('err', '❌ 範圍內沒有符合條件的班次');
+            previewCard.hidden = true;
+            submitBtn.disabled = false;
+            submitBtn.textContent = '先預覽';
+            return;
+          }
+
+          const amount = parseInt(fd.get('amount'), 10);
+          const newTotal = data.total_current_fare + amount * data.count;
+          pvSummary.textContent = `📊 找到 ${data.count} 筆班次（${fd.get('category')}）`;
+          pvList.innerHTML = data.preview.map(t =>
+            `<li>#${t.id} ${t.date} ${t.route} 司機${t.driver_id || '?'} 現:${t.current_total}</li>`
+          ).join('');
+          if (data.count > data.preview.length) {
+            pvList.innerHTML += `<li>... 還有 ${data.count - data.preview.length} 筆</li>`;
+          }
+          pvEstimate.innerHTML = `
+            目前合計：${data.total_current_fare.toLocaleString()} 元<br>
+            加成 ${amount > 0 ? '+' : ''}${amount} × ${data.count} 筆 = ${(amount * data.count).toLocaleString()} 元<br>
+            <strong>更新後合計：${newTotal.toLocaleString()} 元</strong>
+          `;
+          previewCard.hidden = false;
+
+          stage = 'execute';
+          submitBtn.disabled = false;
+          submitBtn.textContent = `✅ 確認加成 ${data.count} 筆`;
+        } catch (err) {
+          showAlert('err', '❌ ' + err.message);
+          submitBtn.disabled = false;
+          submitBtn.textContent = '先預覽';
+        }
+        return;
+      }
+
+      // 階段 2：執行
+      if (!confirm(`確定要對 ${currentPreview.count} 筆班次加成嗎？此動作會寫入資料庫。`)) {
+        return;
+      }
+      submitBtn.disabled = true;
+      submitBtn.textContent = '執行中…';
+      try {
+        const idToken = liff.getIDToken();
+        const fd = new FormData(form);
+        const payload = {
+          date_from: fd.get('date_from'),
+          date_to: fd.get('date_to'),
+          category: fd.get('category'),
+          amount: parseInt(fd.get('amount'), 10),
+          reason: fd.get('reason'),
+        };
+        const resp = await fetch('/liff/batch_allowance', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + idToken,
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+        const inClient = liff.isInClient && liff.isInClient();
+        if (inClient) {
+          showAlert('ok', `✅ 已批量加成 ${data.updated_count} 筆（1.5 秒後關閉）`);
+          setTimeout(() => liff.closeWindow(), 1500);
+        } else {
+          showAlert('ok', `✅ 已批量加成 ${data.updated_count} 筆（可關閉視窗）`);
+        }
+      } catch (err) {
+        showAlert('err', '❌ ' + err.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = `✅ 確認加成 ${currentPreview ? currentPreview.count : 0} 筆`;
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>
