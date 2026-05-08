@@ -71,6 +71,11 @@ _ACCOUNTING_LIFF_TRIGGERS = {
     '帳務處理', '帳務', '餘額', '查餘額', '帳戶餘額',
 }
 
+# 觸發 LIFF 批量加成表單入口
+_BATCH_ALLOWANCE_LIFF_TRIGGERS = {
+    '批量加成', '批次加成', '批量改加成', 'batch-allowance',
+}
+
 # 短 follow-up 詞：sandbox-active 狀態下這類訊息 classifier 常判 unknown，
 # 但其實是上一輪 AI 問題的回答（確認/拒絕/補資訊）→ 直接帶 last_skill 走
 _SHORT_FOLLOWUP_TOKENS = {
@@ -277,6 +282,12 @@ def try_handle_sandbox(event) -> bool:
         balance = r.data.get('balance', 0) if r.ok else 0
         reply_message(event.reply_token, render_accounting_menu(balance))
         logger.info(f"[rewrite sandbox] {short_uid} → 帳務處理 menu (餘額 {balance})")
+        return True
+
+    if text in _BATCH_ALLOWANCE_LIFF_TRIGGERS:
+        from rewrite.views.batch_allowance_flex import render_batch_allowance_entry
+        reply_message(event.reply_token, render_batch_allowance_entry())
+        logger.info(f"[rewrite sandbox] {short_uid} → LIFF batch_allowance entry")
         return True
 
     # 0c. Hard fall-through 關鍵字（rewrite 明確沒做的功能 / 帶參數的舊 booking 流程）

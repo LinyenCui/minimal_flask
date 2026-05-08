@@ -123,6 +123,7 @@ def customer_form_new():
         'report': '/liff/report/form',
         'deposit': '/liff/accounting/deposit_form',
         'weekly_payment': '/liff/accounting/weekly_payment_form',
+        'batch_allowance': '/liff/batch_allowance/form',
     }
     # 動態目標（含 ID）：edit_schedule / leave_schedule
     sched_id = request.args.get('id')
