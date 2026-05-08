@@ -98,10 +98,18 @@ def callback():
                     try:
                         from rewrite.conversation_state import get_state as _rew_state_get
                         from rewrite.handlers.sandbox_handler import (
-                            SANDBOX_ACTIVE_STATE_TYPE, looks_like_quick_command,
+                            SANDBOX_ACTIVE_STATE_TYPE,
+                            TRIP_STATUS_PICKER_STATE_TYPE,
+                            TRIP_STATUS_LEAVE_INPUT_STATE_TYPE,
+                            looks_like_quick_command,
                         )
                         _rew_st = _rew_state_get(user_id) if user_id else None
-                        if _rew_st and _rew_st.get('type') == SANDBOX_ACTIVE_STATE_TYPE:
+                        _rew_active_types = (
+                            SANDBOX_ACTIVE_STATE_TYPE,
+                            TRIP_STATUS_PICKER_STATE_TYPE,
+                            TRIP_STATUS_LEAVE_INPUT_STATE_TYPE,
+                        )
+                        if _rew_st and _rew_st.get('type') in _rew_active_types:
                             if not looks_like_quick_command(original_message_text):
                                 is_rewrite_sandbox_active = True
                     except Exception:

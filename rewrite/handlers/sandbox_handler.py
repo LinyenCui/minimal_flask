@@ -13,9 +13,12 @@ Rewrite v0.1 沙盒入口 — 處理 LINE `!`/`！` 前綴訊息
 用戶不應走這條路 — 由 caller webhook.py 判斷。
 """
 import logging
+import re
+from datetime import date as _date
 from typing import Optional
 
 from modules.utils.line_bot import reply_message
+from modules.utils.unified_date_parser import UnifiedDateParser
 from rewrite.ai.agent import Agent
 from rewrite.ai.client import GeminiClient
 from rewrite.ai.intent import classify
@@ -75,6 +78,67 @@ _ACCOUNTING_LIFF_TRIGGERS = {
 _BATCH_ALLOWANCE_LIFF_TRIGGERS = {
     '批量加成', '批次加成', '批量改加成', 'batch-allowance',
 }
+
+
+# ====== 「[date][location]的狀態」狀態管理流程 ======
+# 用戶常用：「!今天二井家的狀態」「!5/9馬鎮宮的狀態」
+# 流程：parse → query trips → render picker (Flex + Quick Reply)
+#       → 用戶按 [全部請假/註銷/衝突/改回準備] → 對 trip_ids 批次操作
+#       → 「全部請假」需要再問 [原因] [加成]，其他按了直接執行
+TRIP_STATUS_PICKER_STATE_TYPE = 'rewrite_trip_status_picker'
+TRIP_STATUS_LEAVE_INPUT_STATE_TYPE = 'rewrite_trip_status_leave_input'
+TRIP_STATUS_TTL_MINUTES = 5.0  # 5 分鐘思考時間（比 SANDBOX_ACTIVE 90 秒長）
+
+# 批次操作觸發詞 → action label
+_BATCH_STATUS_ACTIONS = {
+    '全部請假': 'leave',     # 需問 [原因] [加成]，進 leave_input state
+    '全部註銷': 'cancel',
+    '全部衝突': 'conflict',
+    '全部改回準備': 'restore',
+}
+
+# 用戶用 / 開頭時剝掉再 match：「/今天二井家的狀態」也認
+_RE_STATUS_QUERY = re.compile(r'^/?(.+?)的狀態$')
+# 嘗試解析 date prefix：今天/明天/昨天/前天/後天 + 數字日期格式
+_RE_DATE_PREFIXES = (
+    re.compile(r'^(前天|昨天|今天|明天|後天)'),
+    re.compile(r'^(\d{4}-\d{1,2}-\d{1,2})'),
+    re.compile(r'^(\d{1,2}/\d{1,2})日?'),  # 5/11日 也接（日當尾綴吞掉）
+    re.compile(r'^(\d{1,2}-\d{1,2})'),
+    re.compile(r'^(\d{1,2}月\d{1,2}日)'),
+    re.compile(r'^(\d{3,4})(?=[^\d])'),  # MMDD 後面要有非數字
+)
+
+
+def _parse_status_query(text: str) -> Optional[tuple[_date, str, str]]:
+    """嘗試解析「[date][location]的狀態」
+
+    Returns:
+        (date_obj, location, date_label) 或 None
+    """
+    text = text.strip()
+    m = _RE_STATUS_QUERY.match(text)
+    if not m:
+        return None
+    body = m.group(1).strip()
+    if not body:
+        return None
+
+    # peel off date prefix
+    for pat in _RE_DATE_PREFIXES:
+        dm = pat.match(body)
+        if not dm:
+            continue
+        date_str = dm.group(1)
+        location = body[len(dm.group(0)):].strip()
+        if not location:
+            continue
+        try:
+            d = UnifiedDateParser.parse(date_str)
+        except Exception:
+            continue
+        return d, location, date_str
+    return None
 
 # 短 follow-up 詞：sandbox-active 狀態下這類訊息 classifier 常判 unknown，
 # 但其實是上一輪 AI 問題的回答（確認/拒絕/補資訊）→ 直接帶 last_skill 走
@@ -233,6 +297,13 @@ def try_handle_sandbox(event) -> bool:
         logger.info(f"[rewrite sandbox] {short_uid} ended conversation by user")
         return True
 
+    # 0a. trip_status 流程的 state-aware action handlers（要在 LIFF 觸發詞之前
+    #     check，因為「全部請假/註銷/衝突/改回準備」是流程內按鈕，不該被當成
+    #     一般文字訊息）
+    trip_status_handled = _try_handle_trip_status_actions(event, user_id, text, short_uid)
+    if trip_status_handled is not None:
+        return trip_status_handled
+
     # 0b. LIFF 表單 exact-match 觸發詞（要在 hard fall-through 之前 check）
     #     rewrite 已用 LIFF 接管 customer/booking/import → 訊息 in *_LIFF_TRIGGERS
     #     會被 hard_fallthrough 的「預約」/「匯入」keyword 偷走，所以順序要調整。
@@ -288,6 +359,15 @@ def try_handle_sandbox(event) -> bool:
         from rewrite.views.batch_allowance_flex import render_batch_allowance_entry
         reply_message(event.reply_token, render_batch_allowance_entry())
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF batch_allowance entry")
+        return True
+
+    # 0b'. 「[date][location]的狀態」入口（regex match，搬 legacy clarify_user_intent）
+    parsed = _parse_status_query(text)
+    if parsed:
+        d, location, date_str = parsed
+        _render_trip_status_picker_for_user(
+            event, user_id, short_uid, d, location, date_str,
+        )
         return True
 
     # 0c. Hard fall-through 關鍵字（rewrite 明確沒做的功能 / 帶參數的舊 booking 流程）
@@ -506,3 +586,297 @@ def _decorate_with_conversation_hint(msg: dict) -> None:
             },
         })
     msg['quick_reply'] = {'items': items}
+
+
+# ============================================================
+# 「[date][location]的狀態」流程：picker render + 批次 actions + leave input
+# ============================================================
+
+def _render_trip_status_picker_for_user(
+    event, user_id: Optional[str], short_uid: str,
+    d: _date, location: str, date_label: str,
+) -> None:
+    """跑 query → render picker → reply → 設 state（讓後續 Quick Reply 免前綴）"""
+    from database import Session
+    from rewrite.tools.trip import query_trips
+    from rewrite.views.trip_status_flex import render_trip_status_picker
+
+    session = Session()
+    try:
+        result = query_trips(
+            session=session,
+            date_from=d, date_to=d,
+            customer_short_name=location,
+            exclude_status=['已完成'],
+        )
+    finally:
+        session.close()
+
+    if not result.ok:
+        reply_message(event.reply_token, {
+            'type': 'text',
+            'text': f'📭 沒找到 {date_label}「{location}」的相關班次\n\n💡 確認日期和客戶簡稱',
+        })
+        logger.info(f"[rewrite sandbox] {short_uid} status query empty: {date_label} {location}")
+        return
+
+    trips = result.data
+    msg = render_trip_status_picker(
+        trips, date_label=date_label, location_label=location,
+    )
+    reply_message(event.reply_token, msg)
+
+    # 設 state，讓後續按鈕（全部請假/註銷/衝突/改回準備）能找到 trip_ids
+    if user_id:
+        trip_ids = [t.trip_id for t in trips]
+        _state_set(
+            user_id,
+            TRIP_STATUS_PICKER_STATE_TYPE,
+            {
+                'trip_ids': trip_ids,
+                'date': d.isoformat(),
+                'date_label': date_label,
+                'location': location,
+            },
+            ttl_minutes=TRIP_STATUS_TTL_MINUTES,
+        )
+    logger.info(
+        f"[rewrite sandbox] {short_uid} status picker {date_label} {location} "
+        f"({len(trips)} trips)"
+    )
+
+
+def _try_handle_trip_status_actions(event, user_id: Optional[str], text: str,
+                                     short_uid: str) -> Optional[bool]:
+    """trip_status state-aware action handlers
+
+    Returns:
+        True / False — 已處理（True=ok, False=讓 caller fall-through）
+        None — 不適用此 handler（caller 繼續正常流程）
+    """
+    if not user_id:
+        return None
+    state = _state_get(user_id)
+    if not state:
+        return None
+    state_type = state.get('type')
+
+    # ---- (1) Picker 階段：用戶按了批次操作按鈕 ----
+    if state_type == TRIP_STATUS_PICKER_STATE_TYPE:
+        action = _BATCH_STATUS_ACTIONS.get(text)
+        if not action:
+            # 不是批次按鈕（可能是「班次詳情 N」、新查詢、雜訊）→ 不處理，
+            # 讓 caller 走原本流程（會 hit LIFF triggers / hard_fallthrough / classifier）
+            return None
+        payload = state.get('payload') or {}
+        trip_ids = payload.get('trip_ids') or []
+        if not trip_ids:
+            _state_clear(user_id)
+            reply_message(event.reply_token, {
+                'type': 'text', 'text': '❌ 班次清單已過期，請重新查詢',
+            })
+            return True
+
+        if action == 'leave':
+            # 進 leave_input state，等用戶輸入 [原因] [加成]
+            _state_set(
+                user_id,
+                TRIP_STATUS_LEAVE_INPUT_STATE_TYPE,
+                {
+                    'trip_ids': trip_ids,
+                    'date_label': payload.get('date_label'),
+                    'location': payload.get('location'),
+                },
+                ttl_minutes=TRIP_STATUS_TTL_MINUTES,
+            )
+            reply_message(event.reply_token, {
+                'type': 'quick_reply',
+                'text': (
+                    f"📋 批量請假模式（{len(trip_ids)} 班）\n\n"
+                    f"🚕 班次：{', '.join(f'#{i}' for i in trip_ids[:5])}"
+                    + (f" 等 {len(trip_ids)} 筆" if len(trip_ids) > 5 else "")
+                    + "\n\n請輸入：[原因] [加成]\n例：化療 -30 / 出國 -50"
+                ),
+                'quick_reply': {
+                    'items': [{
+                        'type': 'action',
+                        'action': {'type': 'message', 'label': '❌ 取消',
+                                   'text': '結束對話'},
+                    }],
+                },
+            })
+            logger.info(
+                f"[rewrite sandbox] {short_uid} batch-leave mode "
+                f"trip_ids={trip_ids[:5]}{'...' if len(trip_ids) > 5 else ''}"
+            )
+            return True
+
+        # cancel / conflict / restore：直接執行
+        _execute_batch_status_action(
+            event, user_id, short_uid, action, trip_ids, payload,
+        )
+        return True
+
+    # ---- (2) Leave-input 階段：用戶輸入 [原因] [加成] ----
+    if state_type == TRIP_STATUS_LEAVE_INPUT_STATE_TYPE:
+        parsed = _parse_leave_input(text)
+        if parsed is None:
+            # 格式不符 → 提醒，但不清 state（讓用戶重試）
+            reply_message(event.reply_token, {
+                'type': 'quick_reply',
+                'text': (
+                    f"❌ 格式不對，要 [原因] [加成]\n"
+                    f"例：化療 -30、出國 -50、自己來 -100\n"
+                    f"輸入「結束對話」取消"
+                ),
+                'quick_reply': {
+                    'items': [{
+                        'type': 'action',
+                        'action': {'type': 'message', 'label': '❌ 取消',
+                                   'text': '結束對話'},
+                    }],
+                },
+            })
+            return True
+
+        reason, surcharge = parsed
+        payload = state.get('payload') or {}
+        trip_ids = payload.get('trip_ids') or []
+        _execute_batch_passenger_leave(
+            event, user_id, short_uid, trip_ids, reason, surcharge,
+        )
+        return True
+
+    return None
+
+
+def _parse_leave_input(text: str) -> Optional[tuple[str, int]]:
+    """parse 「[原因] [加成]」like '化療 -30'  '出國 -50'
+
+    Returns (reason, surcharge_int) or None。
+    需嚴格 2 個 space-separated tokens，第二個必須是 int（可正可負）。
+    """
+    parts = text.strip().split()
+    if len(parts) != 2:
+        return None
+    reason, num_str = parts[0].strip(), parts[1].strip()
+    if not reason:
+        return None
+    try:
+        surcharge = int(num_str)
+    except ValueError:
+        return None
+    return reason, surcharge
+
+
+def _execute_batch_status_action(
+    event, user_id: str, short_uid: str,
+    action: str, trip_ids: list, payload: dict,
+) -> None:
+    """執行批次 cancel / conflict / restore（無 follow-up）"""
+    from database import Session
+    from rewrite.tools.trip import cancel_trip, mark_conflict, restore_to_ready
+
+    op_map = {
+        'cancel': (cancel_trip, '註銷', '🚫'),
+        'conflict': (mark_conflict, '衝突', '⚠️'),
+        'restore': (restore_to_ready, '改回準備', '✅'),
+    }
+    op_fn, action_label, emoji = op_map[action]
+
+    success_ids: list[int] = []
+    failed: list[tuple[int, str]] = []
+
+    for tid in trip_ids:
+        sess = Session()
+        try:
+            r = op_fn(
+                session=sess, trip_id=tid,
+                user_id=user_id, via='sandbox_status_picker',
+            )
+            if r.ok:
+                success_ids.append(tid)
+            else:
+                failed.append((tid, r.error or 'unknown'))
+        except Exception as e:
+            sess.rollback()
+            failed.append((tid, str(e)[:60]))
+        finally:
+            sess.close()
+
+    _state_clear(user_id)
+
+    location = payload.get('location') or ''
+    date_label = payload.get('date_label') or ''
+    msg_lines = [
+        f"{emoji} 批量{action_label}完成",
+        f"📍 {date_label}｜{location}",
+        f"✅ 成功 {len(success_ids)}/{len(trip_ids)} 筆",
+    ]
+    if success_ids:
+        msg_lines.append(f"🚕 班次：{', '.join(f'#{i}' for i in success_ids[:8])}"
+                         + (f" 等" if len(success_ids) > 8 else ""))
+    if failed:
+        msg_lines.append("\n⚠️ 失敗：")
+        for tid, err in failed[:3]:
+            msg_lines.append(f"  #{tid}：{err[:50]}")
+
+    reply_message(event.reply_token, {'type': 'text', 'text': '\n'.join(msg_lines)})
+    logger.info(
+        f"[rewrite sandbox] {short_uid} batch {action_label} "
+        f"ok={len(success_ids)} fail={len(failed)}"
+    )
+
+
+def _execute_batch_passenger_leave(
+    event, user_id: str, short_uid: str,
+    trip_ids: list, reason: str, surcharge: int,
+) -> None:
+    """執行批次 passenger_leave（leave_input 階段執行）"""
+    from database import Session
+    from rewrite.tools.trip import passenger_leave
+
+    success_ids: list[int] = []
+    failed: list[tuple[int, str]] = []
+
+    for tid in trip_ids:
+        sess = Session()
+        try:
+            r = passenger_leave(
+                session=sess, trip_id=tid,
+                reason=reason, surcharge=surcharge,
+                user_id=user_id, via='sandbox_status_picker',
+            )
+            if r.ok:
+                success_ids.append(tid)
+            else:
+                failed.append((tid, r.error or 'unknown'))
+        except Exception as e:
+            sess.rollback()
+            failed.append((tid, str(e)[:60]))
+        finally:
+            sess.close()
+
+    _state_clear(user_id)
+
+    msg_lines = [
+        f"🏥 批量請假完成",
+        f"✅ 成功 {len(success_ids)}/{len(trip_ids)} 筆",
+        f"📝 原因：{reason}",
+        f"💰 加成：{surcharge:+d} 元",
+    ]
+    if success_ids:
+        msg_lines.append(
+            f"🚕 班次：{', '.join(f'#{i}' for i in success_ids[:8])}"
+            + (f" 等" if len(success_ids) > 8 else "")
+        )
+    if failed:
+        msg_lines.append("\n⚠️ 失敗：")
+        for tid, err in failed[:3]:
+            msg_lines.append(f"  #{tid}：{err[:50]}")
+
+    reply_message(event.reply_token, {'type': 'text', 'text': '\n'.join(msg_lines)})
+    logger.info(
+        f"[rewrite sandbox] {short_uid} batch passenger_leave "
+        f"ok={len(success_ids)} fail={len(failed)} reason={reason!r} surcharge={surcharge}"
+    )
