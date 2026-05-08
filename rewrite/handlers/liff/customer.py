@@ -120,6 +120,7 @@ def customer_form_new():
         'booking': '/liff/booking/form',
         'import': '/liff/import/form',
         'new_schedule': '/liff/fixed_schedule/form',
+        'report': '/liff/report/form',
     }
     # 動態目標（含 ID）：edit_schedule / leave_schedule
     sched_id = request.args.get('id')
