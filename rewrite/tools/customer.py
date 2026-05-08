@@ -3,13 +3,15 @@
 
 設計原則：
   R-4：純函數，session 從參數傳入，不依賴 Flask globals
-  R-7：身分證預設遮罩顯示
 
 功能：
   - query_customer：精確/結構化查詢（多欄位 cascade fallback）
   - query_customer_by_term：自然語言模糊查詢（給 AI 用）
 
 輸出含「病歷層」（生日的日）自動計算欄位 — 服務門診人員找病歷層級。
+
+⚠️ 2026-05-08: drop national_id / insurance_type 兩欄（用戶決定不收身分證、
+   健保身份 99% 都健保等於廢欄；自費少數 case 寫 remarks 即可）。
 """
 
 from dataclasses import dataclass, field, asdict
@@ -29,7 +31,6 @@ class CustomerView:
     """
     客戶展示用結構（含計算欄位）
 
-    遮罩規則：national_id 預設只顯示首尾字
     計算欄位：birthday_day（病歷層）, age（年齡）
     """
     id: int
@@ -40,12 +41,10 @@ class CustomerView:
     contact_phone: Optional[str] = None
     remarks: Optional[str] = None
 
-    # 個人資料 (m001 + m002)
+    # 個人資料
     birthday: Optional[date] = None
     gender: Optional[str] = None
-    national_id: Optional[str] = None  # 預設遮罩
     medical_record_no: Optional[str] = None
-    insurance_type: Optional[str] = None
 
     # 座標
     latitude: Optional[float] = None
@@ -58,17 +57,14 @@ class CustomerView:
     # 計算欄位
     birthday_day: Optional[int] = None  # 病歷層（生日的日）
     age: Optional[int] = None           # 年齡
-    is_masked: bool = True              # 身分證是否已遮罩
 
     @classmethod
     def from_row(cls, row, *, mask_id: bool = True) -> "CustomerView":
-        """從 SQLAlchemy row 建構"""
-        d = dict(row._mapping)
+        """從 SQLAlchemy row 建構
 
-        # 遮罩身分證
-        nid = d.get('national_id')
-        if mask_id and nid:
-            d['national_id'] = nid[0] + '*' * max(0, len(nid) - 2) + nid[-1]
+        mask_id 參數保留作 backward-compat 但不再使用（national_id drop 了）
+        """
+        d = dict(row._mapping)
 
         # 計算病歷層
         bd = d.get('birthday')
@@ -86,8 +82,6 @@ class CustomerView:
             if d.get(k) is not None:
                 d[k] = float(d[k])
 
-        d['is_masked'] = mask_id
-
         # 過濾出 dataclass 認的欄位
         valid = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
         return cls(**valid)
@@ -103,7 +97,7 @@ class CustomerView:
 # 共用 SELECT
 _SELECT_ALL = """
     SELECT id, short_name, name, address, category, contact_phone, remarks,
-           birthday, gender, national_id, medical_record_no, insurance_type,
+           birthday, gender, medical_record_no,
            latitude, longitude, created_at, updated_at
     FROM customers
 """
@@ -115,11 +109,10 @@ def query_customer(
     short_name: Optional[str] = None,
     name: Optional[str] = None,
     address: Optional[str] = None,
-    national_id: Optional[str] = None,
     medical_record_no: Optional[str] = None,
     fuzzy_name: bool = True,
     fuzzy_address: bool = True,
-    mask_id: bool = True,
+    mask_id: bool = True,  # backward-compat，不再使用
     limit: int = 20,
 ) -> ToolResult:
     """
@@ -127,10 +120,9 @@ def query_customer(
 
     cascade 順序：
       1. short_name 精確
-      2. national_id 精確（找到回傳）
-      3. medical_record_no 精確
-      4. name（精確或模糊）
-      5. address 模糊
+      2. medical_record_no 精確
+      3. name（精確或模糊）
+      4. address 模糊
 
     任一階段命中 = 回傳，後面不再嘗試。
     """
@@ -142,23 +134,11 @@ def query_customer(
         ).fetchall()
         if rows:
             return ToolResult.success(
-                data=[CustomerView.from_row(r, mask_id=mask_id) for r in rows],
+                data=[CustomerView.from_row(r) for r in rows],
                 matched_by='short_name',
             )
 
-    # 2. 精確 national_id
-    if national_id:
-        rows = session.execute(
-            text(f"{_SELECT_ALL} WHERE national_id = :v"),
-            {'v': national_id}
-        ).fetchall()
-        if rows:
-            return ToolResult.success(
-                data=[CustomerView.from_row(r, mask_id=mask_id) for r in rows],
-                matched_by='national_id',
-            )
-
-    # 3. 病歷號
+    # 2. 病歷號
     if medical_record_no:
         rows = session.execute(
             text(f"{_SELECT_ALL} WHERE medical_record_no = :v"),
@@ -166,11 +146,11 @@ def query_customer(
         ).fetchall()
         if rows:
             return ToolResult.success(
-                data=[CustomerView.from_row(r, mask_id=mask_id) for r in rows],
+                data=[CustomerView.from_row(r) for r in rows],
                 matched_by='medical_record_no',
             )
 
-    # 4. name
+    # 3. name
     if name:
         sql = (f"{_SELECT_ALL} WHERE name LIKE :v ORDER BY id LIMIT :l"
                if fuzzy_name else
@@ -179,11 +159,11 @@ def query_customer(
         rows = session.execute(text(sql), {'v': v, 'l': limit}).fetchall()
         if rows:
             return ToolResult.success(
-                data=[CustomerView.from_row(r, mask_id=mask_id) for r in rows],
+                data=[CustomerView.from_row(r) for r in rows],
                 matched_by='name' + ('(fuzzy)' if fuzzy_name else ''),
             )
 
-    # 5. address 模糊
+    # 4. address 模糊
     if address:
         sql = (f"{_SELECT_ALL} WHERE address LIKE :v ORDER BY id LIMIT :l"
                if fuzzy_address else
@@ -192,7 +172,7 @@ def query_customer(
         rows = session.execute(text(sql), {'v': v, 'l': limit}).fetchall()
         if rows:
             return ToolResult.success(
-                data=[CustomerView.from_row(r, mask_id=mask_id) for r in rows],
+                data=[CustomerView.from_row(r) for r in rows],
                 matched_by='address' + ('(fuzzy)' if fuzzy_address else ''),
             )
 
@@ -203,27 +183,19 @@ def query_customer_by_term(
     term: str,
     *,
     session,
-    mask_id: bool = True,
+    mask_id: bool = True,  # backward-compat，不再使用
     limit: int = 20,
 ) -> ToolResult:
     """
     自然語言模糊查詢（給 AI 或自由輸入用）
 
-    會嘗試把 term 當作 short_name / name / address / national_id / medical_record_no。
+    會嘗試把 term 當作 short_name / name / address / medical_record_no。
     cascade 找到任一就回傳。
-
-    台灣身分證 heuristic：第一字大寫英文 + 9 位數字 (10 chars)
     """
     if not term or not term.strip():
         return ToolResult.fail("請提供查詢關鍵字")
 
     term = term.strip()
-
-    # heuristic: 看 term 像不像身分證
-    looks_like_id = (len(term) == 10
-                     and term[0].isalpha()
-                     and term[0].isupper()
-                     and term[1:].isdigit())
 
     # heuristic: 看 term 像不像病歷號 (純數字 4-8 位)
     looks_like_mr = term.isdigit() and 4 <= len(term) <= 8
@@ -231,11 +203,9 @@ def query_customer_by_term(
     return query_customer(
         session=session,
         short_name=term,                            # 試簡稱
-        national_id=term if looks_like_id else None,
         medical_record_no=term if looks_like_mr else None,
         name=term,                                  # 模糊姓名
         address=term,                               # 模糊地址
-        mask_id=mask_id,
         limit=limit,
     )
 
@@ -244,7 +214,7 @@ def get_customer_by_id(
     customer_id: int,
     *,
     session,
-    mask_id: bool = True,
+    mask_id: bool = True,  # backward-compat，不再使用
 ) -> ToolResult:
     """單筆 ID 查詢"""
     row = session.execute(
@@ -252,7 +222,7 @@ def get_customer_by_id(
         {'id': customer_id}
     ).fetchone()
     if row:
-        return ToolResult.success(data=CustomerView.from_row(row, mask_id=mask_id))
+        return ToolResult.success(data=CustomerView.from_row(row))
     return ToolResult.fail(f"找不到 customer #{customer_id}")
 
 
@@ -260,7 +230,7 @@ def query_customers_by_birthday_day(
     *,
     session,
     day: int,
-    mask_id: bool = True,
+    mask_id: bool = True,  # backward-compat，不再使用
 ) -> ToolResult:
     """
     依「生日的日」查客戶（病歷層查詢）
@@ -290,7 +260,7 @@ def query_customers_by_birthday_day(
         return ToolResult.fail(f"沒有客戶生日是 {day} 日（病歷層 {day} 為空）")
 
     return ToolResult.success(
-        data=[CustomerView.from_row(r, mask_id=mask_id) for r in rows],
+        data=[CustomerView.from_row(r) for r in rows],
         day=day,
         count=len(rows),
         matched_by='birthday_day',
@@ -325,7 +295,7 @@ def query_birthday_day_summary(*, session) -> ToolResult:
 # 允許 update 的欄位白名單（防注入 + 明確語意）
 _UPDATABLE_FIELDS = {
     'name', 'short_name', 'address', 'category', 'contact_phone', 'remarks',
-    'birthday', 'gender', 'national_id', 'medical_record_no', 'insurance_type',
+    'birthday', 'gender', 'medical_record_no',
     'latitude', 'longitude',
 }
 
@@ -341,12 +311,12 @@ def create_customer(
     remarks: Optional[str] = None,
     birthday: Optional[date] = None,
     gender: Optional[str] = None,
-    national_id: Optional[str] = None,
     medical_record_no: Optional[str] = None,
-    insurance_type: Optional[str] = None,
     latitude: Optional[float] = None,
     longitude: Optional[float] = None,
     auto_commit: bool = True,
+    # 接受並忽略已 drop 的欄位（避免上游送舊 payload 時 TypeError）
+    **_deprecated,
 ) -> ToolResult:
     """
     建立新客戶。
@@ -356,8 +326,10 @@ def create_customer(
 
     驗證：
       - short_name 必須唯一
-      - national_id 若有給，必須唯一
       - gender 必須是 M / F / None
+
+    ⚠️ 2026-05-08：drop national_id / insurance_type；舊 payload 從 **_deprecated
+       吞掉不報錯（漸進過渡）
     """
     # --- 必填驗證 ---
     if not name or not name.strip():
@@ -379,32 +351,22 @@ def create_customer(
     if dup:
         return ToolResult.fail(f"短名「{short_name}」已存在 (customer #{dup[0]})")
 
-    # --- national_id 唯一性 ---
-    if national_id:
-        dup = session.execute(
-            text("SELECT id FROM customers WHERE national_id = :v"),
-            {'v': national_id}
-        ).fetchone()
-        if dup:
-            return ToolResult.fail(f"身分證已存在於 customer #{dup[0]}")
-
     # --- INSERT ---
     result = session.execute(text("""
         INSERT INTO customers (
             name, short_name, address, category, contact_phone, remarks,
-            birthday, gender, national_id, medical_record_no, insurance_type,
+            birthday, gender, medical_record_no,
             latitude, longitude
         ) VALUES (
             :name, :short_name, :address, :category, :contact_phone, :remarks,
-            :birthday, :gender, :national_id, :medical_record_no, :insurance_type,
+            :birthday, :gender, :medical_record_no,
             :latitude, :longitude
         ) RETURNING id
     """), {
         'name': name, 'short_name': short_name, 'address': address,
         'category': category, 'contact_phone': contact_phone, 'remarks': remarks,
         'birthday': birthday, 'gender': gender,
-        'national_id': national_id, 'medical_record_no': medical_record_no,
-        'insurance_type': insurance_type,
+        'medical_record_no': medical_record_no,
         'latitude': latitude, 'longitude': longitude,
     })
     new_id = result.fetchone()[0]
@@ -431,6 +393,10 @@ def update_customer(
 
     注意：updated_at 由 DB trigger 自動更新（不在白名單）。
     """
+    # 寬容 drop 已淘汰欄位（national_id / insurance_type）— 不報錯，當 noop
+    _DEPRECATED_FIELDS = {'national_id', 'insurance_type'}
+    fields = {k: v for k, v in fields.items() if k not in _DEPRECATED_FIELDS}
+
     # 拒絕未知欄位（防呆）
     rejected = set(fields.keys()) - _UPDATABLE_FIELDS
     if rejected:
@@ -463,15 +429,6 @@ def update_customer(
         ).fetchone()
         if dup:
             return ToolResult.fail(f"短名「{valid['short_name']}」已被 #{dup[0]} 使用")
-
-    # national_id 唯一性
-    if 'national_id' in valid and valid['national_id']:
-        dup = session.execute(
-            text("SELECT id FROM customers WHERE national_id = :v AND id != :id"),
-            {'v': valid['national_id'], 'id': customer_id}
-        ).fetchone()
-        if dup:
-            return ToolResult.fail(f"身分證已存在於 #{dup[0]}")
 
     # 動態 UPDATE
     set_clauses = ", ".join(f"{k} = :{k}" for k in valid.keys())

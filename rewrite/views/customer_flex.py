@@ -111,16 +111,8 @@ def render_customer_detail(c: CustomerView) -> dict:
             "📋 病歷層", f"{c.birthday_day} 日",
             value_color=ACCENT, value_weight="bold"
         ))
-    if c.insurance_type:
-        medical_rows.append(_row("健保", c.insurance_type))
     if c.medical_record_no:
         medical_rows.append(_row("病歷號", c.medical_record_no))
-    if c.national_id:
-        nid_label = "身分證(遮罩)" if c.is_masked else "身分證"
-        medical_rows.append(_row(
-            nid_label, c.national_id,
-            value_color=MUTED if c.is_masked else BLACK
-        ))
     if medical_rows:
         body_contents.append(_separator())
         body_contents.extend(medical_rows)
@@ -159,18 +151,6 @@ def render_customer_detail(c: CustomerView) -> dict:
 
     # ----- footer 按鈕 -----
     footer_buttons = []
-    if c.is_masked and c.national_id and c.national_id != '—':
-        footer_buttons.append({
-            "type": "button",
-            "style": "secondary",
-            "height": "sm",
-            "action": {
-                "type": "postback",
-                "label": "看完整身分證",
-                "data": f"customer_unmask_id:{c.id}",
-                "displayText": f"看 #{c.id} 完整身分證",
-            }
-        })
     footer_buttons.append({
         "type": "button",
         "style": "primary",

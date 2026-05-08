@@ -39,10 +39,14 @@ def _customer_to_jsonable(view) -> dict:
 
 
 def _parse_payload(body: dict) -> tuple[dict, str | None]:
-    """form payload → atomic tool kwargs（空字串轉 None、birthday 轉 date）"""
+    """form payload → atomic tool kwargs（空字串轉 None、birthday 轉 date）
+
+    ⚠️ 2026-05-08 drop: national_id / insurance_type 已移除；舊 payload 送
+    這兩個 key 也不會破（_parse_payload 只挑現有欄位，atomic tool 也吞）
+    """
     fields: dict[str, Any] = {}
     for k in ('name', 'short_name', 'address', 'category', 'contact_phone',
-             'remarks', 'gender', 'national_id', 'medical_record_no', 'insurance_type'):
+             'remarks', 'gender', 'medical_record_no'):
         v = body.get(k)
         if v == '' or v is None:
             v = None

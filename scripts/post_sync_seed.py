@@ -8,9 +8,12 @@ post_sync_seed.py — 同步後補 seed 測試資料
   此腳本在 sync 後跑，補回本地測試資料。
 
 特性：
-  - 冪等（idempotent）：以 national_id 為 UNIQUE key，重跑不會重複
+  - 冪等（idempotent）：以 medical_record_no 為 UNIQUE key，重跑不會重複
   - 獨立可跑：不依賴 Flask app
   - 自動修序列（防止 INSERT 撞 PK 衝突）
+
+⚠️ 2026-05-08：drop national_id / insurance_type，UPSERT key 改用
+   medical_record_no（5 筆 seed 都有，且唯一）
 
 使用：
   python scripts/post_sync_seed.py
@@ -51,36 +54,31 @@ SEED_PATIENTS = [
         'name': '黃陳玉盆', 'short_name': '黃陳玉盆', 'address': '(待補)',
         'category': '診所', 'remarks': '範例：5/2 處方箋',
         'birthday': '1951-08-23', 'gender': 'F',
-        'national_id': 'D200615801', 'medical_record_no': '001026',
-        'insurance_type': '健保',
+        'medical_record_no': '001026',
     },
     {
         'name': '林佳瑋', 'short_name': '林佳瑋', 'address': '(待補)',
         'category': '診所', 'remarks': '範例：4/28 處方箋',
         'birthday': '1986-09-26', 'gender': 'M',
-        'national_id': 'D122292202', 'medical_record_no': '001676',
-        'insurance_type': '健保',
+        'medical_record_no': '001676',
     },
     {
         'name': '方怡雁', 'short_name': '方怡雁', 'address': '(待補)',
         'category': '診所', 'remarks': '範例：4/28 處方箋',
         'birthday': '1992-08-01', 'gender': 'F',
-        'national_id': 'R223939618', 'medical_record_no': '001677',
-        'insurance_type': '健保',
+        'medical_record_no': '001677',
     },
     {
         'name': '謝家成', 'short_name': '謝家成', 'address': '(待補)',
         'category': '診所', 'remarks': '範例：4/28 處方箋',
         'birthday': '1937-02-17', 'gender': 'M',
-        'national_id': 'D101180038', 'medical_record_no': '000133',
-        'insurance_type': '健保',
+        'medical_record_no': '000133',
     },
     {
         'name': '曾紀淑美', 'short_name': '曾紀淑美', 'address': '(待補)',
         'category': '診所', 'remarks': '範例：5/1 處方箋',
         'birthday': '1956-02-13', 'gender': 'F',
-        'national_id': 'L220814691', 'medical_record_no': '002034',
-        'insurance_type': '健保',
+        'medical_record_no': '002034',
     },
 ]
 
@@ -125,14 +123,13 @@ def fix_customers_sequence(conn):
 
 
 def upsert_patients(conn):
-    """以 national_id 為 key，UPSERT 範例患者"""
+    """以 medical_record_no 為 key，UPSERT 範例患者"""
     inserted, updated = 0, 0
     with conn.cursor() as cur:
         for p in SEED_PATIENTS:
-            # 用 national_id 判斷是否已存在
             cur.execute(
-                "SELECT id FROM customers WHERE national_id = %s",
-                (p['national_id'],)
+                "SELECT id FROM customers WHERE medical_record_no = %s",
+                (p['medical_record_no'],)
             )
             existing = cur.fetchone()
             if existing:
@@ -142,16 +139,14 @@ def upsert_patients(conn):
                     UPDATE customers SET
                         name = %s, short_name = %s, address = %s,
                         category = %s, remarks = %s,
-                        birthday = %s, gender = %s,
-                        medical_record_no = %s, insurance_type = %s
-                    WHERE national_id = %s
+                        birthday = %s, gender = %s
+                    WHERE medical_record_no = %s
                     """,
                     (
                         p['name'], p['short_name'], p['address'],
                         p['category'], p['remarks'],
                         p['birthday'], p['gender'],
-                        p['medical_record_no'], p['insurance_type'],
-                        p['national_id'],
+                        p['medical_record_no'],
                     )
                 )
                 updated += 1
@@ -161,15 +156,14 @@ def upsert_patients(conn):
                     """
                     INSERT INTO customers (
                         name, short_name, address, category, remarks,
-                        birthday, gender, national_id,
-                        medical_record_no, insurance_type
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        birthday, gender, medical_record_no
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         p['name'], p['short_name'], p['address'],
                         p['category'], p['remarks'],
-                        p['birthday'], p['gender'], p['national_id'],
-                        p['medical_record_no'], p['insurance_type'],
+                        p['birthday'], p['gender'],
+                        p['medical_record_no'],
                     )
                 )
                 inserted += 1
@@ -178,10 +172,10 @@ def upsert_patients(conn):
 
 
 def schema_check(conn):
-    """檢查 migration 001/002 欄位是否齊全"""
+    """檢查 migration 必要欄位是否齊全（drop national_id / insurance_type 後）"""
     required_cols = [
         'birthday', 'latitude', 'longitude', 'created_at', 'updated_at',
-        'national_id', 'gender', 'medical_record_no', 'insurance_type',
+        'gender', 'medical_record_no',
     ]
     with conn.cursor() as cur:
         cur.execute(

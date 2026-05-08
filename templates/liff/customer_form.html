@@ -31,6 +31,9 @@
     .alert.ok { background: #e8f5e9; color: #1a7a1a; border: 1px solid #b8e0bb; }
     .loading { text-align: center; color: #666; padding: 40px 0; }
     fieldset { border: 0; padding: 0; margin: 0; }
+    details { margin-bottom: 14px; border: 1px solid #eee; border-radius: 6px; padding: 8px 12px; }
+    details summary { font-weight: 600; cursor: pointer; padding: 4px 0; color: #555; }
+    details[open] { background: #fafafa; }
   </style>
 </head>
 <body>
@@ -44,7 +47,7 @@
         <input name="name" type="text" required maxlength="100">
       </div>
       <div class="field">
-        <label>短名<span class="req">*</span><small style="font-weight:normal;color:#888;">（唯一）</small></label>
+        <label>簡稱<span class="req">*</span><small style="font-weight:normal;color:#888;">（唯一）</small></label>
         <input name="short_name" type="text" required maxlength="50">
       </div>
       <div class="field">
@@ -52,45 +55,42 @@
         <input name="address" type="text" required maxlength="200">
       </div>
       <div class="field">
-        <label>類別</label>
-        <select name="category">
-          <option value="">（未設定）</option>
+        <label>類別<span class="req">*</span></label>
+        <select name="category" required>
+          <option value="">（請選擇）</option>
           <option value="診所">診所</option>
           <option value="東洋">東洋</option>
+          <option value="臨時">臨時</option>
         </select>
       </div>
       <div class="field">
-        <label>電話</label>
+        <label>聯絡電話</label>
         <input name="contact_phone" type="tel" maxlength="20" placeholder="例：0912-345-678">
       </div>
       <div class="field">
         <label>備註</label>
-        <textarea name="remarks" rows="3" maxlength="500"></textarea>
+        <textarea name="remarks" rows="3" maxlength="500" placeholder="（自費、特殊情況、注意事項…）"></textarea>
       </div>
-      <div class="field">
-        <label>生日</label>
-        <input name="birthday" type="date">
-      </div>
-      <div class="field">
-        <label>性別</label>
-        <fieldset class="radio-row">
-          <label><input type="radio" name="gender" value="" checked>不填</label>
-          <label><input type="radio" name="gender" value="M">男</label>
-          <label><input type="radio" name="gender" value="F">女</label>
-        </fieldset>
-      </div>
-      <div class="field">
-        <label>身分證</label>
-        <input name="national_id" type="text" maxlength="15" placeholder="例：A123456789">
-      </div>
-      <div class="field">
-        <label>病歷號</label>
-        <input name="medical_record_no" type="text" maxlength="50">
-      </div>
-      <div class="field">
-        <label>保險類別</label>
-        <input name="insurance_type" type="text" maxlength="50" placeholder="例：健保 / 自費">
-      </div>
+
+      <details>
+        <summary>填寫更多資料（生日 / 性別 / 病歷號）</summary>
+        <div class="field" style="margin-top: 10px;">
+          <label>生日</label>
+          <input name="birthday" type="date">
+        </div>
+        <div class="field">
+          <label>性別</label>
+          <fieldset class="radio-row">
+            <label><input type="radio" name="gender" value="" checked>不填</label>
+            <label><input type="radio" name="gender" value="M">男</label>
+            <label><input type="radio" name="gender" value="F">女</label>
+          </fieldset>
+        </div>
+        <div class="field">
+          <label>病歷號</label>
+          <input name="medical_record_no" type="text" maxlength="50">
+        </div>
+      </details>
 
       <div class="actions">
         <button type="button" class="secondary" id="btn-cancel">取消</button>
@@ -127,6 +127,7 @@
     const form = document.getElementById('customer-form');
     const submitBtn = document.getElementById('btn-submit');
     const cancelBtn = document.getElementById('btn-cancel');
+    const advancedDetails = document.querySelector('details');
 
     function showAlert(type, msg) {
       alertEl.innerHTML = `<div class="alert ${type}">${msg}</div>`;
@@ -136,6 +137,13 @@
 
     function setLoading(text) { loadingEl.textContent = text; loadingEl.hidden = false; contentEl.hidden = true; }
     function showContent() { loadingEl.hidden = true; contentEl.hidden = false; }
+
+    // 編輯模式 prefill 時，若進階欄位有資料就把 details 預設展開
+    function _expandAdvancedIfHasData(c) {
+      if (advancedDetails && (c.birthday || c.gender || c.medical_record_no)) {
+        advancedDetails.open = true;
+      }
+    }
 
     function fillForm(c) {
       for (const [k, v] of Object.entries(c)) {
@@ -150,6 +158,7 @@
           el.value = v ?? '';
         }
       }
+      _expandAdvancedIfHasData(c);
     }
 
     async function loadCustomer(id) {
@@ -195,6 +204,14 @@
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       clearAlert();
+
+      // HTML5 必填驗證（name / short_name / address / category）
+      if (!form.checkValidity()) {
+        showAlert('err', '❌ 請完整填寫必填欄位（姓名 / 簡稱 / 地址 / 類別）');
+        form.reportValidity();
+        return;
+      }
+
       submitBtn.disabled = true;
       submitBtn.textContent = '儲存中…';
       try {

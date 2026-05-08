@@ -49,19 +49,16 @@ try:
     c = r.data[0]
     print(f'  matched_by: {r.meta.get("matched_by")}')
     print(f'  {c.name} ({c.gender}) 生日 {c.birthday}')
-    print(f'  身分證(遮罩): {c.national_id}')
-    print(f'  病歷層: {c.birthday_day} 日')
-    print(f'  is_masked: {c.is_masked}')
+    print(f'  病歷層: {c.birthday_day} 日 | 病歷號: {c.medical_record_no}')
 
     # ============================================================
-    # T3: 病歷號精確（不遮罩，明確要看）
+    # T3: mask_id 參數仍接受（backward-compat）
     # ============================================================
-    banner('T3: 同 T2 但 mask_id=False（明確需要看完整身分證）')
+    banner('T3: mask_id=False 不該炸（drop national_id 後參數變 noop）')
     r = query_customer(medical_record_no='001026', session=session, mask_id=False)
     assert r.ok
     c = r.data[0]
-    print(f'  身分證(完整): {c.national_id}')
-    print(f'  is_masked: {c.is_masked}')
+    print(f'  mask_id=False ok: #{c.id} {c.name}')
 
     # ============================================================
     # T4: 模糊查詢（自然語言）
@@ -86,14 +83,12 @@ try:
             print(f'  - 短名:{c.short_name} 姓名:{c.name}')
 
     # ============================================================
-    # T6: 身分證 heuristic 觸發
+    # T6: 身分證 heuristic（drop 後改檢查不會 cascade 進 national_id 路徑）
     # ============================================================
-    banner('T6: term="D200615801" → 應走 national_id heuristic')
+    banner('T6: term="D200615801" → drop national_id 後該走 short_name fallthrough')
     r = query_customer_by_term('D200615801', session=session)
-    if r.ok:
-        print(f'  matched_by: {r.meta.get("matched_by")}')
-        c = r.data[0]
-        print(f'  → {c.name} (生日 {c.birthday}, 性別 {c.gender})')
+    # 應該命不中（沒這個 short_name / name / address），回 fail
+    print(f'  ok={r.ok}, matched_by={r.meta.get("matched_by") if r.ok else "—"}')
 
     # ============================================================
     # T7: 病歷號 heuristic 觸發（純數字）

@@ -524,9 +524,12 @@ def incremental_sync_completed_trips(local_conn, render_conn):
 def upsert_customers(local_conn, render_conn):
     """UPSERT customers（保留本地升級欄位不被覆蓋）
 
-    本地 schema 升級了 birthday / gender / national_id / medical_record_no /
-    insurance_type / latitude / longitude / created_at / updated_at 等欄位，
-    Render 上沒有。直接 truncate_and_copy 會洗掉本地補的這些欄位。
+    本地 schema 升級了 birthday / gender / medical_record_no / latitude /
+    longitude / created_at / updated_at 等欄位，Render 上沒有。
+    直接 truncate_and_copy 會洗掉本地補的這些欄位。
+
+    ⚠️ 2026-05-08: drop national_id / insurance_type 已從 customers schema
+       移除，本地與 Render schema 對齊後可考慮 enable customers sync。
 
     解法：UPSERT
       - INSERT 用 Render 既有欄位（升級欄位走本地 schema default 為 NULL）

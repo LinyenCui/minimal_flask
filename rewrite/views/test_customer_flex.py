@@ -12,6 +12,7 @@ sys.path.insert(0, '/Users/linyancui/minimal_flask')
 from database import Session
 from rewrite.tools.customer import (
     get_customer_by_id,
+    query_customer,
     query_customers_by_birthday_day,
     create_customer,
     delete_customer,
@@ -48,25 +49,30 @@ session = Session()
 fake_ids = []  # 待清理的 fake customers
 try:
     # ============================================================
-    # T1：完整詳情卡 (#54 黃陳玉盆)
+    # T1：完整詳情卡（黃陳玉盆 — 用 medical_record_no '001026' 找）
     # ============================================================
-    banner('T1: 完整詳情卡 (#54 黃陳玉盆)')
-    r = get_customer_by_id(54, session=session, mask_id=True)
+    banner('T1: 完整詳情卡（黃陳玉盆 / 001026）')
+    rq = query_customer(medical_record_no='001026', session=session)
+    assert rq.ok, f'seed customer 001026 not found: {rq.error}'
+    seed_id = rq.data[0].id
+    print(f'  資料庫實際 id: #{seed_id}')
+    r = get_customer_by_id(seed_id, session=session)
     assert r.ok
     bubble = render_customer_detail(r.data)
     basic_check(bubble)
     print(f'  header: {bubble["header"]["contents"][0]["text"]}')
     print(f'  body 行數: {len(bubble["body"]["contents"])}')
     print(f'  footer 按鈕: {len(bubble["footer"]["contents"])} 個')
-    save_json('01_customer_detail_54_masked.json', bubble)
+    save_json('01_customer_detail_full.json', bubble)
 
     # ============================================================
-    # T2：不遮罩版（看完整身分證）
+    # T2：mask_id 參數仍接受（drop national_id 後變 noop，backward-compat）
     # ============================================================
-    banner('T2: 不遮罩 (#54 mask_id=False)')
-    r = get_customer_by_id(54, session=session, mask_id=False)
+    banner('T2: mask_id=False 不該炸（drop 後變 noop）')
+    r = get_customer_by_id(seed_id, session=session, mask_id=False)
+    assert r.ok
     bubble = render_customer_detail(r.data)
-    save_json('02_customer_detail_54_unmasked.json', bubble)
+    save_json('02_customer_detail_full_unmasked.json', bubble)
 
     # ============================================================
     # T3：沒生日的客戶 (#29 陳昭月)

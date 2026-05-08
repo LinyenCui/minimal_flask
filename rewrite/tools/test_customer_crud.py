@@ -40,15 +40,13 @@ try:
         category='診所',
         birthday=date(1980, 5, 15),
         gender='F',
-        national_id='X123456789',
         medical_record_no='999001',
-        insurance_type='健保',
     )
     assert r.ok, f'expected ok, got {r.error}'
     c = r.data
     created_ids.append(c.id)
     print(f'  ✅ 建立 #{c.id} {c.name} (生日層 {c.birthday_day} 日)')
-    print(f'     身分證(遮罩): {c.national_id}')
+    print(f'     病歷號: {c.medical_record_no}')
 
     # ============================================================
     # T2: create - 短名重複（應被拒絕）
@@ -64,18 +62,20 @@ try:
     print(f'  ✅ 正確拒絕: {r.error}')
 
     # ============================================================
-    # T3: create - 身分證重複（應被拒絕）
+    # T3: create - 寬容已 drop 的舊欄位（national_id / insurance_type）
     # ============================================================
-    banner('T3: create_customer - 身分證重複')
+    banner('T3: create_customer - 舊 payload 帶 national_id 不該炸')
     r = create_customer(
         session=session,
         name='測試客戶C',
         short_name='測試C',
         address='地址',
-        national_id='X123456789',  # 與 T1 重複
+        national_id='X999999999',   # 已 drop，應被吞掉不報錯
+        insurance_type='健保',       # 已 drop
     )
-    assert not r.ok
-    print(f'  ✅ 正確拒絕: {r.error}')
+    assert r.ok, f'expected ok, got {r.error}'
+    created_ids.append(r.data.id)
+    print(f'  ✅ 寬容 drop 欄位，仍建立 #{r.data.id}')
 
     # ============================================================
     # T4: create - gender 不合法（應被拒絕）
@@ -191,7 +191,7 @@ try:
     print(f'  ✅ get_customer_by_id 也找不到: {r2.error}')
 
     print('\n' + '='*60)
-    print('✅ 全部 11 個 CRUD 測試通過')
+    print('✅ 全部 11 個 CRUD 測試通過（含 drop 欄位寬容）')
     print('='*60)
 finally:
     # 清理任何殘留的測試客戶
