@@ -80,6 +80,41 @@ _ACCOUNTING_LEDGER_TRIGGERS = {
     '帳務明細', '查看明細', '明細',
 }
 
+# 帳務明細「篩選區間」觸發詞（進日期 input mode）
+_ACCOUNTING_LEDGER_RANGE_TRIGGER = 'acct_ledger_range'
+
+# 帳務明細翻頁 cursor prefix（payload 用 rsplit 處理因為 ts 含 :）
+_ACCT_LEDGER_NEXT_PREFIX = 'acct_ledger_next:'
+
+# 帳務明細日期區間 input state type
+ACCT_LEDGER_RANGE_INPUT_STATE_TYPE = 'rewrite_acct_ledger_range_input'
+
+
+def _parse_acct_ledger_next(text: str) -> Optional[tuple]:
+    """parse acct_ledger_next:<ts>:<id>:<fd>:<td>（ts 可能含 :）
+
+    對齊 main：rsplit(':', 3) 從右切 3 刀，避免 ISO ts 內的 : 干擾。
+
+    Returns (last_ts, last_id, from_date, to_date) 或 None
+    """
+    if not text.startswith(_ACCT_LEDGER_NEXT_PREFIX):
+        return None
+    payload = text[len(_ACCT_LEDGER_NEXT_PREFIX):]
+    parts = payload.rsplit(':', 3)
+    try:
+        if len(parts) == 2:
+            return parts[0], int(parts[1]), None, None
+        if len(parts) == 4:
+            return (
+                parts[0],
+                int(parts[1] or 0),
+                parts[2] or None,
+                parts[3] or None,
+            )
+    except ValueError:
+        return None
+    return None
+
 # 觸發 LIFF 批量加成表單入口
 _BATCH_ALLOWANCE_LIFF_TRIGGERS = {
     '批量加成', '批次加成', '批量改加成', 'batch-allowance',
@@ -389,21 +424,52 @@ def try_handle_sandbox(event) -> bool:
         return True
 
     if text in _ACCOUNTING_LEDGER_TRIGGERS:
-        # 查看明細：列出最近 N 筆 account_ledger 紀錄 + 顯示餘額
-        from database import Session
-        from rewrite.tools.accounting import query_balance, query_recent_ledger
-        from rewrite.views.accounting_flex import render_ledger_list
-        sess = Session()
-        try:
-            r_bal = query_balance(session=sess)
-            r_log = query_recent_ledger(session=sess, limit=15)
-        finally:
-            sess.close()
-        balance = r_bal.data.get('balance', 0) if r_bal.ok else 0
-        rows = r_log.data if r_log.ok else []
-        reply_message(event.reply_token, render_ledger_list(rows, balance=balance))
-        logger.info(f"[rewrite sandbox] {short_uid} → 帳務明細 ({len(rows)} 筆)")
+        # 查看明細第 1 頁
+        _render_ledger_page(event, short_uid, page_no=1)
         return True
+
+    if text == _ACCOUNTING_LEDGER_RANGE_TRIGGER:
+        # 進入日期區間 input mode
+        if user_id:
+            _state_set(
+                user_id,
+                ACCT_LEDGER_RANGE_INPUT_STATE_TYPE,
+                {},
+                ttl_minutes=5.0,
+            )
+        reply_message(event.reply_token, {
+            'type': 'quick_reply',
+            'text': '請輸入：YYYY-MM-DD YYYY-MM-DD\n例：2026-04-01 2026-04-30',
+            'quick_reply': {
+                'items': [{
+                    'type': 'action',
+                    'action': {'type': 'message', 'label': '❌ 取消',
+                               'text': '結束對話'},
+                }],
+            },
+        })
+        logger.info(f"[rewrite sandbox] {short_uid} → 帳務明細 input range mode")
+        return True
+
+    # 翻頁：acct_ledger_next:ts:id:fd:td（ts 含 : 用 rsplit 解）
+    parsed = _parse_acct_ledger_next(text)
+    if parsed:
+        next_ts, next_id, fd, td = parsed
+        _render_ledger_page(
+            event, short_uid,
+            page_no=0,  # 翻頁顯示「續」
+            last_ts=next_ts, last_id=next_id,
+            from_date_str=fd, to_date_str=td,
+        )
+        return True
+
+    # 帳務明細日期區間 input mode follow-up
+    if user_id:
+        st = _state_get(user_id)
+        if st and st.get('type') == ACCT_LEDGER_RANGE_INPUT_STATE_TYPE:
+            handled = _handle_ledger_range_input(event, user_id, short_uid, text)
+            if handled:
+                return True
 
     if text in _BATCH_ALLOWANCE_LIFF_TRIGGERS:
         from rewrite.views.batch_allowance_flex import render_batch_allowance_entry
@@ -953,3 +1019,112 @@ def _execute_batch_passenger_leave(
         f"[rewrite sandbox] {short_uid} batch passenger_leave "
         f"ok={len(success_ids)} fail={len(failed)} reason={reason!r} surcharge={surcharge}"
     )
+
+
+# ============================================================
+# 帳務明細：cursor pagination + 日期區間篩選（對齊 main 版完整功能）
+# ============================================================
+
+def _render_ledger_page(
+    event, short_uid: str,
+    *,
+    page_no: int = 0,  # 0 = 翻頁(顯示「續」)，>=1 = 第 N 頁
+    last_ts: Optional[str] = None,
+    last_id: Optional[int] = None,
+    from_date_str: Optional[str] = None,
+    to_date_str: Optional[str] = None,
+) -> None:
+    """通用帳務明細頁渲染：第 1 頁、翻頁、區間篩選都共用"""
+    from database import Session
+    from rewrite.tools.accounting import query_ledger_page
+    from rewrite.views.accounting_flex import render_ledger_text
+
+    fd = _date.fromisoformat(from_date_str) if from_date_str else None
+    td = _date.fromisoformat(to_date_str) if to_date_str else None
+
+    sess = Session()
+    try:
+        r = query_ledger_page(
+            session=sess,
+            from_date=fd, to_date=td,
+            last_ts=last_ts, last_id=last_id,
+        )
+    finally:
+        sess.close()
+
+    if not r.ok:
+        reply_message(event.reply_token, {
+            'type': 'text', 'text': f'❌ 帳務明細查詢失敗: {r.error}',
+        })
+        return
+
+    rows = r.data
+    next_cursor = r.meta.get('next_cursor')
+    msg = render_ledger_text(
+        rows,
+        page_no=page_no if page_no > 0 else 0,  # 0 顯示「續」
+        next_cursor=next_cursor,
+        from_date=from_date_str,
+        to_date=to_date_str,
+    )
+    reply_message(event.reply_token, msg)
+    logger.info(
+        f"[rewrite sandbox] {short_uid} 帳務明細 page={page_no} "
+        f"rows={len(rows)} has_more={next_cursor is not None}"
+    )
+
+
+def _handle_ledger_range_input(event, user_id: str, short_uid: str, text: str) -> bool:
+    """日期區間 input mode follow-up parser
+
+    Returns:
+        True — 已處理（不論 OK / 格式錯）
+        False — 不處理（讓上層繼續流程）
+    """
+    parts = text.strip().split()
+    if len(parts) != 2:
+        reply_message(event.reply_token, {
+            'type': 'quick_reply',
+            'text': '❌ 格式：YYYY-MM-DD YYYY-MM-DD\n請重新輸入或取消',
+            'quick_reply': {
+                'items': [{
+                    'type': 'action',
+                    'action': {'type': 'message', 'label': '❌ 取消',
+                               'text': '結束對話'},
+                }],
+            },
+        })
+        return True
+
+    try:
+        fd = _date.fromisoformat(parts[0])
+        td = _date.fromisoformat(parts[1])
+    except ValueError:
+        reply_message(event.reply_token, {
+            'type': 'quick_reply',
+            'text': '❌ 日期格式錯（要 YYYY-MM-DD）\n例：2026-04-01 2026-04-30',
+            'quick_reply': {
+                'items': [{
+                    'type': 'action',
+                    'action': {'type': 'message', 'label': '❌ 取消',
+                               'text': '結束對話'},
+                }],
+            },
+        })
+        return True
+
+    if fd > td:
+        reply_message(event.reply_token, {
+            'type': 'text', 'text': '❌ 起日不能晚於迄日',
+        })
+        return True
+
+    # 套用篩選 → 第 1 頁
+    _state_clear(user_id)
+    _render_ledger_page(
+        event, short_uid,
+        page_no=1,
+        from_date_str=fd.isoformat(),
+        to_date_str=td.isoformat(),
+    )
+    return True

@@ -2,8 +2,12 @@
 
 提供：
   render_accounting_menu(balance) — 顯示餘額 Flex + 3 個按鈕（入金/扣款 LIFF + 明細 message）
-  render_ledger_list(rows, balance) — 顯示最近 N 筆明細 Flex
+  render_ledger_text(rows, page_no, next_cursor, from_date, to_date)
+    — 對齊 main 版：text 格式 + Quick Reply（下一頁/篩選區間/回帳務處理）
 """
+from datetime import timezone, timedelta
+from typing import Optional
+
 from rewrite.views.customer_flex import _liff_id
 
 
@@ -12,16 +16,6 @@ SUCCESS = "#2E7D32"
 DANGER = "#D32F2F"
 MUTED = "#999999"
 BLACK = "#333333"
-
-
-# 各 type 顯示對應
-_TYPE_LABEL = {
-    'deposit': '➕ 入金',
-    'weekly_charge': '💵 週扣款',
-    'manual_in': '➕ 入金',
-    'manual_out': '💵 扣款',
-    'adjustment': '⚙️ 調整',
-}
 
 
 def _deposit_liff_url() -> str:
@@ -106,95 +100,107 @@ def render_accounting_menu(balance: int) -> dict:
     }
 
 
-def _ledger_row(rec: dict) -> dict:
-    """單筆明細行（橫向 layout）：日期 / type / counterparty / amount"""
-    occ = rec.get('occurred_at') or ''
-    # ISO → MM/DD HH:MM
-    short_dt = occ[5:16].replace('T', ' ') if len(occ) >= 16 else occ[:10]
-    type_label = _TYPE_LABEL.get(rec.get('type'), rec.get('type') or '?')
-    counterparty = (rec.get('counterparty') or '')[:14]
-    amt_in = int(rec.get('amount_in') or 0)
-    amt_out = int(rec.get('amount_out') or 0)
-    if amt_in > 0:
-        amt_text = f"+{amt_in:,}"
-        amt_color = SUCCESS
-    elif amt_out > 0:
-        amt_text = f"-{amt_out:,}"
-        amt_color = DANGER
+def _fmt_amount(n: int, sign_force: bool = True) -> str:
+    """格式化金額：強制顯示正負號"""
+    if n is None:
+        n = 0
+    if sign_force:
+        return ("+" if n >= 0 else "-") + f"{abs(n):,}"
+    return f"{n:,}"
+
+
+def _fmt_type(t: str) -> str:
+    """type → 中文 label（對齊 main）"""
+    if t == 'deposit':
+        return '入金'
+    if t == 'weekly_charge':
+        return '扣款'
+    return t or ''
+
+
+def _fmt_line(row: dict) -> str:
+    """單筆明細的 text 行（對齊 main _fmt_line）
+
+    例：2026-05-03 07:59  扣款 📤 -25,330  | 餘額 66,255  · 車資扣款
+    """
+    dt = row.get('occurred_at')
+    if dt is not None:
+        try:
+            if getattr(dt, 'tzinfo', None) is not None:
+                dt = dt.astimezone(timezone(timedelta(hours=8)))
+        except Exception:
+            pass
+        ts = dt.strftime('%Y-%m-%d %H:%M')
     else:
-        amt_text = "0"
-        amt_color = MUTED
+        ts = '----'
 
-    return {
-        "type": "box", "layout": "vertical",
-        "spacing": "xs",
-        "paddingTop": "sm", "paddingBottom": "sm",
-        "contents": [
-            {
-                "type": "box", "layout": "horizontal", "spacing": "sm",
-                "contents": [
-                    {"type": "text", "text": short_dt, "size": "xs",
-                     "color": MUTED, "flex": 3},
-                    {"type": "text", "text": type_label, "size": "xs",
-                     "color": BLACK, "weight": "bold", "flex": 3},
-                    {"type": "text", "text": amt_text, "size": "sm",
-                     "color": amt_color, "weight": "bold",
-                     "align": "end", "flex": 4},
-                ],
-            },
-            {
-                "type": "text", "text": counterparty, "size": "xs",
-                "color": MUTED, "wrap": False,
-            } if counterparty else {"type": "filler"},
-        ],
-    }
+    amount_in = int(row.get('amount_in') or 0)
+    amount_out = int(row.get('amount_out') or 0)
+    if amount_in > 0:
+        delta = f"📥 {_fmt_amount(amount_in)}"
+    else:
+        delta = f"📤 {_fmt_amount(-amount_out)}"
+
+    balance = int(row.get('running_balance') or 0)
+    type_str = row.get('type') or ''
+    # 顯示文案：weekly_charge 強制顯示為「車資扣款」(對齊 main)
+    if type_str == 'weekly_charge':
+        note = '車資扣款'
+    else:
+        note = row.get('counterparty') or row.get('memo') or ''
+
+    return f"{ts}  {_fmt_type(type_str)} {delta}  | 餘額 {balance:,}  · {note}"
 
 
-def render_ledger_list(rows: list[dict], *, balance: int) -> dict:
-    """最近明細 Flex bubble — 標題餘額 + 行列表"""
+def _build_ledger_quick_reply(
+    next_cursor: Optional[tuple],
+    from_date: Optional[str],
+    to_date: Optional[str],
+) -> dict:
+    """組明細 Quick Reply（下一頁 / 篩選區間 / 回帳務處理）"""
+    items = []
+    if next_cursor:
+        next_ts, next_id = next_cursor
+        fd = from_date or ''
+        td = to_date or ''
+        payload = f"acct_ledger_next:{next_ts}:{next_id}:{fd}:{td}"
+        items.append({
+            'type': 'action',
+            'action': {'type': 'message', 'label': '下一頁', 'text': payload},
+        })
+    items.append({
+        'type': 'action',
+        'action': {'type': 'message', 'label': '篩選區間', 'text': 'acct_ledger_range'},
+    })
+    items.append({
+        'type': 'action',
+        'action': {'type': 'message', 'label': '回帳務處理', 'text': '帳務處理'},
+    })
+    return {'items': items}
+
+
+def render_ledger_text(
+    rows: list[dict],
+    *,
+    page_no: int,
+    next_cursor: Optional[tuple],
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+) -> dict:
+    """帳務明細的 text + Quick Reply 訊息（對齊 main 版輸出格式）
+
+    Returns dict for line_bot.py reply_message：
+      type='text_with_quick_reply', text=明細, quick_reply={items: [...]}
+    """
     if not rows:
-        body_contents = [{
-            "type": "text", "text": "📭 沒有任何明細記錄",
-            "size": "md", "color": MUTED, "align": "center",
-        }]
+        body_text = '目前查無明細'
     else:
-        body_contents = []
-        for i, rec in enumerate(rows):
-            body_contents.append(_ledger_row(rec))
-            if i < len(rows) - 1:
-                body_contents.append({"type": "separator", "margin": "xs"})
+        header = f"📒 帳戶明細（第 {page_no if page_no > 0 else '續'} 頁）\n" + "─" * 20 + "\n"
+        body_lines = [_fmt_line(r) for r in rows]
+        body_text = header + "\n".join(body_lines) + "\n" + "─" * 20
 
-    balance_color = SUCCESS if balance >= 0 else DANGER
-    bubble = {
-        "type": "bubble", "size": "giga",
-        "header": {
-            "type": "box", "layout": "vertical",
-            "backgroundColor": PRIMARY,
-            "paddingAll": "md",
-            "contents": [
-                {"type": "text", "text": "📒 帳務明細",
-                 "weight": "bold", "size": "lg", "color": "#ffffff"},
-                {"type": "text",
-                 "text": f"目前餘額 NT$ {balance:,}（最近 {len(rows)} 筆）",
-                 "size": "xs", "color": "#E0E0E0", "margin": "sm"},
-            ],
-        },
-        "body": {
-            "type": "box", "layout": "vertical", "spacing": "xs",
-            "paddingAll": "md",
-            "contents": body_contents,
-        },
-        "footer": {
-            "type": "box", "layout": "vertical",
-            "contents": [{
-                "type": "text",
-                "text": "💡 入金 / 扣款 用 帳務處理 主選單按鈕",
-                "size": "xxs", "color": MUTED, "align": "center", "wrap": True,
-            }],
-        },
-    }
     return {
-        'type': 'flex',
-        'altText': f'帳務明細（最近 {len(rows)} 筆，餘額 {balance:,}）',
-        'contents': bubble,
+        'type': 'text_with_quick_reply',
+        'text': body_text,
+        'quick_reply': _build_ledger_quick_reply(next_cursor, from_date, to_date),
     }

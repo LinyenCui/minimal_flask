@@ -88,6 +88,7 @@ def callback():
                                 SANDBOX_ACTIVE_STATE_TYPE,
                                 TRIP_STATUS_PICKER_STATE_TYPE,
                                 TRIP_STATUS_LEAVE_INPUT_STATE_TYPE,
+                                ACCT_LEDGER_RANGE_INPUT_STATE_TYPE,
                                 looks_like_quick_command,
                             )
                             _rew_st = _rew_state_get(user_id) if user_id else None
@@ -95,6 +96,7 @@ def callback():
                                 SANDBOX_ACTIVE_STATE_TYPE,
                                 TRIP_STATUS_PICKER_STATE_TYPE,
                                 TRIP_STATUS_LEAVE_INPUT_STATE_TYPE,
+                                ACCT_LEDGER_RANGE_INPUT_STATE_TYPE,
                             )
                             if _rew_st and _rew_st.get('type') in _active_types:
                                 # 在多輪對話狀態 — 但若像快速命令就讓用戶切話題不攔

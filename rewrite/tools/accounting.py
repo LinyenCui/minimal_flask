@@ -42,32 +42,89 @@ def query_balance(*, session) -> ToolResult:
     )
 
 
-def query_recent_ledger(*, session, limit: int = 15) -> ToolResult:
-    """回最近 N 筆 account_ledger 明細（依 occurred_at desc）
+LEDGER_PAGE_SIZE = 10
+
+
+def query_ledger_page(
+    *,
+    session,
+    from_date: Optional[_date] = None,
+    to_date: Optional[_date] = None,
+    last_ts: Optional[str] = None,
+    last_id: Optional[int] = None,
+) -> ToolResult:
+    """撈帳務明細一頁（cursor-based，每頁 LEDGER_PAGE_SIZE 筆，附 running_balance）
+
+    對齊 legacy modules/handlers/accounting._fetch_ledger_page。
+    SQL 在指定日期範圍內 window function 累加餘額（occurred_at, id 升冪），
+    再用 (last_ts, last_id) 翻頁過濾，最後 desc 排序回傳。
+
+    Args:
+        from_date / to_date: 日期範圍（None = 不限）
+        last_ts / last_id: 上一頁最後一筆的 cursor (ISO str + int)
 
     Returns:
-        data=[{
-            'id', 'occurred_at' (ISO str), 'type', 'counterparty',
-            'amount_in', 'amount_out', 'memo'
-        }, ...]
+        data=[{id, occurred_at(ISO), type, counterparty, amount_in,
+               amount_out, running_balance}, ...]
+        meta:
+          has_more: bool — 是否還有下一頁
+          next_cursor: (ts, id) 或 None
     """
-    rows = session.execute(text("""
-        SELECT id, occurred_at, type, counterparty,
-               COALESCE(amount_in, 0) AS amount_in,
-               COALESCE(amount_out, 0) AS amount_out,
-               memo
-        FROM account_ledger
+    sql = text("""
+        WITH all_with_balance AS (
+            SELECT a.id,
+                   a.occurred_at AT TIME ZONE 'UTC' AS occurred_at,
+                   a.type,
+                   a.counterparty,
+                   COALESCE(a.amount_in, 0)  AS amount_in,
+                   COALESCE(a.amount_out, 0) AS amount_out,
+                   SUM(COALESCE(a.amount_in, 0) - COALESCE(a.amount_out, 0))
+                     OVER (ORDER BY a.occurred_at ASC, a.id ASC
+                           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_balance
+            FROM account_ledger a
+            WHERE (CAST(:from_date AS date) IS NULL
+                   OR (a.occurred_at AT TIME ZONE 'UTC')::date >= CAST(:from_date AS date))
+              AND (CAST(:to_date AS date) IS NULL
+                   OR (a.occurred_at AT TIME ZONE 'UTC')::date <= CAST(:to_date AS date))
+        )
+        SELECT *
+        FROM all_with_balance
+        WHERE (CAST(:last_ts AS timestamptz) IS NULL
+               OR (occurred_at, id) < ((CAST(:last_ts AS timestamptz) AT TIME ZONE 'UTC'), :last_id))
         ORDER BY occurred_at DESC, id DESC
         LIMIT :limit
-    """), {'limit': limit}).fetchall()
+    """)
+
+    fetch_limit = LEDGER_PAGE_SIZE + 1  # +1 用來判斷 has_more
+    rows = session.execute(sql, {
+        'from_date': from_date,
+        'to_date': to_date,
+        'last_ts': last_ts,
+        'last_id': last_id,
+        'limit': fetch_limit,
+    }).fetchall()
+
+    has_more = len(rows) > LEDGER_PAGE_SIZE
+    page_rows = rows[:LEDGER_PAGE_SIZE]
 
     data = []
-    for r in rows:
+    for r in page_rows:
         d = dict(r._mapping)
         if d.get('occurred_at'):
-            d['occurred_at'] = d['occurred_at'].isoformat()
+            d['occurred_at'] = d['occurred_at']  # keep datetime for view to format
         data.append(d)
-    return ToolResult.success(data=data, count=len(data))
+
+    next_cursor = None
+    if has_more and page_rows:
+        last = page_rows[-1]
+        next_cursor = (last.occurred_at.replace(tzinfo=None).isoformat() + '+00:00',
+                       last.id)
+
+    return ToolResult.success(
+        data=data,
+        has_more=has_more,
+        next_cursor=next_cursor,
+    )
 
 
 def _last_saturday_2359() -> datetime:
