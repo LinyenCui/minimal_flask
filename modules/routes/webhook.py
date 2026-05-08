@@ -6,7 +6,6 @@ import logging
 
 from modules.utils.line_bot import get_parser, reply_text
 from modules.services.postback_service import handle_postback
-from modules.handlers.message_handler import should_process
 
 # 創建藍圖
 webhook_bp = Blueprint('webhook', __name__)
@@ -119,24 +118,17 @@ def callback():
                     logger.error(f"rewrite/router dispatch failed: {_rew_err}", exc_info=True)
 
                 # 2. rewrite/sandbox_handler（LIFF / 狀態 picker / AI agent / DB 同步橋接）
+                # rewrite 是唯一處理路徑：不認得就回友善訊息，不再 fall-through legacy
                 try:
                     from rewrite.handlers.sandbox_handler import try_handle_sandbox
                     if try_handle_sandbox(event):
                         logger.info(f"Routing to rewrite/sandbox_handler: {user_id}")
-                        continue
+                    else:
+                        # rewrite 不認得 — sandbox 已 reply 友善訊息（unknown handler）
+                        logger.info(f"Rewrite did not handle: {original_message_text!r}")
                 except Exception as _rew_err:
                     logger.error(f"sandbox_handler dispatch failed: {_rew_err}", exc_info=True)
-
-                # 3. 過渡期：rewrite 不認 → fall-through legacy text_message_handler
-                # （Phase C 後 legacy 刪光，這段也會刪）
-                should_handle, processed_text = should_process(original_message_text, source_type, user_id)
-                if should_handle:
-                    event.message.text = processed_text
-                    logger.info(f"Fallthrough to legacy: '{processed_text}'")
-                    handle_text_message(event)
-                else:
-                    logger.info(f"Skip from {source_type} (legacy rules): {original_message_text!r}")
-                    continue
+                continue
 
             # 處理位置消息（LocationMessage）
             if event.type == "message" and getattr(event.message, 'type', None) == "location":
@@ -159,9 +151,3 @@ def callback():
         abort(500)
         
     return 'OK'
-
-# 恢復原始的 handle_text_message 函數 (如果之前被註釋或刪除)
-def handle_text_message(event):
-    """處理文本消息"""
-    from modules.handlers.text_message_handler import process_text_message
-    process_text_message(event)

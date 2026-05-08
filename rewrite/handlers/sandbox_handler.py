@@ -260,27 +260,6 @@ def _strip_prefix(text: str) -> str:
     return text
 
 
-# Hard fall-through 關鍵字 — rewrite **明確沒做**的功能，不論 classifier
-# 怎麼判斷都直接讓 legacy 處理。比 LLM-based intent 判斷更可靠。
-# （legacy customers_ai_service 仍能處理這些）
-_HARD_FALLTHROUGH_KEYWORDS = (
-    '匯入',  # 匯入固定班次 / 匯入本週
-    '預約',  # 預約叫車 / 預約班次（booking_create）
-    '報表',  # 生成週報表 / 日報表
-    '日報',
-    '週報',
-    '周報',
-    'booking',
-    'import',
-)
-
-
-def _should_hard_fallthrough(text: str) -> bool:
-    """訊息含「匯入」「預約」「報表」等 → 直接 fall-through legacy"""
-    lower = text.lower()
-    return any(kw in lower for kw in _HARD_FALLTHROUGH_KEYWORDS)
-
-
 # 已知的「快速命令」前綴（包含 rewrite + legacy 常用）
 # sandbox-active 期間，用戶若打這類命令 → 不該攔，讓他做別的事
 _QUICK_COMMAND_PREFIXES = (
@@ -438,15 +417,6 @@ def try_handle_sandbox(event) -> bool:
         )
         return True
 
-    # 0c. Hard fall-through 關鍵字（rewrite 明確沒做的功能 / 帶參數的舊 booking 流程）
-    #     用戶若打「!預約 明天3點台北」這種帶參數版仍走 legacy（rewrite LIFF 是空 form 起步）
-    if _should_hard_fallthrough(text):
-        logger.info(
-            f"[rewrite sandbox] {short_uid} text={text!r} → hard fall-through "
-            f"(keyword match)"
-        )
-        return False
-
     # 0.5 取上一輪 context（給 classifier hint + agent prompt prefix 用）
     #     history 是跨輪累積（含本輪前的 user/ai 對），讓 AI 看到完整脈絡
     #     例：「!固定班次29請假」→「原因？」→「出國」→「加成？」→「-50」
@@ -478,14 +448,18 @@ def try_handle_sandbox(event) -> bool:
         except Exception as e:
             logger.error(f"[rewrite sandbox] classify failed for {short_uid}: {e}",
                          exc_info=True)
-            return False
+            reply_message(event.reply_token, {
+                'type': 'text',
+                'text': '⚠️ 暫時無法處理（AI 分類失敗），請稍後再試或輸入「幫助」',
+            })
+            return True
 
         # 1b. 對話模式保護：sandbox-active 期間 classifier 判 unknown
-        #     + 訊息不像快速命令 → 留 last_skill 不 fall-through。
+        #     + 訊息不像快速命令 → 留 last_skill。
         #     防止用戶補資訊式訊息（如 '$235（一般記賬）'、'一般紀錄'）長度過長
         #     沒被 _is_short_followup 抓到，被 classifier 判 unknown 後
-        #     hijack 到 legacy 的 booking_create / customer_sandbox。
-        #     用戶想切換主題：(a) 打 `!` + 新指令；(b) 打「結束對話」清 state
+        #     破壞對話連續性。
+        #     用戶想切換主題：(a) 打新指令；(b) 打「結束對話」清 state
         if (intent == 'unknown' and last_skill and last_skill in _skills
                 and not looks_like_quick_command(text)):
             logger.info(
@@ -495,8 +469,12 @@ def try_handle_sandbox(event) -> bool:
         elif intent == 'unknown' or intent not in _skills:
             logger.info(
                 f"[rewrite sandbox] {short_uid} text={text!r} → {intent}, "
-                f"fall-through")
-            return False
+                f"reply unknown fallback")
+            reply_message(event.reply_token, {
+                'type': 'text',
+                'text': '🤔 不太懂這個訊息，輸入「幫助」看可用指令',
+            })
+            return True
 
     # 2. 跑對應 skill（含 multi-turn tool loop + 跨輪對話 context）
     try:
@@ -524,7 +502,11 @@ def try_handle_sandbox(event) -> bool:
             f"[rewrite sandbox] {short_uid} skill={intent} failed: {e}",
             exc_info=True,
         )
-        return False  # error 也 fall-through legacy
+        reply_message(event.reply_token, {
+            'type': 'text',
+            'text': f'⚠️ 處理時發生錯誤（{intent}），請稍後再試或輸入「幫助」',
+        })
+        return True
 
     # 3. 判斷 AI 是否在等 follow-up
     #    是 → decorate（進度條 + 結束按鈕）+ 設 sandbox-active state（90 秒可不加 !）
