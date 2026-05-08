@@ -43,7 +43,7 @@ def query_balance(*, session) -> ToolResult:
 
 
 LEDGER_PAGE_SIZE = 10
-LEDGER_CAROUSEL_MAX_ROWS = 120  # 12 bubbles × 10 rows / bubble
+LEDGER_CAROUSEL_MAX_ROWS = 84  # 12 bubbles × 7 rows / bubble (view 端切; 50KB 上限)
 
 
 def query_ledger_carousel(

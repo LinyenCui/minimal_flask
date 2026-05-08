@@ -212,14 +212,13 @@ def render_ledger_text(
 # Carousel 橫向翻頁版（仿診所班次風格）
 # ============================================================
 
-LEDGER_PAGE_SIZE = 10
-LEDGER_CAROUSEL_MAX_BUBBLES = 12
+LEDGER_PAGE_SIZE = 7       # 7 列/bubble × 12 bubbles = 84 筆 max
+LEDGER_CAROUSEL_MAX_BUBBLES = 12  # LINE Flex carousel 上限
 
 
 def _ledger_carousel_row(rec: dict) -> dict:
-    """Carousel bubble 內單筆 — 兩行 layout：
-       行 1: MM/DD HH:MM   入金/扣款   ±N,NNN
-       行 2: 餘額 N,NNN     · counterparty
+    """Carousel bubble 內單筆 — 4 欄極簡 layout（避免 50KB 上限）：
+       MM/DD  ±N,NNN  N,NNN  對方
     """
     dt = rec.get('occurred_at')
     if dt is not None:
@@ -228,53 +227,36 @@ def _ledger_carousel_row(rec: dict) -> dict:
                 dt = dt.astimezone(timezone(timedelta(hours=8)))
         except Exception:
             pass
-        dt_text = dt.strftime('%m/%d %H:%M')
+        dt_text = dt.strftime('%m/%d')
     else:
         dt_text = '—'
 
     type_str = rec.get('type') or ''
     is_in = (rec.get('amount_in') or 0) > 0
-    type_label = '➕ 入金' if type_str == 'deposit' or is_in else '➖ 扣款'
-    type_color = SUCCESS if is_in else DANGER
-
     if is_in:
         amt_text = f"+{int(rec.get('amount_in') or 0):,}"
     else:
         amt_text = f"-{int(rec.get('amount_out') or 0):,}"
+    amt_color = SUCCESS if is_in else DANGER
 
     balance = int(rec.get('running_balance') or 0)
     if type_str == 'weekly_charge':
         note = '車資扣款'
     else:
-        note = (rec.get('counterparty') or rec.get('memo') or '')[:14]
+        note = (rec.get('counterparty') or rec.get('memo') or '')[:8]
 
     return {
-        "type": "box", "layout": "vertical",
-        "spacing": "xs",
-        "paddingTop": "xs", "paddingBottom": "xs",
+        "type": "box", "layout": "horizontal",
         "contents": [
-            {
-                "type": "box", "layout": "horizontal", "spacing": "sm",
-                "contents": [
-                    {"type": "text", "text": dt_text, "size": "xs",
-                     "color": MUTED, "flex": 4},
-                    {"type": "text", "text": type_label, "size": "xs",
-                     "color": type_color, "weight": "bold", "flex": 3},
-                    {"type": "text", "text": amt_text, "size": "sm",
-                     "color": type_color, "weight": "bold",
-                     "align": "end", "flex": 4},
-                ],
-            },
-            {
-                "type": "box", "layout": "horizontal", "spacing": "sm",
-                "contents": [
-                    {"type": "text", "text": f"餘額 {balance:,}",
-                     "size": "xxs", "color": MUTED, "flex": 4},
-                    {"type": "text", "text": note,
-                     "size": "xxs", "color": BLACK, "flex": 7,
-                     "align": "end", "wrap": False},
-                ],
-            },
+            {"type": "text", "text": dt_text, "size": "xxs",
+             "color": MUTED, "flex": 2},
+            {"type": "text", "text": amt_text, "size": "xxs",
+             "color": amt_color, "weight": "bold",
+             "align": "end", "flex": 4},
+            {"type": "text", "text": f"{balance:,}", "size": "xxs",
+             "color": BLACK, "align": "end", "flex": 4},
+            {"type": "text", "text": note, "size": "xxs",
+             "color": MUTED, "flex": 5, "wrap": False, "margin": "sm"},
         ],
     }
 
@@ -282,43 +264,25 @@ def _ledger_carousel_row(rec: dict) -> dict:
 def _ledger_bubble(
     page_rows: list[dict], page_no: int, total_pages: int,
     total_count: int, balance: int,
-    from_date: Optional[str], to_date: Optional[str],
 ) -> dict:
-    """單張 carousel bubble"""
-    body_rows = []
-    for i, rec in enumerate(page_rows):
-        body_rows.append(_ledger_carousel_row(rec))
-        if i < len(page_rows) - 1:
-            body_rows.append({"type": "separator", "margin": "xs"})
+    """單張 carousel bubble（極簡版避免 50KB 上限）"""
+    body_rows = [_ledger_carousel_row(rec) for rec in page_rows]
 
-    range_text = ''
-    if from_date and to_date:
-        range_text = f' · {from_date}~{to_date}'
-
-    sub_text = f"第 {page_no}/{total_pages} 頁（共 {total_count} 筆{range_text}）"
-
-    balance_color = SUCCESS if balance >= 0 else DANGER
     return {
         "type": "bubble",
         "size": "kilo",
         "header": {
             "type": "box", "layout": "vertical",
-            "backgroundColor": PRIMARY,
-            "paddingAll": "sm",
+            "backgroundColor": PRIMARY, "paddingAll": "sm",
             "contents": [
-                {"type": "text", "text": "📒 帳務明細",
+                {"type": "text", "text": f"📒 NT$ {balance:,}",
                  "weight": "bold", "size": "sm", "color": "#ffffff"},
-                {"type": "text",
-                 "text": f"目前餘額 NT$ {balance:,}",
-                 "size": "xxs", "color": "#E0E0E0",
-                 "weight": "bold"},
-                {"type": "text",
-                 "text": sub_text,
+                {"type": "text", "text": f"{page_no}/{total_pages}（共{total_count}筆）",
                  "size": "xxs", "color": "#E0E0E0"},
             ],
         },
         "body": {
-            "type": "box", "layout": "vertical", "spacing": "xs",
+            "type": "box", "layout": "vertical",
             "paddingAll": "sm",
             "contents": body_rows,
         },
@@ -388,7 +352,6 @@ def render_ledger_carousel(
         bubbles.append(_ledger_bubble(
             page, page_no=i + 1, total_pages=total_pages,
             total_count=total_count, balance=balance,
-            from_date=from_date, to_date=to_date,
         ))
 
     if has_more or total_pages > LEDGER_CAROUSEL_MAX_BUBBLES:
