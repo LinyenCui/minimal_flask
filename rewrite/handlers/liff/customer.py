@@ -121,6 +121,8 @@ def customer_form_new():
         'import': '/liff/import/form',
         'new_schedule': '/liff/fixed_schedule/form',
         'report': '/liff/report/form',
+        'deposit': '/liff/accounting/deposit_form',
+        'weekly_payment': '/liff/accounting/weekly_payment_form',
     }
     # 動態目標（含 ID）：edit_schedule / leave_schedule
     sched_id = request.args.get('id')

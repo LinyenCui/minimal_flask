@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>記錄入金</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang TC", "Microsoft JhengHei", sans-serif; padding: 16px; line-height: 1.5; color: #222; max-width: 600px; margin: 0 auto; font-size: 16px; }
+    h2 { margin: 0 0 16px; font-size: 20px; }
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 14px; color: #444; }
+    .field .req { color: #c0392b; margin-left: 2px; }
+    .field input, .field select {
+      width: 100%; padding: 10px 12px; font-size: 16px; border: 1px solid #ccc;
+      border-radius: 6px; background: #fff;
+    }
+    .field input:focus, .field select:focus { outline: none; border-color: #2E7D32; }
+    .helper { font-size: 12px; color: #888; margin-top: 4px; }
+    .actions { margin-top: 24px; display: flex; gap: 8px; }
+    button { flex: 1; padding: 12px; font-size: 16px; border-radius: 6px; border: 0; cursor: pointer; }
+    button[type=submit] { background: #2E7D32; color: #fff; font-weight: 600; }
+    button[type=submit]:disabled { background: #aaa; }
+    button.secondary { background: #f3f3f3; color: #333; }
+    .alert { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 14px; }
+    .alert.err { background: #fdecea; color: #c0392b; border: 1px solid #f5c2bf; }
+    .alert.ok { background: #e8f5e9; color: #1a7a1a; border: 1px solid #b8e0bb; }
+    .loading { text-align: center; color: #666; padding: 40px 0; }
+  </style>
+</head>
+<body>
+  <div id="loading" class="loading">載入中…</div>
+  <div id="content" hidden>
+    <h2>➕ 記錄入金</h2>
+    <div id="alert"></div>
+    <form id="deposit-form" novalidate>
+
+      <div class="field">
+        <label>入金日期<span class="req">*</span></label>
+        <input name="deposit_date" type="date" required>
+        <div class="helper">時間鎖定 09:00（業務慣例）</div>
+      </div>
+
+      <div class="field">
+        <label>金額（NT$）<span class="req">*</span></label>
+        <input name="amount" type="number" min="1" required placeholder="例：30415">
+      </div>
+
+      <div class="field">
+        <label>銀行名稱<span class="req">*</span></label>
+        <input name="bank_name" type="text" required maxlength="50" placeholder="例：合作金庫 / 玉山銀行">
+      </div>
+
+      <div class="field">
+        <label>帳號後四碼<span class="req">*</span></label>
+        <input name="last4" type="text" required pattern="[0-9]{4}" inputmode="numeric" maxlength="4" placeholder="例：8123">
+        <div class="helper">必須是 4 位數字</div>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="secondary" id="btn-cancel">取消</button>
+        <button type="submit" id="btn-submit">確認記錄</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    const LIFF_ID = "{{ liff_id }}";
+
+    const loadingEl = document.getElementById('loading');
+    const contentEl = document.getElementById('content');
+    const alertEl = document.getElementById('alert');
+    const form = document.getElementById('deposit-form');
+    const submitBtn = document.getElementById('btn-submit');
+    const cancelBtn = document.getElementById('btn-cancel');
+
+    function showAlert(type, msg) { alertEl.innerHTML = `<div class="alert ${type}">${msg}</div>`; }
+    function clearAlert() { alertEl.innerHTML = ''; }
+    function setLoading(t) { loadingEl.textContent = t; loadingEl.hidden = false; contentEl.hidden = true; }
+    function showContent() { loadingEl.hidden = true; contentEl.hidden = false; }
+
+    function _today() {
+      const d = new Date();
+      const yy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yy}-${mm}-${dd}`;
+    }
+
+    async function init() {
+      if (!LIFF_ID) { setLoading('LIFF_ID 未設定'); return; }
+      try { await liff.init({ liffId: LIFF_ID }); }
+      catch (e) { setLoading('LIFF init 失敗：' + e.message); return; }
+      if (!liff.isLoggedIn()) {
+        liff.login({ redirectUri: window.location.href });
+        return;
+      }
+      // 預設今天
+      form.elements.namedItem('deposit_date').value = _today();
+      showContent();
+    }
+
+    cancelBtn.addEventListener('click', () => {
+      if (liff.isInClient && liff.isInClient()) liff.closeWindow();
+      else history.back();
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearAlert();
+      submitBtn.disabled = true;
+      submitBtn.textContent = '記錄中…';
+      try {
+        const idToken = liff.getIDToken();
+        const fd = new FormData(form);
+        const payload = {
+          deposit_date: fd.get('deposit_date'),
+          amount: parseInt(fd.get('amount'), 10),
+          bank_name: fd.get('bank_name'),
+          last4: fd.get('last4'),
+        };
+        const resp = await fetch('/liff/accounting/deposit', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + idToken,
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+        const inClient = liff.isInClient && liff.isInClient();
+        if (inClient) {
+          showAlert('ok', `✅ 已記錄入金 NT$ ${data.amount.toLocaleString()}（1.5 秒後關閉）`);
+          setTimeout(() => liff.closeWindow(), 1500);
+        } else {
+          showAlert('ok', `✅ 已記錄入金 NT$ ${data.amount.toLocaleString()}（可關閉視窗）`);
+        }
+      } catch (err) {
+        showAlert('err', '❌ ' + err.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = '確認記錄';
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>
