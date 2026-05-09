@@ -19,6 +19,7 @@ from rewrite.tools.completed_trip import (
     aggregate_completed_trips,
     update_completed_trip_fare,
     update_completed_trip_category,
+    update_completed_trip_driver,
 )
 from rewrite.utils.sun_week import sun_week_info
 
@@ -55,6 +56,7 @@ def _system_prompt() -> str:
 - 其他條件查詢（日期/司機/類別/客戶/地點）→ query_completed_trips
 - 「修改 #N 金額/加成」「記錄車資 N」 → update_completed_trip_fare
 - 「修改類別 #N」「#N 改類別」 → update_completed_trip_category
+- 「#N 司機改成 M」「換 #N 司機 M」 → update_completed_trip_driver
 
 📌 參數提示（**很重要：分清 category vs location**）：
 - **category**：班次的「業務類別」整批分類，目前只有「診所」「東洋」「臨時」幾個固定值
@@ -228,6 +230,23 @@ UPDATE_COMPLETED_TRIP_CATEGORY_SCHEMA = {
     },
 }
 
+UPDATE_COMPLETED_TRIP_DRIVER_SCHEMA = {
+    'description': (
+        "Modify the assigned driver of a completed trip (用於 key 錯司機 / "
+        "司機臨時換人補登). Triggers: 「#N 司機改成 M」「換 #N 司機 M」"
+        "「將已完成 #N 司機改成 M」. Reason 可選。"
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'completed_trip_id': {'type': 'integer', 'description': "completed_trips.id"},
+            'new_driver_id': {'type': 'integer', 'description': "新司機 ID（drivers.id）"},
+            'reason': {'type': 'string', 'description': "修改原因（可選）"},
+        },
+        'required': ['completed_trip_id', 'new_driver_id'],
+    },
+}
+
 
 SUN_WEEK_INFO_SCHEMA = {
     'description': (
@@ -272,5 +291,6 @@ def build_completed_trip_skill() -> Skill:
             (aggregate_completed_trips, AGGREGATE_COMPLETED_TRIPS_SCHEMA),
             (update_completed_trip_fare, UPDATE_COMPLETED_TRIP_FARE_SCHEMA),
             (update_completed_trip_category, UPDATE_COMPLETED_TRIP_CATEGORY_SCHEMA),
+            (update_completed_trip_driver, UPDATE_COMPLETED_TRIP_DRIVER_SCHEMA),
         ],
     )

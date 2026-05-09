@@ -527,3 +527,88 @@ def update_completed_trip_category(
     if auto_commit:
         session.commit()
     return query_completed_trip_by_id(completed_trip_id, session=session)
+
+
+def update_completed_trip_driver(
+    *,
+    session,
+    completed_trip_id: int,
+    new_driver_id: int,
+    reason: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """
+    修改過去態班次司機（key 錯司機 / 司機臨時換人補登）。
+
+    跟 update_completed_trip_category 同 pattern：
+      - 驗證 driver_id 在 drivers 表
+      - 累加 modification_reason（'[N] 換司機: 5386→28530'）
+      - 寫 modified_by + modification_time
+      - audit log
+
+    R-5 鎖：不適用（過去態）
+    """
+    before = _fetch_completed_trip_snapshot(
+        session=session, completed_trip_id=completed_trip_id,
+    )
+    if not before:
+        return ToolResult.fail(f"找不到已完成班次 #{completed_trip_id}")
+
+    # 驗證司機存在
+    drv = session.execute(
+        text("SELECT id FROM drivers WHERE id = :id"),
+        {'id': new_driver_id}
+    ).fetchone()
+    if not drv:
+        return ToolResult.fail(f"找不到司機 ID {new_driver_id}")
+
+    old_driver_id = before.get('driver_id')
+    if old_driver_id == new_driver_id:
+        return ToolResult.fail(
+            f"班次 #{completed_trip_id} 司機已是 #{new_driver_id}，無需修改"
+        )
+
+    note_parts = [f"換司機: {old_driver_id or '無'}→{new_driver_id}"]
+    if reason and reason.strip():
+        note_parts.append(reason.strip())
+    note = ' '.join(note_parts)
+    new_mod = append_modification_reason(
+        before.get('modification_reason'), note, table_name='completed_trips',
+    )
+
+    session.execute(text("""
+        UPDATE completed_trips SET
+            driver_id = :driver_id,
+            modification_reason = :mod,
+            modified_by = :who,
+            modification_time = :mtime
+        WHERE id = :id
+    """), {
+        'driver_id': new_driver_id,
+        'mod': new_mod,
+        'who': user_name or user_id or '系統',
+        'mtime': get_taiwan_time(),
+        'id': completed_trip_id,
+    })
+
+    after = _fetch_completed_trip_snapshot(
+        session=session, completed_trip_id=completed_trip_id,
+    )
+    write_audit(
+        session=session,
+        user_id=user_id, user_name=user_name,
+        action_type='update_completed_trip_driver',
+        target_table='completed_trips', target_id=completed_trip_id,
+        before_state=before, after_state=after,
+        changed_fields=diff_fields(before, after),
+        reason=(reason.strip() if reason else None),
+        extra={'old_driver_id': old_driver_id, 'new_driver_id': new_driver_id},
+        via=via,
+    )
+
+    if auto_commit:
+        session.commit()
+    return query_completed_trip_by_id(completed_trip_id, session=session)
