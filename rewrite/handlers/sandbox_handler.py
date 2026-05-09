@@ -86,6 +86,12 @@ _ACCOUNTING_LEDGER_RANGE_TRIGGER = 'acct_ledger_range'
 # 帳務明細日期區間 input state type
 ACCT_LEDGER_RANGE_INPUT_STATE_TYPE = 'rewrite_acct_ledger_range_input'
 
+# 指派司機 deterministic regex（繞過 AI 直接呼叫 atomic tool 比較可靠）
+#   `指派 1190`         → 跳出司機 Quick Reply
+#   `指派司機 1190 28530` → 直接 assign
+_RE_ASSIGN_PICK = re.compile(r'^指派\s*(\d+)$')
+_RE_ASSIGN_GO = re.compile(r'^指派司機\s+(\d+)\s+(\d+)$')
+
 # 觸發 LIFF 批量加成表單入口
 _BATCH_ALLOWANCE_LIFF_TRIGGERS = {
     '批量加成', '批次加成', '批量改加成', 'batch-allowance',
@@ -462,6 +468,19 @@ def try_handle_sandbox(event) -> bool:
         d, location, date_str = parsed
         _render_trip_status_picker_for_user(
             event, user_id, short_uid, d, location, date_str,
+        )
+        return True
+
+    # 0b''''. 指派司機 — deterministic regex 繞過 AI（AI 對 assign 不穩）
+    m = _RE_ASSIGN_PICK.match(text)
+    if m:
+        _render_driver_picker(event, short_uid, int(m.group(1)))
+        return True
+    m = _RE_ASSIGN_GO.match(text)
+    if m:
+        _execute_assign_driver(
+            event, user_id, short_uid,
+            trip_id=int(m.group(1)), driver_id=int(m.group(2)),
         )
         return True
 
@@ -1080,3 +1099,117 @@ def _handle_ledger_range_input(event, user_id: str, short_uid: str, text: str) -
         to_date_str=td.isoformat(),
     )
     return True
+
+
+# ============================================================
+# 指派司機 — deterministic 流程（仿 legacy driver_service）
+# ============================================================
+
+def _render_driver_picker(event, short_uid: str, trip_id: int) -> None:
+    """`指派 N` → 列出所有司機 Quick Reply 按鈕，按一下送『指派司機 N M』
+
+    對齊 legacy modules/services/driver_service.handle_driver_assign_request。
+    """
+    from database import Session
+    from sqlalchemy import text as _text
+    from rewrite.tools.trip import query_trip_by_id
+
+    sess = Session()
+    try:
+        # 1. 確認 trip 存在 + 顯示當前司機
+        r = query_trip_by_id(trip_id, session=sess)
+        if not r.ok:
+            reply_message(event.reply_token, {
+                'type': 'text',
+                'text': f'❌ {r.error}',
+            })
+            return
+        trip = r.data
+
+        # 2. 撈所有司機 ID
+        rows = sess.execute(
+            _text('SELECT id FROM drivers ORDER BY id')
+        ).fetchall()
+    finally:
+        sess.close()
+
+    if not rows:
+        reply_message(event.reply_token, {
+            'type': 'text',
+            'text': '❌ 系統內沒有司機資料',
+        })
+        return
+
+    sp, _, ep = trip.display_route()
+    cur_driver = f"#{trip.driver_id}" if trip.driver_id else '未指派'
+
+    items = []
+    for r in rows[:12]:  # LINE QR 上限 13；留 1 個給取消
+        did = r[0]
+        items.append({
+            'type': 'action',
+            'action': {
+                'type': 'message',
+                'label': f'司機 {did}',
+                'text': f'指派司機 {trip_id} {did}',
+            },
+        })
+    items.append({
+        'type': 'action',
+        'action': {'type': 'message', 'label': '❌ 取消', 'text': '結束對話'},
+    })
+
+    reply_message(event.reply_token, {
+        'type': 'quick_reply',
+        'text': (
+            f"🚖 指派司機給班次 #{trip_id}\n"
+            f"  路線：{sp or '?'}→{ep or '?'}\n"
+            f"  時間：{trip.date} {str(trip.time)[:5] if trip.time else ''}\n"
+            f"  目前司機：{cur_driver}\n\n"
+            f"請點下方按鈕選司機："
+        ),
+        'quick_reply': {'items': items},
+    })
+    logger.info(f"[rewrite sandbox] {short_uid} → driver picker for trip #{trip_id} ({len(rows)} drivers)")
+
+
+def _execute_assign_driver(
+    event, user_id: Optional[str], short_uid: str,
+    *, trip_id: int, driver_id: int,
+) -> None:
+    """`指派司機 N M` → 直接 atomic tool assign_driver"""
+    from database import Session
+    from rewrite.tools.trip import assign_driver
+
+    sess = Session()
+    try:
+        r = assign_driver(
+            session=sess,
+            trip_id=trip_id, driver_id=driver_id,
+            user_id=user_id, via='sandbox_assign_picker',
+        )
+    finally:
+        sess.close()
+
+    if not r.ok:
+        reply_message(event.reply_token, {
+            'type': 'text', 'text': f'❌ {r.error}',
+        })
+        return
+
+    trip = r.data
+    sp, _, ep = trip.display_route()
+    reply_message(event.reply_token, {
+        'type': 'text',
+        'text': (
+            f"✅ 指派完成\n"
+            f"🚖 #{trip.trip_id} {trip.date} {str(trip.time)[:5] if trip.time else ''}\n"
+            f"  路線：{sp or '?'}→{ep or '?'}\n"
+            f"  司機：#{trip.driver_id}\n"
+            f"  狀態：{trip.display_status}"
+        ),
+    })
+    logger.info(
+        f"[rewrite sandbox] {short_uid} assign_driver trip={trip_id} "
+        f"driver={driver_id} ✅"
+    )
