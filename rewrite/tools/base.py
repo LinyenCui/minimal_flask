@@ -117,8 +117,19 @@ def write_audit(
     extra: Optional[dict] = None,
     via: str = 'unknown',
 ) -> None:
-    """寫一筆 audit log。失敗只 log error 不擋主流程。"""
+    """寫一筆 audit log。失敗只 log error 不擋主流程。
+
+    ⚠️ 重要：用 SAVEPOINT 包住 audit INSERT。如果 audit_log 表不存在或欄位
+    對不上，失敗時只 rollback savepoint，不會把 caller 的 main mutation
+    transaction 也 abort 掉（不然 commit 會跟著 rollback，主修改也消失）。
+
+    案例：2026-05-10 Render DB 缺 migrations/003_audit_log.sql 的 audit_log
+    表 → write_audit 炸 → psycopg2 整個 tx 進 aborted state →
+    update_completed_trip_driver 的 UPDATE 跟著回滾 → 用戶看起來「改不了」。
+    """
+    sp = None
     try:
+        sp = session.begin_nested()  # SAVEPOINT
         session.execute(
             text("""
                 INSERT INTO audit_log (
@@ -147,8 +158,15 @@ def write_audit(
                 'via': via,
             }
         )
+        sp.commit()  # release savepoint
     except Exception as e:
-        logger.error(f"audit log 寫入失敗（不擋主流程）: {e}", exc_info=True)
+        if sp is not None:
+            try:
+                sp.rollback()  # 只 rollback savepoint，不影響 main tx
+            except Exception:
+                pass
+        logger.error(f"audit log 寫入失敗（已 rollback savepoint，不擋主流程）: {e}",
+                     exc_info=True)
 
 
 def fetch_trip_snapshot(*, session, trip_id: int) -> Optional[dict]:

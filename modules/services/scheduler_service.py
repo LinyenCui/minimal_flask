@@ -727,7 +727,6 @@ def cleanup_expired_conversation_states():
         
         # 輸出當前狀態統計
         stats = {
-            'temp_booking_states': len(temp_booking_states),
             'user_states': len(user_states),
         }
         if conversation_manager:
