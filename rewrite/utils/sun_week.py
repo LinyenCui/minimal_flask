@@ -94,10 +94,10 @@ def parse_week_offset(phrase: str) -> Optional[int]:
 def sun_week_info(
     *,
     session=None,  # 不用 DB，但跟其他 atomic tool 簽名一致
-    week_number: Optional[int] = None,
-    week_offset: Optional[int] = None,
-    target_date: Optional[date] = None,
-    year: Optional[int] = None,
+    week_number=None,    # int（AI 可能傳 str）
+    week_offset=None,    # int（AI 可能傳 str）
+    target_date=None,    # date 或 'YYYY-MM-DD' / 'M/D' str（AI schema 是 string）
+    year=None,           # int（AI 可能傳 str）
 ) -> ToolResult:
     """太陽週資訊查詢工具
 
@@ -109,22 +109,47 @@ def sun_week_info(
     Args:
         year: week_number 模式才用，預設今年。
 
-    Returns:
-        ToolResult.success(data={
-            'week_number': int,         # 太陽週號（W18）
-            'week_label': str,          # 「本週」/「上週」/「+3週」/「N 週前」
-            'date_start': date,         # 該週星期日
-            'date_end': date,           # 該週星期六
-            'description': str,         # 「W18 本週 5/3-5/9」一行人話
-        })
+    ⚠️ AI 透過 Gemini Function Calling 呼叫時，所有參數都是 string —
+       裡面 coerce 成正確型別（date / int），失敗就 ToolResult.fail。
 
-    範例（今天 2026-05-08，星期五）：
-      sun_week_info(week_offset=0)   → W18 本週 5/3-5/9
-      sun_week_info(week_offset=-1)  → W17 上週 4/26-5/2
-      sun_week_info(week_number=17)  → W17 上週 4/26-5/2
-      sun_week_info(target_date=date(2026,4,26)) → W17 上週 4/26-5/2
+    Returns:
+        ToolResult.success(data={...})（細節見 docstring 範例）
     """
     today = date.today()
+
+    # ---- 強制 type coerce（防 AI 送 str）----
+    def _to_int(v, name):
+        if v is None or isinstance(v, int):
+            return v
+        try:
+            return int(str(v).strip())
+        except (ValueError, TypeError):
+            return f"❌ {name} 必須是整數，收到: {v!r}"
+
+    def _to_date(v):
+        if v is None or isinstance(v, date):
+            return v
+        if not isinstance(v, str):
+            return f"❌ target_date 型別不對: {type(v).__name__}"
+        s = v.strip()
+        # 試 YYYY-MM-DD 或 M/D
+        try:
+            return date.fromisoformat(s)
+        except ValueError:
+            pass
+        try:
+            from modules.utils.unified_date_parser import UnifiedDateParser
+            return UnifiedDateParser.parse(s)
+        except Exception as e:
+            return f"❌ target_date 解析失敗: {s!r} ({e})"
+
+    week_number = _to_int(week_number, 'week_number')
+    week_offset = _to_int(week_offset, 'week_offset')
+    year = _to_int(year, 'year')
+    target_date = _to_date(target_date)
+    for v in (week_number, week_offset, year, target_date):
+        if isinstance(v, str) and v.startswith('❌'):
+            return ToolResult.fail(v)
 
     # 算該週起點 ws
     if target_date is not None:
