@@ -145,10 +145,19 @@ def import_execute():
 
     # === 群組廣播：若 source 是 group/room，push 結果讓所有成員看到 ===
     source = body.get('source') or {}
+    logger.info(f"[LIFF] import source={source!r}")
     if isinstance(source, dict) and source.get('type') in ('group', 'room'):
-        target_id = source.get('groupId') if source['type'] == 'group' else source.get('roomId')
+        raw_target = source.get('groupId') if source['type'] == 'group' else source.get('roomId')
+        # 嚴格清洗：strip whitespace + 拒空字串（LINE API 的 'to' 對格式很嚴）
+        target_id = (raw_target or '').strip() if isinstance(raw_target, str) else None
+        logger.info(
+            f"[LIFF] broadcast target raw={raw_target!r} cleaned={target_id!r} "
+            f"len={len(target_id) if target_id else 0}"
+        )
         if target_id:
             _push_import_broadcast(target_id, data, operator_user_id=request.line_user_id)
+        else:
+            logger.warning(f"[LIFF] skip broadcast: target_id 為空（source={source!r}）")
 
     return jsonify({'ok': True, 'result': data}), 201
 
@@ -186,9 +195,20 @@ def _push_import_broadcast(target_id: str, data: dict, operator_user_id: str | N
         msg_text = '\n'.join(lines)
 
         api = get_line_bot_api()
+        # 注意：LINE API 對 to 格式很嚴 — 必須是 33 字元（'C'/'R'/'U' + 32 hex）
+        logger.info(
+            f"[LIFF] pushing broadcast: to={target_id!r} (len={len(target_id)}) "
+            f"msg_len={len(msg_text)}"
+        )
         api.push_message(PushMessageRequest(
             to=target_id, messages=[TextMessage(text=msg_text)],
         ))
         logger.info(f"[LIFF] pushed import broadcast to {target_id[:8]}…")
     except Exception as e:
-        logger.warning(f"[LIFF] push import broadcast failed: {e}")
+        # 抓 LINE API 的 body — 看 LINE 給的 detailed error
+        body_attr = getattr(e, 'body', None)
+        status_attr = getattr(e, 'status', None)
+        logger.warning(
+            f"[LIFF] push import broadcast failed: status={status_attr} "
+            f"err_type={type(e).__name__} msg={e} body={body_attr!r}"
+        )
