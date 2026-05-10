@@ -120,13 +120,14 @@ def try_route(event) -> bool:
         return False
 
     reply_token = event.reply_token
+    event_source = event.source  # 帶到 render 用，編輯按鈕 LIFF URL 才會帶 gid/rid
     session = Session()
 
     try:
         # ===== 客戶命令 =====
         m = _RE_DETAIL.match(text)
         if m:
-            return _handle_customer_detail(reply_token, session, int(m.group(1)))
+            return _handle_customer_detail(reply_token, session, int(m.group(1)), event_source)
 
         m = _RE_QUERY.match(text)
         if m:
@@ -134,7 +135,7 @@ def try_route(event) -> bool:
             if not term:
                 _send_help(reply_token)
                 return True
-            return _handle_customer_query(reply_token, session, term)
+            return _handle_customer_query(reply_token, session, term, event_source)
 
         m = _RE_LAYER.match(text)
         if m:
@@ -257,13 +258,13 @@ def try_route_postback(event) -> bool:
 # Handlers
 # ============================================================
 
-def _handle_customer_detail(reply_token, session, customer_id: int) -> bool:
+def _handle_customer_detail(reply_token, session, customer_id: int, event_source=None) -> bool:
     r = get_customer_by_id(customer_id, session=session, mask_id=True)
     if not r.ok:
         reply_message(reply_token, {"type": "text", "text": f"❌ {r.error}"})
         return True
 
-    bubble = render_customer_detail(r.data)
+    bubble = render_customer_detail(r.data, event_source=event_source)
     reply_message(reply_token, {
         "type": "flex",
         "altText": f"客戶詳情 #{customer_id}",
@@ -272,7 +273,7 @@ def _handle_customer_detail(reply_token, session, customer_id: int) -> bool:
     return True
 
 
-def _handle_customer_query(reply_token, session, term: str) -> bool:
+def _handle_customer_query(reply_token, session, term: str, event_source=None) -> bool:
     r = query_customer_by_term(term, session=session, mask_id=True)
     if not r.ok:
         reply_message(reply_token, {"type": "text", "text": f"❌ {r.error}"})
@@ -283,7 +284,7 @@ def _handle_customer_query(reply_token, session, term: str) -> bool:
 
     if len(customers) == 1:
         # 1 筆 → 直接詳情卡
-        bubble = render_customer_detail(customers[0])
+        bubble = render_customer_detail(customers[0], event_source=event_source)
         reply_message(reply_token, {
             "type": "flex",
             "altText": f"找到客戶：{customers[0].name}",

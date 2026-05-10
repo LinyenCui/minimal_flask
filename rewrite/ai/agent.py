@@ -95,7 +95,7 @@ class Agent:
         self.llm = llm
         self.skill = skill
 
-    def process(self, text: str, user_id: Optional[str] = None) -> dict:
+    def process(self, text: str, user_id: Optional[str] = None, event_source: Any = None) -> dict:
         """
         Multi-turn tool loop：
           1. AI 看 prompt → 可能 call function
@@ -105,13 +105,17 @@ class Agent:
 
         最後一個 tool call 的結果會用 _render_result 轉 LINE message；
         若 AI 最後回純文字，回 text reply。
+
+        Args:
+            event_source: webhook event.source（傳了，render 出的 Flex bubble 上的
+                LIFF 按鈕會帶 gid/rid，編輯/請假後 push 才會回到群組）
         """
         text = (text or '').strip()
         if not text:
             return {'type': 'text', 'text': '🤔 沒收到訊息內容'}
 
         try:
-            return self._chat_with_tool_loop(text, user_id)
+            return self._chat_with_tool_loop(text, user_id, event_source)
         except Exception as e:
             # Vertex AI 429 配額/burst 用友善訊息，技術細節進 log
             if _is_quota_error(e):
@@ -123,7 +127,7 @@ class Agent:
             logger.error(f"[Agent] tool loop failed: {e}", exc_info=True)
             return {'type': 'text', 'text': f'⚠️ AI 處理錯誤：{str(e)[:120]}'}
 
-    def _chat_with_tool_loop(self, text: str, user_id: Optional[str]) -> dict:
+    def _chat_with_tool_loop(self, text: str, user_id: Optional[str], event_source: Any = None) -> dict:
         """跑 multi-turn chat，每輪檢查是否有 function_call → 執行 → feed back"""
         # init_vertexai() 已 idempotent（module-level _VERTEX_INITED guard），
         # 這裡 call 是 defense in depth — 萬一 GeminiClient 沒先 init 過
@@ -172,7 +176,7 @@ class Agent:
         # 決定 reply
         # 優先：最後執行的 tool 結果（如果有）渲染 → LINE flex/text
         if last_tool_result is not None:
-            rendered = self._render_result(last_tool_result, last_tool_name, last_tool_args or {})
+            rendered = self._render_result(last_tool_result, last_tool_name, last_tool_args or {}, event_source=event_source)
             # 如果 AI 結尾還有補充文字，附加在前頭（除非 rendered 是 flex）
             ai_text = self._extract_text(response)
             if ai_text and rendered.get('type') == 'text':
@@ -265,8 +269,11 @@ class Agent:
         return normalized
 
     @staticmethod
-    def _render_result(result: ToolResult, tool_name: str, args: dict) -> dict:
-        """ToolResult → LINE message dict"""
+    def _render_result(result: ToolResult, tool_name: str, args: dict, event_source: Any = None) -> dict:
+        """ToolResult → LINE message dict
+
+        event_source 沿用過來給 Flex bubble 上的 LIFF 按鈕用（編輯/請假後 push 才會回到群組）。
+        """
         from rewrite.views.trip_flex import (
             render_trip_detail,
             render_trip_list_carousel,
@@ -344,7 +351,7 @@ class Agent:
 
         # ----- CustomerView -----
         if isinstance(data, CustomerView):
-            bubble = render_customer_detail(data)
+            bubble = render_customer_detail(data, event_source=event_source)
             return {
                 'type': 'flex',
                 'altText': f'客戶 #{data.id} {data.name}',
@@ -381,7 +388,7 @@ class Agent:
         # ----- FixedScheduleView -----
         if isinstance(data, FixedScheduleView):
             from rewrite.views.fixed_schedule_flex import render_fixed_schedule_detail
-            bubble = render_fixed_schedule_detail(data)
+            bubble = render_fixed_schedule_detail(data, event_source=event_source)
             return {
                 'type': 'flex',
                 'altText': f'固定班次 #{data.id}',
@@ -390,7 +397,7 @@ class Agent:
 
         if isinstance(data, list) and data and isinstance(data[0], FixedScheduleView):
             from rewrite.views.fixed_schedule_flex import render_fixed_schedule_list_carousel
-            flex = render_fixed_schedule_list_carousel(data)
+            flex = render_fixed_schedule_list_carousel(data, event_source=event_source)
             return {
                 'type': 'flex',
                 'altText': f'查到 {len(data)} 筆固定班次',

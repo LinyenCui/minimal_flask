@@ -115,12 +115,14 @@ def batch_allowance_execute():
         f"[LIFF] batch_allowance updated={data['updated_count']} "
         f"({df}~{dt} {cat} {amount:+d} {reason!r}) by {request.line_user_id}"
     )
-    _push_batch_allowance_to_user(request.line_user_id, data)
+    from rewrite.utils.liff_url import resolve_push_target
+    target = resolve_push_target(body.get('source'), request.line_user_id)
+    _push_batch_allowance(target, data)
     return jsonify({'ok': True, **data}), 201
 
 
-def _push_batch_allowance_to_user(user_id, data) -> None:
-    if not user_id:
+def _push_batch_allowance(target_id, data) -> None:
+    if not target_id:
         return
     try:
         from linebot.v3.messaging import PushMessageRequest, TextMessage
@@ -134,7 +136,8 @@ def _push_batch_allowance_to_user(user_id, data) -> None:
             f"原因：{data['reason']}"
         )
         api.push_message(PushMessageRequest(
-            to=user_id, messages=[TextMessage(text=msg)],
+            to=target_id, messages=[TextMessage(text=msg)],
         ))
     except Exception as e:
-        logger.warning(f"[LIFF] push batch_allowance failed: {e}")
+        body_attr = getattr(e, 'body', None)
+        logger.warning(f"[LIFF] push batch_allowance failed: {e} body={body_attr!r}")

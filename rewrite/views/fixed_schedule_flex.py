@@ -1,13 +1,17 @@
 """固定班次（fixed_schedule）Flex
 
 提供：
-  render_new_fixed_schedule_entry()       — !新增固定班次 入口 Quick Reply
-  render_fixed_schedule_detail(view)      — 單筆詳情 bubble（含 編輯 / 請假 / 恢復 按鈕）
-  render_fixed_schedule_list_carousel(views) — 多筆 carousel
+  render_new_fixed_schedule_entry(event_source=None)
+    !新增固定班次 入口 Quick Reply
+  render_fixed_schedule_detail(view, event_source=None)
+    單筆詳情 bubble（含 編輯 / 請假 / 恢復 按鈕）
+  render_fixed_schedule_list_carousel(views, event_source=None)
+    多筆 carousel
 """
 from collections import defaultdict
 from typing import List, Optional
 from rewrite.tools.fixed_schedule import FixedScheduleView
+from rewrite.utils.liff_url import build_liff_url
 from rewrite.views.customer_flex import _liff_id
 
 
@@ -25,19 +29,16 @@ PER_BUBBLE = 1   # 每筆一張 bubble，方便附按鈕
 MAX_BUBBLES = 12
 
 
-def _new_fixed_schedule_liff_url() -> str:
-    """共用 LIFF App，靠 ?form=new_schedule 路由"""
-    return f"https://liff.line.me/{_liff_id()}?form=new_schedule"
+def _new_fixed_schedule_liff_url(event_source=None) -> str:
+    return build_liff_url(_liff_id(), 'new_schedule', event_source)
 
 
-def _edit_liff_url(schedule_id: int) -> str:
-    """編輯模式 LIFF URL：dispatcher 看 ?form=edit_schedule&id=N"""
-    return f"https://liff.line.me/{_liff_id()}?form=edit_schedule&id={schedule_id}"
+def _edit_liff_url(schedule_id: int, event_source=None) -> str:
+    return build_liff_url(_liff_id(), 'edit_schedule', event_source, extra_params={'id': schedule_id})
 
 
-def _leave_liff_url(schedule_id: int) -> str:
-    """請假表單 LIFF URL"""
-    return f"https://liff.line.me/{_liff_id()}?form=leave_schedule&id={schedule_id}"
+def _leave_liff_url(schedule_id: int, event_source=None) -> str:
+    return build_liff_url(_liff_id(), 'leave_schedule', event_source, extra_params={'id': schedule_id})
 
 
 def _format_route_number(rn: Optional[str]) -> str:
@@ -57,11 +58,11 @@ def _short_route(view: FixedScheduleView) -> str:
     return '→'.join(p for p in parts if p)
 
 
-def render_new_fixed_schedule_entry() -> dict:
+def render_new_fixed_schedule_entry(event_source=None) -> dict:
     """!新增固定班次 觸發的 LINE message：text + Quick Reply
 
-    Quick Reply 按完即消失，跟其他三入口（customer / booking / import）同 pattern。
-    LIFF_ID 環境變數未設時 → 回錯誤 Flex bubble。
+    Args:
+        event_source: webhook event.source；群組裡觸發傳了，新增完才會 push 回群組。
     """
     if not _liff_id():
         from rewrite.views.customer_flex import _liff_unavailable_bubble
@@ -80,7 +81,7 @@ def render_new_fixed_schedule_entry() -> dict:
                 'action': {
                     'type': 'uri',
                     'label': '📝 開填寫表單',
-                    'uri': _new_fixed_schedule_liff_url(),
+                    'uri': _new_fixed_schedule_liff_url(event_source=event_source),
                 },
             }],
         },
@@ -107,7 +108,7 @@ def _separator(margin: str = "md"):
     return {"type": "separator", "margin": margin}
 
 
-def _build_action_buttons(view: FixedScheduleView) -> list:
+def _build_action_buttons(view: FixedScheduleView, event_source=None) -> list:
     """根據 status 動態生按鈕（footer 內）
 
     準備     → 編輯 + 請假
@@ -117,14 +118,16 @@ def _build_action_buttons(view: FixedScheduleView) -> list:
     btns = [{
         "type": "button", "style": "primary", "height": "sm",
         "color": ACCENT,
-        "action": {"type": "uri", "label": "📝 編輯", "uri": _edit_liff_url(view.id)},
+        "action": {"type": "uri", "label": "📝 編輯",
+                   "uri": _edit_liff_url(view.id, event_source=event_source)},
     }]
 
     status = view.status or ''
     if status == '準備':
         btns.append({
             "type": "button", "style": "secondary", "height": "sm",
-            "action": {"type": "uri", "label": "🏷️ 請假", "uri": _leave_liff_url(view.id)},
+            "action": {"type": "uri", "label": "🏷️ 請假",
+                       "uri": _leave_liff_url(view.id, event_source=event_source)},
         })
     elif status in ('請假', '註銷'):
         btns.append({
@@ -141,8 +144,12 @@ def _build_action_buttons(view: FixedScheduleView) -> list:
 # 詳情卡（單筆）
 # ============================================================
 
-def render_fixed_schedule_detail(view: FixedScheduleView) -> dict:
-    """單筆固定班次 → bubble（含 編輯 / 請假 / 恢復 按鈕）"""
+def render_fixed_schedule_detail(view: FixedScheduleView, event_source=None) -> dict:
+    """單筆固定班次 → bubble（含 編輯 / 請假 / 恢復 按鈕）
+
+    event_source 傳了，編輯/請假按鈕的 LIFF URL 會帶 gid/rid，
+    submit 後 push 才會回到原群組（不是操作者私聊）。
+    """
     body = []
 
     body.append(_row("週幾", _format_route_number(view.route_number)))
@@ -192,7 +199,7 @@ def render_fixed_schedule_detail(view: FixedScheduleView) -> dict:
         },
         "footer": {
             "type": "box", "layout": "vertical", "spacing": "sm",
-            "contents": _build_action_buttons(view),
+            "contents": _build_action_buttons(view, event_source=event_source),
         },
     }
 
@@ -201,15 +208,15 @@ def render_fixed_schedule_detail(view: FixedScheduleView) -> dict:
 # 多筆 carousel
 # ============================================================
 
-def render_fixed_schedule_list_carousel(views: List[FixedScheduleView]) -> dict:
+def render_fixed_schedule_list_carousel(views: List[FixedScheduleView], event_source=None) -> dict:
     """多筆固定班次 → carousel（每張一筆，含按鈕）"""
     if not views:
         return _empty_bubble()
 
     if len(views) == 1:
-        return render_fixed_schedule_detail(views[0])
+        return render_fixed_schedule_detail(views[0], event_source=event_source)
 
-    bubbles = [render_fixed_schedule_detail(v) for v in views[:MAX_BUBBLES]]
+    bubbles = [render_fixed_schedule_detail(v, event_source=event_source) for v in views[:MAX_BUBBLES]]
     if len(views) > MAX_BUBBLES:
         bubbles[-1] = _more_bubble(remaining=len(views) - (MAX_BUBBLES - 1),
                                    total=len(views))

@@ -372,13 +372,13 @@ def try_handle_sandbox(event) -> bool:
 
     if text in _NEW_FIXED_SCHEDULE_LIFF_TRIGGERS:
         from rewrite.views.fixed_schedule_flex import render_new_fixed_schedule_entry
-        reply_message(event.reply_token, render_new_fixed_schedule_entry())
+        reply_message(event.reply_token, render_new_fixed_schedule_entry(event_source=event.source))
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF new-fixed-schedule entry")
         return True
 
     if text in _REPORT_LIFF_TRIGGERS:
         from rewrite.views.report_flex import render_report_entry
-        reply_message(event.reply_token, render_report_entry())
+        reply_message(event.reply_token, render_report_entry(event_source=event.source))
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF report entry")
         return True
 
@@ -393,7 +393,7 @@ def try_handle_sandbox(event) -> bool:
         finally:
             sess.close()
         balance = r.data.get('balance', 0) if r.ok else 0
-        reply_message(event.reply_token, render_accounting_menu(balance))
+        reply_message(event.reply_token, render_accounting_menu(balance, event_source=event.source))
         logger.info(f"[rewrite sandbox] {short_uid} → 帳務處理 menu (餘額 {balance})")
         return True
 
@@ -435,7 +435,7 @@ def try_handle_sandbox(event) -> bool:
 
     if text in _BATCH_ALLOWANCE_LIFF_TRIGGERS:
         from rewrite.views.batch_allowance_flex import render_batch_allowance_entry
-        reply_message(event.reply_token, render_batch_allowance_entry())
+        reply_message(event.reply_token, render_batch_allowance_entry(event_source=event.source))
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF batch_allowance entry")
         return True
 
@@ -547,7 +547,7 @@ def try_handle_sandbox(event) -> bool:
                     + "\n".join(lines)
                     + f"\n[本輪用戶說]\n{text}"
                 )
-        msg = agent.process(text_for_agent, user_id)
+        msg = agent.process(text_for_agent, user_id, event_source=event.source)
     except Exception as e:
         logger.error(
             f"[rewrite sandbox] {short_uid} skill={intent} failed: {e}",

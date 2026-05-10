@@ -16,41 +16,71 @@ from __future__ import annotations
 from typing import Any
 
 
-def build_liff_url(liff_id: str, form: str, event_source: Any = None) -> str:
-    """組 LIFF URL，從 webhook event.source 抓 group_id / room_id 塞進 query。
+def _extract_target_ids(source: Any) -> tuple[str | None, str | None]:
+    """從任何形式的 source 拆出 (group_id, room_id)。
+
+    支援兩種形式：
+      1. webhook event.source 物件（snake_case 屬性: type, group_id, room_id）
+      2. LIFF payload 的 source dict（camelCase keys: type, groupId, roomId）
+
+    回傳 (None, None) 表示沒有群組/聊天室 context（私聊或無 source）。
+    """
+    if source is None:
+        return None, None
+    if isinstance(source, dict):
+        s_type = source.get('type')
+        if s_type == 'group':
+            gid = source.get('groupId')
+            return (gid.strip() if isinstance(gid, str) and gid.strip() else None), None
+        if s_type == 'room':
+            rid = source.get('roomId')
+            return None, (rid.strip() if isinstance(rid, str) and rid.strip() else None)
+        return None, None
+    # attribute-style（webhook event.source）
+    s_type = getattr(source, 'type', None)
+    if s_type == 'group':
+        return getattr(source, 'group_id', None), None
+    if s_type == 'room':
+        return None, getattr(source, 'room_id', None)
+    return None, None
+
+
+def build_liff_url(
+    liff_id: str,
+    form: str,
+    event_source: Any = None,
+    *,
+    extra_params: dict[str, Any] | None = None,
+) -> str:
+    """組 LIFF URL，把當前對話 context（group/room）塞進 query 給前端 round-trip。
 
     Args:
         liff_id: LIFF App ID
-        form: 表單路由（如 'import' / 'booking' / 'customer'）
-        event_source: linebot v3 event.source 物件，有 type / group_id / room_id 屬性
+        form: 表單路由（如 'import' / 'booking' / 'customer' / 'edit_schedule'）
+        event_source: webhook event.source 或 LIFF payload source dict（任一）
+        extra_params: 額外 query params，如 {'id': 42}（給編輯/請假 LIFF 帶 ID）
 
     Returns:
-        完整 LIFF URL，例如:
-          https://liff.line.me/{liff_id}?form=import&gid=C8fc24...
-          https://liff.line.me/{liff_id}?form=booking&rid=R8fc24...
-          https://liff.line.me/{liff_id}?form=customer  (1-on-1 chat 沒 gid/rid)
+        https://liff.line.me/{liff_id}?form=xxx[&gid=...][&rid=...][&id=42 ...]
     """
-    params = [f"form={form}"]
-    if event_source is not None:
-        src_type = getattr(event_source, 'type', None)
-        if src_type == 'group':
-            gid = getattr(event_source, 'group_id', None)
-            if gid:
-                params.append(f"gid={gid}")
-        elif src_type == 'room':
-            rid = getattr(event_source, 'room_id', None)
-            if rid:
-                params.append(f"rid={rid}")
-    return f"https://liff.line.me/{liff_id}?{'&'.join(params)}"
+    params: list[str] = []
+    if form:
+        params.append(f"form={form}")
+    if extra_params:
+        for k, v in extra_params.items():
+            if v is not None:
+                params.append(f"{k}={v}")
+    gid, rid = _extract_target_ids(event_source)
+    if gid:
+        params.append(f"gid={gid}")
+    elif rid:
+        params.append(f"rid={rid}")
+    qs = '&'.join(params) if params else ''
+    return f"https://liff.line.me/{liff_id}?{qs}" if qs else f"https://liff.line.me/{liff_id}"
 
 
 def resolve_push_target(payload_source: Any, fallback_user_id: str | None) -> str | None:
     """從 LIFF POST 進來的 source dict 決定 push 目標。
-
-    LIFF 表單 submit 時帶的 source 形如:
-        {'type': 'group', 'groupId': 'C8fc24...', 'roomId': null}
-        {'type': 'room',  'groupId': null, 'roomId': 'R8fc24...'}
-        null  (1-on-1 chat 或前端未送)
 
     Args:
         payload_source: body['source'] 內容，可能是 dict / None
@@ -59,14 +89,5 @@ def resolve_push_target(payload_source: Any, fallback_user_id: str | None) -> st
     Returns:
         groupId / roomId / fallback_user_id 之一，全空回 None
     """
-    if isinstance(payload_source, dict):
-        s_type = payload_source.get('type')
-        if s_type == 'group':
-            gid = (payload_source.get('groupId') or '').strip() if isinstance(payload_source.get('groupId'), str) else ''
-            if gid:
-                return gid
-        elif s_type == 'room':
-            rid = (payload_source.get('roomId') or '').strip() if isinstance(payload_source.get('roomId'), str) else ''
-            if rid:
-                return rid
-    return fallback_user_id
+    gid, rid = _extract_target_ids(payload_source)
+    return gid or rid or fallback_user_id

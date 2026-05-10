@@ -144,6 +144,14 @@
           bank_name: fd.get('bank_name'),
           last4: fd.get('last4'),
         };
+
+        // 從 URL params 拿真實 group/room ID（liff.getContext 給的 UUID 不能用）
+        const _params = new URLSearchParams(window.location.search);
+        const _gid = _params.get('gid');
+        const _rid = _params.get('rid');
+        if (_gid) payload.source = { type: 'group', groupId: _gid, roomId: null };
+        else if (_rid) payload.source = { type: 'room', groupId: null, roomId: _rid };
+
         const resp = await fetch('/liff/accounting/deposit', {
           method: 'POST',
           headers: {
