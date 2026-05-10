@@ -363,7 +363,9 @@ def try_handle_sandbox(event) -> bool:
 
     if text in _IMPORT_LIFF_TRIGGERS:
         from rewrite.views.import_flex import render_import_entry
-        reply_message(event.reply_token, render_import_entry())
+        # 把 event.source 傳進去 — 渲染時把 webhook 拿到的真 group_id 塞進 LIFF URL，
+        # 否則 LIFF SDK 端拿到的 groupId 是 UUID 格式（≠ LINE 平台 ID），無法 push 廣播
+        reply_message(event.reply_token, render_import_entry(event_source=event.source))
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF import entry")
         return True
 
