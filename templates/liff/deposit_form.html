@@ -81,9 +81,25 @@
     // 防 LIFF SDK 偶爾回傳含 \r \n \0 的 idToken 導致 Headers.set 炸
     // (iOS Safari WebView 上常見「The string did not match the expected pattern.」)
     function _safeIdToken() {
-      const t = _safeIdToken();
-      if (!t) return '';
-      return t.replace(/[\r\n\0\s]+/g, '').trim();
+      const t = liff.getIDToken();
+      if (!t) {
+        console.warn('[_safeIdToken] getIDToken returned falsy:', t);
+        return '';
+      }
+      // 先 trim 兩邊空白，再 strip 所有非「ASCII printable」字元（0x21-0x7E）
+      // JWT idToken 應該只含 [A-Za-z0-9_\-\.]，任何非該範圍都不該保留
+      const cleaned = t.trim().replace(/[^\x21-\x7E]/g, '');
+      if (cleaned.length !== t.length) {
+        const codes = Array.from(t.slice(0, 30))
+          .map(c => c.charCodeAt(0).toString(16))
+          .join(' ');
+        console.warn(
+          `[_safeIdToken] cleaned ${t.length - cleaned.length} bad chars; ` +
+          `original len=${t.length}, clean len=${cleaned.length}, ` +
+          `first 30 hex: ${codes}`
+        );
+      }
+      return cleaned;
     }
     function setLoading(t) { loadingEl.textContent = t; loadingEl.hidden = false; contentEl.hidden = true; }
     function showContent() { loadingEl.hidden = true; contentEl.hidden = false; }
