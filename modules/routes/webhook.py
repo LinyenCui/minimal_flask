@@ -81,7 +81,10 @@ def callback():
                     if original_message_text.lstrip().startswith('/'):
                         is_bot_addressed = True
                     else:
-                        # 群組無 / 開頭 — 唯一例外：用戶剛回應 bot（rewrite-active state）
+                        # 群組無 / 開頭 — 兩個例外都讓過：
+                        #   (a) Flex/quickReply 按鈕 callback（如「固定班次恢復 29」、
+                        #       「acct_ledger_start」、「查看 1234」）→ looks_like_quick_command
+                        #   (b) 用戶剛回應 bot（rewrite-active state，多輪對話 follow-up）
                         try:
                             from rewrite.conversation_state import get_state as _rew_state_get
                             from rewrite.handlers.sandbox_handler import (
@@ -91,16 +94,19 @@ def callback():
                                 ACCT_LEDGER_RANGE_INPUT_STATE_TYPE,
                                 looks_like_quick_command,
                             )
-                            _rew_st = _rew_state_get(user_id) if user_id else None
-                            _active_types = (
-                                SANDBOX_ACTIVE_STATE_TYPE,
-                                TRIP_STATUS_PICKER_STATE_TYPE,
-                                TRIP_STATUS_LEAVE_INPUT_STATE_TYPE,
-                                ACCT_LEDGER_RANGE_INPUT_STATE_TYPE,
-                            )
-                            if _rew_st and _rew_st.get('type') in _active_types:
-                                # 在多輪對話狀態 — 但若像快速命令就讓用戶切話題不攔
-                                if not looks_like_quick_command(original_message_text):
+                            # (a) 看起來像按鈕 callback / 已知快速命令 → 讓過
+                            if looks_like_quick_command(original_message_text):
+                                is_bot_addressed = True
+                            else:
+                                # (b) 多輪對話狀態中 → 讓過（follow-up 通常無 / 前綴）
+                                _rew_st = _rew_state_get(user_id) if user_id else None
+                                _active_types = (
+                                    SANDBOX_ACTIVE_STATE_TYPE,
+                                    TRIP_STATUS_PICKER_STATE_TYPE,
+                                    TRIP_STATUS_LEAVE_INPUT_STATE_TYPE,
+                                    ACCT_LEDGER_RANGE_INPUT_STATE_TYPE,
+                                )
+                                if _rew_st and _rew_st.get('type') in _active_types:
                                     is_bot_addressed = True
                         except Exception:
                             pass

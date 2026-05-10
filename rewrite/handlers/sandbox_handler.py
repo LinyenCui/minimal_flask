@@ -272,8 +272,14 @@ def _strip_prefix(text: str) -> str:
     return text
 
 
-# 已知的「快速命令」前綴（包含 rewrite + legacy 常用）
-# sandbox-active 期間，用戶若打這類命令 → 不該攔，讓他做別的事
+# 已知的「快速命令」+「Flex/quickReply 按鈕 callback」前綴
+#
+# 兩個用途：
+#   1. sandbox-active 期間，用戶若打這類命令 → 不該攔當 follow-up
+#   2. webhook 群組過濾：群組裡按 Flex 按鈕（type='message'）送的 callback 文字
+#      沒 `/` 前綴會被擋掉，這裡列入白名單讓過
+#
+# 加新按鈕／新命令時：把 callback text 的前綴加到這裡
 _QUICK_COMMAND_PREFIXES = (
     # rewrite quick commands
     '查客戶', '客戶詳情', '病歷層',
@@ -282,6 +288,15 @@ _QUICK_COMMAND_PREFIXES = (
     '班次註銷', '班次衝突', '班次請假',
     '班次恢復', '班次撤銷指派',
     '批量請假',
+    # rewrite Flex 按鈕 callback（type='message' 送的文字）
+    '固定班次恢復',         # fixed_schedule_flex「↩️ 恢復」
+    '查看 ',                # completed_trip_flex「#N 詳情」
+    'acct_ledger_start',    # accounting_flex「📒 查看明細」
+    'acct_ledger_range',    # accounting_flex「篩選區間」
+    'acct_ledger_next:',    # accounting_flex 翻頁 payload（acct_ledger_next:ts:id:fd:td）
+    '帳務處理',             # accounting_flex「回帳務處理」
+    '結束對話',             # 各處對話 cancel
+    '放棄操作',             # router.py 取消
     # legacy 常用快速命令
     '資料庫同步', '確認同步', '取消同步',
     '生成日報表', '生成週報表', '生成周報表',
