@@ -195,7 +195,9 @@
         // 衝突沒勾覆蓋 → submit 仍 disable
         updateSubmitButton();
       } catch (e) {
-        showAlert('err', '❌ 預覽失敗：' + e.message);
+        const detail = `${e.name || 'Error'}: ${e.message}` + (e.stack ? `\n${(e.stack || '').slice(0, 300)}` : '');
+        showAlert('err', '❌ 預覽失敗：' + detail);
+        console.error('[refreshPreview] error', e);
         submitBtn.textContent = '執行匯入';
       }
     }
@@ -286,7 +288,9 @@
           showAlert('ok', msg + '\n（可關閉視窗）');
         }
       } catch (err) {
-        showAlert('err', '❌ ' + err.message);
+        const detail = `${err.name || 'Error'}: ${err.message}` + (err.stack ? `\n${(err.stack || '').slice(0, 400)}` : '');
+        showAlert('err', '❌ ' + detail);
+        console.error('[submit] error', err);
         submitBtn.disabled = false;
         submitBtn.textContent = '執行匯入';
       }
