@@ -238,6 +238,22 @@ def import_fixed_to_trips(
     normal_count = 0
     skipped_dup = 0
 
+    # === 效能：一次撈該週所有 (fixed_trip_id, date) 已存在組合（避免 N 次 SELECT）===
+    # 之前每筆 INSERT 前 SELECT 1 dup 檢查 → 114 筆 × ~100ms 在 Render 撞 30s gunicorn timeout
+    # 現在收集成 set，in-memory 比對
+    existing_keys: set[tuple] = set()
+    if week_offset_actual == 0 and not overwrite:
+        rows = session.execute(text("""
+            SELECT fixed_trip_id AS fid, date
+            FROM trips
+            WHERE date >= :start AND date <= :end
+              AND fixed_trip_id IS NOT NULL
+        """), {'start': dates[0], 'end': dates[6]}).fetchall()
+        existing_keys = {(r.fid, r.date) for r in rows}
+
+    # === 收集要 INSERT 的 batch（不立即執行）===
+    insert_batch: list[dict] = []
+
     for import_date in dates:
         weekday = import_date.isoweekday()
         rows = _fetch_fixed_for_day(
@@ -259,35 +275,16 @@ def import_fixed_to_trips(
                 normal_count += 1
             extra_fare = r.surcharge if r.surcharge is not None else 0
 
-            # 本週 + 非覆蓋 → 重複檢查避免 UNIQUE 違反
-            if week_offset_actual == 0 and not overwrite:
-                dup = session.execute(text("""
-                    SELECT 1 FROM trips
-                    WHERE fixed_trip_id = :fid AND date = :date
-                    LIMIT 1
-                """), {'fid': r.id, 'date': import_date}).fetchone()
-                if dup:
-                    skipped_dup += 1
-                    if is_leave:
-                        leave_count -= 1
-                    else:
-                        normal_count -= 1
-                    continue
+            # in-memory dup 檢查（不再 SELECT 每筆）
+            if (r.id, import_date) in existing_keys:
+                skipped_dup += 1
+                if is_leave:
+                    leave_count -= 1
+                else:
+                    normal_count -= 1
+                continue
 
-            session.execute(text("""
-                INSERT INTO trips
-                (fixed_trip_id, date, time,
-                 start_point, via_point, end_point,
-                 meter_fare, extra_fare, category, driver_id,
-                 status, passenger_leave_reason,
-                 unique_code, week_number, trip_type)
-                VALUES
-                (:fid, :date, :time,
-                 :sp, :vp, :ep,
-                 :meter, :extra, :cat, :did,
-                 '準備', :leave,
-                 :uc, :wn, 'fixed')
-            """), {
+            insert_batch.append({
                 'fid': r.id, 'date': import_date, 'time': r.departure_time,
                 'sp': r.start_point, 'vp': r.via_point, 'ep': r.end_point,
                 'meter': r.base_fare, 'extra': extra_fare,
@@ -296,6 +293,23 @@ def import_fixed_to_trips(
                 'uc': unique_code, 'wn': week_number,
             })
             inserted += 1
+
+    # === 一次 batch INSERT（SQLAlchemy executemany 性能比 loop 中個別 execute 快很多）===
+    if insert_batch:
+        session.execute(text("""
+            INSERT INTO trips
+            (fixed_trip_id, date, time,
+             start_point, via_point, end_point,
+             meter_fare, extra_fare, category, driver_id,
+             status, passenger_leave_reason,
+             unique_code, week_number, trip_type)
+            VALUES
+            (:fid, :date, :time,
+             :sp, :vp, :ep,
+             :meter, :extra, :cat, :did,
+             '準備', :leave,
+             :uc, :wn, 'fixed')
+        """), insert_batch)
 
     # batch audit log
     write_audit(
