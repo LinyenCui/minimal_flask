@@ -125,6 +125,8 @@ class Agent:
 
     def _chat_with_tool_loop(self, text: str, user_id: Optional[str]) -> dict:
         """跑 multi-turn chat，每輪檢查是否有 function_call → 執行 → feed back"""
+        # init_vertexai() 已 idempotent（module-level _VERTEX_INITED guard），
+        # 這裡 call 是 defense in depth — 萬一 GeminiClient 沒先 init 過
         init_vertexai()
         gemini_tools = [Tool(function_declarations=self.skill.function_declarations())]
         model = GenerativeModel(MODEL_ID, tools=gemini_tools)
