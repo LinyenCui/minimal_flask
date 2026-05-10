@@ -63,3 +63,23 @@ def state_count() -> int:
     """目前活躍 state 總數（debug 用）"""
     with _LOCK:
         return len(_STATES)
+
+
+def sweep_expired() -> int:
+    """主動掃過所有 state，清掉已過期的，回清掉的數量。
+
+    平常 get_state 會 lazy expire（被查到才 pop），但有些 state 設了沒人再查
+    就會留在 dict 裡到永遠（直到下次同 user_id 進來才被驗）。
+    給 scheduler 5 分鐘呼叫一次，主動掃。
+    """
+    now = datetime.now()
+    cleaned = 0
+    with _LOCK:
+        for user_id in list(_STATES.keys()):
+            s = _STATES.get(user_id)
+            if s and now > s['expires_at']:
+                del _STATES[user_id]
+                cleaned += 1
+    if cleaned > 0:
+        logger.info(f"[conversation_state] sweep cleaned {cleaned} expired states")
+    return cleaned
