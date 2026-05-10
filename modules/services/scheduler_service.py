@@ -721,6 +721,14 @@ def cleanup_expired_conversation_states():
         except ImportError:
             pass
 
+        # 4. rewrite/conversation_state（trip_status_picker / leave_input /
+        #    SANDBOX_ACTIVE / acct_ledger_range_input 等）— 主動 sweep 過期 state
+        try:
+            from rewrite.conversation_state import sweep_expired as _rew_sweep
+            cleaned_total += _rew_sweep()
+        except Exception:
+            pass
+
         # 記錄清理結果和當前記憶體狀態
         if cleaned_total > 0:
             current_app.logger.info(f"🧹 記憶體清理完成，共清理 {cleaned_total} 個過期狀態")

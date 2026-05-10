@@ -52,13 +52,22 @@ def load_prompt_from_file(file_path):
         return '分析以下文字提取預約信息，以 JSON 格式回傳： "{user_text}"\nJSON輸出:' 
 # --- END ADDED ---
 
-def init_vertexai():
-    """Initialize Vertex AI client with explicit credentials.""" # Modified docstring
+# Module-level flag — Vertex AI 一個 process 只 init 一次就夠
+# 之前 caller（rewrite/ai/agent.py 每次 chat、ai_service.py 每次
+# extract_booking_info_with_gemini）都重複 call 這個函數，每次都 load 新的
+# Credentials object + 呼叫 vertexai.init()，物件 leak → Render Starter 512MB 撐爆。
+_VERTEX_INITED = False
+
+
+def init_vertexai(force: bool = False):
+    """Initialize Vertex AI client with explicit credentials (idempotent)."""
+    global _VERTEX_INITED
+    if _VERTEX_INITED and not force:
+        return  # 已 init 過就直接 return，不再 alloc 新物件
+
     credentials = None
     try:
-        # --- MODIFIED: Load credentials explicitly and set environment variable --- 
         if os.path.exists(_KEY_FILE_PATH):
-            # Set environment variable for Google credentials
             os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = _KEY_FILE_PATH
             credentials = service_account.Credentials.from_service_account_file(_KEY_FILE_PATH)
             logger.info(f"✅ Loaded credentials from: {_KEY_FILE_PATH}")
@@ -67,20 +76,17 @@ def init_vertexai():
             logger.error(f"❌ Service account key file not found at: {_KEY_FILE_PATH}")
             logger.error(f"❌ Cannot initialize Vertex AI without credentials")
             raise FileNotFoundError(f"Service account key file not found: {_KEY_FILE_PATH}")
-        # --- END MODIFIED ---
 
-        # --- MODIFIED: Pass credentials to init --- 
         vertexai.init(project=PROJECT_ID, location=LOCATION, credentials=credentials)
         logger.info(f"✅ Vertex AI initialized successfully:")
         logger.info(f"   Project: {PROJECT_ID}")
         logger.info(f"   Location: {LOCATION}")
         logger.info(f"   Model: {MODEL_ID}")
-        # --- END MODIFIED ---
 
-    # --- ADDED: Specific auth error handling ---
+        _VERTEX_INITED = True
+
     except auth_exceptions.DefaultCredentialsError as e:
          logger.error(f"Failed to find default credentials and key file was not found or invalid: {e}")
-    # --- END ADDED ---
     except Exception as e:
         logger.error(f"Failed to initialize Vertex AI: {e}", exc_info=True)
 
