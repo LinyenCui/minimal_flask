@@ -1,12 +1,9 @@
 """批量加成入口 Flex"""
+from rewrite.utils.liff_url import build_liff_url
 from rewrite.views.customer_flex import _liff_id
 
 
-def _batch_allowance_liff_url() -> str:
-    return f"https://liff.line.me/{_liff_id()}?form=batch_allowance"
-
-
-def render_batch_allowance_entry() -> dict:
+def render_batch_allowance_entry(event_source=None) -> dict:
     """!批量加成 觸發 Quick Reply"""
     if not _liff_id():
         from rewrite.views.customer_flex import _liff_unavailable_bubble
@@ -25,7 +22,7 @@ def render_batch_allowance_entry() -> dict:
                 'action': {
                     'type': 'uri',
                     'label': '💰 開批量加成表單',
-                    'uri': _batch_allowance_liff_url(),
+                    'uri': build_liff_url(_liff_id(), 'batch_allowance', event_source),
                 },
             }],
         },

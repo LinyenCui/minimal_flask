@@ -10,6 +10,7 @@
 from datetime import timezone, timedelta
 from typing import Optional
 
+from rewrite.utils.liff_url import build_liff_url
 from rewrite.views.customer_flex import _liff_id
 
 
@@ -20,16 +21,12 @@ MUTED = "#999999"
 BLACK = "#333333"
 
 
-def _deposit_liff_url() -> str:
-    return f"https://liff.line.me/{_liff_id()}?form=deposit"
+def render_accounting_menu(balance: int, event_source=None) -> dict:
+    """!帳務處理 觸發的 Flex bubble：餘額 + 3 個按鈕
 
-
-def _weekly_payment_liff_url() -> str:
-    return f"https://liff.line.me/{_liff_id()}?form=weekly_payment"
-
-
-def render_accounting_menu(balance: int) -> dict:
-    """!帳務處理 觸發的 Flex bubble：餘額 + 3 個按鈕"""
+    event_source 傳了，入金 / 扣款按鈕的 LIFF URL 會帶 gid/rid，
+    submit 後 push 才會回到原群組。
+    """
     if not _liff_id():
         from rewrite.views.customer_flex import _liff_unavailable_bubble
         return {
@@ -37,6 +34,8 @@ def render_accounting_menu(balance: int) -> dict:
             'altText': '⚠️ LIFF 未設定',
             'contents': _liff_unavailable_bubble('帳務處理'),
         }
+    deposit_uri = build_liff_url(_liff_id(), 'deposit', event_source)
+    weekly_uri = build_liff_url(_liff_id(), 'weekly_payment', event_source)
 
     # 餘額正負顏色
     balance_color = SUCCESS if balance >= 0 else DANGER
@@ -74,7 +73,7 @@ def render_accounting_menu(balance: int) -> dict:
                     "color": SUCCESS,
                     "action": {
                         "type": "uri", "label": "➕ 記錄入金",
-                        "uri": _deposit_liff_url(),
+                        "uri": deposit_uri,
                     },
                 },
                 {
@@ -82,7 +81,7 @@ def render_accounting_menu(balance: int) -> dict:
                     "color": "#FF6D00",
                     "action": {
                         "type": "uri", "label": "💵 記錄上週扣款",
-                        "uri": _weekly_payment_liff_url(),
+                        "uri": weekly_uri,
                     },
                 },
                 {

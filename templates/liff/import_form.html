@@ -271,11 +271,31 @@
       submitBtn.textContent = '匯入中…';
       try {
         const idToken = _safeIdToken();
+        // 帶 source 進 payload — 後端用來 push 群組廣播
+        //
+        // ⚠️ 重要：liff.getContext().groupId 回傳的是 LIFF-internal UUID
+        // （如 3677e217-8619-445a-b8b1-604e02c2cfa3），不是 LINE Messaging API 認的
+        // 33 字元 ID（C+32 hex）。所以 push 不能用！
+        //
+        // 解法：bot 觸發 LIFF 時把真 groupId 從 webhook 塞進 URL（?gid=...），
+        // 這裡讀 URL params 拿真 ID 給 backend 廣播。
+        let source = null;
+        const urlParams = new URLSearchParams(window.location.search);
+        const gid = urlParams.get('gid');
+        const rid = urlParams.get('rid');
+        if (gid) {
+          source = { type: 'group', groupId: gid, roomId: null };
+        } else if (rid) {
+          source = { type: 'room', groupId: null, roomId: rid };
+        }
+        // 1-on-1 私聊（utou）→ source 留 null，backend 不廣播
+
         const payload = {
           week_offset: parseInt(selWeek.value, 10),
           category: selCategory.value,
           overwrite: cbOverwrite.checked,
           purge_past: cbPurge.checked,
+          source: source,
         };
         const resp = await fetch('/liff/import', {
           method: 'POST',

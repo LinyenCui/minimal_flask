@@ -52,9 +52,9 @@ def _parse_payload(body: dict) -> tuple[dict, str | None]:
     }, None
 
 
-def _push_report_result(user_id, result_data) -> None:
-    """產完 push 給用戶（含 Drive URL）"""
-    if not user_id:
+def _push_report_result(target_id, result_data) -> None:
+    """產完 push 到指定目標（群組 / 聊天室 / 個人，含 Drive URL）"""
+    if not target_id:
         return
     try:
         from linebot.v3.messaging import PushMessageRequest, TextMessage
@@ -68,10 +68,11 @@ def _push_report_result(user_id, result_data) -> None:
         if url:
             msg += f"\n📂 {url}"
         api.push_message(PushMessageRequest(
-            to=user_id, messages=[TextMessage(text=msg)],
+            to=target_id, messages=[TextMessage(text=msg)],
         ))
     except Exception as e:
-        logger.warning(f"[LIFF] push report result failed: {e}")
+        body_attr = getattr(e, 'body', None)
+        logger.warning(f"[LIFF] push report result failed: {e} body={body_attr!r}")
 
 
 # ---------- HTML 殼 ----------
@@ -115,8 +116,10 @@ def report_generate():
         f"[LIFF] report {data.get('report_type')}/{data.get('category')} "
         f"by {request.line_user_id}, drive_url={data.get('drive_url')}"
     )
-    # 順手 push（用戶 LIFF 內看到，LINE 訊息歷史也保留）
-    _push_report_result(request.line_user_id, data)
+    # 順手 push（群組觸發 → push 群組；私聊 → push 個人）
+    from rewrite.utils.liff_url import resolve_push_target
+    target = resolve_push_target(body.get('source'), request.line_user_id)
+    _push_report_result(target, data)
     return jsonify({
         'ok': True,
         'result_text': data.get('result_text', ''),

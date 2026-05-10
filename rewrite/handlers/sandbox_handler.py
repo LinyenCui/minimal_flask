@@ -272,8 +272,14 @@ def _strip_prefix(text: str) -> str:
     return text
 
 
-# 已知的「快速命令」前綴（包含 rewrite + legacy 常用）
-# sandbox-active 期間，用戶若打這類命令 → 不該攔，讓他做別的事
+# 已知的「快速命令」+「Flex/quickReply 按鈕 callback」前綴
+#
+# 兩個用途：
+#   1. sandbox-active 期間，用戶若打這類命令 → 不該攔當 follow-up
+#   2. webhook 群組過濾：群組裡按 Flex 按鈕（type='message'）送的 callback 文字
+#      沒 `/` 前綴會被擋掉，這裡列入白名單讓過
+#
+# 加新按鈕／新命令時：把 callback text 的前綴加到這裡
 _QUICK_COMMAND_PREFIXES = (
     # rewrite quick commands
     '查客戶', '客戶詳情', '病歷層',
@@ -282,6 +288,15 @@ _QUICK_COMMAND_PREFIXES = (
     '班次註銷', '班次衝突', '班次請假',
     '班次恢復', '班次撤銷指派',
     '批量請假',
+    # rewrite Flex 按鈕 callback（type='message' 送的文字）
+    '固定班次恢復',         # fixed_schedule_flex「↩️ 恢復」
+    '查看 ',                # completed_trip_flex「#N 詳情」
+    'acct_ledger_start',    # accounting_flex「📒 查看明細」
+    'acct_ledger_range',    # accounting_flex「篩選區間」
+    'acct_ledger_next:',    # accounting_flex 翻頁 payload（acct_ledger_next:ts:id:fd:td）
+    '帳務處理',             # accounting_flex「回帳務處理」
+    '結束對話',             # 各處對話 cancel
+    '放棄操作',             # router.py 取消
     # legacy 常用快速命令
     '資料庫同步', '確認同步', '取消同步',
     '生成日報表', '生成週報表', '生成周報表',
@@ -351,31 +366,34 @@ def try_handle_sandbox(event) -> bool:
     #     Quick Reply 按完即消失，不留歷史殘留 — 比 Flex bubble 體驗好。
     if text in _NEW_CUSTOMER_LIFF_TRIGGERS:
         from rewrite.views.customer_flex import render_new_customer_entry
-        reply_message(event.reply_token, render_new_customer_entry())
+        # 傳 event.source 才能在群組廣播結果（同 import 的處理）
+        reply_message(event.reply_token, render_new_customer_entry(event_source=event.source))
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF new-customer entry")
         return True
 
     if text in _BOOKING_LIFF_TRIGGERS:
         from rewrite.views.booking_flex import render_booking_entry
-        reply_message(event.reply_token, render_booking_entry())
+        reply_message(event.reply_token, render_booking_entry(event_source=event.source))
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF booking entry")
         return True
 
     if text in _IMPORT_LIFF_TRIGGERS:
         from rewrite.views.import_flex import render_import_entry
-        reply_message(event.reply_token, render_import_entry())
+        # 把 event.source 傳進去 — 渲染時把 webhook 拿到的真 group_id 塞進 LIFF URL，
+        # 否則 LIFF SDK 端拿到的 groupId 是 UUID 格式（≠ LINE 平台 ID），無法 push 廣播
+        reply_message(event.reply_token, render_import_entry(event_source=event.source))
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF import entry")
         return True
 
     if text in _NEW_FIXED_SCHEDULE_LIFF_TRIGGERS:
         from rewrite.views.fixed_schedule_flex import render_new_fixed_schedule_entry
-        reply_message(event.reply_token, render_new_fixed_schedule_entry())
+        reply_message(event.reply_token, render_new_fixed_schedule_entry(event_source=event.source))
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF new-fixed-schedule entry")
         return True
 
     if text in _REPORT_LIFF_TRIGGERS:
         from rewrite.views.report_flex import render_report_entry
-        reply_message(event.reply_token, render_report_entry())
+        reply_message(event.reply_token, render_report_entry(event_source=event.source))
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF report entry")
         return True
 
@@ -390,7 +408,7 @@ def try_handle_sandbox(event) -> bool:
         finally:
             sess.close()
         balance = r.data.get('balance', 0) if r.ok else 0
-        reply_message(event.reply_token, render_accounting_menu(balance))
+        reply_message(event.reply_token, render_accounting_menu(balance, event_source=event.source))
         logger.info(f"[rewrite sandbox] {short_uid} → 帳務處理 menu (餘額 {balance})")
         return True
 
@@ -432,7 +450,7 @@ def try_handle_sandbox(event) -> bool:
 
     if text in _BATCH_ALLOWANCE_LIFF_TRIGGERS:
         from rewrite.views.batch_allowance_flex import render_batch_allowance_entry
-        reply_message(event.reply_token, render_batch_allowance_entry())
+        reply_message(event.reply_token, render_batch_allowance_entry(event_source=event.source))
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF batch_allowance entry")
         return True
 
@@ -544,7 +562,7 @@ def try_handle_sandbox(event) -> bool:
                     + "\n".join(lines)
                     + f"\n[本輪用戶說]\n{text}"
                 )
-        msg = agent.process(text_for_agent, user_id)
+        msg = agent.process(text_for_agent, user_id, event_source=event.source)
     except Exception as e:
         logger.error(
             f"[rewrite sandbox] {short_uid} skill={intent} failed: {e}",

@@ -120,6 +120,27 @@
     const CUSTOMER_ID = SERVER_CUSTOMER_ID || _readQueryCustomerId();
     const MODE = CUSTOMER_ID ? 'edit' : 'create';
 
+    // 讀 webhook 給的 group/room ID（包進 ?gid= / ?rid=，可能在 liff.state 裡也可能展開後）
+    // LIFF SDK 的 liff.getContext().groupId 是 UUID（≠ LINE 平台 ID），不能拿來 push，
+    // 所以 bot 在 webhook 階段塞進 LIFF URL，這裡讀回來
+    function _readSource() {
+      function _scan(qs) {
+        const p = new URLSearchParams(qs);
+        const g = p.get('gid'), r = p.get('rid');
+        if (g) return { type: 'group', groupId: g, roomId: null };
+        if (r) return { type: 'room', groupId: null, roomId: r };
+        return null;
+      }
+      let s = _scan(window.location.search);
+      if (s) return s;
+      const ls = new URLSearchParams(window.location.search).get('liff.state');
+      if (ls) {
+        const stripped = ls.startsWith('?') ? ls.slice(1) : ls;
+        s = _scan(stripped);
+      }
+      return s;
+    }
+
     const loadingEl = document.getElementById('loading');
     const contentEl = document.getElementById('content');
     const titleEl = document.getElementById('form-title');
@@ -238,10 +259,24 @@
 
       submitBtn.disabled = true;
       submitBtn.textContent = '儲存中…';
+      // 每步都打 console.log 並標 stage，出錯時顯示哪一步炸的
+      let _stage = 'init';
       try {
+        _stage = 'idToken';
         const idToken = _safeIdToken();
+        console.log('[submit] idToken len=', idToken.length);
+
+        _stage = 'formData';
         const fd = new FormData(form);
         const payload = Object.fromEntries(fd.entries());
+
+        // 讀 source — 同時看 window.location.search 和 liff.state（iOS LIFF 有時不解 liff.state）
+        _stage = 'readSource';
+        const src = _readSource();
+        if (src) payload.source = src;
+        console.log('[submit] payload.source=', payload.source);
+
+        _stage = 'fetch';
         const url = MODE === 'edit' ? `/liff/customer/${CUSTOMER_ID}` : '/liff/customer';
         const resp = await fetch(url, {
           method: 'POST',
@@ -251,8 +286,12 @@
           },
           body: JSON.stringify(payload),
         });
+
+        _stage = 'parseJson';
         const data = await resp.json();
         if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+        _stage = 'success';
         const inClient = liff.isInClient && liff.isInClient();
         const action = MODE === 'edit' ? '更新' : '新增';
         if (inClient) {
@@ -262,7 +301,8 @@
           showAlert('ok', `✅ 已${action}客戶 #${data.customer.id}（可關閉視窗）`);
         }
       } catch (err) {
-        showAlert('err', '❌ ' + err.message);
+        console.error(`[submit] failed at stage=${_stage}`, err);
+        showAlert('err', `❌ [${_stage}] ${err.message || err}`);
         submitBtn.disabled = false;
         submitBtn.textContent = '儲存';
       }

@@ -99,7 +99,9 @@ def accounting_deposit():
         f"[LIFF] deposit #{data['payment_id']} amount={data['amount']} "
         f"by {request.line_user_id}"
     )
-    _push_deposit_to_user(request.line_user_id, data)
+    from rewrite.utils.liff_url import resolve_push_target
+    target = resolve_push_target(body.get('source'), request.line_user_id)
+    _push_deposit(target, data)
     return jsonify({'ok': True, **data}), 201
 
 
@@ -139,12 +141,14 @@ def accounting_weekly_payment():
         f"[LIFF] weekly_charge amount={data['amount']} "
         f"week_end={data['week_end_date']} by {request.line_user_id}"
     )
-    _push_weekly_charge_to_user(request.line_user_id, data)
+    from rewrite.utils.liff_url import resolve_push_target
+    target = resolve_push_target(body.get('source'), request.line_user_id)
+    _push_weekly_charge(target, data)
     return jsonify({'ok': True, **data}), 201
 
 
-def _push_deposit_to_user(user_id, data) -> None:
-    if not user_id:
+def _push_deposit(target_id, data) -> None:
+    if not target_id:
         return
     try:
         from linebot.v3.messaging import PushMessageRequest, TextMessage
@@ -156,14 +160,15 @@ def _push_deposit_to_user(user_id, data) -> None:
             f"銀行：{data['bank_name']} {data['last4']}"
         )
         api.push_message(PushMessageRequest(
-            to=user_id, messages=[TextMessage(text=msg)],
+            to=target_id, messages=[TextMessage(text=msg)],
         ))
     except Exception as e:
-        logger.warning(f"[LIFF] push deposit failed: {e}")
+        body_attr = getattr(e, 'body', None)
+        logger.warning(f"[LIFF] push deposit failed: {e} body={body_attr!r}")
 
 
-def _push_weekly_charge_to_user(user_id, data) -> None:
-    if not user_id:
+def _push_weekly_charge(target_id, data) -> None:
+    if not target_id:
         return
     try:
         from linebot.v3.messaging import PushMessageRequest, TextMessage
@@ -174,7 +179,8 @@ def _push_weekly_charge_to_user(user_id, data) -> None:
             f"鎖定時間：{data['occurred_at']}（上週六 23:59）"
         )
         api.push_message(PushMessageRequest(
-            to=user_id, messages=[TextMessage(text=msg)],
+            to=target_id, messages=[TextMessage(text=msg)],
         ))
     except Exception as e:
-        logger.warning(f"[LIFF] push weekly_charge failed: {e}")
+        body_attr = getattr(e, 'body', None)
+        logger.warning(f"[LIFF] push weekly_charge failed: {e} body={body_attr!r}")

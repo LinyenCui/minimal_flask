@@ -293,6 +293,15 @@
           surcharge: fd.get('surcharge') ? parseInt(fd.get('surcharge'), 10) : null,
           note: fd.get('note') || null,
         };
+
+        // 從 URL params 拿真實 group/room ID（liff.getContext 給的 UUID 不能用，
+        // 詳見 rewrite/utils/liff_url.py）
+        const _params = new URLSearchParams(window.location.search);
+        const _gid = _params.get('gid');
+        const _rid = _params.get('rid');
+        if (_gid) payload.source = { type: 'group', groupId: _gid, roomId: null };
+        else if (_rid) payload.source = { type: 'room', groupId: null, roomId: _rid };
+
         const url = MODE === 'edit'
           ? `/liff/fixed_schedule/${SCHEDULE_ID}`
           : '/liff/fixed_schedule';

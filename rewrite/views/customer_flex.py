@@ -21,10 +21,14 @@ def _liff_id() -> str:
     return os.environ.get('LIFF_ID', '').strip()
 
 
-def _liff_url(customer_id: Optional[int] = None) -> str:
-    """組 LIFF URL，帶 customer_id 就是編輯模式。"""
-    base = f"https://liff.line.me/{_liff_id()}"
-    return f"{base}?customer_id={customer_id}" if customer_id else base
+def _liff_url(customer_id: Optional[int] = None, event_source=None) -> str:
+    """組 LIFF URL，帶 customer_id 就是編輯模式；event_source 帶當前 group/room context。
+
+    群組 / 聊天室 context 會塞進 query (?gid=... / ?rid=...)，給編輯後 push 用。
+    """
+    from rewrite.utils.liff_url import build_liff_url
+    extra = {'customer_id': customer_id} if customer_id else None
+    return build_liff_url(_liff_id(), '', event_source, extra_params=extra)
 
 
 # ============================================================
@@ -86,8 +90,15 @@ def _is_placeholder_address(addr: Optional[str]) -> bool:
 # 1. 客戶詳情卡（單筆）
 # ============================================================
 
-def render_customer_detail(c: CustomerView) -> dict:
-    """單筆客戶詳情，渲染為 Flex Bubble"""
+def render_customer_detail(c: CustomerView, event_source=None) -> dict:
+    """單筆客戶詳情，渲染為 Flex Bubble。
+
+    Args:
+        c: CustomerView
+        event_source: 當前對話 context（webhook event.source 或 LIFF payload source dict）。
+            傳了，「編輯」按鈕的 LIFF URL 會帶 gid/rid，編輯後 push 才會回到群組；
+            沒傳 → 編輯後 push 給操作者個人。
+    """
     body_contents: List[dict] = []
 
     # 姓名 (含性別)
@@ -159,7 +170,7 @@ def render_customer_detail(c: CustomerView) -> dict:
         "action": {
             "type": "uri",
             "label": "編輯",
-            "uri": _liff_url(c.id),
+            "uri": _liff_url(c.id, event_source=event_source),
         }
     })
 
@@ -198,8 +209,12 @@ def render_customer_detail(c: CustomerView) -> dict:
 # 1b. 新增客戶入口（!新增客戶 → 開 LIFF 表單）
 # ============================================================
 
-def render_new_customer_entry() -> dict:
+def render_new_customer_entry(event_source=None) -> dict:
     """!新增客戶 觸發的 LINE message：text + Quick Reply（uri action 開 LIFF）
+
+    Args:
+        event_source: webhook event.source 物件。傳了才能在群組廣播新增結果，
+            因為 LIFF SDK 的 getContext() 回的是假 UUID groupId（不能 push）。
 
     Quick Reply 按完即消失，不留歷史殘留 — 比 Flex bubble 體驗更好。
     LIFF_ID 環境變數未設時 → 回錯誤 Flex bubble（顯示警告）。
@@ -211,6 +226,7 @@ def render_new_customer_entry() -> dict:
             'contents': _liff_unavailable_bubble('新增客戶表單'),
         }
 
+    from rewrite.utils.liff_url import build_liff_url
     return {
         'type': 'quick_reply',
         'text': '🪪 點下方按鈕新增客戶',
@@ -220,7 +236,8 @@ def render_new_customer_entry() -> dict:
                 'action': {
                     'type': 'uri',
                     'label': '📝 開填寫表單',
-                    'uri': _liff_url(),  # 客戶表單預設行為
+                    # form='customer' 是預設值，dispatcher 沒 form 參數會 fall through 到新增客戶
+                    'uri': build_liff_url(_liff_id(), 'customer', event_source),
                 },
             }],
         },

@@ -96,9 +96,9 @@ def _parse_payload(body: dict) -> tuple[dict, str | None]:
     return fields, None
 
 
-def _push_booking_to_user(user_id: str | None, view) -> None:
-    """建好 push 一則 text + 班次詳情 Flex 給用戶。失敗只 log。"""
-    if not user_id:
+def _push_booking(target_id: str | None, view) -> None:
+    """建好 push 一則 text + 班次詳情 Flex 到指定目標（群組 / 聊天室 / 個人）。"""
+    if not target_id:
         return
     try:
         from linebot.v3.messaging import (
@@ -122,12 +122,13 @@ def _push_booking_to_user(user_id: str | None, view) -> None:
             contents=FlexContainer.from_dict(flex_dict),
         )
         api.push_message(PushMessageRequest(
-            to=user_id,
+            to=target_id,
             messages=[text_msg, flex_msg],
         ))
-        logger.info(f"[LIFF] pushed booking #{view.trip_id} to {user_id[:8]}")
+        logger.info(f"[LIFF] pushed booking #{view.trip_id} to {target_id[:8]}")
     except Exception as e:
-        logger.warning(f"[LIFF] push booking detail failed: {e}")
+        body_attr = getattr(e, 'body', None)
+        logger.warning(f"[LIFF] push booking detail failed: {e} body={body_attr!r}")
 
 
 # ---------- HTML 殼 ----------
@@ -170,5 +171,7 @@ def booking_create():
 
     trip_data = _trip_to_jsonable(result.data)
     logger.info(f"[LIFF] booking #{trip_data.get('trip_id')} created by {request.line_user_id}")
-    _push_booking_to_user(request.line_user_id, result.data)
+    from rewrite.utils.liff_url import resolve_push_target
+    target = resolve_push_target(body.get('source'), request.line_user_id)
+    _push_booking(target, result.data)
     return jsonify({'ok': True, 'trip': trip_data}), 201

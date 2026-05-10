@@ -142,4 +142,73 @@ def import_execute():
         f"inserted={data.get('inserted')} overwritten={data.get('overwritten')} "
         f"by {request.line_user_id}"
     )
+
+    # === 群組廣播：若 source 是 group/room，push 結果讓所有成員看到 ===
+    source = body.get('source') or {}
+    logger.info(f"[LIFF] import source={source!r}")
+    if isinstance(source, dict) and source.get('type') in ('group', 'room'):
+        raw_target = source.get('groupId') if source['type'] == 'group' else source.get('roomId')
+        # 嚴格清洗：strip whitespace + 拒空字串（LINE API 的 'to' 對格式很嚴）
+        target_id = (raw_target or '').strip() if isinstance(raw_target, str) else None
+        logger.info(
+            f"[LIFF] broadcast target raw={raw_target!r} cleaned={target_id!r} "
+            f"len={len(target_id) if target_id else 0}"
+        )
+        if target_id:
+            _push_import_broadcast(target_id, data, operator_user_id=request.line_user_id)
+        else:
+            logger.warning(f"[LIFF] skip broadcast: target_id 為空（source={source!r}）")
+
     return jsonify({'ok': True, 'result': data}), 201
+
+
+def _push_import_broadcast(target_id: str, data: dict, operator_user_id: str | None) -> None:
+    """匯入成功後 push 群組／聊天室通知（失敗只 log，不擋 LIFF 回應）"""
+    try:
+        from linebot.v3.messaging import PushMessageRequest, TextMessage
+        from modules.utils.line_bot import get_line_bot_api
+
+        operator = '某位成員'
+        if operator_user_id:
+            try:
+                from modules.utils.line_bot import get_user_display_name
+                operator = get_user_display_name(operator_user_id) or operator
+            except Exception:
+                pass
+
+        wn = data.get('sun_week_number')
+        wn_str = f"W{wn} " if wn is not None else ''
+        lines = [
+            f"✅ {operator} 已匯入固定班次",
+            f"📅 {wn_str}{data.get('week_label', '')} {data.get('week_range', '')}",
+            f"📁 類別：{data.get('category', '')}",
+            f"📥 匯入：{data.get('inserted', 0)} 筆",
+        ]
+        if data.get('leave_count', 0) > 0:
+            lines.append(f"🏷️ 含請假：{data['leave_count']} 筆")
+        if data.get('overwritten', 0) > 0:
+            lines.append(f"🔄 覆蓋：{data['overwritten']} 筆")
+        if data.get('purged_past', 0) > 0:
+            lines.append(f"🗑️ 清過去週：{data['purged_past']} 筆")
+        if data.get('skipped_dup', 0) > 0:
+            lines.append(f"⏭️ 跳過重複：{data['skipped_dup']} 筆")
+        msg_text = '\n'.join(lines)
+
+        api = get_line_bot_api()
+        # 注意：LINE API 對 to 格式很嚴 — 必須是 33 字元（'C'/'R'/'U' + 32 hex）
+        logger.info(
+            f"[LIFF] pushing broadcast: to={target_id!r} (len={len(target_id)}) "
+            f"msg_len={len(msg_text)}"
+        )
+        api.push_message(PushMessageRequest(
+            to=target_id, messages=[TextMessage(text=msg_text)],
+        ))
+        logger.info(f"[LIFF] pushed import broadcast to {target_id[:8]}…")
+    except Exception as e:
+        # 抓 LINE API 的 body — 看 LINE 給的 detailed error
+        body_attr = getattr(e, 'body', None)
+        status_attr = getattr(e, 'status', None)
+        logger.warning(
+            f"[LIFF] push import broadcast failed: status={status_attr} "
+            f"err_type={type(e).__name__} msg={e} body={body_attr!r}"
+        )
