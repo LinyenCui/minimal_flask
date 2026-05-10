@@ -42,3 +42,31 @@ def build_liff_url(liff_id: str, form: str, event_source: Any = None) -> str:
             if rid:
                 params.append(f"rid={rid}")
     return f"https://liff.line.me/{liff_id}?{'&'.join(params)}"
+
+
+def resolve_push_target(payload_source: Any, fallback_user_id: str | None) -> str | None:
+    """從 LIFF POST 進來的 source dict 決定 push 目標。
+
+    LIFF 表單 submit 時帶的 source 形如:
+        {'type': 'group', 'groupId': 'C8fc24...', 'roomId': null}
+        {'type': 'room',  'groupId': null, 'roomId': 'R8fc24...'}
+        null  (1-on-1 chat 或前端未送)
+
+    Args:
+        payload_source: body['source'] 內容，可能是 dict / None
+        fallback_user_id: 私聊或拿不到 group/room 時的退回值
+
+    Returns:
+        groupId / roomId / fallback_user_id 之一，全空回 None
+    """
+    if isinstance(payload_source, dict):
+        s_type = payload_source.get('type')
+        if s_type == 'group':
+            gid = (payload_source.get('groupId') or '').strip() if isinstance(payload_source.get('groupId'), str) else ''
+            if gid:
+                return gid
+        elif s_type == 'room':
+            rid = (payload_source.get('roomId') or '').strip() if isinstance(payload_source.get('roomId'), str) else ''
+            if rid:
+                return rid
+    return fallback_user_id

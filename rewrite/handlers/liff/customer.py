@@ -73,12 +73,13 @@ def _serve_form(customer_id: int | None):
     )
 
 
-def _push_customer_to_user(user_id: str | None, view, action_label: str) -> None:
-    """存完 push 一則 text + 客戶詳情 Flex 給用戶（1-on-1 with bot）。
+def _push_customer(target_id: str | None, view, action_label: str) -> None:
+    """存完 push 一則 text + 客戶詳情 Flex 到指定目標（群組 / 聊天室 / 個人）。
 
+    target_id 是 LINE Messaging API 認的 33 字元 ID（C/R/U + 32 hex）。
     失敗只 log warning，不 raise — push 不該擋住 LIFF 回應。
     """
-    if not user_id:
+    if not target_id:
         return
     try:
         from linebot.v3.messaging import (
@@ -99,12 +100,13 @@ def _push_customer_to_user(user_id: str | None, view, action_label: str) -> None
             contents=FlexContainer.from_dict(flex_dict),
         )
         api.push_message(PushMessageRequest(
-            to=user_id,
+            to=target_id,
             messages=[text_msg, flex_msg],
         ))
-        logger.info(f"[LIFF] pushed customer #{view.id} ({action_label}) to {user_id[:8]}")
+        logger.info(f"[LIFF] pushed customer #{view.id} ({action_label}) to {target_id[:8]}")
     except Exception as e:
-        logger.warning(f"[LIFF] push customer detail failed: {e}")
+        body_attr = getattr(e, 'body', None)
+        logger.warning(f"[LIFF] push customer detail failed: {e} body={body_attr!r}")
 
 
 # ---------- HTML 殼 ----------
@@ -204,7 +206,10 @@ def customer_create():
 
     customer_data = _customer_to_jsonable(result.data)
     logger.info(f"[LIFF] customer #{customer_data.get('id')} created by {request.line_user_id}")
-    _push_customer_to_user(request.line_user_id, result.data, '新增')
+    # 決定 push 目標：群組觸發 → 群組；私聊 → 個人
+    from rewrite.utils.liff_url import resolve_push_target
+    target = resolve_push_target(body.get('source'), request.line_user_id)
+    _push_customer(target, result.data, '新增')
     return jsonify({'ok': True, 'customer': customer_data}), 201
 
 
@@ -235,5 +240,7 @@ def customer_update(customer_id):
 
     customer_data = _customer_to_jsonable(result.data)
     logger.info(f"[LIFF] customer #{customer_id} updated by {request.line_user_id}")
-    _push_customer_to_user(request.line_user_id, result.data, '更新')
+    from rewrite.utils.liff_url import resolve_push_target
+    target = resolve_push_target(body.get('source'), request.line_user_id)
+    _push_customer(target, result.data, '更新')
     return jsonify({'ok': True, 'customer': customer_data})

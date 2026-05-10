@@ -198,8 +198,12 @@ def render_customer_detail(c: CustomerView) -> dict:
 # 1b. 新增客戶入口（!新增客戶 → 開 LIFF 表單）
 # ============================================================
 
-def render_new_customer_entry() -> dict:
+def render_new_customer_entry(event_source=None) -> dict:
     """!新增客戶 觸發的 LINE message：text + Quick Reply（uri action 開 LIFF）
+
+    Args:
+        event_source: webhook event.source 物件。傳了才能在群組廣播新增結果，
+            因為 LIFF SDK 的 getContext() 回的是假 UUID groupId（不能 push）。
 
     Quick Reply 按完即消失，不留歷史殘留 — 比 Flex bubble 體驗更好。
     LIFF_ID 環境變數未設時 → 回錯誤 Flex bubble（顯示警告）。
@@ -211,6 +215,7 @@ def render_new_customer_entry() -> dict:
             'contents': _liff_unavailable_bubble('新增客戶表單'),
         }
 
+    from rewrite.utils.liff_url import build_liff_url
     return {
         'type': 'quick_reply',
         'text': '🪪 點下方按鈕新增客戶',
@@ -220,7 +225,8 @@ def render_new_customer_entry() -> dict:
                 'action': {
                     'type': 'uri',
                     'label': '📝 開填寫表單',
-                    'uri': _liff_url(),  # 客戶表單預設行為
+                    # form='customer' 是預設值，dispatcher 沒 form 參數會 fall through 到新增客戶
+                    'uri': build_liff_url(_liff_id(), 'customer', event_source),
                 },
             }],
         },

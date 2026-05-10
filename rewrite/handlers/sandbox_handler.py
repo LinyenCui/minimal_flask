@@ -351,13 +351,14 @@ def try_handle_sandbox(event) -> bool:
     #     Quick Reply 按完即消失，不留歷史殘留 — 比 Flex bubble 體驗好。
     if text in _NEW_CUSTOMER_LIFF_TRIGGERS:
         from rewrite.views.customer_flex import render_new_customer_entry
-        reply_message(event.reply_token, render_new_customer_entry())
+        # 傳 event.source 才能在群組廣播結果（同 import 的處理）
+        reply_message(event.reply_token, render_new_customer_entry(event_source=event.source))
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF new-customer entry")
         return True
 
     if text in _BOOKING_LIFF_TRIGGERS:
         from rewrite.views.booking_flex import render_booking_entry
-        reply_message(event.reply_token, render_booking_entry())
+        reply_message(event.reply_token, render_booking_entry(event_source=event.source))
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF booking entry")
         return True
 

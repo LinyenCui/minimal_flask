@@ -242,6 +242,15 @@
         const idToken = _safeIdToken();
         const fd = new FormData(form);
         const payload = Object.fromEntries(fd.entries());
+
+        // 從 URL params 拿真實 group/room ID（liff.getContext 給的 UUID 不能用）
+        // bot 觸發 LIFF 時把 webhook 的 group_id 塞進 URL 了，這裡讀回來給後端 push
+        const _params = new URLSearchParams(window.location.search);
+        const _gid = _params.get('gid');
+        const _rid = _params.get('rid');
+        if (_gid) payload.source = { type: 'group', groupId: _gid, roomId: null };
+        else if (_rid) payload.source = { type: 'room', groupId: null, roomId: _rid };
+
         const url = MODE === 'edit' ? `/liff/customer/${CUSTOMER_ID}` : '/liff/customer';
         const resp = await fetch(url, {
           method: 'POST',
