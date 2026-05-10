@@ -271,11 +271,23 @@
       submitBtn.textContent = '匯入中…';
       try {
         const idToken = _safeIdToken();
+        // 帶 source 進 payload — 後端用來 push 群組廣播
+        // liff.getContext() 在 LIFF inApp 時回 { type: 'utou'|'group'|'room'|'none',
+        //                                          userId, groupId?, roomId? }
+        let source = null;
+        try {
+          const ctx = liff.getContext();
+          if (ctx) {
+            source = { type: ctx.type || null, groupId: ctx.groupId || null, roomId: ctx.roomId || null };
+          }
+        } catch (_) { /* getContext 偶爾在 external browser 拋錯，不擋主流程 */ }
+
         const payload = {
           week_offset: parseInt(selWeek.value, 10),
           category: selCategory.value,
           overwrite: cbOverwrite.checked,
           purge_past: cbPurge.checked,
+          source: source,
         };
         const resp = await fetch('/liff/import', {
           method: 'POST',

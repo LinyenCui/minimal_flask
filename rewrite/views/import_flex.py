@@ -36,7 +36,10 @@ def render_import_entry() -> dict:
 
     return {
         'type': 'quick_reply',
-        'text': '📥 點下方按鈕匯入固定班次（太陽週：星期日 → 星期六）',
+        'text': (
+            '📥 點下方按鈕匯入固定班次（太陽週：星期日 → 星期六）\n\n'
+            '⚠️ 一人操作即可，匯入完成會在群組通知大家'
+        ),
         'quick_reply': {
             'items': [{
                 'type': 'action',
