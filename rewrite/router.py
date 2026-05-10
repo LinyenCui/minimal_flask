@@ -161,7 +161,7 @@ def try_route(event) -> bool:
         m = _RE_TRIP_LEAVE.match(text)
         if m:
             return _handle_trip_leave(
-                reply_token, session, int(m.group(1)), user_id,
+                reply_token, session, int(m.group(1)), user_id, event_source,
             )
 
         m = _RE_TRIP_RESTORE.match(text)
@@ -402,7 +402,7 @@ def _handle_trip_conflict(reply_token, session, trip_id: int,
     return _reply_mutation_result(reply_token, session, trip_id, r, '標記衝突')
 
 
-def _handle_trip_leave(reply_token, session, trip_id: int, user_id) -> bool:
+def _handle_trip_leave(reply_token, session, trip_id: int, user_id, event_source=None) -> bool:
     """
     [請假] button → 進入請假輸入模式（conversation state）
 
@@ -434,7 +434,13 @@ def _handle_trip_leave(reply_token, session, trip_id: int, user_id) -> bool:
         return True
 
     # 進入 input mode
-    _state_set(user_id, 'leave_input', {'trip_id': trip_id})
+    # event_source 抽 chat_id：群組 group_id / 聊天室 room_id / 私聊 user_id
+    chat_id = (
+        getattr(event_source, 'group_id', None)
+        or getattr(event_source, 'room_id', None)
+        or getattr(event_source, 'user_id', None)
+    ) if event_source else user_id
+    _state_set(user_id, 'leave_input', {'trip_id': trip_id}, chat_id=chat_id)
 
     reply_message(reply_token, {
         "type": "text",

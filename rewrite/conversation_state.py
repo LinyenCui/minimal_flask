@@ -24,19 +24,43 @@ _LOCK = threading.Lock()
 
 
 def set_state(user_id: str, state_type: str, payload: dict,
-              ttl_minutes: Optional[float] = None) -> None:
+              ttl_minutes: Optional[float] = None,
+              chat_id: Optional[str] = None) -> None:
     """設定 user 的對話狀態（會覆蓋既有的）
 
-    ttl_minutes：自訂 TTL（分鐘），None = 預設 30 分鐘
+    Args:
+        ttl_minutes：自訂 TTL（分鐘），None = 預設 30 分鐘
+        chat_id：訊息來源的對話 ID（群組用 group_id、聊天室用 room_id、私聊用 user_id）。
+            存在 state 裡，webhook 用來判定「active state bypass / 規則」是否應在
+            當前對話生效——避免私聊 active state 跨到群組讓所有閒聊被當 bot 訊息。
     """
     ttl = timedelta(minutes=ttl_minutes) if ttl_minutes is not None else _TTL
     with _LOCK:
         _STATES[user_id] = {
             'type': state_type,
             'payload': dict(payload),
+            'chat_id': chat_id,
             'expires_at': datetime.now() + ttl,
         }
-    logger.info(f"[conversation_state] set {user_id[:8]}.. type={state_type} ttl={ttl} payload={payload}")
+    logger.info(
+        f"[conversation_state] set {user_id[:8]}.. type={state_type} "
+        f"ttl={ttl} chat={(chat_id or '?')[:8]}.. payload={payload}"
+    )
+
+
+def get_chat_id_from_event(event) -> Optional[str]:
+    """從 webhook event 抽 chat_id（群組/聊天室/私聊統一抽法）。
+
+    set_state 時用同函式抽 chat_id，跟 webhook 比對才一致。
+    """
+    src = getattr(event, 'source', None)
+    if src is None:
+        return None
+    return (
+        getattr(src, 'group_id', None)
+        or getattr(src, 'room_id', None)
+        or getattr(src, 'user_id', None)
+    )
 
 
 def get_state(user_id: str) -> Optional[dict]:

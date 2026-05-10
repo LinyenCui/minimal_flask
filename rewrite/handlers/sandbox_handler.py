@@ -420,11 +420,13 @@ def try_handle_sandbox(event) -> bool:
     if text == _ACCOUNTING_LEDGER_RANGE_TRIGGER:
         # 進入日期區間 input mode
         if user_id:
+            from rewrite.conversation_state import get_chat_id_from_event
             _state_set(
                 user_id,
                 ACCT_LEDGER_RANGE_INPUT_STATE_TYPE,
                 {},
                 ttl_minutes=5.0,
+                chat_id=get_chat_id_from_event(event),
             )
         reply_message(event.reply_token, {
             'type': 'quick_reply',
@@ -611,6 +613,7 @@ def try_handle_sandbox(event) -> bool:
         # cap 最近 5 輪，避免 prompt 撐爆
         history = history[-5:]
 
+        from rewrite.conversation_state import get_chat_id_from_event
         _state_set(
             user_id,
             SANDBOX_ACTIVE_STATE_TYPE,
@@ -621,6 +624,7 @@ def try_handle_sandbox(event) -> bool:
                 'history': history,
             },
             ttl_minutes=SANDBOX_ACTIVE_TTL_MINUTES,
+            chat_id=get_chat_id_from_event(event),
         )
     return True
 
@@ -744,6 +748,7 @@ def _render_trip_status_picker_for_user(
 
     # 設 state，讓後續按鈕（全部請假/註銷/衝突/改回準備）能找到 trip_ids
     if user_id:
+        from rewrite.conversation_state import get_chat_id_from_event
         trip_ids = [t.trip_id for t in trips]
         _state_set(
             user_id,
@@ -755,6 +760,7 @@ def _render_trip_status_picker_for_user(
                 'location': location,
             },
             ttl_minutes=TRIP_STATUS_TTL_MINUTES,
+            chat_id=get_chat_id_from_event(event),
         )
     logger.info(
         f"[rewrite sandbox] {short_uid} status picker {date_label} {location} "
@@ -795,6 +801,7 @@ def _try_handle_trip_status_actions(event, user_id: Optional[str], text: str,
 
         if action == 'leave':
             # 進 leave_input state，等用戶輸入 [原因] [加成]
+            from rewrite.conversation_state import get_chat_id_from_event
             _state_set(
                 user_id,
                 TRIP_STATUS_LEAVE_INPUT_STATE_TYPE,
@@ -804,6 +811,7 @@ def _try_handle_trip_status_actions(event, user_id: Optional[str], text: str,
                     'location': payload.get('location'),
                 },
                 ttl_minutes=TRIP_STATUS_TTL_MINUTES,
+                chat_id=get_chat_id_from_event(event),
             )
             reply_message(event.reply_token, {
                 'type': 'quick_reply',

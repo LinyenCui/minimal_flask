@@ -86,7 +86,10 @@ def callback():
                         #       「acct_ledger_start」、「查看 1234」）→ looks_like_quick_command
                         #   (b) 用戶剛回應 bot（rewrite-active state，多輪對話 follow-up）
                         try:
-                            from rewrite.conversation_state import get_state as _rew_state_get
+                            from rewrite.conversation_state import (
+                                get_state as _rew_state_get,
+                                get_chat_id_from_event as _rew_get_chat,
+                            )
                             from rewrite.handlers.sandbox_handler import (
                                 SANDBOX_ACTIVE_STATE_TYPE,
                                 TRIP_STATUS_PICKER_STATE_TYPE,
@@ -99,6 +102,8 @@ def callback():
                                 is_bot_addressed = True
                             else:
                                 # (b) 多輪對話狀態中 → 讓過（follow-up 通常無 / 前綴）
+                                #     但只在「同對話」才算 — 防止私聊 state 跨到群組
+                                #     讓所有閒聊被當 bot 訊息
                                 _rew_st = _rew_state_get(user_id) if user_id else None
                                 _active_types = (
                                     SANDBOX_ACTIVE_STATE_TYPE,
@@ -107,7 +112,11 @@ def callback():
                                     ACCT_LEDGER_RANGE_INPUT_STATE_TYPE,
                                 )
                                 if _rew_st and _rew_st.get('type') in _active_types:
-                                    is_bot_addressed = True
+                                    state_chat = _rew_st.get('chat_id')
+                                    current_chat = _rew_get_chat(event)
+                                    if state_chat and state_chat == current_chat:
+                                        is_bot_addressed = True
+                                    # state 沒記 chat（舊 state）或不同對話 → 不 bypass
                         except Exception:
                             pass
 
