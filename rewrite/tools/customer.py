@@ -466,10 +466,12 @@ def delete_customer(
     name = customer[2]
 
     # 檢查 trips FK 引用
+    # via_point 可能是 '+'-joined 多段（例如 '中華南路+新建路'），用 string_to_array 拆
     if short_name:
         ref_count = session.execute(text("""
             SELECT COUNT(*) FROM trips
-            WHERE start_point = :sn OR via_point = :sn OR end_point = :sn
+            WHERE start_point = :sn OR end_point = :sn
+               OR :sn = ANY(string_to_array(COALESCE(via_point, ''), '+'))
         """), {'sn': short_name}).scalar()
         if ref_count > 0:
             return ToolResult.fail(

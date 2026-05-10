@@ -203,7 +203,12 @@ def query_trips(
         where.append('status = :status')
         params['status'] = status
     if customer_short_name:
-        where.append("(start_point = :sn OR via_point = :sn OR end_point = :sn)")
+        # via_point 可能是 '+'-joined 多段（例如 '中華南路+新建路'），
+        # 用 string_to_array 拆開後檢查任一段命中。start/end 是單值，照舊 exact match。
+        where.append(
+            "(start_point = :sn OR end_point = :sn "
+            "OR :sn = ANY(string_to_array(COALESCE(via_point, ''), '+')))"
+        )
         params['sn'] = customer_short_name
     if exclude_status:
         # 用 ANY array，避免逐個 OR
