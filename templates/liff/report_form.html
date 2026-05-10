@@ -101,6 +101,14 @@
 
     function showAlert(html) { alertEl.innerHTML = html; }
     function clearAlert() { alertEl.innerHTML = ''; }
+
+    // 防 LIFF SDK 偶爾回傳含 \r \n \0 的 idToken 導致 Headers.set 炸
+    // (iOS Safari WebView 上常見「The string did not match the expected pattern.」)
+    function _safeIdToken() {
+      const t = _safeIdToken();
+      if (!t) return '';
+      return t.replace(/[\r\n\0\s]+/g, '').trim();
+    }
     function setLoading(t) { loadingEl.textContent = t; loadingEl.hidden = false; contentEl.hidden = true; }
     function showContent() { loadingEl.hidden = true; contentEl.hidden = false; }
 
@@ -137,7 +145,7 @@
       submitBtn.textContent = '產生中…';
       showAlert('<div class="progress">⏳ 報表產生中（拉資料 + 建 Excel + 上傳 Drive，預計 5-30 秒）…</div>');
       try {
-        const idToken = liff.getIDToken();
+        const idToken = _safeIdToken();
         const fd = new FormData(form);
         const payload = {
           report_type: fd.get('report_type'),

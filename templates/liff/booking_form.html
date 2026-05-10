@@ -111,6 +111,14 @@
 
     function showAlert(type, msg) { alertEl.innerHTML = `<div class="alert ${type}">${msg}</div>`; }
     function clearAlert() { alertEl.innerHTML = ''; }
+
+    // 防 LIFF SDK 偶爾回傳含 \r \n \0 的 idToken 導致 Headers.set 炸
+    // (iOS Safari WebView 上常見「The string did not match the expected pattern.」)
+    function _safeIdToken() {
+      const t = _safeIdToken();
+      if (!t) return '';
+      return t.replace(/[\r\n\0\s]+/g, '').trim();
+    }
     function setLoading(text) { loadingEl.textContent = text; loadingEl.hidden = false; contentEl.hidden = true; }
     function showContent() { loadingEl.hidden = true; contentEl.hidden = false; }
 
@@ -168,7 +176,7 @@
       submitBtn.disabled = true;
       submitBtn.textContent = '建立中…';
       try {
-        const idToken = liff.getIDToken();
+        const idToken = _safeIdToken();
         const payload = Object.fromEntries(fd.entries());
         const resp = await fetch('/liff/booking', {
           method: 'POST',
