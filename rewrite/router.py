@@ -52,6 +52,11 @@ from rewrite.views.trip_flex import (
     render_trip_list_carousel,
     build_trip_quick_reply,
 )
+from rewrite.tools.fare_calc import (
+    calculate_fare as _fare_calc,
+    format_text as _fare_format,
+    parse_command as _fare_parse,
+)
 from rewrite.conversation_state import (
     set_state as _state_set,
     get_state as _state_get,
@@ -71,6 +76,9 @@ _RE_LAYER_SUMMARY = re.compile(r'^病歷層分布$')
 _RE_TRIP_DETAIL = re.compile(r'^班次詳情\s+(\d+)$')
 _RE_TRIP_LIST = re.compile(r'^(查|診所|東洋)班次(?:\s+(.+))?$')
 _RE_PENDING = re.compile(r'^待派班次$')
+
+# 車資試算（純算 — 不碰 DB）
+_RE_FARE = re.compile(r'^車資試算\b')
 
 # 班次 mutation 命令 regex（footer button 發出來的）
 _RE_TRIP_CANCEL = re.compile(r'^班次註銷\s+(\d+)$')
@@ -115,12 +123,19 @@ def try_route(event) -> bool:
                         '班次詳情', '待派班次',
                         # mutation 命令（footer button 觸發）
                         '班次註銷', '班次衝突', '班次請假',
-                        '班次恢復', '班次撤銷指派')
+                        '班次恢復', '班次撤銷指派',
+                        # 車資試算（純算）
+                        '車資試算')
     if not text.startswith(rewrite_prefixes):
         return False
 
     reply_token = event.reply_token
     event_source = event.source  # 帶到 render 用，編輯按鈕 LIFF URL 才會帶 gid/rid
+
+    # ===== 車資試算（純算，不開 session）=====
+    if _RE_FARE.match(text):
+        return _handle_fare_calc(reply_token, text)
+
     session = Session()
 
     try:
@@ -668,6 +683,23 @@ def _handle_trip_list(reply_token, session, kind: str, arg: str) -> bool:
     return True
 
 
+def _handle_fare_calc(reply_token, text: str) -> bool:
+    """車資試算（無 DB，純算）。
+
+    用法：車資試算 <公里> [停等分鐘] [日間|夜間]
+    """
+    parsed = _fare_parse(text)
+    if not parsed.ok:
+        reply_message(reply_token, {"type": "text", "text": f"❌ {parsed.error}"})
+        return True
+    r = _fare_calc(**parsed.data)
+    if not r.ok:
+        reply_message(reply_token, {"type": "text", "text": f"❌ {r.error}"})
+        return True
+    reply_message(reply_token, {"type": "text", "text": _fare_format(r.data)})
+    return True
+
+
 def _send_help(reply_token):
     help_text = """🛠️ Rewrite v0.1 測試命令
 
@@ -693,5 +725,10 @@ def _send_help(reply_token):
   東洋班次 [日期]
   班次詳情 <trip_id>
     例：班次詳情 1043
-  待派班次"""
+  待派班次
+
+🚕 車資試算（純算，不寫 DB）
+  車資試算 <公里> [停等分鐘] [日間|夜間]
+    例：車資試算 8.5
+    例：車資試算 10 5 夜間"""
     reply_message(reply_token, {"type": "text", "text": help_text})
