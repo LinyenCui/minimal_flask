@@ -1,16 +1,17 @@
-from modules.services.fare_calculator import calculate_fare, format_text
+"""手測腳本（非 regression）— atomic tool 改用 keyword args 並回 ToolResult"""
+from rewrite.tools.fare_calc import calculate_fare, format_text
 
 
 def main():
     cases = [
-        (10, 0, "日間"),
-        (10, 5, "夜間"),
-        (5.8, 3, "日間"),
+        {"distance_km": 10, "waiting_min": 0, "period": "日間"},
+        {"distance_km": 10, "waiting_min": 5, "period": "夜間"},
+        {"distance_km": 5.8, "waiting_min": 3, "period": "日間"},
     ]
-    for d, w, p in cases:
-        res = calculate_fare(d, w, p)
-        print(res)
-        print(format_text(res))
+    for kw in cases:
+        r = calculate_fare(**kw)
+        print(r.data)
+        print(format_text(r.data))
         print("-" * 40)
 
 
