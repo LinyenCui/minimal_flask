@@ -288,6 +288,7 @@ _QUICK_COMMAND_PREFIXES = (
     '班次註銷', '班次衝突', '班次請假',
     '班次恢復', '班次撤銷指派',
     '批量請假',
+    '車資試算',
     # rewrite Flex 按鈕 callback（type='message' 送的文字）
     '固定班次恢復',         # fixed_schedule_flex「↩️ 恢復」
     '查看 ',                # completed_trip_flex「#N 詳情」
