@@ -114,7 +114,8 @@
       try { await liff.init({ liffId: LIFF_ID }); }
       catch (e) { setLoading('LIFF init 失敗：' + e.message); return; }
       if (!liff.isLoggedIn()) {
-        liff.login({ redirectUri: window.location.href });
+        // PC LIFF OAuth2 redirect_uri 必須在白名單 — 用 LIFF URL 才會通過
+        liff.login({ redirectUri: 'https://liff.line.me/' + LIFF_ID + window.location.search });
         return;
       }
       lastSatEl.textContent = _lastSaturday();
