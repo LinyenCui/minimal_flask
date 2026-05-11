@@ -39,7 +39,7 @@
         if (!isLoggedIn) {
           const loginBtn = document.createElement('button');
           loginBtn.textContent = '登入';
-          loginBtn.onclick = () => liff.login({ redirectUri: window.location.href });
+          loginBtn.onclick = () => liff.login({ redirectUri: 'https://liff.line.me/' + LIFF_ID + window.location.search });
           statusEl.appendChild(loginBtn);
         } else {
           btn.disabled = false;

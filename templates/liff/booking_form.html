@@ -155,7 +155,8 @@
         return;
       }
       if (!liff.isLoggedIn()) {
-        liff.login({ redirectUri: window.location.href });
+        // PC LIFF OAuth2 redirect_uri 必須在白名單 — 用 LIFF URL 才會通過
+        liff.login({ redirectUri: 'https://liff.line.me/' + LIFF_ID + window.location.search });
         return;
       }
       // 預設日期 = 今天，且 picker 最早只能選今天（過去日期擋掉，避免誤選）
