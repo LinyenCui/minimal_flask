@@ -238,7 +238,11 @@ logger = logging.getLogger(__name__)
 
 # ============================================================
 # 全域 lazy-init agent / skill registry
-# 第一次呼叫才 init Gemini（避免 import 時就連線）
+# - Gemini client lazy（避免 import 時就連線）
+# - Skills 每次都重 build：trip_query / trip_mutation / completed_trip 的
+#   system prompt 內嵌 date.today()，process 不重啟就會凍結在啟動那天。
+#   rebuild 成本是 5 個 dataclass instantiation + 字串 interpolation，
+#   亞毫秒級，跟 Gemini call 比可忽略。
 # ============================================================
 _llm: Optional[GeminiClient] = None
 _skills: Optional[dict] = None
@@ -248,14 +252,15 @@ def _init():
     global _llm, _skills
     if _llm is None:
         _llm = GeminiClient()
-        _skills = {
-            'trip_query': build_trip_query_skill(),
-            'trip_mutation': build_trip_mutation_skill(),
-            'completed_trip': build_completed_trip_skill(),
-            'customer': build_customer_skill(),
-            'fixed_schedule': build_fixed_schedule_skill(),
-        }
-        logger.info(f"[rewrite sandbox] initialized {len(_skills)} skills")
+        logger.info("[rewrite sandbox] Gemini client ready")
+    # 每次都重 build — 讓 prompt 內的「今天」跟上系統時鐘
+    _skills = {
+        'trip_query': build_trip_query_skill(),
+        'trip_mutation': build_trip_mutation_skill(),
+        'completed_trip': build_completed_trip_skill(),
+        'customer': build_customer_skill(),
+        'fixed_schedule': build_fixed_schedule_skill(),
+    }
 
 
 def _strip_prefix(text: str) -> str:
