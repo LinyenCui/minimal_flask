@@ -21,10 +21,10 @@ from modules.utils.line_bot import reply_message
 from modules.utils.unified_date_parser import UnifiedDateParser
 from rewrite.ai.agent import Agent
 from rewrite.ai.client import GeminiClient
-from rewrite.ai.intent import classify
 from rewrite.ai.skills.completed_trip import build_completed_trip_skill
 from rewrite.ai.skills.customer import build_customer_skill
 from rewrite.ai.skills.fixed_schedule import build_fixed_schedule_skill
+from rewrite.ai.skills.master import build_master_skill
 from rewrite.ai.skills.trip_mutation import build_trip_mutation_skill
 from rewrite.ai.skills.trip_query import build_trip_query_skill
 from rewrite.conversation_state import (
@@ -246,14 +246,16 @@ logger = logging.getLogger(__name__)
 # ============================================================
 _llm: Optional[GeminiClient] = None
 _skills: Optional[dict] = None
+_master_skill = None
 
 
 def _init():
-    global _llm, _skills
+    global _llm, _skills, _master_skill
     if _llm is None:
         _llm = GeminiClient()
         logger.info("[rewrite sandbox] Gemini client ready")
     # 每次都重 build — 讓 prompt 內的「今天」跟上系統時鐘
+    # master_skill 是運行時用的合一 skill；_skills 保留給測試 / multi_skill_agent
     _skills = {
         'trip_query': build_trip_query_skill(),
         'trip_mutation': build_trip_mutation_skill(),
@@ -261,6 +263,7 @@ def _init():
         'customer': build_customer_skill(),
         'fixed_schedule': build_fixed_schedule_skill(),
     }
+    _master_skill = build_master_skill()
 
 
 def _strip_prefix(text: str) -> str:
@@ -491,71 +494,26 @@ def try_handle_sandbox(event) -> bool:
         )
         return True
 
-    # 0.5 取上一輪 context（給 classifier hint + agent prompt prefix 用）
-    #     history 是跨輪累積（含本輪前的 user/ai 對），讓 AI 看到完整脈絡
+    # 0.5 取上一輪 context（給 master agent prompt prefix 用）
+    #     history 跨輪累積（含本輪前的 user/ai 對），讓 AI 看到完整脈絡
     #     例：「!固定班次29請假」→「原因？」→「出國」→「加成？」→「-50」
     #         turn 3 必須看得到 turn 1 的 schedule_id=29
-    last_skill = None
-    last_user_text = None
-    last_ai_text = None
     history: list = []
     if user_id:
         prev = _state_get(user_id)
         if prev and prev.get('type') == SANDBOX_ACTIVE_STATE_TYPE:
             payload = prev.get('payload') or {}
-            last_skill = payload.get('last_skill')
-            last_user_text = payload.get('last_user_text')
-            last_ai_text = payload.get('last_ai_text')
             history = payload.get('history') or []
 
-    # 1. 分類意圖
-    #    1a. sandbox-active + 短 follow-up → 直接用 last_skill，bypass classifier
-    #        （classifier 對「是」「確認」「14」常判 unknown，會破壞對話連續）
-    if last_skill and last_skill in _skills and _is_short_followup(text):
-        intent = last_skill
-        logger.info(
-            f"[rewrite sandbox] {short_uid} short follow-up text={text!r} → "
-            f"bypass classifier, use last_skill={intent}")
-    else:
-        try:
-            intent = classify(_llm, text, last_skill=last_skill)
-        except Exception as e:
-            logger.error(f"[rewrite sandbox] classify failed for {short_uid}: {e}",
-                         exc_info=True)
-            reply_message(event.reply_token, {
-                'type': 'text',
-                'text': '⚠️ 暫時無法處理（AI 分類失敗），請稍後再試或輸入「幫助」',
-            })
-            return True
-
-        # 1b. 對話模式保護：sandbox-active 期間 classifier 判 unknown
-        #     + 訊息不像快速命令 → 留 last_skill。
-        #     防止用戶補資訊式訊息（如 '$235（一般記賬）'、'一般紀錄'）長度過長
-        #     沒被 _is_short_followup 抓到，被 classifier 判 unknown 後
-        #     破壞對話連續性。
-        #     用戶想切換主題：(a) 打新指令；(b) 打「結束對話」清 state
-        if (intent == 'unknown' and last_skill and last_skill in _skills
-                and not looks_like_quick_command(text)):
-            logger.info(
-                f"[rewrite sandbox] {short_uid} text={text!r} → unknown but "
-                f"sandbox-active({last_skill}) → 留 last_skill 保護對話")
-            intent = last_skill
-        elif intent == 'unknown' or intent not in _skills:
-            logger.info(
-                f"[rewrite sandbox] {short_uid} text={text!r} → {intent}, "
-                f"reply unknown fallback")
-            reply_message(event.reply_token, {
-                'type': 'text',
-                'text': '🤔 不太懂這個訊息，輸入「幫助」看可用指令',
-            })
-            return True
-
-    # 2. 跑對應 skill（含 multi-turn tool loop + 跨輪對話 context）
+    # 1. 跑 Master Agent — 一個 LLM call 含全部 ~25 atomic tools
+    #    取代原本「intent classifier (call 1) + skill agent (call 2+)」雙 call 架構
+    #    收益：延遲砍 ~50%、無 intent misclassify 風險
+    #    對 short follow-up 的處理：靠 history prepend 讓 master 自己看上下文判斷
+    #    （不再需要「sandbox-active + last_skill bypass classifier」hack）
     try:
-        agent = Agent(_llm, _skills[intent])
-        # 把跨輪對話塞進 prompt，讓 AI 看到完整脈絡（含 turn 1 的 schedule_id 等）
+        agent = Agent(_llm, _master_skill)
         text_for_agent = text
-        if history and last_skill == intent:
+        if history:
             lines = []
             for h in history:
                 u = (h.get('user') or '').strip()
@@ -573,12 +531,12 @@ def try_handle_sandbox(event) -> bool:
         msg = agent.process(text_for_agent, user_id, event_source=event.source)
     except Exception as e:
         logger.error(
-            f"[rewrite sandbox] {short_uid} skill={intent} failed: {e}",
+            f"[rewrite sandbox] {short_uid} master agent failed: {e}",
             exc_info=True,
         )
         reply_message(event.reply_token, {
             'type': 'text',
-            'text': f'⚠️ 處理時發生錯誤（{intent}），請稍後再試或輸入「幫助」',
+            'text': '⚠️ 處理時發生錯誤，請稍後再試或輸入「幫助」',
         })
         return True
 
@@ -593,7 +551,7 @@ def try_handle_sandbox(event) -> bool:
     try:
         reply_message(event.reply_token, msg)
         logger.info(
-            f"[rewrite sandbox] {short_uid} text={text!r} skill={intent} "
+            f"[rewrite sandbox] {short_uid} text={text!r} master_agent "
             f"followup={waiting_followup} ✅")
     except Exception as e:
         logger.error(
@@ -612,9 +570,7 @@ def try_handle_sandbox(event) -> bool:
             elif mt == 'flex':
                 ai_text_summary = f"[flex] {msg.get('altText', '')}"
 
-        # 累積 history：本輪 user + ai 追加進去，但不同 skill 切換時清掉重來
-        if last_skill != intent:
-            history = []
+        # 累積 history：本輪 user + ai 追加進去（master 模式不分 skill，一直累）
         history = history + [{'user': text[:300], 'ai': ai_text_summary}]
         # cap 最近 5 輪，避免 prompt 撐爆
         history = history[-5:]
@@ -624,7 +580,7 @@ def try_handle_sandbox(event) -> bool:
             user_id,
             SANDBOX_ACTIVE_STATE_TYPE,
             {
-                'last_skill': intent,
+                'last_skill': 'master',
                 'last_user_text': text[:300],
                 'last_ai_text': ai_text_summary,
                 'history': history,
