@@ -1,4 +1,12 @@
-"""回診日期計算 Flex bubble — (日期) 外掛的結果渲染"""
+"""回診日期計算 Flex bubble — !日期 外掛的結果渲染
+
+排版對齊用戶手寫範本：
+  看診日   115年06月18日（四）
+  第1週   115年06月25日（四）  看報告
+  第4週   115年07月16日（四）  28天
+  第11週  115年09月03日（四）  抽血
+  第12週  115年09月10日（四）  回診
+"""
 from datetime import date
 from typing import Any, Dict
 
@@ -6,14 +14,16 @@ from rewrite.tools.date_calc import format_date_full
 
 # 粉紅 / 紫色系配色（醫療回診語境）
 HEADER_BG = "#EC407A"   # Material Pink 400 — header 底
-TAG_BLOOD = "#AD1457"   # Material Pink 800 — 抽血 tag（深粉紅，同色系深一階）
-TAG_VISIT = "#6A1B9A"   # Material Purple 800 — 回診 tag（紫，對比但溫和）
+TAG_REPORT = "#1565C0"  # 藍 — 看報告
+TAG_28DAY = "#999999"   # 灰 — 28天（天數說明）
+TAG_BLOOD = "#AD1457"   # Material Pink 800 — 抽血
+TAG_VISIT = "#6A1B9A"   # Material Purple 800 — 回診
 MUTED = "#999999"
 BLACK = "#333333"
 
 
-def _row(label: str, value: str, tag: str = "", tag_color: str = TAG_BLOOD) -> dict:
-    """單 row：左 label / 右 date / 可選右上小 tag（抽血 / 回診）"""
+def _row(label: str, value: str, tag: str = "", tag_color: str = MUTED) -> dict:
+    """單 row：左 label / 中 民國年日期 / 右 附註 tag"""
     contents = [
         {
             "type": "text",
@@ -28,7 +38,7 @@ def _row(label: str, value: str, tag: str = "", tag_color: str = TAG_BLOOD) -> d
             "size": "xs",
             "color": BLACK,
             "weight": "bold",
-            "flex": 5,
+            "flex": 6,
             "wrap": True,
         },
     ]
@@ -36,12 +46,14 @@ def _row(label: str, value: str, tag: str = "", tag_color: str = TAG_BLOOD) -> d
         contents.append({
             "type": "text",
             "text": tag,
-            "size": "xxs",
+            "size": "xs",
             "color": tag_color,
             "weight": "bold",
-            "flex": 1,
+            "flex": 2,
             "align": "end",
         })
+    else:
+        contents.append({"type": "text", "text": " ", "size": "xs", "flex": 2})
     return {
         "type": "box",
         "layout": "horizontal",
@@ -51,15 +63,12 @@ def _row(label: str, value: str, tag: str = "", tag_color: str = TAG_BLOOD) -> d
 
 
 def render_date_calc(data: Dict[str, Any]) -> dict:
-    """Flex bubble：該日期 / +7 / +77 (抽血) / +84 (回診)"""
+    """Flex bubble：看診日 / 第1週(看報告) / 第4週(28天) / 第11週(抽血) / 第12週(回診)"""
     base: date = data['base']
-    next_week: date = data['next_week']
-    week11: date = data['week11']
-    week12: date = data['week12']
 
     return {
         "type": "flex",
-        "altText": f"📅 回診日期計算 {base.month}/{base.day}",
+        "altText": f"📅 回診日期計算（看診日 {format_date_full(base)}）",
         "contents": {
             "type": "bubble",
             "size": "mega",
@@ -76,13 +85,6 @@ def render_date_calc(data: Dict[str, Any]) -> dict:
                         "size": "md",
                         "color": "#ffffff",
                     },
-                    {
-                        "type": "text",
-                        "text": format_date_full(base),
-                        "size": "xs",
-                        "color": "#ffffff",
-                        "margin": "xs",
-                    },
                 ],
             },
             "body": {
@@ -90,13 +92,15 @@ def render_date_calc(data: Dict[str, Any]) -> dict:
                 "layout": "vertical",
                 "spacing": "md",
                 "contents": [
-                    _row("該日期", format_date_full(base)),
+                    _row("看診日", format_date_full(base)),
                     {"type": "separator"},
-                    _row("下一週", format_date_full(next_week)),
+                    _row("第1週", format_date_full(data['week1']), tag="看報告", tag_color=TAG_REPORT),
                     {"type": "separator"},
-                    _row("第 11 週", format_date_full(week11), tag="抽血", tag_color=TAG_BLOOD),
+                    _row("第4週", format_date_full(data['week4']), tag="28天", tag_color=TAG_28DAY),
                     {"type": "separator"},
-                    _row("第 12 週", format_date_full(week12), tag="回診", tag_color=TAG_VISIT),
+                    _row("第11週", format_date_full(data['week11']), tag="抽血", tag_color=TAG_BLOOD),
+                    {"type": "separator"},
+                    _row("第12週", format_date_full(data['week12']), tag="回診", tag_color=TAG_VISIT),
                 ],
             },
         },
