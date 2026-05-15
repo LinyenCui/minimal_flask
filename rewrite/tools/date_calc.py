@@ -21,12 +21,20 @@
 
 「廿」「卅」等台灣略寫不支援（用戶當前需求外）。
 
+回診療程節點（看診日 = base）：
+  第1週  = +7   看報告
+  第4週  = +28  28天
+  第11週 = +77  抽血
+  第12週 = +84  回診
+
+日期輸出用民國年格式：115年06月18日（四）
+
 公開 API:
   is_date_calc_command(text) → bool   router / sandbox_handler 共用判斷
   parse_command(text)     → ToolResult.data = {'date_str': inner}
       只負責剝 ! / ！ 前綴，回後面的日期字串
-  calculate(*, date_str)  → ToolResult.data = {'base', 'next_week', 'week11', 'week12'}
-      呼叫 unified_date_parser，加 +7 / +77 / +84 天
+  calculate(*, date_str)  → ToolResult.data = {'base','week1','week4','week11','week12'}
+      呼叫 unified_date_parser，加 +7 / +28 / +77 / +84 天
   format_text(data)       → str  (fallback / 純文字訊息用)
 
 設計判斷：中文數字 → 阿拉伯數字 算 preprocessing，不算 parsing 重建；
@@ -111,8 +119,20 @@ SHORT_DATE_RE = re.compile(r'^\d{1,2}[-/]\d{1,2}$')
 
 # ---- 主計算 ----
 
+def _build_result(date_str: str, base: date) -> ToolResult:
+    """看診日 base → 4 個療程節點"""
+    return ToolResult.success(data={
+        'input': date_str,
+        'base': base,                              # 看診日
+        'week1': base + timedelta(days=7),         # 第1週 看報告
+        'week4': base + timedelta(days=28),        # 第4週 28天
+        'week11': base + timedelta(days=77),       # 第11週 抽血
+        'week12': base + timedelta(days=84),       # 第12週 回診
+    })
+
+
 def calculate(*, date_str: str) -> ToolResult:
-    """從日期字串算 base / +7 / +77 / +84 四個日期。
+    """從日期字串算 看診日 + 第1/4/11/12 週。
 
     短日期語境（沒指定年份）：
       1) 一律取「當年」— unified_date_parser 的「>180 天推上下年」邏輯
@@ -137,14 +157,7 @@ def calculate(*, date_str: str) -> ToolResult:
             from modules.utils.taiwan_time import get_taiwan_date
             today = get_taiwan_date()
             if not calendar.isleap(today.year):
-                base = date(today.year, 3, 1)
-                return ToolResult.success(data={
-                    'input': date_str,
-                    'base': base,
-                    'next_week': base + timedelta(days=7),
-                    'week11': base + timedelta(days=77),
-                    'week12': base + timedelta(days=84),
-                })
+                return _build_result(date_str, date(today.year, 3, 1))
 
     try:
         base = UnifiedDateParser.parse(normalized)
@@ -161,13 +174,7 @@ def calculate(*, date_str: str) -> ToolResult:
                 f"日期「{date_str}」在 {today.year} 年無對應日"
             )
 
-    return ToolResult.success(data={
-        'input': date_str,
-        'base': base,
-        'next_week': base + timedelta(days=7),
-        'week11': base + timedelta(days=77),
-        'week12': base + timedelta(days=84),
-    })
+    return _build_result(date_str, base)
 
 
 # ---- 指令解析（router / sandbox_handler 共用）----
@@ -201,16 +208,18 @@ _WEEKDAY_CN = ['一', '二', '三', '四', '五', '六', '日']
 
 
 def format_date_full(d: date) -> str:
-    """日期 → 「2026 年 05 月 14 日 星期四」"""
-    return f"{d.year} 年 {d.month:02d} 月 {d.day:02d} 日 星期{_WEEKDAY_CN[d.weekday()]}"
+    """日期 → 民國年格式「115年06月18日（四）」"""
+    minguo = d.year - 1911
+    return f"{minguo}年{d.month:02d}月{d.day:02d}日（{_WEEKDAY_CN[d.weekday()]}）"
 
 
 def format_text(data: Dict[str, Any]) -> str:
     """渲染純文字（fallback）"""
     return (
         f"📅 回診日期計算\n"
-        f"該日期：{format_date_full(data['base'])}\n"
-        f"下一週：{format_date_full(data['next_week'])}\n"
-        f"第 11 週：{format_date_full(data['week11'])}（抽血）\n"
-        f"第 12 週：{format_date_full(data['week12'])}（回診）"
+        f"看診日　{format_date_full(data['base'])}\n"
+        f"第1週　{format_date_full(data['week1'])}　看報告\n"
+        f"第4週　{format_date_full(data['week4'])}　28天\n"
+        f"第11週　{format_date_full(data['week11'])}　抽血\n"
+        f"第12週　{format_date_full(data['week12'])}　回診"
     )
