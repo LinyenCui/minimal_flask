@@ -71,15 +71,17 @@ def _cn_to_int(s: str) -> Optional[int]:
 _CN_DATE_RE = re.compile(
     r'^([一二三四五六七八九十]+)月([一二三四五六七八九十]+)(?:日|號)?$'
 )
+_ARABIC_MD_RE = re.compile(r'^(\d{1,2})月(\d{1,2})(?:日|號)?$')
 _YMD_SLASH_RE = re.compile(r'^(\d{4})/(\d{1,2})/(\d{1,2})$')
 
 
 def _normalize_input(text: str) -> str:
-    """把 unified_date_parser 不直接認的格式轉成它認的。
+    """把多元輸入正規化到 unified_date_parser 認的格式。
 
     - 中文數字「五月二十日」→ "5/20"
+    - 阿拉伯月日「5月14日」/「5月14」→ "5/14"（後續邏輯統一吃 M/D）
     - YYYY/M/D → YYYY-M-D（parser 只認 YYYY-MM-DD 短橫線含年）
-    - 其他原樣（parser 自己認 MM/DD / MM-DD / MM月DD日（阿拉伯）/ 完整 YYYY-MM-DD）
+    - 其他原樣（parser 自己認 MM/DD / MM-DD / YYYY-M-D）
     """
     text = (text or '').strip()
     m = _CN_DATE_RE.match(text)
@@ -88,16 +90,29 @@ def _normalize_input(text: str) -> str:
         day = _cn_to_int(m.group(2))
         if month is not None and day is not None and 1 <= month <= 12 and 1 <= day <= 31:
             return f"{month}/{day}"
+    m = _ARABIC_MD_RE.match(text)
+    if m:
+        return f"{int(m.group(1))}/{int(m.group(2))}"
     m = _YMD_SLASH_RE.match(text)
     if m:
         return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
     return text
 
 
+# 短日期（沒指定年）— _normalize_input 後形如 M/D 或 M-D
+SHORT_DATE_RE = re.compile(r'^\d{1,2}[-/]\d{1,2}$')
+
+
 # ---- 主計算 ----
 
 def calculate(*, date_str: str) -> ToolResult:
-    """從日期字串算 base / +7 / +77 / +84 四個日期。"""
+    """從日期字串算 base / +7 / +77 / +84 四個日期。
+
+    短日期語境：用戶沒指定年份時，一律取「當年」。
+    unified_date_parser 對短日期有「>180 天往前推 1 年」邏輯（line 95-100），
+    對醫療回診語境不合理：(12-30) 距今 229 天會被推到去年，但用戶語意是「今年 12-30
+    的下次回診」。含年明示 (2025-12-30) 不受影響。
+    """
     if not isinstance(date_str, str) or not date_str.strip():
         return ToolResult.fail("date_str 不能為空")
     normalized = _normalize_input(date_str)
@@ -105,6 +120,17 @@ def calculate(*, date_str: str) -> ToolResult:
         base = UnifiedDateParser.parse(normalized)
     except Exception as e:
         return ToolResult.fail(f"無法解析日期「{date_str}」：{e}")
+
+    if SHORT_DATE_RE.match(normalized):
+        from modules.utils.taiwan_time import get_taiwan_date
+        today = get_taiwan_date()
+        try:
+            base = base.replace(year=today.year)
+        except ValueError:
+            return ToolResult.fail(
+                f"日期「{date_str}」在 {today.year} 年無對應日（如 2/29 跨非閏年）"
+            )
+
     return ToolResult.success(data={
         'input': date_str,
         'base': base,
