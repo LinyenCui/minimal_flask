@@ -1,30 +1,31 @@
-"""日期計算 Flex bubble — (日期) 外掛的結果渲染"""
+"""回診日期計算 Flex bubble — (日期) 外掛的結果渲染"""
 from datetime import date
 from typing import Any, Dict
 
 from rewrite.tools.date_calc import format_date_full
 
-PRIMARY = "#1565C0"
-ACCENT = "#FF6D00"
-SUCCESS = "#2E7D32"
+# 粉紅 / 紫色系配色（醫療回診語境）
+HEADER_BG = "#EC407A"   # Material Pink 400 — header 底
+TAG_BLOOD = "#AD1457"   # Material Pink 800 — 抽血 tag（深粉紅，同色系深一階）
+TAG_VISIT = "#6A1B9A"   # Material Purple 800 — 回診 tag（紫，對比但溫和）
 MUTED = "#999999"
 BLACK = "#333333"
 
 
-def _row(label: str, value: str, tag: str = "", tag_color: str = ACCENT) -> dict:
+def _row(label: str, value: str, tag: str = "", tag_color: str = TAG_BLOOD) -> dict:
     """單 row：左 label / 右 date / 可選右上小 tag（抽血 / 回診）"""
     contents = [
         {
             "type": "text",
             "text": label,
-            "size": "sm",
+            "size": "xs",
             "color": MUTED,
             "flex": 2,
         },
         {
             "type": "text",
             "text": value,
-            "size": "sm",
+            "size": "xs",
             "color": BLACK,
             "weight": "bold",
             "flex": 5,
@@ -35,7 +36,7 @@ def _row(label: str, value: str, tag: str = "", tag_color: str = ACCENT) -> dict
         contents.append({
             "type": "text",
             "text": tag,
-            "size": "xs",
+            "size": "xxs",
             "color": tag_color,
             "weight": "bold",
             "flex": 1,
@@ -50,7 +51,7 @@ def _row(label: str, value: str, tag: str = "", tag_color: str = ACCENT) -> dict
 
 
 def render_date_calc(data: Dict[str, Any]) -> dict:
-    """Flex bubble：base / +7 / +77 (抽血) / +84 (回診)"""
+    """Flex bubble：該日期 / +7 / +77 (抽血) / +84 (回診)"""
     base: date = data['base']
     next_week: date = data['next_week']
     week11: date = data['week11']
@@ -58,27 +59,27 @@ def render_date_calc(data: Dict[str, Any]) -> dict:
 
     return {
         "type": "flex",
-        "altText": f"📅 日期計算 {base.month}/{base.day}",
+        "altText": f"📅 回診日期計算 {base.month}/{base.day}",
         "contents": {
             "type": "bubble",
             "size": "mega",
             "header": {
                 "type": "box",
                 "layout": "vertical",
-                "backgroundColor": PRIMARY,
+                "backgroundColor": HEADER_BG,
                 "paddingAll": "md",
                 "contents": [
                     {
                         "type": "text",
-                        "text": "📅 日期計算",
+                        "text": "📅 回診日期計算",
                         "weight": "bold",
-                        "size": "lg",
+                        "size": "md",
                         "color": "#ffffff",
                     },
                     {
                         "type": "text",
                         "text": format_date_full(base),
-                        "size": "sm",
+                        "size": "xs",
                         "color": "#ffffff",
                         "margin": "xs",
                     },
@@ -93,9 +94,9 @@ def render_date_calc(data: Dict[str, Any]) -> dict:
                     {"type": "separator"},
                     _row("下一週", format_date_full(next_week)),
                     {"type": "separator"},
-                    _row("第 11 週", format_date_full(week11), tag="抽血", tag_color=ACCENT),
+                    _row("第 11 週", format_date_full(week11), tag="抽血", tag_color=TAG_BLOOD),
                     {"type": "separator"},
-                    _row("第 12 週", format_date_full(week12), tag="回診", tag_color=SUCCESS),
+                    _row("第 12 週", format_date_full(week12), tag="回診", tag_color=TAG_VISIT),
                 ],
             },
         },
