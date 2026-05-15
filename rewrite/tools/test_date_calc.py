@@ -249,6 +249,7 @@ print(f'  ✅ (五月二十日) → base={r.data["base"]} +77={r.data["week11"]}
 #   12/30 在 5/15 打時 parser 推 2025/12/30，但用戶語意是今年。
 # ============================================================
 banner('T17: 短日期強制當年')
+import calendar
 from modules.utils.taiwan_time import get_taiwan_date
 this_year = get_taiwan_date().year
 
@@ -268,6 +269,42 @@ print(f'  ✅ 含年明示 2025-12-30 → {r.data["base"]}（保持原年）')
 r = calculate(date_str='2027-3-15')
 assert r.ok and r.data['base'] == date(2027, 3, 15)
 print(f'  ✅ 含年明示 2027-3-15 → {r.data["base"]}（保持原年）')
+
+
+# ============================================================
+# T18: 2/29 非閏年 fallback 到 3/1
+#   用戶語意是「2/29 自然順位的下一天」（療程順下去），
+#   不是 2/28（療程提早 1 天）。
+#   含年明示 (2025-2-29) 非閏 → fail（不 silent fallback）
+# ============================================================
+banner('T18: 2/29 非閏年 fallback 3/1')
+
+is_leap = calendar.isleap(this_year)
+expected_29 = date(this_year, 2, 29) if is_leap else date(this_year, 3, 1)
+
+for inp in ['2/29', '2-29', '2月29日', '2月29號', '二月二十九日', '二月二十九']:
+    r = calculate(date_str=inp)
+    assert r.ok, f'{inp!r} should ok: {r.error}'
+    assert r.data['base'] == expected_29, \
+        f'{inp!r} → {r.data["base"]}, expected {expected_29}'
+    print(f'  ✅ {inp!r} → {r.data["base"]}（{"閏年保留" if is_leap else "fallback 3/1"}）')
+
+# 端到端 parse_command + calculate
+p = parse_command('(2/29)')
+assert p.ok
+r = calculate(**p.data)
+assert r.ok and r.data['base'] == expected_29
+print(f'  ✅ 端到端 (2/29) → {r.data["base"]}')
+
+# 含年明示閏年 — 保留
+r = calculate(date_str='2024-2-29')
+assert r.ok and r.data['base'] == date(2024, 2, 29)
+print(f'  ✅ 含年明示閏年 2024-2-29 → {r.data["base"]}')
+
+# 含年明示非閏年 — fail，不 fallback（用戶明確指定）
+r = calculate(date_str='2025-2-29')
+assert not r.ok, f'2025-2-29 should fail (non-leap explicit), got {r}'
+print(f'  ✅ 含年明示非閏 2025-2-29 → fail（不 silent fallback）: {r.error[:50]}')
 
 
 print('\n' + '=' * 60)
