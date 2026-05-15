@@ -107,7 +107,9 @@ assert _normalize_input('十二月三十一日') == '12/31'
 assert _normalize_input('2026/5/14') == '2026-5-14'  # 斜線含年 → 短橫線
 assert _normalize_input('5/14') == '5/14'             # 不變
 assert _normalize_input('2026-5-14') == '2026-5-14'   # 不變
-assert _normalize_input('5月14日') == '5月14日'       # 阿拉伯不動（parser 自己認）
+assert _normalize_input('5月14日') == '5/14'          # 阿拉伯月日也統一吃 M/D
+assert _normalize_input('5月14') == '5/14'            # 阿拉伯缺尾
+assert _normalize_input('5月14號') == '5/14'          # 阿拉伯 + 「號」
 print(f'  ✅ 預處理規則正確')
 
 
@@ -239,6 +241,33 @@ r = calculate(**p.data)
 assert r.ok, r.error
 assert r.data['base'].month == 5 and r.data['base'].day == 20
 print(f'  ✅ (五月二十日) → base={r.data["base"]} +77={r.data["week11"]}')
+
+
+# ============================================================
+# T17: 短日期強制當年（醫療回診語境）
+#   parser 的「>180 天往前推 1 年」邏輯對日期計算外掛不對。
+#   12/30 在 5/15 打時 parser 推 2025/12/30，但用戶語意是今年。
+# ============================================================
+banner('T17: 短日期強制當年')
+from modules.utils.taiwan_time import get_taiwan_date
+this_year = get_taiwan_date().year
+
+for inp in ['12/30', '12-30', '十二月三十日', '12月30日', '12月30']:
+    r = calculate(date_str=inp)
+    assert r.ok, r.error
+    assert r.data['base'].year == this_year, \
+        f'{inp!r} expected year={this_year} got {r.data["base"]}'
+    assert r.data['base'].month == 12 and r.data['base'].day == 30
+    print(f'  ✅ {inp!r} → {r.data["base"]}（強制當年）')
+
+# 含年明示 — 不受強制當年影響
+r = calculate(date_str='2025-12-30')
+assert r.ok and r.data['base'] == date(2025, 12, 30)
+print(f'  ✅ 含年明示 2025-12-30 → {r.data["base"]}（保持原年）')
+
+r = calculate(date_str='2027-3-15')
+assert r.ok and r.data['base'] == date(2027, 3, 15)
+print(f'  ✅ 含年明示 2027-3-15 → {r.data["base"]}（保持原年）')
 
 
 print('\n' + '=' * 60)
