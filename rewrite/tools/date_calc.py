@@ -2,7 +2,7 @@
 日期計算 atomic tool（純函數，無 DB）
 
 外掛性質（跟車資試算同類型）— 純算、不碰 DB、無 session、無 audit log。
-用戶輸入 `(日期)` 半形 / `（日期）` 全形 → router 直接呼叫，零 AI 成本。
+用戶輸入 `(日期)` 半形 / `（日期）` 全形 → router 直接呼叫,零 AI 成本。
 
 支援的日期格式（多數仰賴 unified_date_parser）：
   (5/14)        MM/DD
@@ -108,14 +108,38 @@ SHORT_DATE_RE = re.compile(r'^\d{1,2}[-/]\d{1,2}$')
 def calculate(*, date_str: str) -> ToolResult:
     """從日期字串算 base / +7 / +77 / +84 四個日期。
 
-    短日期語境：用戶沒指定年份時，一律取「當年」。
-    unified_date_parser 對短日期有「>180 天往前推 1 年」邏輯（line 95-100），
-    對醫療回診語境不合理：(12-30) 距今 229 天會被推到去年，但用戶語意是「今年 12-30
-    的下次回診」。含年明示 (2025-12-30) 不受影響。
+    短日期語境（沒指定年份）：
+      1) 一律取「當年」— unified_date_parser 的「>180 天推上下年」邏輯
+         對醫療回診語境不對：(12-30) 距今 229 天會被推到去年，
+         但用戶語意是「今年 12-30 的下次回診」。
+      2) 2/29 非閏年自動 fallback 到 3/1 — 「2/29 自然順位的下一天」，
+         比 fallback 到 2/28 更貼合療程順下去的語意。
+
+    含年明示 (2025-2-29) / (2025-12-30) 不受影響 — 用戶明確指定，
+    無效就 fail，不 silent fallback。
     """
     if not isinstance(date_str, str) or not date_str.strip():
         return ToolResult.fail("date_str 不能為空")
     normalized = _normalize_input(date_str)
+
+    # 短日期 2/29 非閏年特例 — 早於 parser，避免 parser 內拋 ValueError
+    if SHORT_DATE_RE.match(normalized):
+        sep = '/' if '/' in normalized else '-'
+        m, d = map(int, normalized.split(sep))
+        if m == 2 and d == 29:
+            import calendar
+            from modules.utils.taiwan_time import get_taiwan_date
+            today = get_taiwan_date()
+            if not calendar.isleap(today.year):
+                base = date(today.year, 3, 1)
+                return ToolResult.success(data={
+                    'input': date_str,
+                    'base': base,
+                    'next_week': base + timedelta(days=7),
+                    'week11': base + timedelta(days=77),
+                    'week12': base + timedelta(days=84),
+                })
+
     try:
         base = UnifiedDateParser.parse(normalized)
     except Exception as e:
@@ -128,7 +152,7 @@ def calculate(*, date_str: str) -> ToolResult:
             base = base.replace(year=today.year)
         except ValueError:
             return ToolResult.fail(
-                f"日期「{date_str}」在 {today.year} 年無對應日（如 2/29 跨非閏年）"
+                f"日期「{date_str}」在 {today.year} 年無對應日"
             )
 
     return ToolResult.success(data={
