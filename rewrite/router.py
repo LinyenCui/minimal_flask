@@ -57,6 +57,12 @@ from rewrite.tools.fare_calc import (
     format_text as _fare_format,
     parse_command as _fare_parse,
 )
+from rewrite.tools.date_calc import (
+    calculate as _date_calc,
+    parse_command as _date_calc_parse,
+    is_date_calc_command,
+)
+from rewrite.views.date_calc_flex import render_date_calc
 from rewrite.conversation_state import (
     set_state as _state_set,
     get_state as _state_get,
@@ -117,6 +123,14 @@ def try_route(event) -> bool:
                 event.reply_token, user_id, text, state['payload']
             )
 
+    reply_token = event.reply_token
+    event_source = event.source  # 帶到 render 用，編輯按鈕 LIFF URL 才會帶 gid/rid
+
+    # ===== 日期計算外掛（純算，不開 session）— 早於 prefix check =====
+    # (日期) / （日期） 不是 prefix 字串型，要在 prefix 早退出前處理
+    if is_date_calc_command(text):
+        return _handle_date_calc(reply_token, text)
+
     # 提早退出：不像我們的命令
     rewrite_prefixes = ('查客戶', '客戶詳情', '病歷層',
                         '查班次', '診所班次', '東洋班次',
@@ -128,9 +142,6 @@ def try_route(event) -> bool:
                         '車資試算')
     if not text.startswith(rewrite_prefixes):
         return False
-
-    reply_token = event.reply_token
-    event_source = event.source  # 帶到 render 用，編輯按鈕 LIFF URL 才會帶 gid/rid
 
     # ===== 車資試算（純算，不開 session）=====
     if _RE_FARE.match(text):
@@ -700,6 +711,24 @@ def _handle_fare_calc(reply_token, text: str) -> bool:
     return True
 
 
+def _handle_date_calc(reply_token, text: str) -> bool:
+    """日期計算外掛（無 DB，純算）。
+
+    用法：(日期) 或 （日期）— 半全形括號皆可
+    範例：(5/14) (05-20) (2026-5-14) (五月二十日)
+    """
+    parsed = _date_calc_parse(text)
+    if not parsed.ok:
+        reply_message(reply_token, {"type": "text", "text": f"❌ {parsed.error}"})
+        return True
+    r = _date_calc(**parsed.data)
+    if not r.ok:
+        reply_message(reply_token, {"type": "text", "text": f"❌ {r.error}"})
+        return True
+    reply_message(reply_token, render_date_calc(r.data))
+    return True
+
+
 def _send_help(reply_token):
     help_text = """🛠️ Rewrite v0.1 測試命令
 
@@ -730,5 +759,10 @@ def _send_help(reply_token):
 🚕 車資試算（純算，不寫 DB）
   車資試算 <公里> [停等分鐘] [日間|夜間]
     例：車資試算 8.5
-    例：車資試算 10 5 夜間"""
+    例：車資試算 10 5 夜間
+
+📅 日期計算（純算，不寫 DB）
+  (日期) 或 （日期）— 半全形括號皆可
+    例：(5/14)、(05-20)、(2026-5-14)、(五月二十日)
+    回該日期 / +7 天 / 第11週（抽血）/ 第12週（回診）"""
     reply_message(reply_token, {"type": "text", "text": help_text})
