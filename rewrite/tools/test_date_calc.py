@@ -29,54 +29,57 @@ def banner(label: str):
 
 
 # ============================================================
-# T1: parse_command — 半形括號
+# T1: parse_command — 半形 ! 前綴
 # ============================================================
-banner('T1: parse_command 半形括號')
-r = parse_command('(5/14)')
+banner('T1: parse_command 半形 ! 前綴')
+r = parse_command('!5/14')
 assert r.ok and r.data == {'date_str': '5/14'}, r
-print(f'  ✅ (5/14) → {r.data}')
+print(f'  ✅ !5/14 → {r.data}')
 
-r = parse_command('  (5/14)  ')
+r = parse_command('  !5/14  ')
 assert r.ok and r.data['date_str'] == '5/14', r
 print(f'  ✅ 兩端空白 OK')
 
-r = parse_command('( 5/14 )')
+r = parse_command('! 5/14')
 assert r.ok and r.data['date_str'] == '5/14', r
-print(f'  ✅ 括號內空白 OK → {r.data}')
+print(f'  ✅ ! 後空白 OK → {r.data}')
 
 
 # ============================================================
-# T2: parse_command — 全形括號
+# T2: parse_command — 全形 ！ 前綴
 # ============================================================
-banner('T2: parse_command 全形括號')
-r = parse_command('（5/14）')
+banner('T2: parse_command 全形 ！ 前綴')
+r = parse_command('！5/14')
 assert r.ok and r.data['date_str'] == '5/14', r
-print(f'  ✅ （5/14）→ {r.data}')
+print(f'  ✅ ！5/14 → {r.data}')
 
-r = parse_command('（五月二十日）')
+r = parse_command('！五月二十日')
 assert r.ok and r.data['date_str'] == '五月二十日', r
-print(f'  ✅ （五月二十日）→ {r.data}')
+print(f'  ✅ ！五月二十日 → {r.data}')
 
 
 # ============================================================
 # T3: parse_command — 失敗
+#   ! 後非數字/中文數字 / 無前綴 / 舊括號格式 都不認
 # ============================================================
 banner('T3: parse_command 失敗')
-for bad in ['abc', '5/14', '(5/14)abc', 'abc(5/14)', '()', '（）', '(  )']:
+for bad in ['abc', '5/14', '(5/14)', '（5/14）', '!收到', '!!!', '!', '！', '! ', '!abc']:
     r = parse_command(bad)
     assert not r.ok, f'{bad!r} should fail but got ok'
-print(f'  ✅ 各種非法輸入都 fail')
+print(f'  ✅ 各種非法輸入都 fail（含舊括號 / !非日期）')
 
 
 # ============================================================
 # T4: is_date_calc_command
 # ============================================================
 banner('T4: is_date_calc_command')
-for good in ['(5/14)', '（5/14）', '(05-20)', '(2026-5-14)', '(五月二十日)', '  (5/14)  ']:
+for good in ['!5/14', '！5/14', '!05-20', '!2026-5-14', '!五月二十日',
+             '  !5/14  ', '! 5/14', '!十二月三十一']:
     assert is_date_calc_command(good), f'{good!r} should be True'
-for bad in ['', '5/14', 'abc', '(abc', 'abc)', '()', '車資試算 10', '(這是)備註(也是)']:
+for bad in ['', '5/14', 'abc', '(5/14)', '（5/14）', '!收到', '!!!', '!',
+            '！', '車資試算 10', '!哈哈', '太子龍!']:
     assert not is_date_calc_command(bad), f'{bad!r} should be False'
-print(f'  ✅ regex 行為正確')
+print(f'  ✅ regex 行為正確（! + 數字/中文數字 才認）')
 
 
 # ============================================================
@@ -234,13 +237,13 @@ print(f'  ✅ format_date_full({d}) = {s!r}')
 # ============================================================
 # T16: parse_command + calculate 端到端
 # ============================================================
-banner('T16: 端到端 (五月二十日)')
-p = parse_command('(五月二十日)')
+banner('T16: 端到端 !五月二十日')
+p = parse_command('!五月二十日')
 assert p.ok, p.error
 r = calculate(**p.data)
 assert r.ok, r.error
 assert r.data['base'].month == 5 and r.data['base'].day == 20
-print(f'  ✅ (五月二十日) → base={r.data["base"]} +77={r.data["week11"]}')
+print(f'  ✅ !五月二十日 → base={r.data["base"]} +77={r.data["week11"]}')
 
 
 # ============================================================
@@ -290,11 +293,11 @@ for inp in ['2/29', '2-29', '2月29日', '2月29號', '二月二十九日', '二
     print(f'  ✅ {inp!r} → {r.data["base"]}（{"閏年保留" if is_leap else "fallback 3/1"}）')
 
 # 端到端 parse_command + calculate
-p = parse_command('(2/29)')
+p = parse_command('!2/29')
 assert p.ok
 r = calculate(**p.data)
 assert r.ok and r.data['base'] == expected_29
-print(f'  ✅ 端到端 (2/29) → {r.data["base"]}')
+print(f'  ✅ 端到端 !2/29 → {r.data["base"]}')
 
 # 含年明示閏年 — 保留
 r = calculate(date_str='2024-2-29')

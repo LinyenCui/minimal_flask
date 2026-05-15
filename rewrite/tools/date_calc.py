@@ -1,24 +1,30 @@
 """
-日期計算 atomic tool（純函數，無 DB）
+回診日期計算 atomic tool（純函數，無 DB）
 
 外掛性質（跟車資試算同類型）— 純算、不碰 DB、無 session、無 audit log。
-用戶輸入 `(日期)` 半形 / `（日期）` 全形 → router 直接呼叫,零 AI 成本。
+用戶輸入 `!日期` 半形 / `！日期` 全形 → router 直接呼叫，零 AI 成本。
+
+> 觸發前綴歷史：原本用 `(日期)` 括號，但 LINE 內建顏文字（emoticon）在
+> webhook 的 message.text 就是 `(...)` 形式（如 `(笑)`），群組任何人傳
+> 都會誤觸發。改用 `!` / `！` 前綴，且限制後面緊接數字/中文數字，避免
+> `!收到` `!!!` 等非日期誤觸發。
 
 支援的日期格式（多數仰賴 unified_date_parser）：
-  (5/14)        MM/DD
-  (05-20)       MM-DD
-  (2026-5-14)   YYYY-M-D
-  (2026/5/14)   YYYY/M/D（本工具預處理成 YYYY-M-D 再丟 parser）
-  (5月14日)     MM月DD日（阿拉伯數字）
-  (五月二十日)  中文數字（本工具預處理成 5/20 再丟 parser）
-  (五月二十)    中文數字 + 缺尾
-  (五月二十號)  中文數字 + 「號」
+  !5/14        MM/DD
+  !05-20       MM-DD
+  !2026-5-14   YYYY-M-D
+  !2026/5/14   YYYY/M/D（本工具預處理成 YYYY-M-D 再丟 parser）
+  !5月14日     MM月DD日（阿拉伯數字）
+  !五月二十日  中文數字（本工具預處理成 5/20 再丟 parser）
+  !五月二十    中文數字 + 缺尾
+  !五月二十號  中文數字 + 「號」
 
 「廿」「卅」等台灣略寫不支援（用戶當前需求外）。
 
 公開 API:
+  is_date_calc_command(text) → bool   router / sandbox_handler 共用判斷
   parse_command(text)     → ToolResult.data = {'date_str': inner}
-      只負責剝外圈括號，回括號內字串
+      只負責剝 ! / ！ 前綴，回後面的日期字串
   calculate(*, date_str)  → ToolResult.data = {'base', 'next_week', 'week11', 'week12'}
       呼叫 unified_date_parser，加 +7 / +77 / +84 天
   format_text(data)       → str  (fallback / 純文字訊息用)
@@ -110,12 +116,12 @@ def calculate(*, date_str: str) -> ToolResult:
 
     短日期語境（沒指定年份）：
       1) 一律取「當年」— unified_date_parser 的「>180 天推上下年」邏輯
-         對醫療回診語境不對：(12-30) 距今 229 天會被推到去年，
+         對醫療回診語境不對：12-30 距今 229 天會被推到去年，
          但用戶語意是「今年 12-30 的下次回診」。
-      2) 2/29 非閏年自動 fallback 到 3/1 — 「2/29 自然順位的下一天」，
-         比 fallback 到 2/28 更貼合療程順下去的語意。
+      2) 2/29 非閏年自動 fallback 到 3/1 — 在 +7 推算語境下，閏年的
+         2/29 等於非閏年的 3/1（2/22 + 7 在閏年=2/29、非閏年=3/1）。
 
-    含年明示 (2025-2-29) / (2025-12-30) 不受影響 — 用戶明確指定，
+    含年明示 2025-2-29 / 2025-12-30 不受影響 — 用戶明確指定，
     無效就 fail，不 silent fallback。
     """
     if not isinstance(date_str, str) or not date_str.strip():
@@ -166,24 +172,26 @@ def calculate(*, date_str: str) -> ToolResult:
 
 # ---- 指令解析（router / sandbox_handler 共用）----
 
-OUTER_PAREN_RE = re.compile(r'^[(（]\s*([^)）]+?)\s*[)）]$')
+# ! / ！ 前綴，且後面緊接數字或中文數字（日期一定數字/中文開頭）
+# 限制是為了避免 !收到 !!! 等非日期訊息誤觸發
+BANG_RE = re.compile(r'^[!！]\s*([\d一二三四五六七八九十].*)$')
 
 
 def is_date_calc_command(text: str) -> bool:
-    """訊息是否為 (日期) 外掛格式。router 跟 sandbox_handler 共用判斷。"""
-    return bool(OUTER_PAREN_RE.match((text or '').strip()))
+    """訊息是否為 !日期 外掛格式。router 跟 sandbox_handler 共用判斷。"""
+    return bool(BANG_RE.match((text or '').strip()))
 
 
 def parse_command(text: str) -> ToolResult:
-    """從訊息 `(日期)` / `（日期）` 抽內容。只剝括號，parsing 交給 calculate。"""
+    """從訊息 `!日期` / `！日期` 抽日期字串。只剝前綴，parsing 交給 calculate。"""
     if not isinstance(text, str):
         return ToolResult.fail("text 必須是字串")
-    m = OUTER_PAREN_RE.match(text.strip())
+    m = BANG_RE.match(text.strip())
     if not m:
-        return ToolResult.fail("用法：(日期) 例 (5/14) (五月二十日) (2026-5-14)")
+        return ToolResult.fail("用法：!日期 例 !5/14 !五月二十日 !2026-5-14")
     inner = m.group(1).strip()
     if not inner:
-        return ToolResult.fail("括號內不可為空")
+        return ToolResult.fail("! 後面要接日期")
     return ToolResult.success(data={'date_str': inner})
 
 
@@ -200,7 +208,7 @@ def format_date_full(d: date) -> str:
 def format_text(data: Dict[str, Any]) -> str:
     """渲染純文字（fallback）"""
     return (
-        f"📅 日期計算\n"
+        f"📅 回診日期計算\n"
         f"該日期：{format_date_full(data['base'])}\n"
         f"下一週：{format_date_full(data['next_week'])}\n"
         f"第 11 週：{format_date_full(data['week11'])}（抽血）\n"
