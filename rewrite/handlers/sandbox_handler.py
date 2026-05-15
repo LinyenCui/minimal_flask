@@ -328,7 +328,13 @@ def looks_like_quick_command(text: str) -> bool:
         return False
     # 剝掉 / # 前綴（群組命令格式）
     cleaned = text.strip().lstrip('/').lstrip('#').strip()
-    return cleaned.startswith(_QUICK_COMMAND_PREFIXES)
+    if cleaned.startswith(_QUICK_COMMAND_PREFIXES):
+        return True
+    # 日期計算外掛：(日期) / （日期）— 不是 prefix 字串型，regex 認
+    from rewrite.tools.date_calc import is_date_calc_command
+    if is_date_calc_command(cleaned):
+        return True
+    return False
 
 
 def try_handle_sandbox(event) -> bool:
