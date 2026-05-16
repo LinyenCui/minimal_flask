@@ -46,7 +46,7 @@ def _parse_payload(body: dict) -> tuple[dict, str | None]:
     """
     fields: dict[str, Any] = {}
     for k in ('name', 'short_name', 'address', 'category', 'contact_phone',
-             'remarks', 'gender', 'medical_record_no'):
+             'remarks', 'gender', 'medical_record_no', 'dm_care_no'):
         v = body.get(k)
         if v == '' or v is None:
             v = None

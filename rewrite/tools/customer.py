@@ -45,6 +45,7 @@ class CustomerView:
     birthday: Optional[date] = None
     gender: Optional[str] = None
     medical_record_no: Optional[str] = None
+    dm_care_no: Optional[str] = None  # 糖尿病共同照護網代號（診所內部編號）
 
     # 座標
     latitude: Optional[float] = None
@@ -97,7 +98,7 @@ class CustomerView:
 # 共用 SELECT
 _SELECT_ALL = """
     SELECT id, short_name, name, address, category, contact_phone, remarks,
-           birthday, gender, medical_record_no,
+           birthday, gender, medical_record_no, dm_care_no,
            latitude, longitude, created_at, updated_at
     FROM customers
 """
@@ -110,6 +111,7 @@ def query_customer(
     name: Optional[str] = None,
     address: Optional[str] = None,
     medical_record_no: Optional[str] = None,
+    dm_care_no: Optional[str] = None,
     fuzzy_name: bool = True,
     fuzzy_address: bool = True,
     mask_id: bool = True,  # backward-compat，不再使用
@@ -121,8 +123,9 @@ def query_customer(
     cascade 順序：
       1. short_name 精確
       2. medical_record_no 精確
-      3. name（精確或模糊）
-      4. address 模糊
+      3. dm_care_no 精確（糖尿病共同照護網代號）
+      4. name（精確或模糊）
+      5. address 模糊
 
     任一階段命中 = 回傳，後面不再嘗試。
     """
@@ -150,7 +153,19 @@ def query_customer(
                 matched_by='medical_record_no',
             )
 
-    # 3. name
+    # 3. 糖尿病共同照護網代號
+    if dm_care_no:
+        rows = session.execute(
+            text(f"{_SELECT_ALL} WHERE dm_care_no = :v"),
+            {'v': dm_care_no}
+        ).fetchall()
+        if rows:
+            return ToolResult.success(
+                data=[CustomerView.from_row(r) for r in rows],
+                matched_by='dm_care_no',
+            )
+
+    # 4. name
     if name:
         sql = (f"{_SELECT_ALL} WHERE name LIKE :v ORDER BY id LIMIT :l"
                if fuzzy_name else
@@ -163,7 +178,7 @@ def query_customer(
                 matched_by='name' + ('(fuzzy)' if fuzzy_name else ''),
             )
 
-    # 4. address 模糊
+    # 5. address 模糊
     if address:
         sql = (f"{_SELECT_ALL} WHERE address LIKE :v ORDER BY id LIMIT :l"
                if fuzzy_address else
@@ -189,21 +204,22 @@ def query_customer_by_term(
     """
     自然語言模糊查詢（給 AI 或自由輸入用）
 
-    會嘗試把 term 當作 short_name / name / address / medical_record_no。
-    cascade 找到任一就回傳。
+    會嘗試把 term 當作 short_name / medical_record_no / dm_care_no /
+    name / address。cascade 找到任一就回傳。
     """
     if not term or not term.strip():
         return ToolResult.fail("請提供查詢關鍵字")
 
     term = term.strip()
 
-    # heuristic: 看 term 像不像病歷號 (純數字 4-8 位)
-    looks_like_mr = term.isdigit() and 4 <= len(term) <= 8
+    # heuristic: 純數字 4-8 位 → 可能是病歷號或共照網代號（cascade 內依序試）
+    looks_like_code = term.isdigit() and 4 <= len(term) <= 8
 
     return query_customer(
         session=session,
         short_name=term,                            # 試簡稱
-        medical_record_no=term if looks_like_mr else None,
+        medical_record_no=term if looks_like_code else None,
+        dm_care_no=term if looks_like_code else None,
         name=term,                                  # 模糊姓名
         address=term,                               # 模糊地址
         limit=limit,
@@ -295,7 +311,7 @@ def query_birthday_day_summary(*, session) -> ToolResult:
 # 允許 update 的欄位白名單（防注入 + 明確語意）
 _UPDATABLE_FIELDS = {
     'name', 'short_name', 'address', 'category', 'contact_phone', 'remarks',
-    'birthday', 'gender', 'medical_record_no',
+    'birthday', 'gender', 'medical_record_no', 'dm_care_no',
     'latitude', 'longitude',
 }
 
@@ -312,6 +328,7 @@ def create_customer(
     birthday: Optional[date] = None,
     gender: Optional[str] = None,
     medical_record_no: Optional[str] = None,
+    dm_care_no: Optional[str] = None,
     latitude: Optional[float] = None,
     longitude: Optional[float] = None,
     auto_commit: bool = True,
@@ -355,18 +372,18 @@ def create_customer(
     result = session.execute(text("""
         INSERT INTO customers (
             name, short_name, address, category, contact_phone, remarks,
-            birthday, gender, medical_record_no,
+            birthday, gender, medical_record_no, dm_care_no,
             latitude, longitude
         ) VALUES (
             :name, :short_name, :address, :category, :contact_phone, :remarks,
-            :birthday, :gender, :medical_record_no,
+            :birthday, :gender, :medical_record_no, :dm_care_no,
             :latitude, :longitude
         ) RETURNING id
     """), {
         'name': name, 'short_name': short_name, 'address': address,
         'category': category, 'contact_phone': contact_phone, 'remarks': remarks,
         'birthday': birthday, 'gender': gender,
-        'medical_record_no': medical_record_no,
+        'medical_record_no': medical_record_no, 'dm_care_no': dm_care_no,
         'latitude': latitude, 'longitude': longitude,
     })
     new_id = result.fetchone()[0]
