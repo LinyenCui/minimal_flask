@@ -28,7 +28,8 @@ _SYSTEM_PROMPT = """\
 你是客戶資料助手。
 
 🗂️ 客戶資料含：name (全名)、short_name (簡稱)、address、category、
-contact_phone、remarks、birthday、gender、medical_record_no (病歷號) 等。
+contact_phone、remarks、birthday、gender、medical_record_no (病歷號)、
+dm_care_no (糖尿病共同照護網代號，診所內部編號) 等。
 
 🛠️ 工具選擇規則：
 
@@ -67,11 +68,11 @@ contact_phone、remarks、birthday、gender、medical_record_no (病歷號) 等�
 # ============================================================
 
 QUERY_CUSTOMER_BY_TERM_SCHEMA = {
-    'description': "Cascade fallback search: tries medical_record_no → short_name → name → address. 給「查 X」「X 是誰」這類自然詢問用",
+    'description': "Cascade fallback search: tries short_name → medical_record_no → dm_care_no → name → address. 給「查 X」「X 是誰」這類自然詢問用",
     'parameters': {
         'type': 'object',
         'properties': {
-            'term': {'type': 'string', 'description': "用戶輸入的搜尋詞（簡稱/姓名/地址/病歷號）"},
+            'term': {'type': 'string', 'description': "用戶輸入的搜尋詞（簡稱/姓名/地址/病歷號/共照網代號）"},
             'limit': {'type': 'integer', 'description': "預設 20"},
         },
         'required': ['term'],
@@ -87,6 +88,7 @@ QUERY_CUSTOMER_SCHEMA = {
             'name': {'type': 'string'},
             'address': {'type': 'string'},
             'medical_record_no': {'type': 'string', 'description': "病歷號"},
+            'dm_care_no': {'type': 'string', 'description': "糖尿病共同照護網代號（診所內部編號）"},
             'fuzzy_name': {'type': 'boolean'},
             'fuzzy_address': {'type': 'boolean'},
             'limit': {'type': 'integer'},
@@ -138,6 +140,7 @@ CREATE_CUSTOMER_SCHEMA = {
             'birthday': {'type': 'string', 'description': "YYYY-MM-DD"},
             'gender': {'type': 'string', 'description': "M/F"},
             'medical_record_no': {'type': 'string', 'description': "病歷號"},
+            'dm_care_no': {'type': 'string', 'description': "糖尿病共同照護網代號（診所內部編號，約 4 位數）"},
         },
         'required': ['name', 'short_name', 'address'],
     },
@@ -158,6 +161,7 @@ UPDATE_CUSTOMER_SCHEMA = {
             'birthday': {'type': 'string', 'description': "YYYY-MM-DD"},
             'gender': {'type': 'string'},
             'medical_record_no': {'type': 'string'},
+            'dm_care_no': {'type': 'string', 'description': "糖尿病共同照護網代號（診所內部編號）"},
         },
         'required': ['customer_id'],
     },

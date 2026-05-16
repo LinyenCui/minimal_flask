@@ -124,6 +124,8 @@ def render_customer_detail(c: CustomerView, event_source=None) -> dict:
         ))
     if c.medical_record_no:
         medical_rows.append(_row("病歷號", c.medical_record_no))
+    if c.dm_care_no:
+        medical_rows.append(_row("共照網代號", c.dm_care_no))
     if medical_rows:
         body_contents.append(_separator())
         body_contents.extend(medical_rows)

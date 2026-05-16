@@ -73,7 +73,7 @@
       </div>
 
       <details>
-        <summary>填寫更多資料（生日 / 性別 / 病歷號）</summary>
+        <summary>填寫更多資料（生日 / 性別 / 病歷號 / 共照網代號）</summary>
         <div class="field" style="margin-top: 10px;">
           <label>生日</label>
           <input name="birthday" type="date">
@@ -89,6 +89,10 @@
         <div class="field">
           <label>病歷號</label>
           <input name="medical_record_no" type="text" maxlength="50">
+        </div>
+        <div class="field">
+          <label>糖尿病共照網代號</label>
+          <input name="dm_care_no" type="text" maxlength="10" inputmode="numeric" placeholder="診所內部編號（約 4 位數，可留空）">
         </div>
       </details>
 
@@ -185,7 +189,7 @@
 
     // 編輯模式 prefill 時，若進階欄位有資料就把 details 預設展開
     function _expandAdvancedIfHasData(c) {
-      if (advancedDetails && (c.birthday || c.gender || c.medical_record_no)) {
+      if (advancedDetails && (c.birthday || c.gender || c.medical_record_no || c.dm_care_no)) {
         advancedDetails.open = true;
       }
     }
