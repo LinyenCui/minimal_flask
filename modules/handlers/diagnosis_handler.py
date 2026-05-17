@@ -8,8 +8,9 @@
   /dx ...        → 群組相容
 """
 import logging
-from modules.utils.line_bot import reply_text
+from modules.utils.line_bot import reply_message, reply_text
 from modules.services.diagnosis_query_service import DiagnosisQueryService
+from modules.views.diagnosis_flex import render_diagnosis_detail
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ def handle_diagnosis_message(event):
 
     try:
         result = DiagnosisQueryService.search(query)
-        reply_text(reply_token, _format_result(result))
+        _reply_result(reply_token, result)
     except Exception as e:
         logger.error(f"診斷碼查詢失敗: {e}", exc_info=True)
         reply_text(reply_token, "❌ 查詢失敗，請稍後再試")
@@ -58,6 +59,29 @@ def handle_diagnosis_message(event):
 # ---------------------------------------------------------------------------
 # 格式化
 # ---------------------------------------------------------------------------
+
+def _reply_result(reply_token: str, result: dict) -> None:
+    """Reply with read-only Flex for single /dx result, falling back to text."""
+    text_fallback = _format_result(result)
+
+    if result.get('type') != 'single':
+        reply_text(reply_token, text_fallback)
+        return
+
+    try:
+        code = result['codes'][0]
+        flex = render_diagnosis_detail(code)
+        ok = reply_message(reply_token, {
+            'type': 'flex',
+            'altText': f"診斷碼：{code.get('name_zh') or code.get('icd10_code') or code.get('icd9_code')}",
+            'contents': flex,
+        })
+        if not ok:
+            logger.warning("診斷碼 Flex 發送失敗，改用文字 fallback")
+            reply_text(reply_token, text_fallback)
+    except Exception as exc:
+        logger.warning(f"診斷碼 Flex 建立失敗，改用文字 fallback: {exc}", exc_info=True)
+        reply_text(reply_token, text_fallback)
 
 def _format_result(result: dict) -> str:
     if result['type'] == 'error':

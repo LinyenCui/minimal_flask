@@ -10,7 +10,8 @@
 import logging
 
 from modules.services.drug_query_service import DrugQueryService
-from modules.utils.line_bot import reply_text
+from modules.utils.line_bot import reply_message, reply_text
+from modules.views.drug_flex import render_drug_results
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +45,34 @@ def handle_drug_message(event):
 
     try:
         result = DrugQueryService.search(query)
-        reply_text(reply_token, _format_result(result))
+        _reply_result(reply_token, result)
     except Exception as exc:
         logger.error(f"藥名查詢失敗: {exc}", exc_info=True)
         reply_text(reply_token, "❌ 藥名查詢失敗，請稍後再試")
+
+
+def _reply_result(reply_token: str, result: dict) -> None:
+    """Reply with read-only Flex for drug results, falling back to text."""
+    text_fallback = _format_result(result)
+
+    if result.get('type') != 'list' or not result.get('items'):
+        reply_text(reply_token, text_fallback)
+        return
+
+    try:
+        items = result.get('items') or []
+        flex = render_drug_results(items)
+        ok = reply_message(reply_token, {
+            'type': 'flex',
+            'altText': f"藥名查詢：{result.get('query') or 'drug'}（{len(items)} 筆）",
+            'contents': flex,
+        })
+        if not ok:
+            logger.warning("藥名 Flex 發送失敗，改用文字 fallback")
+            reply_text(reply_token, text_fallback)
+    except Exception as exc:
+        logger.warning(f"藥名 Flex 建立失敗，改用文字 fallback: {exc}", exc_info=True)
+        reply_text(reply_token, text_fallback)
 
 
 def _format_result(result: dict) -> str:
