@@ -62,6 +62,17 @@ def callback():
                     logger.error(f"Diagnosis dispatch failed: {e}", exc_info=True)
                 # --- END PATCH: 診斷碼查詢 ---
 
+                # --- PATCH: 藥名查詢 (drug / 藥 / 藥名 前綴) ---
+                try:
+                    from modules.handlers.drug_handler import is_drug_trigger, handle_drug_message
+                    if is_drug_trigger(original_message_text):
+                        logger.info(f"Routing to Drug Query: {user_id}")
+                        handle_drug_message(event)
+                        continue
+                except Exception as e:
+                    logger.error(f"Drug dispatch failed: {e}", exc_info=True)
+                # --- END PATCH: 藥名查詢 ---
+
                 # ============================================================
                 # Phase B（拆沙盒）：新路由規則
                 # ============================================================

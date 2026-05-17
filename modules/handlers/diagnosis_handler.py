@@ -123,6 +123,11 @@ def _format_single(c: dict) -> str:
             note_short = note if len(note) <= 80 else note[:77] + '...'
             lines.append(f"💡 {note_short}")
 
+    related = _format_related_drugs(c)
+    if related:
+        lines.append('')
+        lines.extend(related)
+
     return '\n'.join(lines)
 
 
@@ -149,6 +154,9 @@ def _format_table(result: dict) -> str:
             desc = c['description']
             if len(desc) <= 40:
                 lines.append(f'  📝 {desc}')
+        related = _format_related_drugs(c, prefix='  ')
+        if related:
+            lines.extend(related)
         lines.append('')
 
     if notes:
@@ -175,12 +183,41 @@ def _format_list(codes: list, total: int, query: str) -> str:
             code_str = icd9 or icd10
 
         lines.append(f"{prefix} {code_str} {c['name_zh']}{en}{ch_str}")
+        related = _format_related_drugs(c, prefix='   ')
+        if related:
+            lines.extend(related)
 
     if total > 15:
         lines.append(f"\n... 還有 {total - 15} 筆，請縮小查詢範圍")
 
     lines.append(f"\n💡 輸入 dx <碼號> 查看詳情")
     return '\n'.join(lines)
+
+
+def _format_related_drugs(c: dict, prefix: str = '') -> list:
+    related = c.get('related_drugs') or []
+    if not related:
+        return []
+
+    lines = [f'{prefix}相關藥名']
+    for drug in related[:5]:
+        drug_name = f"{drug.get('generic_name') or ''} / {drug.get('brand_name') or ''}".strip()
+        meta = '；'.join(
+            part for part in [
+                drug.get('link_type'),
+                drug.get('role_type'),
+                drug.get('confidence'),
+                drug.get('source_type'),
+            ]
+            if part
+        )
+        line = f'{prefix}- {drug_name}'
+        if meta:
+            line += f'（{meta}）'
+        lines.append(line)
+        if drug.get('note_text'):
+            lines.append(f"{prefix}  {drug['note_text']}")
+    return lines
 
 
 def _format_chapters(chapters: list) -> str:

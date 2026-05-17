@@ -10,6 +10,8 @@ import re
 import logging
 from typing import List, Dict, Any
 
+from sqlalchemy import text
+
 from modules.models.base import db
 from modules.models.diagnosis import (
     DiagnosisCode, DiagnosisChapter, DiagnosisCodeChapter,
@@ -191,6 +193,7 @@ class DiagnosisQueryService:
         ]
 
         notes = [n.note_text for n in DiagnosisCodeNote.query.filter_by(diagnosis_code_id=dc.id).all()]
+        related_drugs = DiagnosisQueryService._get_related_drugs(dc.id)
 
         return {
             'id': dc.id,
@@ -208,7 +211,45 @@ class DiagnosisQueryService:
             'additional_codes': dc.additional_codes,
             'components': components,
             'notes': notes,
+            'related_drugs': related_drugs,
         }
+
+    @staticmethod
+    def _get_related_drugs(diagnosis_code_id: int) -> List[Dict[str, Any]]:
+        rows = db.session.execute(
+            text("""
+                SELECT
+                    di.id AS drug_item_id,
+                    di.generic_name,
+                    di.brand_name,
+                    ddl.link_type,
+                    ddl.role_type,
+                    ddl.confidence,
+                    ddl.source_type,
+                    ddl.note_text,
+                    ddl.is_primary,
+                    ddl.sort_order
+                FROM drug_diagnosis_links ddl
+                JOIN drug_items di ON di.id = ddl.drug_item_id
+                WHERE ddl.diagnosis_code_id = :diagnosis_code_id
+                  AND di.is_active IS TRUE
+                ORDER BY
+                    ddl.is_primary DESC,
+                    CASE ddl.confidence
+                        WHEN 'high' THEN 1
+                        WHEN 'medium' THEN 2
+                        WHEN 'low' THEN 3
+                        ELSE 4
+                    END ASC,
+                    ddl.sort_order ASC,
+                    di.generic_name ASC,
+                    di.brand_name ASC
+                LIMIT 5
+            """),
+            {'diagnosis_code_id': diagnosis_code_id},
+        ).mappings().all()
+
+        return [dict(row) for row in rows]
 
     @staticmethod
     def _get_chapter_notes(enriched: List[Dict]) -> List[str]:
