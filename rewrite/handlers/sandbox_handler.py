@@ -91,6 +91,11 @@ _BATCH_ALLOWANCE_LIFF_TRIGGERS = {
     '批量加成', '批次加成', '批量改加成', 'batch-allowance',
 }
 
+# 觸發藥名 ↔ 診斷碼關聯維護 LIFF 入口（v3 最小版）
+_DRUG_DX_LINK_LIFF_TRIGGERS = {
+    '藥診關聯', '新增藥診關聯',
+}
+
 # 觸發資料庫同步流程（admin 工具，橋接呼叫 legacy database_sync_handler）
 # 設計選擇：admin 工具不重寫 atomic-tool 風格（580 行業務邏輯 + sysadmin only），
 #          rewrite 沙盒只認 trigger，dispatch 給既有 legacy handler 處理
@@ -280,6 +285,34 @@ def _strip_prefix(text: str) -> str:
     return text
 
 
+def _is_drug_dx_link_liff_trigger(raw: str, source_type: str | None) -> bool:
+    """藥診關聯 LIFF 入口（全部 exact-match）：
+    群組 group/room 收 / 與 ! / ！ 前綴；私聊 user 另收無前綴。
+    """
+    cleaned = (raw or '').strip()
+    if source_type in ('group', 'room'):
+        return cleaned in {
+            '/藥診關聯',
+            '/新增藥診關聯',
+            '!藥診關聯',
+            '!新增藥診關聯',
+            '！藥診關聯',
+            '！新增藥診關聯',
+        }
+    if source_type == 'user':
+        return cleaned in {
+            '藥診關聯',
+            '新增藥診關聯',
+            '/藥診關聯',
+            '/新增藥診關聯',
+            '!藥診關聯',
+            '!新增藥診關聯',
+            '！藥診關聯',
+            '！新增藥診關聯',
+        }
+    return False
+
+
 # 已知的「快速命令」+「Flex/quickReply 按鈕 callback」前綴
 #
 # 兩個用途：
@@ -326,6 +359,13 @@ def looks_like_quick_command(text: str) -> bool:
     """
     if not text:
         return False
+    # 藥診關聯 LIFF 群聊入口：! / ！ exact-match 放行（webhook 群聊閘門用本函式）
+    # 僅放行這四個精確字串，不開放所有 ! 前綴；尾綴 xxx 不放行
+    if text.strip() in {
+        '!藥診關聯', '!新增藥診關聯',
+        '！藥診關聯', '！新增藥診關聯',
+    }:
+        return True
     # 剝掉 / # 前綴（群組命令格式）
     cleaned = text.strip().lstrip('/').lstrip('#').strip()
     if cleaned.startswith(_QUICK_COMMAND_PREFIXES):
@@ -348,6 +388,7 @@ def try_handle_sandbox(event) -> bool:
     _init()
     user_id = getattr(event.source, 'user_id', None)
     raw = (event.message.text or '').strip()
+    source_type = getattr(event.source, 'type', None)
     text = _strip_prefix(raw)
 
     if not text:
@@ -398,6 +439,12 @@ def try_handle_sandbox(event) -> bool:
         # 否則 LIFF SDK 端拿到的 groupId 是 UUID 格式（≠ LINE 平台 ID），無法 push 廣播
         reply_message(event.reply_token, render_import_entry(event_source=event.source))
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF import entry")
+        return True
+
+    if text in _DRUG_DX_LINK_LIFF_TRIGGERS and _is_drug_dx_link_liff_trigger(raw, source_type):
+        from rewrite.views.drug_diagnosis_link_flex import render_drug_diagnosis_link_entry
+        reply_message(event.reply_token, render_drug_diagnosis_link_entry(event_source=event.source))
+        logger.info(f"[rewrite sandbox] {short_uid} → LIFF drug-diagnosis link entry")
         return True
 
     if text in _NEW_FIXED_SCHEDULE_LIFF_TRIGGERS:
@@ -1074,5 +1121,3 @@ def _handle_ledger_range_input(event, user_id: str, short_uid: str, text: str) -
         to_date_str=td.isoformat(),
     )
     return True
-
-

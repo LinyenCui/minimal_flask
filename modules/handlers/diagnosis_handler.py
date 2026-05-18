@@ -14,7 +14,7 @@ from modules.views.diagnosis_flex import render_diagnosis_detail
 
 logger = logging.getLogger(__name__)
 
-PREFIXES = ['dx ', 'dx', '碼 ', '碼', '/dx ', '/dx', '/碼 ', '/碼']
+PREFIXES = ['dx ', 'dx', '碼 ', '碼', '/dx ', '/dx', '/碼 ', '/碼', '!dx', '！dx']
 
 
 def is_diagnosis_trigger(text: str) -> bool:

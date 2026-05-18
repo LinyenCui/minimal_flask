@@ -132,6 +132,7 @@ def customer_form_new():
         'deposit': '/liff/accounting/deposit_form',
         'weekly_payment': '/liff/accounting/weekly_payment_form',
         'batch_allowance': '/liff/batch_allowance/form',
+        'drug_dx_link': '/liff/drug_diagnosis_links/form',
     }
     # 動態目標（含 ID）：edit_schedule / leave_schedule
     sched_id = request.args.get('id')

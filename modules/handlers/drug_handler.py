@@ -15,7 +15,7 @@ from modules.views.drug_flex import render_drug_results
 
 logger = logging.getLogger(__name__)
 
-PREFIXES = ['藥名 ', '藥名', '/藥名 ', '/藥名', '/drug ', '/drug', 'drug ', 'drug', '藥 ', '藥']
+PREFIXES = ['藥名 ', '藥名', '/藥名 ', '/藥名', '/drug ', '/drug', 'drug ', 'drug', '藥 ', '藥', '!drug', '！drug']
 
 
 def is_drug_trigger(text: str) -> bool:

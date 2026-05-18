@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>藥診關聯維護</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang TC", "Microsoft JhengHei", sans-serif; padding: 16px; line-height: 1.5; color: #222; max-width: 680px; margin: 0 auto; font-size: 16px; }
+    h2 { margin: 0 0 16px; font-size: 20px; }
+    h3 { margin: 20px 0 8px; font-size: 16px; }
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 14px; color: #444; }
+    input, select, textarea {
+      width: 100%; padding: 10px 12px; font-size: 16px; border: 1px solid #ccc;
+      border-radius: 6px; background: #fff;
+    }
+    textarea { min-height: 72px; resize: vertical; }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: #06c755; }
+    button { padding: 10px 12px; font-size: 15px; border-radius: 6px; border: 0; cursor: pointer; }
+    button.primary { background: #06c755; color: #fff; font-weight: 600; }
+    button.secondary { background: #f3f3f3; color: #333; }
+    button:disabled { background: #aaa; color: #fff; cursor: not-allowed; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .row input { flex: 1; }
+    .alert { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 14px; white-space: pre-wrap; }
+    .alert.err { background: #fdecea; color: #c0392b; border: 1px solid #f5c2bf; }
+    .alert.ok { background: #e8f5e9; color: #1a7a1a; border: 1px solid #b8e0bb; }
+    .alert.warn { background: #fff8e1; color: #b85c00; border: 1px solid #ffd180; }
+    .loading { text-align: center; color: #666; padding: 40px 0; }
+    .list { border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; margin-top: 8px; }
+    .item { padding: 10px 12px; border-bottom: 1px solid #eee; background: #fff; }
+    .item:last-child { border-bottom: 0; }
+    .item button { width: 100%; text-align: left; background: transparent; padding: 0; color: #222; }
+    .item .title { font-weight: 700; }
+    .item .meta { font-size: 13px; color: #666; margin-top: 2px; }
+    .selected, .preview-card {
+      margin: 10px 0 16px; padding: 12px; border: 1px solid #d7eadb;
+      border-radius: 8px; background: #f7fff8; font-size: 14px;
+    }
+    .preview-card { border-color: #e0e0e0; background: #fafafa; }
+    .kv { display: flex; justify-content: space-between; gap: 12px; margin: 5px 0; }
+    .kv .label { color: #666; flex: 0 0 42%; }
+    .kv .value { text-align: right; flex: 1; font-weight: 600; overflow-wrap: anywhere; }
+    .muted { color: #777; font-size: 13px; }
+    .actions { display: flex; gap: 8px; margin-top: 20px; }
+    .actions button { flex: 1; }
+  </style>
+</head>
+<body>
+  <div id="loading" class="loading">載入中…</div>
+  <div id="content" hidden>
+    <h2>🔗 藥名 ↔ 診斷碼關聯</h2>
+    <div id="alert"></div>
+
+    <h3>現有關聯</h3>
+    <div class="row">
+      <input id="link-query" placeholder="搜尋現有關聯，例如 Concor、I10、糖尿病">
+      <button class="secondary" id="btn-list" type="button">查詢</button>
+    </div>
+    <div id="link-list" class="list" hidden></div>
+
+    <h3>選擇藥品</h3>
+    <div class="row">
+      <input id="drug-query" placeholder="輸入藥名 / 成分 / 廠牌，至少 2 字">
+      <button class="secondary" id="btn-drug-search" type="button">搜尋</button>
+    </div>
+    <div id="drug-selected" class="selected" hidden></div>
+    <div id="drug-results" class="list" hidden></div>
+
+    <h3>選擇診斷碼</h3>
+    <div class="row">
+      <input id="dx-query" placeholder="輸入 ICD / 中文診斷名，至少 2 字">
+      <button class="secondary" id="btn-dx-search" type="button">搜尋</button>
+    </div>
+    <div id="dx-selected" class="selected" hidden></div>
+    <div id="dx-results" class="list" hidden></div>
+
+    <h3>關聯欄位</h3>
+    <div class="field">
+      <label>link_type</label>
+      <select id="link-type">
+        {% for t in link_types %}
+        <option value="{{ t }}"{% if t == 'commonly_used_for' %} selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>role_type</label>
+      <select id="role-type">
+        {% for t in role_types %}
+        <option value="{{ t }}"{% if t == 'primary_treatment' %} selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>confidence</label>
+      <select id="confidence">
+        {% for c in confidences %}
+        <option value="{{ c }}"{% if c == 'medium' %} selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>is_primary</label>
+      <select id="is-primary">
+        <option value="true" selected>true</option>
+        <option value="false">false</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>sort_order</label>
+      <input id="sort-order" type="number" value="100">
+    </div>
+    <div class="field">
+      <label>source_type</label>
+      <input id="source-type" value="manual" disabled>
+      <div class="muted">v3 最小版固定 manual，不接受 OCR 或 prescription_sample。</div>
+    </div>
+    <div class="field">
+      <label>note_text</label>
+      <textarea id="note-text" placeholder="人工補充說明，可留空"></textarea>
+    </div>
+
+    <div class="actions">
+      <button class="secondary" id="btn-cancel" type="button">取消</button>
+      <button class="primary" id="btn-preview" type="button">預覽</button>
+    </div>
+
+    <div id="preview-card" class="preview-card" hidden></div>
+  </div>
+
+  <script>
+    const LIFF_ID = "{{ liff_id }}";
+    const loadingEl = document.getElementById('loading');
+    const contentEl = document.getElementById('content');
+    const alertEl = document.getElementById('alert');
+    const linkListEl = document.getElementById('link-list');
+    const drugResultsEl = document.getElementById('drug-results');
+    const dxResultsEl = document.getElementById('dx-results');
+    const drugSelectedEl = document.getElementById('drug-selected');
+    const dxSelectedEl = document.getElementById('dx-selected');
+    const previewCardEl = document.getElementById('preview-card');
+
+    let selectedDrug = null;
+    let selectedDiagnosis = null;
+
+    function showAlert(type, msg) { alertEl.innerHTML = `<div class="alert ${type}">${escapeHtml(msg)}</div>`; }
+    function clearAlert() { alertEl.innerHTML = ''; }
+    function setLoading(t) { loadingEl.textContent = t; loadingEl.hidden = false; contentEl.hidden = true; }
+    function showContent() { loadingEl.hidden = true; contentEl.hidden = false; }
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    function _safeIdToken() {
+      const t = liff.getIDToken();
+      if (!t) return '';
+      return t.trim().replace(/[^\x21-\x7E]/g, '');
+    }
+    function authHeaders() {
+      return { 'Authorization': 'Bearer ' + _safeIdToken() };
+    }
+    function jsonHeaders() {
+      return { 'Content-Type': 'application/json', ...authHeaders() };
+    }
+    function drugTitle(d) {
+      return [d.generic_name, d.brand_name].filter(Boolean).join(' / ') || `drug_items #${d.id}`;
+    }
+    function dxTitle(d) {
+      return [d.icd10_code, d.icd9_code, d.name_zh].filter(Boolean).join(' / ') || `diagnosis_codes #${d.id}`;
+    }
+    function renderSelectedDrug() {
+      if (!selectedDrug) { drugSelectedEl.hidden = true; return; }
+      drugSelectedEl.hidden = false;
+      drugSelectedEl.innerHTML = `<b>已選藥品：</b>${escapeHtml(drugTitle(selectedDrug))}<br><span class="muted">id=${selectedDrug.id} ${escapeHtml(selectedDrug.table_type || '')} ${escapeHtml(selectedDrug.item_kind || '')}</span>`;
+    }
+    function renderSelectedDiagnosis() {
+      if (!selectedDiagnosis) { dxSelectedEl.hidden = true; return; }
+      dxSelectedEl.hidden = false;
+      dxSelectedEl.innerHTML = `<b>已選診斷：</b>${escapeHtml(dxTitle(selectedDiagnosis))}<br><span class="muted">id=${selectedDiagnosis.id}</span>`;
+    }
+    function renderItems(el, items, render, onPick) {
+      if (!items.length) {
+        el.hidden = false;
+        el.innerHTML = '<div class="item muted">沒有結果</div>';
+        return;
+      }
+      el.hidden = false;
+      el.innerHTML = items.map((item, idx) => render(item, idx)).join('');
+      el.querySelectorAll('button[data-idx]').forEach(btn => {
+        btn.addEventListener('click', () => onPick(items[parseInt(btn.dataset.idx, 10)]));
+      });
+    }
+
+    async function fetchJson(url, options = {}) {
+      const resp = await fetch(url, options);
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      return data;
+    }
+
+    async function listLinks() {
+      clearAlert();
+      const q = document.getElementById('link-query').value.trim();
+      const data = await fetchJson('/liff/drug_diagnosis_links?q=' + encodeURIComponent(q), { headers: authHeaders() });
+      renderItems(linkListEl, data.links || [], (item, idx) => `
+        <div class="item">
+          <button type="button" data-idx="${idx}">
+            <div class="title">${escapeHtml(drugTitle(item))}</div>
+            <div class="meta">${escapeHtml(dxTitle(item))}</div>
+            <div class="meta">${escapeHtml([item.link_type, item.role_type, item.confidence, item.source_type].filter(Boolean).join(' / '))}</div>
+          </button>
+        </div>
+      `, () => {});
+    }
+
+    async function searchDrugs() {
+      clearAlert();
+      const q = document.getElementById('drug-query').value.trim();
+      if (q.length < 2) { showAlert('warn', '藥品搜尋至少 2 字'); return; }
+      const data = await fetchJson('/liff/drug_diagnosis_links/search_drugs?q=' + encodeURIComponent(q), { headers: authHeaders() });
+      renderItems(drugResultsEl, data.items || [], (item, idx) => `
+        <div class="item">
+          <button type="button" data-idx="${idx}">
+            <div class="title">${escapeHtml(drugTitle(item))}</div>
+            <div class="meta">id=${item.id} ${escapeHtml([item.table_type, item.item_kind, item.category].filter(Boolean).join(' / '))}</div>
+          </button>
+        </div>
+      `, item => { selectedDrug = item; renderSelectedDrug(); drugResultsEl.hidden = true; });
+    }
+
+    async function searchDiagnoses() {
+      clearAlert();
+      const q = document.getElementById('dx-query').value.trim();
+      if (q.length < 2) { showAlert('warn', '診斷搜尋至少 2 字'); return; }
+      const data = await fetchJson('/liff/drug_diagnosis_links/search_diagnoses?q=' + encodeURIComponent(q), { headers: authHeaders() });
+      renderItems(dxResultsEl, data.items || [], (item, idx) => `
+        <div class="item">
+          <button type="button" data-idx="${idx}">
+            <div class="title">${escapeHtml(dxTitle(item))}</div>
+            <div class="meta">id=${item.id} ${escapeHtml(item.name_en || '')}</div>
+          </button>
+        </div>
+      `, item => { selectedDiagnosis = item; renderSelectedDiagnosis(); dxResultsEl.hidden = true; });
+    }
+
+    async function previewLink() {
+      clearAlert();
+      previewCardEl.hidden = true;
+      if (!selectedDrug || !selectedDiagnosis) {
+        showAlert('warn', '請先選擇藥品與診斷碼');
+        return;
+      }
+      const payload = {
+        drug_item_id: selectedDrug.id,
+        diagnosis_code_id: selectedDiagnosis.id,
+        link_type: document.getElementById('link-type').value,
+        role_type: document.getElementById('role-type').value,
+        confidence: document.getElementById('confidence').value,
+        is_primary: document.getElementById('is-primary').value === 'true',
+        sort_order: document.getElementById('sort-order').value,
+        source_type: 'manual',
+        note_text: document.getElementById('note-text').value,
+      };
+      const data = await fetchJson('/liff/drug_diagnosis_links/preview', {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify(payload),
+      });
+      const p = data.preview;
+      previewCardEl.hidden = false;
+      previewCardEl.innerHTML = `
+        <div class="kv"><span class="label">狀態</span><span class="value">${escapeHtml(data.message)}</span></div>
+        <div class="kv"><span class="label">drug</span><span class="value">${escapeHtml(drugTitle(p.drug))}</span></div>
+        <div class="kv"><span class="label">diagnosis</span><span class="value">${escapeHtml(dxTitle(p.diagnosis))}</span></div>
+        <div class="kv"><span class="label">link_type</span><span class="value">${escapeHtml(p.link_type)}</span></div>
+        <div class="kv"><span class="label">role_type</span><span class="value">${escapeHtml(p.role_type)}</span></div>
+        <div class="kv"><span class="label">confidence</span><span class="value">${escapeHtml(p.confidence)}</span></div>
+        <div class="kv"><span class="label">is_primary</span><span class="value">${escapeHtml(p.is_primary)}</span></div>
+        <div class="kv"><span class="label">sort_order</span><span class="value">${escapeHtml(p.sort_order)}</span></div>
+        <div class="kv"><span class="label">source_type</span><span class="value">${escapeHtml(p.source_type)}</span></div>
+        <div class="kv"><span class="label">note_text</span><span class="value">${escapeHtml(p.note_text || '—')}</span></div>
+        <p class="muted">第一階段只提供 preview，不會寫入資料庫。</p>
+      `;
+      showAlert(data.can_apply ? 'ok' : 'warn', data.message);
+    }
+
+    document.getElementById('btn-list').addEventListener('click', () => listLinks().catch(e => showAlert('err', e.message)));
+    document.getElementById('btn-drug-search').addEventListener('click', () => searchDrugs().catch(e => showAlert('err', e.message)));
+    document.getElementById('btn-dx-search').addEventListener('click', () => searchDiagnoses().catch(e => showAlert('err', e.message)));
+    document.getElementById('btn-preview').addEventListener('click', () => previewLink().catch(e => showAlert('err', e.message)));
+    document.getElementById('btn-cancel').addEventListener('click', () => {
+      if (liff.isInClient && liff.isInClient()) liff.closeWindow();
+      else history.back();
+    });
+
+    async function init() {
+      if (!LIFF_ID) { setLoading('LIFF_ID 未設定'); return; }
+      try {
+        await liff.init({ liffId: LIFF_ID });
+      } catch (e) {
+        setLoading('LIFF init 失敗：' + e.message);
+        return;
+      }
+      if (!liff.isLoggedIn()) {
+        liff.login({ redirectUri: 'https://liff.line.me/' + LIFF_ID + window.location.search });
+        return;
+      }
+      showContent();
+      listLinks().catch(e => showAlert('err', e.message));
+    }
+    init();
+  </script>
+</body>
+</html>
