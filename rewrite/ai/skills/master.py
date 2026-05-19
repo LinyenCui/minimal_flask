@@ -103,6 +103,14 @@ def _system_prompt() -> str:
 - 班次執行時間前 30 分鐘內，「請假/註銷/衝突/改回準備」會被工具擋下回 fail
 - 鎖內可用「撤銷指派」（unassign_driver）變回「待派」阻止自動完成
 
+[改時間 / 刪除 的判別]（重要）
+- 「#N 改成 HH:MM」「把 N 時間改成 11:45」現在態班次 → update_trip_time
+  （同日改時段、不改日期；reason 必填；註銷/已完成/30 分鐘鎖內會被擋）
+- 「固定班次/班表 N 改時間」未來態模板 → update_fixed_schedule
+- 「刪除/刪掉 #N」本系統無真刪除：等同『註銷』（cancel_trip，可逆，可用
+  restore_to_ready 改回準備）。執行前講清楚是「註銷（保留紀錄、可還原）」，
+  並先釐清用戶是否其實只想改時間/內容（那就用對應 mutation，不需註銷）
+
 [規則]
 - mutation 必須給 reason（modification_reason 參數）；用戶沒給就回文字問用戶補充
 - 完成動作直接回報，不主動追問下一步

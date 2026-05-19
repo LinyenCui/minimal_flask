@@ -790,6 +790,88 @@ def update_trip_category(
     return query_trip_by_id(trip_id, session=session)
 
 
+@require_modifiable_window(allow_in_lock=False)  # 改時間屬時間敏感 → 30 分鐘鎖內照擋
+def update_trip_time(
+    *,
+    session,
+    trip_id: int,
+    new_time: str,
+    reason: str,
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """
+    修改現在態班次「時間」（同日改時段）。
+
+    範圍刻意只改 time：不改 date —— 改日期會連動 week_number(isocalendar)
+    與 unique_code(T_{id}_{YYYYMMDD})，留待後續 slice 穩做。
+
+    不影響註銷：status in ('已完成','註銷') 直接拒絕（與 cancel_trip 對稱），
+    註銷態班次完全不被本工具觸碰；本函式不讀寫 status，純改 time。
+
+    R-5 鎖：allow_in_lock=False（時間敏感，30 分鐘鎖內擋）
+    R-6 audit：寫 'update_trip_time'
+    """
+    if not reason or not reason.strip():
+        return ToolResult.fail("請提供修改原因")
+    if not new_time or not str(new_time).strip():
+        return ToolResult.fail("new_time 不可空")
+    raw = str(new_time).strip()
+    try:
+        parts = [int(x) for x in raw.split(':')]
+        if len(parts) < 2:
+            raise ValueError
+        parsed = time(parts[0], parts[1], parts[2] if len(parts) > 2 else 0)
+    except (ValueError, IndexError):
+        return ToolResult.fail(f"時間格式錯（要 HH:MM）：{raw!r}")
+
+    before = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    if not before:
+        return ToolResult.fail(f"找不到班次 #{trip_id}")
+    status = before.get('status')
+    if status == '已完成':
+        return ToolResult.fail(f"班次 #{trip_id} 已完成，無法改時間")
+    if status == '註銷':
+        return ToolResult.fail(
+            f"班次 #{trip_id} 為註銷狀態，無法改時間（如要恢復請先『改回準備』）"
+        )
+
+    old_time = before.get('time')
+    old_hm = str(old_time)[:5] if old_time is not None else None
+    new_hm = parsed.strftime('%H:%M')
+    if old_hm == new_hm:
+        return ToolResult.fail(f"班次 #{trip_id} 時間已是 {new_hm}，無需修改")
+
+    note = f"改時間: {old_hm}→{new_hm} ({reason.strip()})"
+    new_mod = _bump_modification_reason(before.get('modification_reason'), note)
+
+    session.execute(text("""
+        UPDATE trips SET
+            time = :t,
+            modification_reason = :mod,
+            modified_by = :who,
+            modification_time = CURRENT_TIMESTAMP
+        WHERE trip_id = :id
+    """), {'t': parsed, 'mod': new_mod, 'who': user_name or user_id, 'id': trip_id})
+
+    after = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    write_audit(
+        session=session, user_id=user_id, user_name=user_name,
+        action_type='update_trip_time', target_table='trips', target_id=trip_id,
+        before_state=before, after_state=after,
+        changed_fields=diff_fields(before, after),
+        reason=reason.strip(),
+        extra={'old_time': old_hm, 'new_time': new_hm},
+        via=via,
+    )
+
+    if auto_commit:
+        session.commit()
+    return query_trip_by_id(trip_id, session=session)
+
+
 @require_modifiable_window(allow_in_lock=True)
 def record_fare_current(
     *,

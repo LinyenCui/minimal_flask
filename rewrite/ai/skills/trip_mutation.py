@@ -26,6 +26,7 @@ from rewrite.tools.trip import (
     update_passenger_name,
     record_fare_current,
     update_trip_category,
+    update_trip_time,
 )
 
 
@@ -49,6 +50,8 @@ def _system_prompt() -> str:
 - 改乘客名 → update_passenger_name
 - 記錄/修改現在態車資（錶價/加成）→ record_fare_current
 - 改類別（key 錯時用，例「東洋」改「診所」）→ update_trip_category（reason 必填）
+- 改時間（同日改時段，例「#2575 改成 11:45」）→ update_trip_time
+  （reason 必填；註銷/已完成不可改；30 分鐘鎖內擋；不改日期）
 
 ⚠️ 規則：
 1. trip_id 必填。用戶說「那筆」「剛剛那班」這種，問清楚再執行
@@ -207,6 +210,27 @@ UPDATE_TRIP_CATEGORY_SCHEMA = {
     },
 }
 
+UPDATE_TRIP_TIME_SCHEMA = {
+    'description': (
+        "Modify a CURRENT trip's time (same-day re-time only, does NOT change date). "
+        "Triggers: 「#N 改成 HH:MM」「把 N 的時間改成 11:45」「現在態 N 改時間」. "
+        "Rejected if status 註銷/已完成, or inside 30-min lock. Reason REQUIRED. "
+        "改日期請勿用本工具（會連動週次/編號，尚未支援）。"
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'trip_id': {'type': 'integer', 'description': "Trip ID（現在態 trips.trip_id）"},
+            'new_time': {
+                'type': 'string',
+                'description': "新時間 HH:MM（24 小時制，例 11:45）",
+            },
+            'reason': {'type': 'string', 'description': "修改原因（必填）"},
+        },
+        'required': ['trip_id', 'new_time', 'reason'],
+    },
+}
+
 
 # 也讓 mutation skill 能呼叫 query 類工具（規則 3：多筆 mutation 前先 query 確認）
 QUERY_TRIPS_SCHEMA = {
@@ -249,6 +273,7 @@ def build_trip_mutation_skill() -> Skill:
             (update_passenger_name, UPDATE_PASSENGER_NAME_SCHEMA),
             (record_fare_current, RECORD_FARE_CURRENT_SCHEMA),
             (update_trip_category, UPDATE_TRIP_CATEGORY_SCHEMA),
+            (update_trip_time, UPDATE_TRIP_TIME_SCHEMA),
             # 規則 3 用：mutation 前先 query 確認
             (query_trips, QUERY_TRIPS_SCHEMA),
             (query_trip_by_id, QUERY_TRIP_BY_ID_SCHEMA),
