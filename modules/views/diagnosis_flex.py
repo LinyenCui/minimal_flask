@@ -16,6 +16,9 @@ BLACK = "#333333"
 SUCCESS = "#2E7D32"
 DANGER = "#D32F2F"
 LIGHT_BG = "#F5F5F5"
+MAX_RELATED_DRUG_GROUP_BUBBLES = 9
+RELATED_DRUGS_PER_BUBBLE = 3
+MAX_VISIBLE_RELATED_DRUGS = MAX_RELATED_DRUG_GROUP_BUBBLES * RELATED_DRUGS_PER_BUBBLE
 
 
 def _short(text: Any, limit: int = 80) -> str:
@@ -113,8 +116,13 @@ def _drug_row(drug: dict) -> dict:
     }
 
 
-def render_diagnosis_detail(c: dict) -> dict:
-    """Render one enriched diagnosis result as a Flex bubble."""
+def _diagnosis_bubble(
+    c: dict,
+    related_count: int = 0,
+    hidden_related_count: int = 0,
+    hidden_related_names: str = "",
+) -> dict:
+    """Render the main diagnosis information bubble."""
     body: list[dict] = []
 
     icd10 = c.get("icd10_code") or ""
@@ -178,21 +186,42 @@ def render_diagnosis_detail(c: dict) -> dict:
         for idx, note in enumerate(note_items, start=1):
             body.append(_row(f"備註{idx}", note, value_color=MUTED))
 
-    related = c.get("related_drugs") or []
-    if related:
+    if related_count:
         body.append(_separator())
         body.append(
             {
                 "type": "text",
-                "text": "相關藥名",
+                "text": f"相關藥名：{related_count} 筆",
                 "weight": "bold",
                 "size": "sm",
                 "color": SUCCESS,
                 "margin": "sm",
             }
         )
-        for drug in related[:5]:
-            body.append(_drug_row(drug))
+        if hidden_related_count > 0:
+            body.append(
+                {
+                    "type": "text",
+                    "text": _short(
+                        f"僅顯示前 {MAX_VISIBLE_RELATED_DRUGS} 筆，仍有更多未顯示"
+                        + (f"：{hidden_related_names}" if hidden_related_names else "。"),
+                        120,
+                    ),
+                    "size": "xs",
+                    "color": MUTED,
+                    "wrap": True,
+                }
+            )
+        else:
+            body.append(
+                {
+                    "type": "text",
+                    "text": "請左右滑動查看相關藥名。",
+                    "size": "xs",
+                    "color": MUTED,
+                    "wrap": True,
+                }
+            )
 
     header_code = icd10 or icd9 or f"#{c.get('id') or ''}".strip()
     return {
@@ -230,3 +259,126 @@ def render_diagnosis_detail(c: dict) -> dict:
         },
     }
 
+
+def _drug_title(drug: dict) -> str:
+    generic = drug.get("generic_name") or ""
+    brand = drug.get("brand_name") or ""
+    return " / ".join(part for part in (generic, brand) if part) or "相關藥名"
+
+
+def _related_drug_item(drug: dict) -> dict:
+    title = _drug_title(drug)
+    meta = " / ".join(
+        part
+        for part in (
+            drug.get("confidence"),
+            drug.get("source_type"),
+            drug.get("role_type"),
+        )
+        if part
+    )
+    contents = [
+        {
+            "type": "text",
+            "text": _short(title, 70),
+            "size": "sm",
+            "color": BLACK,
+            "weight": "bold",
+            "wrap": True,
+        },
+        {
+            "type": "text",
+            "text": meta or "—",
+            "size": "xs",
+            "color": MUTED,
+            "wrap": True,
+        },
+    ]
+    if drug.get("note_text"):
+        contents.append(
+            {
+                "type": "text",
+                "text": _short(drug["note_text"], 40),
+                "size": "xs",
+                "color": MUTED,
+                "wrap": True,
+            }
+        )
+    return {
+        "type": "box",
+        "layout": "vertical",
+        "spacing": "xs",
+        "paddingAll": "sm",
+        "backgroundColor": LIGHT_BG,
+        "cornerRadius": "md",
+        "contents": contents,
+    }
+
+
+def _related_drug_group_bubble(drugs: list[dict], start_index: int) -> dict:
+    """Render up to three related drugs in one carousel bubble."""
+    end_index = start_index + len(drugs) - 1
+    body: list[dict] = []
+    for idx, drug in enumerate(drugs):
+        if idx > 0:
+            body.append(_separator("sm"))
+        body.append(_related_drug_item(drug))
+
+    return {
+        "type": "bubble",
+        "size": "mega",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": SUCCESS,
+            "paddingAll": "md",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": f"相關藥名 {start_index}-{end_index}",
+                    "weight": "bold",
+                    "size": "lg",
+                    "color": "#ffffff",
+                    "wrap": True,
+                },
+                {
+                    "type": "text",
+                    "text": f"每張最多 {RELATED_DRUGS_PER_BUBBLE} 筆",
+                    "size": "xs",
+                    "color": "#E8F5E9",
+                    "margin": "sm",
+                    "wrap": True,
+                },
+            ],
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "sm",
+            "contents": body,
+        },
+    }
+
+
+def render_diagnosis_detail(c: dict) -> dict:
+    """Render one enriched diagnosis result as a Flex bubble or carousel."""
+    related = c.get("related_drugs") or []
+    visible_related = related[:MAX_VISIBLE_RELATED_DRUGS]
+    hidden_related = related[MAX_VISIBLE_RELATED_DRUGS:]
+    hidden_count = len(hidden_related)
+    hidden_names = "、".join(_drug_title(drug) for drug in hidden_related[:3])
+
+    main_bubble = _diagnosis_bubble(
+        c,
+        related_count=len(visible_related),
+        hidden_related_count=hidden_count,
+        hidden_related_names=hidden_names,
+    )
+    if not visible_related:
+        return main_bubble
+
+    bubbles = [main_bubble]
+    for start in range(0, len(visible_related), RELATED_DRUGS_PER_BUBBLE):
+        group = visible_related[start : start + RELATED_DRUGS_PER_BUBBLE]
+        bubbles.append(_related_drug_group_bubble(group, start + 1))
+    return {"type": "carousel", "contents": bubbles}

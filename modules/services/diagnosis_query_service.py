@@ -244,7 +244,7 @@ class DiagnosisQueryService:
                     ddl.sort_order ASC,
                     di.generic_name ASC,
                     di.brand_name ASC
-                LIMIT 5
+                LIMIT 30
             """),
             {'diagnosis_code_id': diagnosis_code_id},
         ).mappings().all()
