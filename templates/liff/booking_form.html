@@ -20,10 +20,14 @@
     }
     .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: #06c755; }
     .actions { margin-top: 24px; display: flex; gap: 8px; }
+    /* #post-actions 同時有 .actions(display:flex)，會蓋過 [hidden] 的 display:none，
+       需用 ID 特異性更高的規則，hidden 時才真的收起 */
+    #post-actions[hidden] { display: none; }
     button { flex: 1; padding: 12px; font-size: 16px; border-radius: 6px; border: 0; cursor: pointer; }
     button[type=submit] { background: #06c755; color: #fff; font-weight: 600; }
     button[type=submit]:disabled { background: #aaa; }
     button.secondary { background: #f3f3f3; color: #333; }
+    button.primary { background: #06c755; color: #fff; font-weight: 600; }
     .alert { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 14px; }
     .alert.err { background: #fdecea; color: #c0392b; border: 1px solid #f5c2bf; }
     .alert.ok { background: #e8f5e9; color: #1a7a1a; border: 1px solid #b8e0bb; }
@@ -97,6 +101,11 @@
         <button type="submit" id="btn-submit">建立預約</button>
       </div>
     </form>
+
+    <div id="post-actions" class="actions" hidden>
+      <button type="button" class="secondary" id="btn-done">✅ 完成關閉</button>
+      <button type="button" class="primary" id="btn-again">✏️ 再預約一筆</button>
+    </div>
   </div>
 
   <script>
@@ -108,6 +117,9 @@
     const form = document.getElementById('booking-form');
     const submitBtn = document.getElementById('btn-submit');
     const cancelBtn = document.getElementById('btn-cancel');
+    const postActions = document.getElementById('post-actions');
+    const againBtn = document.getElementById('btn-again');
+    const doneBtn = document.getElementById('btn-done');
 
     function showAlert(type, msg) { alertEl.innerHTML = `<div class="alert ${type}">${msg}</div>`; }
     function clearAlert() { alertEl.innerHTML = ''; }
@@ -166,9 +178,30 @@
       showContent();
     }
 
-    cancelBtn.addEventListener('click', () => {
+    function _closeOrBack() {
       if (liff.isInClient && liff.isInClient()) liff.closeWindow();
       else history.back();
+    }
+
+    cancelBtn.addEventListener('click', _closeOrBack);
+    doneBtn.addEventListener('click', _closeOrBack);
+
+    againBtn.addEventListener('click', () => {
+      form.reset();
+      // form.reset() 不會收合 <details>，手動收回
+      form.querySelectorAll('details[open]').forEach((d) => { d.open = false; });
+      // 日期欄 reset 後會空白，重設今天 + 最早今天
+      const dateEl = form.elements.namedItem('date');
+      dateEl.value = _today();
+      dateEl.min = _today();
+      clearAlert();
+      submitBtn.disabled = false;
+      submitBtn.textContent = '建立預約';
+      postActions.hidden = true;
+      form.hidden = false;
+      window.scrollTo(0, 0);
+      const timeEl = form.elements.namedItem('time');
+      if (timeEl && timeEl.focus) timeEl.focus();
     });
 
     form.addEventListener('submit', async (e) => {
@@ -213,14 +246,12 @@
         });
         const data = await resp.json();
         if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-        const inClient = liff.isInClient && liff.isInClient();
         const tid = data.trip && data.trip.trip_id;
-        if (inClient) {
-          showAlert('ok', `✅ 已建立預約 #${tid}（1.5 秒後關閉）`);
-          setTimeout(() => liff.closeWindow(), 1500);
-        } else {
-          showAlert('ok', `✅ 已建立預約 #${tid}（可關閉視窗）`);
-        }
+        showAlert('ok', `✅ 已建立預約 #${tid}，可繼續預約下一班`);
+        // 連續預約：不自動關窗，改顯示「再預約一筆 / 完成關閉」
+        form.hidden = true;
+        postActions.hidden = false;
+        window.scrollTo(0, 0);
       } catch (err) {
         showAlert('err', '❌ ' + err.message);
         submitBtn.disabled = false;
