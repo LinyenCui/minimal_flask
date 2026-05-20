@@ -54,3 +54,4 @@ new_venv/
 
 # Claude Code 本地狀態
 .claude/
+last_sync_result.txt
