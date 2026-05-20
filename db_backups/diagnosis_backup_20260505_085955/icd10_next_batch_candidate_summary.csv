@@ -1,0 +1,9 @@
+﻿diagnosis_code_id,current_icd9_code,current_name_zh,candidate_icd10_code,official_name_zh,official_name_en,use_flag,candidate_status,reason,recommended_next_action
+63,28521,腎性貧血,D63.1,慢性腎臟疾病導致的貧血,Anemia in chronic kidney disease,1,needs_more_source,健保署 2001 ICD-9-CM 與 2023 ICD-10-CM 對應檔為單一對應；仍建議人工確認診所語境後再採用。,官方單一對應但語意範圍需人工確認
+71,5990,泌尿道感染,N39.0,未明示部位之泌尿道感染症,"Urinary tract infection, site not specified",1,needs_more_source,健保署 2001 ICD-9-CM 與 2023 ICD-10-CM 對應檔為單一對應；仍建議人工確認診所語境後再採用。,官方單一對應但語意範圍需人工確認
+76,5849,急性腎衰竭,N17.9,急性腎衰竭,"Acute kidney failure, unspecified",1,high_confidence_candidate,健保署 2001 ICD-9-CM 與 2023 ICD-10-CM 對應檔為單一對應；仍建議人工確認診所語境後再採用。,可列下一批 approve 候選，但仍需人工確認
+78,5829,慢性腎絲球腎炎,N03.9,慢性腎炎症候群伴有非特異性的組織形態改變,Chronic nephritic syndrome with unspecified morphologic changes,1,needs_more_source,健保署 2001 ICD-9-CM 與 2023 ICD-10-CM 對應檔為單一對應；仍建議人工確認診所語境後再採用。,官方單一對應但語意範圍需人工確認
+92,6019,攝護腺炎,N41.9,攝護腺炎性疾病,"Inflammatory disease of prostate, unspecified",1,needs_more_source,健保署 2001 ICD-9-CM 與 2023 ICD-10-CM 對應檔為單一對應；仍建議人工確認診所語境後再採用。,官方單一對應但語意範圍需人工確認
+98,5932,腎囊腫,N28.1,後天性腎囊腫,"Cyst of kidney, acquired",1,needs_more_source,健保署 2001 ICD-9-CM 與 2023 ICD-10-CM 對應檔為單一對應；仍建議人工確認診所語境後再採用。,官方單一對應但語意範圍需人工確認
+109,75313,多囊腎（顯性染色體）,Q61.2,成人型多囊腎,"Polycystic kidney, adult type",1,needs_more_source,健保署 2001 ICD-9-CM 與 2023 ICD-10-CM 對應檔為單一對應；仍建議人工確認診所語境後再採用。,官方單一對應但語意範圍需人工確認
+133,2810,惡性貧血,D51.0,內因子缺乏所致的維生素Ｂ12缺乏性貧血,Vitamin B12 deficiency anemia due to intrinsic factor deficiency,1,needs_more_source,健保署 2001 ICD-9-CM 與 2023 ICD-10-CM 對應檔為單一對應；仍建議人工確認診所語境後再採用。,官方單一對應但語意範圍需人工確認
