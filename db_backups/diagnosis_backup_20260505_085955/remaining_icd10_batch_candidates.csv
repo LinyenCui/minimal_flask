@@ -1,0 +1,176 @@
+﻿diagnosis_code_id,current_icd9_code,current_name_zh,candidate_icd10_code,official_name_zh,official_name_en,use_flag,mapping_count,batch_group,candidate_status,reason,recommended_next_action
+8,7821,皮疹,R21,皮疹及其他非特定性皮膚出疹,Rash and other nonspecific skin eruption,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 contains。,可列下一批人工 review / approve 候選。
+13,2149,脂肪瘤,D17.9,良性脂肪瘤,"Benign lipomatous neoplasm, unspecified",1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 contains。,可列下一批人工 review / approve 候選。
+18,1104,足癬,B35.3,足癬,Tinea pedis,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 exact。,可列下一批人工 review / approve 候選。
+19,1110,汗斑,B36.0,變色糠疹(汗斑),Pityriasis versicolor,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 contains。,可列下一批人工 review / approve 候選。
+20,7089,蕁麻疹,L50.9,蕁麻疹,"Urticaria, unspecified",1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 exact。,可列下一批人工 review / approve 候選。
+21,7854,壞疽,I96,壞疽，他處未歸類者,"Gangrene, not elsewhere classified",1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 contains。,可列下一批人工 review / approve 候選。
+22,71940,關節痛,M25.50,關節痛,Pain in unspecified joint,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 exact。,可列下一批人工 review / approve 候選。
+30,71610,創傷後關節炎,M12.50,未明示部位創傷性關節病變,"Traumatic arthropathy, unspecified site",1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+32,7231,頸椎痛,M54.2,頸椎痛,Cervicalgia,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 exact。,可列下一批人工 review / approve 候選。
+33,72479,尾椎痛,M53.3,薦尾椎骨疾患，他處未歸類者,"Sacrococcygeal disorders, not elsewhere classified",1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+40,7222,椎間盤脫出,M51.9,未明示胸椎、胸腰椎及腰薦椎椎間盤疾患,"Unspecified thoracic, thoracolumbar and lumbosacral intervertebral disc disorder",1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+41,73300,骨質疏鬆,M81.0,老年性骨質疏鬆症未伴有病理性骨折,Age-related osteoporosis without current pathological fracture,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 contains。,可列下一批人工 review / approve 候選。
+42,7241,胸椎痛,M54.6,胸椎痛,Pain in thoracic spine,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 exact。,可列下一批人工 review / approve 候選。
+52,72700,肌腱炎,M65.9,其他滑膜炎及腱鞘炎,"Synovitis and tenosynovitis, unspecified",1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+57,73025,骨髓炎（骨盆）,M86.9,骨髓炎,"Osteomyelitis, unspecified",1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 contains。,可列下一批人工 review / approve 候選。
+58,73027,骨髓炎（踝及腳）,M86.9,骨髓炎,"Osteomyelitis, unspecified",1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 contains。,可列下一批人工 review / approve 候選。
+63,28521,腎性貧血,D63.1,慢性腎臟疾病導致的貧血,Anemia in chronic kidney disease,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+68,78841,頻尿,R35.0,頻尿,Frequency of micturition,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 exact。,可列下一批人工 review / approve 候選。
+71,5990,泌尿道感染,N39.0,未明示部位之泌尿道感染症,"Urinary tract infection, site not specified",1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+75,5809,急性腎絲球腎炎,N00.9,急性腎炎症候群伴有非特異性的組織形態改變,Acute nephritic syndrome with unspecified morphologic changes,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+77,5960,膀胱頸攣縮,N32.0,膀胱頸阻塞,Bladder-neck obstruction,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+78,5829,慢性腎絲球腎炎,N03.9,慢性腎炎症候群伴有非特異性的組織形態改變,Chronic nephritic syndrome with unspecified morphologic changes,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+79,59000,慢性腎盂腎炎,N11.0,與非阻塞性逆流相關的慢性腎盂腎炎,Nonobstructive reflux-associated chronic pyelonephritis,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 contains。,可列下一批人工 review / approve 候選。
+92,6019,攝護腺炎,N41.9,攝護腺炎性疾病,"Inflammatory disease of prostate, unspecified",1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 contains。,可列下一批人工 review / approve 候選。
+97,5921,輸尿管結石,N20.1,輸尿管結石,Calculus of ureter,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+98,5932,腎囊腫,N28.1,後天性腎囊腫,"Cyst of kidney, acquired",1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 contains。,可列下一批人工 review / approve 候選。
+101,586,尿毒症／慢性腎衰竭，未明示者（末期腎臟病）,N19,腎衰竭,Unspecified kidney failure,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 contains。,可列下一批人工 review / approve 候選。
+104,78830,尿失禁,R32,尿失禁,Unspecified urinary incontinence,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 exact。,可列下一批人工 review / approve 候選。
+106,5941,膀胱結石,N21.0,膀胱內結石,Calculus in bladder,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+131,2767,血鉀過高,E87.5,高血鉀症,Hyperkalemia,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+133,2810,惡性貧血,D51.0,內因子缺乏所致的維生素Ｂ12缺乏性貧血,Vitamin B12 deficiency anemia due to intrinsic factor deficiency,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+138,2875,血小板低下,D69.6,血小板缺乏症,"Thrombocytopenia, unspecified",1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+139,28521,末期腎病導致貧血,D63.1,慢性腎臟疾病導致的貧血,Anemia in chronic kidney disease,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+142,2769,電解質及體液失調症,E87.8,其他電解質及體液平衡疾患，他處未歸類者,"Other disorders of electrolyte and fluid balance, not elsewhere classified",1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+147,27540,鈣代謝失調,E83.50,未明示之鈣代謝疾患,Unspecified disorder of calcium metabolism,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+149,27542,高血鈣,E83.52,高血鈣症,Hypercalcemia,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 contains。,可列下一批人工 review / approve 候選。
+151,2760,高滲壓及血鈉過高,E87.0,高滲壓及高血鈉,Hyperosmolality and hypernatremia,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+152,2761,低滲壓及血鈉過高,E87.1,低滲壓及低血鈉,Hypo-osmolality and hyponatremia,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+154,2768,血鉀過低,E87.6,低血鉀症,Hypokalemia,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+156,0529,水痘,B01.9,水痘未伴有併發症,Varicella without complication,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 contains。,可列下一批人工 review / approve 候選。
+159,0539,帶狀泡疹,B02.9,帶狀疱疹未伴有併發症,Zoster without complications,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+161,0559,麻疹,B05.9,麻疹未伴有併發症,Measles without complication,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 contains。,可列下一批人工 review / approve 候選。
+162,0569,德國麻疹,B06.9,德國麻疹未伴有併發症,Rubella without complication,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 contains。,可列下一批人工 review / approve 候選。
+163,0979,梅毒,A53.9,梅毒,"Syphilis, unspecified",1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 exact。,可列下一批人工 review / approve 候選。
+165,57510,膽囊炎,K81.9,膽囊炎,"Cholecystitis, unspecified",1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 exact。,可列下一批人工 review / approve 候選。
+167,07054,C 型肝炎,B18.2,慢性病毒性C型肝炎,Chronic viral hepatitis C,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+177,5724,肝腎徵候群,K76.7,肝腎徵候群,Hepatorenal syndrome,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 exact。,可列下一批人工 review / approve 候選。
+183,86400,肝損傷,S36.119A,肝臟損傷之初期照護,"Unspecified injury of liver, initial encounter",1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 similar。,可列下一批人工 review / approve 候選。
+184,7824,黃疸,R17,黃疸,Unspecified jaundice,1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 exact。,可列下一批人工 review / approve 候選。
+185,7892,脾腫大,R16.1,脾腫大，他處未歸類者,"Splenomegaly, not elsewhere classified",1,1,Batch A,single_mapping_high_confidence,單一 ICD-9→ICD-10，USE=1，中文語意 contains。,可列下一批人工 review / approve 候選。
+1,6918,異位性皮膚炎（過敏性皮膚炎）,L20.0,貝斯尼耶氏癢疹,Besnier's prurigo,1,7,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 7 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+2,69289,濕疹,L23.4,染料所致之過敏性接觸性皮膚炎,Allergic contact dermatitis due to dyes,1,14,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 14 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+3,6929,接觸性皮膚炎,L23.9,過敏性接觸性皮膚炎，未明示原因,"Allergic contact dermatitis, unspecified cause",1,7,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 7 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+4,7061,座瘡（痤瘡）,L70.0,尋常性痤瘡,Acne vulgaris,1,8,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 8 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+5,9490,燙傷,T30.0,未明示身體部位燒傷,"Burn of unspecified body region, unspecified degree",1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+6,6819,蜂窩組織炎,L03.019,未明示側性手指蜂窩組織炎,Cellulitis of unspecified finger,1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+7,2168,皮膚良性腫瘤,D22.9,黑色素細胞痣,"Melanocytic nevi, unspecified",1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+9,6809,癤、癰,L02.92,癤,"Furuncle, unspecified",1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+10,1119,癬,B36.9,表淺性黴菌病,"Superficial mycosis, unspecified",1,1,Batch B,single_mapping_name_mismatch,單一 mapping 且 USE=1，但中文名差異明顯。,需要人工 review；不可自動補。
+11,6829,蜂窩組織炎及膿瘍,L02.91,皮膚膿瘍,"Cutaneous abscess, unspecified",1,6,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 6 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+12,6826,其他蜂窩組織炎及膿瘍（下肢、足）,L02.415,右側下肢皮膚膿瘍,Cutaneous abscess of right lower limb,1,9,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 9 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+14,70909,白斑症,L57.3,Civatte型多形皮膚萎縮症,Poikiloderma of Civatte,1,10,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 10 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+15,68102,甲溝炎,L03.011,右側手指蜂窩組織炎,Cellulitis of right finger,1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+16,9190,表淺損傷,T07.XXXA,多處損傷之初期照護,"Unspecified multiple injuries, initial encounter",1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+23,2740,痛風性關節病變,M10.00,未明示部位特發性痛風,"Idiopathic gout, unspecified site",1,263,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 263 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+25,7245,下背痛,M54.89,其他背痛,Other dorsalgia,1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+26,7906,尿酸過高,E79.0,高尿酸血症未伴有關節炎及痛風石,Hyperuricemia without signs of inflammatory arthritis and tophaceous disease,1,9,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 9 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+28,71600,關節炎,M12.10,未明示部位Kaschin-Beck氏病,"Kaschin-Beck disease, unspecified site",1,1,Batch B,single_mapping_name_mismatch,單一 mapping 且 USE=1，但中文名差異明顯。,需要人工 review；不可自動補。
+29,72190,僵直性脊椎炎,M47.20,未明示部位其他退化性脊椎炎伴有神經根病變,"Other spondylosis with radiculopathy, site unspecified",1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+31,72982,痙攣（四肢）,G47.62,睡眠相關之腿抽筋,Sleep related leg cramps,1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+34,78039,痙攣,G40.909,癲癇，非難治之癲癇，未伴有癲癇重積狀態,"Epilepsy, unspecified, not intractable, without status epilepticus",1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+35,8290,閉鎖性骨折,T14.8XXA,其他身體損傷之初期照護,"Other injury of unspecified body region, initial encounter",1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+36,8291,開放性骨折,T14.8XXA,其他身體損傷之初期照護,"Other injury of unspecified body region, initial encounter",1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+37,7290,纖維組織炎／風濕症,M79.0,風濕病,"Rheumatism, unspecified",1,1,Batch B,single_mapping_name_mismatch,單一 mapping 且 USE=1，但中文名差異明顯。,需要人工 review；不可自動補。
+38,7260,冷凍肩（五十肩）,M75.00,未明示側性肩部粘連性囊炎,Adhesive capsulitis of unspecified shoulder,1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+39,72290,椎間盤疾患,M46.40,未明示部位椎間盤炎,"Discitis, unspecified, site unspecified",1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+43,7140,類風濕性關節炎,M05.70,未明示部位類風濕性關節炎伴有類風濕因子，未侵及器官及系統,Rheumatoid arthritis with rheumatoid factor of unspecified site without organ or systems involvement,1,149,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 149 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+44,71590,骨關節炎（退化性關節炎）,M15.9,多發性骨關節炎,"Polyosteoarthritis, unspecified",1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+45,71696,膝關節炎,M12.9,關節病變,"Arthropathy, unspecified",1,1,Batch B,single_mapping_needs_semantic_review,單一 mapping 且 USE=1，但中文語意只弱相近。,需要更多來源確認語意範圍。
+46,8489,肌肉扭傷拉傷,T14.90XA,損傷之初期照護,"Injury, unspecified, initial encounter",1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+47,84500,踝扭傷,S93.401A,右側踝部韌帶扭傷之初期照護,"Sprain of unspecified ligament of right ankle, initial encounter",1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+48,84210,手扭傷,S63.90XA,未明示側性腕部及手部未明示部位扭傷之初期照護,"Sprain of unspecified part of unspecified wrist and hand, initial encounter",1,6,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 6 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+49,84200,腕扭傷,S63.501A,右側腕部扭傷之初期照護,"Unspecified sprain of right wrist, initial encounter",1,6,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 6 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+50,8419,手肘和前臂扭傷,S53.401A,右側手肘扭傷之初期照護,"Unspecified sprain of right elbow, initial encounter",1,39,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 39 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+51,3540,腕部隧道徵候群,G56.00,未明示側性腕隧道症候群,"Carpal tunnel syndrome, unspecified upper limb",1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+53,72703,扳機指,M65.30,扳機指,"Trigger finger, unspecified finger",1,16,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 16 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+54,72705,手及手腕肌腱炎,M65.831,右側前臂其他滑膜炎及腱鞘炎,"Other synovitis and tenosynovitis, right forearm",1,6,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 6 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+55,72706,足及踝肌腱炎,M65.871,右側踝部及足部其他滑膜炎及腱鞘炎,"Other synovitis and tenosynovitis, right ankle and foot",1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+59,27411,尿酸腎石病（標記 ✗，見備註）,N20.0,腎結石,Calculus of kidney,1,1,Batch B,single_mapping_name_mismatch,單一 mapping 且 USE=1，但中文名差異明顯。,需要人工 review；不可自動補。
+60,27419,其他痛風性腎病變,M10.30,未明示部位腎功能損傷所致的痛風,"Gout due to renal impairment, unspecified site",1,1,Batch B,single_mapping_name_mismatch,單一 mapping 且 USE=1，但中文名差異明顯。,需要人工 review；不可自動補。
+61,7294,肌膜炎（未明示者）,M72.9,纖維母細胞性疾患,"Fibroblastic disorder, unspecified",1,1,Batch B,single_mapping_name_mismatch,單一 mapping 且 USE=1，但中文名差異明顯。,需要人工 review；不可自動補。
+62,7243,坐骨神經痛,M54.30,未明示側性坐骨神經痛,"Sciatica, unspecified side",1,6,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 6 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+66,7881,解尿困難,R30.0,排尿困難,Dysuria,1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+67,7823,水腫,R60.0,局部性水腫,Localized edema,1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+69,7910,蛋白尿,R80.0,孤立性蛋白尿,Isolated proteinuria,1,5,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 5 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+70,59780,尿道炎,N34.1,非特定性的尿道炎,Nonspecific urethritis,1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+72,7242,腰痛,M54.50,下背痛,"Low back pain, unspecified",1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+73,5997,血尿,R31.0,肉眼可見性血尿,Gross hematuria,1,6,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 6 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+81,585,慢性腎衰竭（末期腎臟病）,N18.4,第四期慢性腎臟疾病(重度),"Chronic kidney disease, stage 4 (severe)",1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+82,5950,急性膀胱炎,N30.00,急性膀胱炎未伴有血尿,Acute cystitis without hematuria,1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+83,5959,膀胱炎,N30.90,膀胱炎未伴有血尿,"Cystitis, unspecified without hematuria",1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+84,591,腎水腫,N13.0,腎水腫伴有腎盂輸尿管接合處阻塞,Hydronephrosis with ureteropelvic junction obstruction,1,5,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 5 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+86,5968,激躁性膀胱,N32.89,其他特定膀胱疾患,Other specified disorders of bladder,1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+87,86600,腎臟損傷,S37.001A,右側腎臟損傷之初期照護,"Unspecified injury of right kidney, initial encounter",1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+88,5819,腎症候群,N02.9,再發性及持續性血尿伴有非特異性的組織形態改變,Recurrent and persistent hematuria with unspecified morphologic changes,1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+89,59654,神經性膀胱,N31.0,未被抑制性神經病變性膀胱，他處未歸類者,"Uninhibited neuropathic bladder, not elsewhere classified",1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+90,59080,腎盂腎炎,N11.9,慢性腎小管－間質腎炎,"Chronic tubulo-interstitial nephritis, unspecified",1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+91,78842,多尿,R35.81,夜尿多尿症,Nocturnal polyuria,1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+93,185,攝護腺癌,C61,攝護腺惡性腫瘤,Malignant neoplasm of prostate,1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+95,78820,尿滯留,R33.8,其他尿滯留,Other retention of urine,1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+96,5920,腎結石,N20.0,腎結石,Calculus of kidney,1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+99,5933,輸尿管狹窄,N13.0,腎水腫伴有腎盂輸尿管接合處阻塞,Hydronephrosis with ureteropelvic junction obstruction,1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+100,5989,尿道狹窄,N35.911,男性尿道外口狹窄,"Unspecified urethral stricture, male, meatal",1,8,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 8 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+102,5929,泌尿道結石,N13.9,阻塞性及逆流性泌尿道病變,"Obstructive and reflux uropathy, unspecified",1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+103,7889,泌尿道症狀,R30.1,膀胱裏急後重,Vesical tenesmus,1,7,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 7 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+105,0980,泌尿生殖道淋病雙球菌感染,A54.00,下生殖泌尿道淋病雙球菌感染,"Gonococcal infection of lower genitourinary tract, unspecified",1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+108,5964,膀胱無張力,N31.2,鬆弛性神經病變性膀胱，他處未歸類者,"Flaccid neuropathic bladder, not elsewhere classified",1,1,Batch B,single_mapping_needs_semantic_review,單一 mapping 且 USE=1，但中文語意只弱相近。,需要更多來源確認語意範圍。
+109,75313,多囊腎（顯性染色體）,Q61.2,成人型多囊腎,"Polycystic kidney, adult type",1,1,Batch B,single_mapping_name_mismatch,單一 mapping 且 USE=1，但中文名差異明顯。,需要人工 review；不可自動補。
+110,1890,腎臟癌,C64.1,右側腎惡性腫瘤，腎盂除外,"Malignant neoplasm of right kidney, except renal pelvis",1,5,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 5 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+111,1459,口腔癌,C06.9,口惡性腫瘤,"Malignant neoplasm of mouth, unspecified",1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+112,1509,食道癌,C15.9,食道惡性腫瘤,"Malignant neoplasm of esophagus, unspecified",1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+113,1519,胃癌,C16.9,胃惡性腫瘤,"Malignant neoplasm of stomach, unspecified",1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+114,1539,大腸癌,C18.9,結腸惡性腫瘤,"Malignant neoplasm of colon, unspecified",1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+115,1541,直腸癌,C20,直腸惡性腫瘤,Malignant neoplasm of rectum,1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+116,1579,胰臟癌,C25.9,胰臟惡性腫瘤,"Malignant neoplasm of pancreas, unspecified",1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+117,1599,腸胃道惡性腫瘤,C26.9,消化系統內界定不明的部位惡性腫瘤,Malignant neoplasm of ill-defined sites within the digestive system,1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+118,1629,肺癌,C34.90,未明示側性支氣管或肺惡性腫瘤,Malignant neoplasm of unspecified part of unspecified bronchus or lung,1,5,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 5 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+119,1709,骨骼及關節軟骨之惡性腫瘤,C40.80,未明示側性肢體骨及關節軟骨重疊部位之惡性腫瘤,Malignant neoplasm of overlapping sites of bone and articular cartilage of unspecified limb,1,8,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 8 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+120,1719,結締組織癌,C47.9,周邊神經及自主神經系統之惡性腫瘤,"Malignant neoplasm of peripheral nerves and autonomic nervous system, unspecified",1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+121,1749,女性乳房惡性腫瘤,C50.911,女性右側乳房未明示部位惡性腫瘤,Malignant neoplasm of unspecified site of right female breast,1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+122,193,甲狀腺癌,C73,甲狀腺惡性腫瘤,Malignant neoplasm of thyroid gland,1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+123,1991,原發不明之癌症（惡性腫瘤）,C45.9,間皮瘤,"Mesothelioma, unspecified",1,11,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 11 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+124,1550,肝癌,C22.0,肝細胞癌,Liver cell carcinoma,1,7,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 7 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+125,1809,子宮頸癌,C53.9,子宮頸惡性腫瘤,"Malignant neoplasm of cervix uteri, unspecified",1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+126,1830,卵巢癌,C56.1,右側卵巢惡性腫瘤,Malignant neoplasm of right ovary,1,5,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 5 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+127,1880,膀胱癌,C67.0,膀胱三角惡性腫瘤,Malignant neoplasm of trigone of bladder,1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+130,2720,純高膽固醇血症,E78.00,純高膽固醇血症,"Pure hypercholesterolemia, unspecified",1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+132,2849,再生不良性貧血,D46.4,骨髓分化不良症候群-頑固性貧血,"Refractory anemia, unspecified",1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+134,2812,葉酸缺乏性貧血,D52.0,飲食性葉酸缺乏性貧血,Dietary folate deficiency anemia,1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+135,2811,維生素 B12 缺乏性貧血,D51.1,選擇性維生素Ｂ12吸收不良所致伴有蛋白尿的維生素Ｂ12缺乏性貧血,Vitamin B12 deficiency anemia due to selective vitamin B12 malabsorption with proteinuria,1,5,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 5 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+136,2809,缺鐵性貧血,D50.8,其他缺鐵性貧血,Other iron deficiency anemias,1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+137,2824,地中海貧血,D56.0,甲(α)型地中海型貧血,Alpha thalassemia,1,25,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 25 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+143,2750,鐵代謝失調,E83.10,鐵代謝疾患,"Disorder of iron metabolism, unspecified",1,6,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 6 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+144,2751,銅代謝失調,E83.00,銅代謝疾患,"Disorder of copper metabolism, unspecified",1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+145,2752,鎂代謝失調,E83.40,鎂代謝疾患,"Disorders of magnesium metabolism, unspecified",1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+146,2753,磷代謝失調,E83.30,磷代謝疾患,"Disorder of phosphorus metabolism, unspecified",1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+148,27541,低血鈣,E83.51,低血鈣症,Hypocalcemia,1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+153,2765,體液量缺乏,E86.0,脫水,Dehydration,1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+155,2779,未明示之新陳代謝失調,E88.9,新陳代謝疾患,"Metabolic disorder, unspecified",1,1,Batch B,single_mapping_needs_semantic_review,單一 mapping 且 USE=1，但中文語意只弱相近。,需要更多來源確認語意範圍。
+157,0980,淋病,A54.00,下生殖泌尿道淋病雙球菌感染,"Gonococcal infection of lower genitourinary tract, unspecified",1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+160,0549,單純性泡疹,B00.9,疱疹病毒感染,"Herpesviral infection, unspecified",1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+166,07030,B 型肝炎,B16.9,急性B型病毒性肝炎未併D 型肝炎病毒未伴有肝昏迷,Acute hepatitis B without delta-agent and without hepatic coma,1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+168,5711,急性酒精性肝炎,K70.10,酒精性肝炎未伴有腹水,Alcoholic hepatitis without ascites,1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+169,5713,酒精性肝病（酒精性肝損害）,K70.40,酒精性肝衰竭未伴有昏迷,Alcoholic hepatic failure without coma,1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+170,5712,酒精性肝硬化,K70.2,酒精性肝纖維化及硬化,Alcoholic fibrosis and sclerosis of liver,1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+174,5715,肝硬化,K74.00,肝纖維化,"Hepatic fibrosis, unspecified",1,8,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 8 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+175,5733,肝炎（未明示）,K71.0,毒性肝疾病併膽汁鬱滯,Toxic liver disease with cholestasis,1,18,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 18 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+179,5761,慢性膽道炎,K83.01,原發性硬化性膽管炎,Primary sclerosing cholangitis,1,3,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 3 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+180,5770,急性胰臟炎,B25.2,巨細胞病毒性胰臟炎,Cytomegaloviral pancreatitis,1,25,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 25 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+181,5771,慢性胰臟炎,K86.0,酒精導致之慢性胰臟炎,Alcohol-induced chronic pancreatitis,1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+186,3310,阿茲海默症,G30.0,早發型阿茲海默氏病,Alzheimer's disease with early onset,1,4,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 4 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+188,3569,周圍神經病變,G60.9,遺傳性及原發性神經病變,"Hereditary and idiopathic neuropathy, unspecified",1,2,Batch B,multiple_mapping_needs_review,單一 ICD-9 對應 2 個 ICD-10，不可自動選唯一值。CSV 僅列其中一個代表候選。,需要更多來源或人工選碼。
+27,2741,痛風性腎病變,,,,,0,Batch C,no_mapping,健保 ICD-9→ICD-10-CM 對照表找不到對應。,不建議自動補；需人工或其他來源。
+56,7302,骨髓炎,,,,,0,Batch C,no_mapping,健保 ICD-9→ICD-10-CM 對照表找不到對應。,不建議自動補；需人工或其他來源。
+74,7886,小便異常,,,,,0,Batch C,no_mapping,健保 ICD-9→ICD-10-CM 對照表找不到對應。,不建議自動補；需人工或其他來源。
+80,581,腎徵候群,,,,,0,Batch C,no_mapping,健保 ICD-9→ICD-10-CM 對照表找不到對應。,不建議自動補；需人工或其他來源。
+85,4030,高血壓腎臟病,,,,,0,Batch C,no_mapping,健保 ICD-9→ICD-10-CM 對照表找不到對應。,不建議自動補；需人工或其他來源。
+107,590,腎感染,,,,,0,Batch C,no_mapping,健保 ICD-9→ICD-10-CM 對照表找不到對應。,不建議自動補；需人工或其他來源。
+150,276,體液電解質及酸鹼平衡失調,,,,,0,Batch C,no_mapping,健保 ICD-9→ICD-10-CM 對照表找不到對應。,不建議自動補；需人工或其他來源。
+178,5741,膽結石合併膽囊炎,,,,,0,Batch C,no_mapping,健保 ICD-9→ICD-10-CM 對照表找不到對應。,不建議自動補；需人工或其他來源。
+182,532,十二指腸潰瘍,,,,,0,Batch C,no_mapping,健保 ICD-9→ICD-10-CM 對照表找不到對應。,不建議自動補；需人工或其他來源。
+158,V08,人類免疫不全病毒感染,,,,,0,Batch D,combo_or_non_numeric_icd9,ICD-9 為組合碼/多重碼/非純數字，避免自動 mapping。,暫緩；人工拆解或 OCR/照片佐證。
+173,5733+5715,肝炎合併肝硬化,,,,,0,Batch D,combo_or_non_numeric_icd9,ICD-9 為組合碼/多重碼/非純數字，避免自動 mapping。,暫緩；人工拆解或 OCR/照片佐證。
+176,570+7824,急性肝炎合併黃疸,,,,,0,Batch D,combo_or_non_numeric_icd9,ICD-9 為組合碼/多重碼/非純數字，避免自動 mapping。,暫緩；人工拆解或 OCR/照片佐證。
+187,25060+3572,糖尿病併多發性神經病變,,,,,0,Batch D,combo_or_non_numeric_icd9,ICD-9 為組合碼/多重碼/非純數字，避免自動 mapping。,暫緩；人工拆解或 OCR/照片佐證。
