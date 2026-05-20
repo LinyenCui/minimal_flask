@@ -463,10 +463,15 @@
         liff.login({ redirectUri: 'https://liff.line.me/' + LIFF_ID + window.location.search });
         return;
       }
-      // idToken 取一次共用（見 fetchTrip 註解：避免 iOS WebView 並行不穩）
       const idToken = _safeIdToken();
       if (!idToken) { setLoading('LIFF idToken 取得失敗，請重新打開表單'); return; }
-      trips = await Promise.all(TRIP_IDS.map(id => fetchTrip(id, idToken)));
+      // 循序 await：iOS LIFF WebView 對同步排隊多個 fetch() 不穩
+      // (Promise.all 模式下 0/2 或 1/2 prefetch 會在 client 端拋掉,
+      //  server 連 GET 都收不到 → 改循序避開,2~5 筆延遲微忽略)
+      trips = [];
+      for (const id of TRIP_IDS) {
+        trips.push(await fetchTrip(id, idToken));
+      }
       renderTripList();
       refreshActionPicker();
       showContent();
