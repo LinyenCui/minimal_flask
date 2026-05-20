@@ -187,12 +187,15 @@
     doneBtn.addEventListener('click', _closeOrBack);
 
     againBtn.addEventListener('click', () => {
+      // 保留上一筆日期：連續預約多班的主場景是同日批次，
+      // form.reset() 後若重設為今天，會默默撤銷使用者剛選的日期 → 跑錯日
+      const dateEl = form.elements.namedItem('date');
+      const previousDate = dateEl.value;
       form.reset();
       // form.reset() 不會收合 <details>，手動收回
       form.querySelectorAll('details[open]').forEach((d) => { d.open = false; });
-      // 日期欄 reset 後會空白，重設今天 + 最早今天
-      const dateEl = form.elements.namedItem('date');
-      dateEl.value = _today();
+      // 還原上一筆日期；異常為空才退回今天。min 仍鎖今天避免手動選過去
+      dateEl.value = previousDate || _today();
       dateEl.min = _today();
       clearAlert();
       submitBtn.disabled = false;
