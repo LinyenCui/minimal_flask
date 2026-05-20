@@ -158,23 +158,47 @@ def render_trip_detail(t: TripView) -> dict:
 # 動作 Quick Reply（attach 到 reply message，不放 flex bubble footer）
 # ============================================================
 
-def build_trip_quick_reply(t: TripView) -> Optional[dict]:
+def build_trip_quick_reply(t: TripView, event_source=None) -> Optional[dict]:
     """
     依 trip 狀態產生 quickReply 物件（給 reply_message 附帶）
 
-    狀態決策表：
-      已完成                 → 無
-      鎖內                   → 無
-      鎖外 + 準備            → [註銷] [衝突] [請假]
-      鎖外 + 請假/衝突/註銷  → [改回準備]
-      鎖外 + 其他            → 無
+    狀態決策表（同 LIFF trip_status_form.html 的 validActionsFor）：
+      已完成 / 鎖內              → 無
+      鎖外 + 準備                → [⚙️ 狀態管理]（LIFF；form 內可選 請假/註銷/衝突）
+      鎖外 + 請假/衝突/註銷      → [⚙️ 狀態管理]（LIFF；form 內可選 改回準備）
+      其他                       → 無
 
-    [請假] 按了發送「班次請假 X」（無參數）→ 進入請假輸入模式
-    （見 router.py 的 conversation state 流程）。
+    LIFF_ID 已設 → 一律一顆「狀態管理」LIFF URI 按鈕（請假含 reason+加成 chip，
+    註銷/衝突 reason 可空，改回準備直接執行；都在 form 裡決定）。
+    LIFF_ID 未設 → fallback 到原本的多顆文字 quick reply（backward compat）。
+
+    event_source: webhook event.source（或 LIFF payload source dict），給
+    build_liff_url 帶 gid/rid 用，缺則 LIFF 內 push 會 fallback 到使用者私聊。
     """
     if t.display_status == '已完成' or t.is_locked:
         return None
 
+    if t.display_status == '準備':
+        has_action = True
+    elif t.display_status in ('請假', '衝突', '註銷'):
+        has_action = True
+    else:
+        has_action = False
+    if not has_action:
+        return None
+
+    # 優先用 LIFF 統一狀態管理面板
+    from rewrite.views.customer_flex import _liff_id
+    liff_id = _liff_id()
+    if liff_id:
+        from rewrite.utils.liff_url import build_liff_url
+        uri = build_liff_url(
+            liff_id, 'trip_status', event_source,
+            extra_params={'trip_id': t.trip_id},
+        )
+        return {"items": [_qr_uri("⚙️ 狀態管理", uri)]}
+
+    # Fallback（LIFF_ID 未設）：原文字 quick reply
     items = []
     if t.display_status == '準備':
         items.append(_qr_msg("❌ 註銷", f"班次註銷 {t.trip_id}"))
@@ -182,7 +206,6 @@ def build_trip_quick_reply(t: TripView) -> Optional[dict]:
         items.append(_qr_msg("🏷️ 請假", f"班次請假 {t.trip_id}"))
     elif t.display_status in ('請假', '衝突', '註銷'):
         items.append(_qr_msg("↩️ 改回準備", f"班次恢復 {t.trip_id}"))
-
     return {"items": items} if items else None
 
 
@@ -191,6 +214,14 @@ def _qr_msg(label: str, text: str) -> dict:
     return {
         "type": "action",
         "action": {"type": "message", "label": label, "text": text},
+    }
+
+
+def _qr_uri(label: str, uri: str) -> dict:
+    """quickReply 的 uri action item（按了開 LIFF / 外部連結）"""
+    return {
+        "type": "action",
+        "action": {"type": "uri", "label": label, "uri": uri},
     }
 
 

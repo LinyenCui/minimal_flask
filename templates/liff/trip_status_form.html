@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>班次狀態管理</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang TC", "Microsoft JhengHei", sans-serif; padding: 16px; line-height: 1.5; color: #222; max-width: 600px; margin: 0 auto; font-size: 16px; }
+    h2 { margin: 0 0 16px; font-size: 20px; }
+    .field { margin-bottom: 14px; }
+    .field > label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 14px; color: #444; }
+    .field .req { color: #c0392b; margin-left: 2px; }
+    .field input, .field textarea {
+      width: 100%; padding: 10px 12px; font-size: 16px; border: 1px solid #ccc;
+      border-radius: 6px; background: #fff;
+    }
+    .field input:focus, .field textarea:focus { outline: none; border-color: #06c755; }
+    .helper { font-size: 12px; color: #888; margin-top: 4px; }
+    .trip-info {
+      background: #e3f2fd; border: 1px solid #90caf9; border-radius: 6px;
+      padding: 10px 12px; margin-bottom: 14px; font-size: 14px;
+    }
+    .trip-info .locked { color: #D32F2F; margin-top: 4px; font-weight: 600; }
+    .actions { margin-top: 24px; display: flex; gap: 8px; }
+    button { flex: 1; padding: 12px; font-size: 16px; border-radius: 6px; border: 0; cursor: pointer; }
+    button[type=submit] { background: #06c755; color: #fff; font-weight: 600; }
+    button[type=submit]:disabled { background: #aaa; cursor: not-allowed; }
+    button.secondary { background: #f3f3f3; color: #333; }
+    .alert { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 14px; }
+    .alert.err { background: #fdecea; color: #c0392b; border: 1px solid #f5c2bf; }
+    .alert.ok { background: #e8f5e9; color: #1a7a1a; border: 1px solid #b8e0bb; }
+    .loading { text-align: center; color: #666; padding: 40px 0; }
+    .preset-buttons { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .preset-buttons button {
+      flex: 0 0 auto; padding: 6px 10px; font-size: 13px;
+      background: #fff; color: #555; border: 1px solid #ccc; border-radius: 4px;
+      cursor: pointer; font-weight: normal;
+    }
+    .preset-buttons button:hover { background: #f0f0f0; }
+    /* 動作選擇器（radio 卡片風） */
+    .action-picker { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+    .action-picker label.opt {
+      display: flex; align-items: center; padding: 12px;
+      border: 1.5px solid #ccc; border-radius: 6px; cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+      font-weight: normal; margin-bottom: 0;
+    }
+    .action-picker label.opt:hover { background: #fafafa; }
+    .action-picker label.opt.checked { border-color: #06c755; background: #e8f5e9; }
+    .action-picker input[type=radio] {
+      width: auto; margin-right: 10px; transform: scale(1.2);
+    }
+    /* 隱藏用屬性 — 跟 booking_form.html 一樣的小技巧：
+       .actions(display:flex)會蓋過 [hidden],ID 特異性更高的規則才壓得住 */
+    #leave-fields[hidden], #reason-fields[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <div id="loading" class="loading">載入中…</div>
+  <div id="content" hidden>
+    <h2>⚙️ 班次狀態管理</h2>
+    <div id="trip-info" class="trip-info">載入班次資訊中…</div>
+    <div id="alert"></div>
+    <form id="status-form" novalidate>
+
+      <div class="field">
+        <label>動作<span class="req">*</span></label>
+        <div id="action-picker" class="action-picker">
+          <!-- 由 JS 依目前狀態動態插入合法動作 -->
+        </div>
+      </div>
+
+      <!-- 請假專屬：原因 + 加成 -->
+      <div id="leave-fields" hidden>
+        <div class="field">
+          <label>請假原因<span class="req">*</span></label>
+          <input id="reason-leave" name="reason_leave" type="text" maxlength="100" placeholder="例：出國度假 / 住院 / 化療 / 自己來">
+          <div class="preset-buttons">
+            <button type="button" data-reason="出國">出國</button>
+            <button type="button" data-reason="住院">住院</button>
+            <button type="button" data-reason="化療">化療</button>
+            <button type="button" data-reason="自己來">自己來</button>
+            <button type="button" data-reason="搬家">搬家</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>加成（負數 = 自己負擔扣除金額）</label>
+          <input name="surcharge" type="number" value="0" placeholder="0">
+          <div class="preset-buttons">
+            <button type="button" data-fare="0">0</button>
+            <button type="button" data-fare="-30">-30</button>
+            <button type="button" data-fare="-50">-50</button>
+            <button type="button" data-fare="-100">-100</button>
+            <button type="button" data-fare="-200">-200</button>
+          </div>
+          <div class="helper">空白或 0 = 不扣加成；自己來常用 -100；化療常用 -30/-50</div>
+        </div>
+      </div>
+
+      <!-- 註銷/衝突 共用：原因可空 -->
+      <div id="reason-fields" hidden>
+        <div class="field">
+          <label>原因（可空）</label>
+          <input id="reason-other" name="reason_other" type="text" maxlength="100" placeholder="（選填）">
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="secondary" id="btn-cancel">取消</button>
+        <button type="submit" id="btn-submit" disabled>請先選動作</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    const LIFF_ID = "{{ liff_id }}";
+    const TRIP_ID = {{ trip_id|tojson }};
+
+    const loadingEl = document.getElementById('loading');
+    const contentEl = document.getElementById('content');
+    const alertEl = document.getElementById('alert');
+    const infoEl = document.getElementById('trip-info');
+    const form = document.getElementById('status-form');
+    const pickerEl = document.getElementById('action-picker');
+    const leaveFieldsEl = document.getElementById('leave-fields');
+    const reasonFieldsEl = document.getElementById('reason-fields');
+    const submitBtn = document.getElementById('btn-submit');
+    const cancelBtn = document.getElementById('btn-cancel');
+
+    function showAlert(type, msg) { alertEl.innerHTML = `<div class="alert ${type}">${msg}</div>`; }
+    function clearAlert() { alertEl.innerHTML = ''; }
+    function setLoading(t) { loadingEl.textContent = t; loadingEl.hidden = false; contentEl.hidden = true; }
+    function showContent() { loadingEl.hidden = true; contentEl.hidden = false; }
+
+    // 防 LIFF SDK 偶爾回傳含 \r \n \0 的 idToken（iOS Safari WebView 常見）
+    function _safeIdToken() {
+      const t = liff.getIDToken();
+      if (!t) return '';
+      return t.trim().replace(/[^\x21-\x7E]/g, '');
+    }
+
+    const ACTION_LABEL = {
+      leave:   '🏷️ 請假',
+      cancel:  '🚫 註銷',
+      conflict:'⚠️ 衝突',
+      restore: '🔄 改回準備',
+    };
+    const SUBMIT_LABEL = {
+      leave:   '確認請假',
+      cancel:  '確認註銷',
+      conflict:'確認標記衝突',
+      restore: '確認改回準備',
+    };
+
+    let currentAction = '';
+
+    function validActionsFor(trip) {
+      // 對齊 rewrite/views/trip_flex.py build_trip_quick_reply 的可見性規則
+      if (trip.display_status === '已完成' || trip.is_locked) return [];
+      const ds = trip.display_status;
+      if (ds === '準備') return ['leave', 'cancel', 'conflict'];
+      if (ds === '請假' || ds === '衝突' || ds === '註銷') return ['restore'];
+      return [];
+    }
+
+    async function loadTrip(id) {
+      const idToken = _safeIdToken();
+      const resp = await fetch(`/liff/trip/${id}`, {
+        headers: { 'Authorization': 'Bearer ' + idToken },
+      });
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      return data.trip;
+    }
+
+    function renderInfo(t) {
+      const fmt = (d) => d ? String(d).slice(0, 10) : '?';
+      const tm = (t.time || '').slice(0, 5);
+      const sp = t.custom_start_point || t.start_point || '?';
+      const ep = t.custom_end_point || t.end_point || '?';
+      const lr = t.passenger_leave_reason ? `（${t.passenger_leave_reason}）` : '';
+      const ds = t.display_status || t.status || '?';
+      const color = (ds === '註銷' || ds === '衝突') ? '#D32F2F'
+                  : (ds === '請假') ? '#7B1FA2'
+                  : (ds === '已完成') ? '#999' : '#2E7D32';
+      infoEl.innerHTML = `
+        <div><strong>#${t.trip_id}</strong> ${fmt(t.date)} ${tm}</div>
+        <div>${sp} → ${ep}（${t.category || '?'}）</div>
+        <div style="color: ${color};">目前狀態：${ds}${lr}</div>
+        ${t.is_locked ? '<div class="locked">⏰ 已進入 30 分鐘鎖,狀態無法變更</div>' : ''}
+      `;
+    }
+
+    function renderActionPicker(actions) {
+      pickerEl.innerHTML = '';
+      if (actions.length === 0) {
+        pickerEl.innerHTML = '<div style="color:#888;padding:8px;">目前無可執行的狀態變更</div>';
+        submitBtn.disabled = true;
+        submitBtn.textContent = '無可執行動作';
+        return;
+      }
+      for (const a of actions) {
+        const lbl = document.createElement('label');
+        lbl.className = 'opt';
+        lbl.innerHTML = `<input type="radio" name="action" value="${a}"> ${ACTION_LABEL[a]}`;
+        pickerEl.appendChild(lbl);
+      }
+      pickerEl.querySelectorAll('input[type=radio]').forEach(r => {
+        r.addEventListener('change', onActionChange);
+      });
+    }
+
+    function onActionChange(e) {
+      const a = e.target.value;
+      currentAction = a;
+      pickerEl.querySelectorAll('label.opt').forEach(l => l.classList.remove('checked'));
+      e.target.closest('label').classList.add('checked');
+      leaveFieldsEl.hidden = (a !== 'leave');
+      reasonFieldsEl.hidden = !(a === 'cancel' || a === 'conflict');
+      submitBtn.disabled = false;
+      submitBtn.textContent = SUBMIT_LABEL[a] || '確認';
+    }
+
+    // preset 按鈕綁定（請假專屬）
+    leaveFieldsEl.querySelectorAll('button[data-reason]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.getElementById('reason-leave').value = btn.dataset.reason;
+      });
+    });
+    leaveFieldsEl.querySelectorAll('button[data-fare]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        form.elements.namedItem('surcharge').value = btn.dataset.fare;
+      });
+    });
+
+    cancelBtn.addEventListener('click', () => {
+      if (liff.isInClient && liff.isInClient()) liff.closeWindow();
+      else history.back();
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearAlert();
+      if (!currentAction) {
+        showAlert('err', '❌ 請選一個動作');
+        return;
+      }
+      const payload = { action: currentAction };
+      if (currentAction === 'leave') {
+        const reason = (document.getElementById('reason-leave').value || '').trim();
+        if (!reason) {
+          showAlert('err', '❌ 請填請假原因');
+          return;
+        }
+        const sc = form.elements.namedItem('surcharge').value;
+        payload.reason = reason;
+        payload.surcharge = sc !== '' ? parseInt(sc, 10) : 0;
+        if (Number.isNaN(payload.surcharge)) {
+          showAlert('err', '❌ 加成必須是整數（可正可負）');
+          return;
+        }
+      } else if (currentAction === 'cancel' || currentAction === 'conflict') {
+        const reason = (document.getElementById('reason-other').value || '').trim();
+        if (reason) payload.reason = reason;
+      }
+      // 從 URL params 拿真實 group/room ID（同 booking / fixed_schedule 慣例）
+      const _params = new URLSearchParams(window.location.search);
+      const _gid = _params.get('gid');
+      const _rid = _params.get('rid');
+      if (_gid) payload.source = { type: 'group', groupId: _gid, roomId: null };
+      else if (_rid) payload.source = { type: 'room', groupId: null, roomId: _rid };
+
+      submitBtn.disabled = true;
+      const origText = submitBtn.textContent;
+      submitBtn.textContent = '送出中…';
+      try {
+        const idToken = _safeIdToken();
+        const resp = await fetch(`/liff/trip/${TRIP_ID}/status`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + idToken,
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        const inClient = liff.isInClient && liff.isInClient();
+        if (inClient) {
+          showAlert('ok', `✅ 已執行：${ACTION_LABEL[currentAction]}（1.5 秒後關閉）`);
+          setTimeout(() => liff.closeWindow(), 1500);
+        } else {
+          showAlert('ok', `✅ 已執行：${ACTION_LABEL[currentAction]}（可關閉視窗）`);
+        }
+      } catch (err) {
+        showAlert('err', '❌ ' + err.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = origText;
+      }
+    });
+
+    async function init() {
+      if (!LIFF_ID) { setLoading('LIFF_ID 未設定'); return; }
+      try {
+        await liff.init({ liffId: LIFF_ID });
+      } catch (e) {
+        setLoading('LIFF init 失敗：' + e.message);
+        return;
+      }
+      if (!liff.isLoggedIn()) {
+        // PC LIFF OAuth2 redirect_uri 必須在白名單 — 用 LIFF URL 才會通過
+        liff.login({ redirectUri: 'https://liff.line.me/' + LIFF_ID + window.location.search });
+        return;
+      }
+      try {
+        const t = await loadTrip(TRIP_ID);
+        renderInfo(t);
+        renderActionPicker(validActionsFor(t));
+      } catch (e) {
+        setLoading('載入班次失敗：' + e.message);
+        return;
+      }
+      showContent();
+    }
+
+    init();
+  </script>
+</body>
+</html>

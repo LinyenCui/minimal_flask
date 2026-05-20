@@ -173,7 +173,8 @@ def try_route(event) -> bool:
         # ===== 班次命令 =====
         m = _RE_TRIP_DETAIL.match(text)
         if m:
-            return _handle_trip_detail(reply_token, session, int(m.group(1)))
+            return _handle_trip_detail(reply_token, session, int(m.group(1)),
+                                       event_source=event.source)
 
         # ===== 班次 mutation 命令（quick reply 觸發）=====
         m = _RE_TRIP_CANCEL.match(text)
@@ -240,7 +241,8 @@ def try_route_postback(event) -> bool:
     if m:
         session = Session()
         try:
-            return _handle_trip_detail(event.reply_token, session, int(m.group(1)))
+            return _handle_trip_detail(event.reply_token, session, int(m.group(1)),
+                                       event_source=event.source)
         except Exception as e:
             logger.error(f"rewrite postback 異常 ({data!r}): {e}", exc_info=True)
             try:
@@ -371,19 +373,25 @@ def _handle_layer_summary(reply_token, session) -> bool:
 # 班次 handlers
 # ============================================================
 
-def _handle_trip_detail(reply_token, session, trip_id: int) -> bool:
+def _handle_trip_detail(reply_token, session, trip_id: int, event_source=None) -> bool:
     r = query_trip_by_id(trip_id, session=session)
     if not r.ok:
         reply_message(reply_token, {"type": "text", "text": f"❌ {r.error}"})
         return True
-    _send_trip_card(reply_token, r.data, alt_prefix=f"班次 #{trip_id} 詳情")
+    _send_trip_card(reply_token, r.data,
+                    alt_prefix=f"班次 #{trip_id} 詳情",
+                    event_source=event_source)
     return True
 
 
-def _send_trip_card(reply_token, trip, *, alt_prefix: str) -> None:
-    """送詳情卡 + 動作 quickReply（attach 在 reply message，輸入框上方顯示）"""
+def _send_trip_card(reply_token, trip, *, alt_prefix: str, event_source=None) -> None:
+    """送詳情卡 + 動作 quickReply（attach 在 reply message，輸入框上方顯示）
+
+    event_source 傳給 build_trip_quick_reply，讓「狀態管理」LIFF URI 帶 gid/rid，
+    送出操作後 push 回群組才能對到原本的 chat。
+    """
     bubble = render_trip_detail(trip)
-    qr = build_trip_quick_reply(trip)
+    qr = build_trip_quick_reply(trip, event_source=event_source)
     msg = {
         "type": "flex",
         "altText": alt_prefix,
@@ -395,7 +403,7 @@ def _send_trip_card(reply_token, trip, *, alt_prefix: str) -> None:
 
 
 def _reply_mutation_result(reply_token, session, trip_id: int, result,
-                            action_label: str) -> bool:
+                            action_label: str, event_source=None) -> bool:
     """統一 mutation reply：失敗回文字、成功回更新後的詳情卡（含新狀態的 footer button）"""
     if not result.ok:
         reply_message(reply_token, {
@@ -404,7 +412,8 @@ def _reply_mutation_result(reply_token, session, trip_id: int, result,
         })
         return True
     _send_trip_card(reply_token, result.data,
-                    alt_prefix=f"班次 #{trip_id} 已{action_label}")
+                    alt_prefix=f"班次 #{trip_id} 已{action_label}",
+                    event_source=event_source)
     return True
 
 
