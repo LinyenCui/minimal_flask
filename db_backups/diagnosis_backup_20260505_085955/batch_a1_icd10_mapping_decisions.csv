@@ -1,0 +1,8 @@
+﻿diagnosis_code_id,current_icd9_code,current_icd10_code,current_name_zh,candidate_icd10_code,official_name_zh,official_name_en,use_flag,reviewer_decision,review_note
+8,7821,,皮疹,R21,皮疹及其他非特定性皮膚出疹,Rash and other nonspecific skin eruption,1,approve,Batch A1 high-confidence 補 ICD-10，人工同意。
+13,2149,,脂肪瘤,D17.9,良性脂肪瘤,"Benign lipomatous neoplasm, unspecified",1,approve,Batch A1 high-confidence 補 ICD-10，人工同意。
+18,1104,,足癬,B35.3,足癬,Tinea pedis,1,approve,Batch A1 high-confidence 補 ICD-10，人工同意。
+19,1110,,汗斑,B36.0,變色糠疹(汗斑),Pityriasis versicolor,1,approve,Batch A1 high-confidence 補 ICD-10，人工同意。
+20,7089,,蕁麻疹,L50.9,蕁麻疹,"Urticaria, unspecified",1,approve,Batch A1 high-confidence 補 ICD-10，人工同意。
+32,7231,,頸椎痛,M54.2,頸椎痛,Cervicalgia,1,approve,Batch A1 high-confidence 補 ICD-10，人工同意。
+68,78841,,頻尿,R35.0,頻尿,Frequency of micturition,1,approve,Batch A1 high-confidence 補 ICD-10，人工同意。
