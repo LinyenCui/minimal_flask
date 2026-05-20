@@ -74,6 +74,21 @@ def trip_status_form(trip_id):
     )
 
 
+@liff_bp.route('/trips/batch_status_form', methods=['GET'])
+def trip_batch_status_form():
+    """批次班次狀態管理表單殼（無 auth — 頁面 HTML）。
+
+    用 URL query `trip_ids=2534,2543` 帶入要批次操作的班次清單。
+    前端載入時呼叫單筆 GET `/liff/trip/<id>` 並行抓資料，
+    送出時迴圈 POST `/liff/trip/<id>/status`（每筆獨立 audit / 失敗逐筆顯示）。
+    """
+    return render_template(
+        'liff/trip_batch_status_form.html',
+        liff_id=os.environ.get('LIFF_ID', ''),
+        trip_ids_csv=(request.args.get('trip_ids') or '').strip(),
+    )
+
+
 # ---------- JSON prefill ----------
 
 @liff_bp.route('/trip/<int:trip_id>', methods=['GET'])

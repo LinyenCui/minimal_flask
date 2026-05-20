@@ -162,6 +162,11 @@ def customer_form_new():
             return redirect(f"{target}?{qs}" if qs else target, code=302)
         except ValueError:
             pass
+    # 動態目標：batch_trip_status（批次班次狀態管理 LIFF，trip_ids=CSV）
+    if form_kind == 'batch_trip_status':
+        qs = request.query_string.decode('utf-8')
+        target = '/liff/trips/batch_status_form'
+        return redirect(f"{target}?{qs}" if qs else target, code=302)
 
     if form_kind in redirect_targets:
         # 把其他 query string 一起轉過去（保留 liff.state、未來其他參數）

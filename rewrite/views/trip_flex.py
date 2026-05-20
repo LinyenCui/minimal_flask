@@ -225,6 +225,40 @@ def _qr_uri(label: str, uri: str) -> dict:
     }
 
 
+def build_trip_list_batch_quick_reply(
+    trips: List[TripView], event_source=None,
+) -> Optional[dict]:
+    """為「列表查詢」結果掛批次『狀態管理』LIFF 入口（skill 路徑,不疊 regex）。
+
+    任何走 AI query_trips 拿回的列表（「5/22中華北路」「5/22中華北路狀態」
+    「5/22中華北路的狀態」「5/22中華北路狀態管理」… AI 都認得意圖）→ 都會
+    看到這顆鈕，點開 LIFF 直接做批次操作。等同把「picker conversation state」
+    換成 LIFF 表單，UX 跟單筆狀態管理一致。
+
+    篩選掉「已完成 / 30 分鐘鎖內」的 trip——這些不可操作（atomic tool 內部
+    也會把關，這裡是為了讓 LIFF 載入時的 trip 清單就乾淨）。
+
+    回 None 的條件：
+      - 無 trip 可操作 / LIFF_ID 未設
+    """
+    actionable_ids = [
+        t.trip_id for t in trips
+        if t.display_status != '已完成' and not getattr(t, 'is_locked', False)
+    ]
+    if not actionable_ids:
+        return None
+    from rewrite.views.customer_flex import _liff_id
+    liff_id = _liff_id()
+    if not liff_id:
+        return None
+    from rewrite.utils.liff_url import build_liff_url
+    uri = build_liff_url(
+        liff_id, 'batch_trip_status', event_source,
+        extra_params={'trip_ids': ','.join(str(i) for i in actionable_ids)},
+    )
+    return {"items": [_qr_uri("⚙️ 對這批做狀態管理", uri)]}
+
+
 # ============================================================
 # 2. 班次列表 carousel（按日分組）
 # ============================================================

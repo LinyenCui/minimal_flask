@@ -331,7 +331,7 @@ class Agent:
         # ----- TripView -----
         if isinstance(data, TripView):
             bubble = render_trip_detail(data)
-            qr = build_trip_quick_reply(data)
+            qr = build_trip_quick_reply(data, event_source=event_source)
             msg = {
                 'type': 'flex',
                 'altText': f'班次 #{data.trip_id} 詳情',
@@ -343,11 +343,16 @@ class Agent:
 
         if isinstance(data, list) and data and isinstance(data[0], TripView):
             flex = render_trip_list_carousel(data)
-            return {
+            from rewrite.views.trip_flex import build_trip_list_batch_quick_reply
+            batch_qr = build_trip_list_batch_quick_reply(data, event_source=event_source)
+            msg = {
                 'type': 'flex',
                 'altText': f'查到 {len(data)} 筆班次',
                 'contents': flex,
             }
+            if batch_qr:
+                msg['quickReply'] = batch_qr
+            return msg
 
         # ----- CustomerView -----
         if isinstance(data, CustomerView):
