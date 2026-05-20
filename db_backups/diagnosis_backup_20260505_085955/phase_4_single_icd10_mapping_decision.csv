@@ -1,0 +1,2 @@
+﻿diagnosis_code_id,current_icd9_code,current_icd10_code,current_name_zh,candidate_icd10_code,official_name_zh,official_name_en,use_flag,reviewer_decision,review_note
+76,5849,,急性腎衰竭,N17.9,急性腎衰竭,"Acute kidney failure, unspecified",1,approve,第二批單筆 high-confidence 補 ICD-10，人工同意。
