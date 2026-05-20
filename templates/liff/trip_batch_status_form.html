@@ -177,8 +177,10 @@
     let trips = [];                // 已 fetch 的 trip 詳情
     let currentAction = '';
 
-    async function fetchTrip(id) {
-      const idToken = _safeIdToken();
+    // idToken 共用：iOS LIFF WebView 在 Promise.all 並行對 liff.getIDToken()
+    // 快速連續呼叫時，第二次以後常吐含怪字元的 token,觸發 Headers.set 的
+    // 「The string did not match the expected pattern」。一次取乾淨後共用即可。
+    async function fetchTrip(id, idToken) {
       try {
         const resp = await fetch(`/liff/trip/${id}`, {
           headers: { 'Authorization': 'Bearer ' + idToken },
@@ -343,8 +345,7 @@
       else history.back();
     });
 
-    async function submitOne(tripId, payload) {
-      const idToken = _safeIdToken();
+    async function submitOne(tripId, payload, idToken) {
       try {
         const resp = await fetch(`/liff/trip/${tripId}/status`, {
           method: 'POST',
@@ -399,7 +400,9 @@
       if (_gid) basePayload.source = { type: 'group', groupId: _gid, roomId: null };
       else if (_rid) basePayload.source = { type: 'room', groupId: null, roomId: _rid };
 
-      // 鎖 UI + 逐筆送
+      // 鎖 UI + 逐筆送（idToken 共用,避免 iOS WebView 對 getIDToken 連續呼叫不穩）
+      const idToken = _safeIdToken();
+      if (!idToken) { showAlert('err', '❌ LIFF idToken 取得失敗,請重新打開表單'); return; }
       submitBtn.disabled = true;
       const origText = submitBtn.textContent;
       submitBtn.textContent = `送出中… (0/${selected.length})`;
@@ -422,7 +425,7 @@
         if (!okForAction) {
           setRowResult(t.trip_id, 'skip', '不適用'); skipCnt++; continue;
         }
-        const result = await submitOne(t.trip_id, basePayload);
+        const result = await submitOne(t.trip_id, basePayload, idToken);
         if (result.ok) {
           setRowResult(t.trip_id, 'ok', '✅');
           okCnt++;
@@ -460,8 +463,10 @@
         liff.login({ redirectUri: 'https://liff.line.me/' + LIFF_ID + window.location.search });
         return;
       }
-      // 並行 fetch 所有 trip
-      trips = await Promise.all(TRIP_IDS.map(id => fetchTrip(id)));
+      // idToken 取一次共用（見 fetchTrip 註解：避免 iOS WebView 並行不穩）
+      const idToken = _safeIdToken();
+      if (!idToken) { setLoading('LIFF idToken 取得失敗，請重新打開表單'); return; }
+      trips = await Promise.all(TRIP_IDS.map(id => fetchTrip(id, idToken)));
       renderTripList();
       refreshActionPicker();
       showContent();

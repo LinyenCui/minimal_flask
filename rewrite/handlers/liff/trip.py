@@ -36,12 +36,14 @@ logger = logging.getLogger(__name__)
 
 VALID_ACTIONS = ('leave', 'cancel', 'conflict', 'restore')
 
-_ACTION_LABEL = {
-    'leave': '🏷️ 請假',
-    'cancel': '🚫 註銷',
-    'conflict': '⚠️ 衝突',
-    'restore': '🔄 改回準備',
+_ACTION_VERB = {
+    'leave':    '🏷️ 已請假',
+    'cancel':   '🚫 已註銷',
+    'conflict': '⚠️ 已標記衝突',
+    'restore':  '🔄 已改回準備',
 }
+
+_WEEKDAY_TC = ['一', '二', '三', '四', '五', '六', '日']
 
 
 def _trip_to_jsonable(view) -> dict:
@@ -183,42 +185,46 @@ def trip_status_change(trip_id):
 # ---------- push 結果回 chat ----------
 
 def _push_trip_status(target_id, view, action, reason, surcharge):
-    """執行後 push 一則 text + 班次詳情 Flex 到指定目標（群組/聊天室/個人）。"""
+    """執行後 push 一則精簡 text 到指定目標。
+
+    刻意不再附 Flex 詳情卡——使用者剛在 LIFF 內看過該班次資訊,結果再丟一張
+    一模一樣的 Flex 出來只會洗版。簡潔通知 + emoji 前綴即可。
+    若使用者要查最新狀態,自己打 /dx N 或點 quick reply。
+    """
     if not target_id:
         return
     try:
-        from linebot.v3.messaging import (
-            FlexContainer, FlexMessage, PushMessageRequest, TextMessage,
-        )
+        from linebot.v3.messaging import PushMessageRequest, TextMessage
         from modules.utils.line_bot import get_line_bot_api
-        from rewrite.views.trip_flex import render_trip_detail
 
         api = get_line_bot_api()
-        label = _ACTION_LABEL.get(action, action)
+        verb = _ACTION_VERB.get(action, action)
         sp, _, ep = view.display_route()
-        route = f"{sp or '?'}→{ep or '?'}"
+        route = f"{sp or '?'} → {ep or '?'}"
+        if view.date:
+            wd = _WEEKDAY_TC[view.date.weekday()]
+            date_str = f"{view.date.month}/{view.date.day}({wd})"
+        else:
+            date_str = '?'
         time_str = str(view.time)[:5] if view.time else '?'
-        date_str = view.date.isoformat() if view.date else '?'
+
         lines = [
-            f"✅ 班次 #{view.trip_id} 已執行：{label}",
-            f"{date_str} {time_str} {route}",
+            f"{verb} 班次 #{view.trip_id}",
+            f"📅 {date_str} {time_str}",
+            f"📍 {route}",
         ]
         if action == 'leave':
-            lines.append(f"原因：{reason}")
-            lines.append(f"加成：{surcharge:+d} 元" if surcharge else "加成：0 元")
+            lines.append(f"📝 {reason}")
+            if surcharge:
+                lines.append(f"💰 {surcharge:+d} 元")
         elif action in ('cancel', 'conflict') and reason:
-            lines.append(f"原因：{reason}")
+            lines.append(f"📝 {reason}")
         if action in ('cancel', 'conflict'):
-            lines.append("（可用『改回準備』還原）")
-        text_msg = TextMessage(text='\n'.join(lines))
+            lines.append("↩️ 可用「改回準備」還原")
 
-        flex_dict = render_trip_detail(view)
-        flex_msg = FlexMessage(
-            alt_text=f"班次 #{view.trip_id} {label}",
-            contents=FlexContainer.from_dict(flex_dict),
-        )
         api.push_message(PushMessageRequest(
-            to=target_id, messages=[text_msg, flex_msg],
+            to=target_id,
+            messages=[TextMessage(text='\n'.join(lines))],
         ))
         logger.info(
             f"[LIFF] pushed trip status #{view.trip_id} ({action}) to {target_id[:8]}"
