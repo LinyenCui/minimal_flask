@@ -1,0 +1,61 @@
+﻿dataset,local_path,inner_file_if_zip,row_count,column_name,non_null_count,null_count,sample_values,inferred_role
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,異動,2567,221694,Y,其他
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,藥品代號,224261,0,B015924100 | B020896229 | B020964100,健保藥品代碼候選
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,藥品英文名稱,224261,0,FLUANXOL TABLETS 0.5MG | MODECATE INJECTION | SELEGOS TABLETS 5MG,英文藥名/品名
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,藥品中文名稱,224175,86,福祿安糖衣錠０．５公絲 | 保利神注射液 | 舒立康錠,中文藥名/品名
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,成分,224240,21,FLUPENTIXOL (2HCL) .5 MG | FLUPHENAZINE DECANOATE 25 MG/ML | DEPRENYL L- HCL (=SELEGILINE HCL) 5 MG,成分
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,規格量,106251,118010,10 | 60 | 20,規格/含量
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,規格單位,106190,118071,ML | MG | MCL,規格/含量
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,單複方,224261,0,單方 | 複方,其他
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,支付價,224261,0,6.30 | 0.00 | 1200.00,價格/給付價
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,有效起日,224261,0,840301 | 860601 | 890401,生效日
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,有效迄日,224261,0,890331 | 860531 | 900331,其他
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,藥商,223885,376,禾利行股份有限公司 | 台灣必治妥施貴寶股份有限公司 | 雙正貿易股份有限公司,其他
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,製造廠名稱,222965,1296,H. LUNDBECK A/S | BRISTOL-MYERS SQUIBB GMBH | MEDOCHEMIE LTD.,廠商/申請商/製造廠
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,劑型,224244,17,糖衣錠 | 注射劑 | 錠劑,劑型
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,藥品分類,224172,89,研發廠 | 一般學名藥 | BA/BE學名藥,其他
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,分類分組名稱,222698,1563,"FLUPENTIXOL , 一般錠劑膠囊劑 , .50 MG | FLUPHENAZINE DECANOATE , 注射劑 , 250.00 MG | SELEGILINE , 一般錠劑膠囊劑 , 5.00 MG",其他
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,ATC代碼,224261,0,N05AF01 | N05AB02 | N04BD01,ATC code/classification
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,給付規定章節,95547,128714,1.3.4. | 1.2.1. | 1.2.1.1.,其他
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,藥品代碼超連結,224261,0,https://lmspiq.fda.gov.tw/web/DRPIQ/DRPIQ1000Result?licId=02015924 | https://lmspiq.fda.gov.tw/web/DRPIQ/DRPIQ1000Result?licId=02020896 | https://lmspiq.fda.gov.tw/web/DRPIQ/DRPIQ1000Result?licId=02020964,健保藥品代碼候選
+NHI drug payment,reference_data/drug/raw/nhi_drug_payment_20260522.csv,,224261,給付規定章節連結,95364,128897,https://info.nhi.gov.tw/api/INAE3000/INAE3000S01/getPDF?DurgFileName=1.3.4._20220301.pdf | https://info.nhi.gov.tw/api/INAE3000/INAE3000S01/getPDF?DurgFileName=1.2.1._20180301_000.pdf | https://info.nhi.gov.tw/api/INAE3000/INAE3000S01/getPDF?DurgFileName=1.2.1.1._20101001_000.pdf,其他
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,許可證字號,71804,0,內衛成製字第000143號 | 內衛成製字第000182號 | 內衛成製字第000195號,TFDA 許可證 join key 候選
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,註銷狀態,45472,26332,已註銷 | 已廢止,停用/有效日期/狀態
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,註銷日期,45654,26150,2013/10/16 | 2013/09/30 | 2008/10/06,停用/有效日期/狀態
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,註銷理由,45422,26382,自行鍵入 | 自請註銷 | 未展延而逾期者,停用/有效日期/狀態
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,有效日期,71804,0,2003/05/01 | 2003/05/25 | 2008/05/25,停用/有效日期/狀態
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,發證日期,71803,1,1969/07/09 | 1969/09/16 | 1969/10/01,其他
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,許可證種類,71804,0,製　劑 | 菌　疫 | 體外試劑,TFDA 許可證 join key 候選
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,舊證字號,15955,55849,00000000 | 03007271 | 14003975,其他
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,通關簽審文件編號,69939,1865,DHY01400014305 | DHY01400018202 | DHY01400019501,其他
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,中文品名,71803,1,阿司匹靈錠 | 綠芳油 | 複方炭酸氫鈉錠,中文藥名/品名
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,英文品名,71701,103,"ASPIRIN TABLETS ""K.Y."" | RIFON OIL | COMPOUND SODIUM BICARBONATE TABLETS ""PLP""",英文藥名/品名
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,適應症,71743,61,解熱、鎮痛劑 | 頭眩鼻塞、頭痛牙痛、風濕骨痛、湯火燙傷、舟車暈浪、止癢消腫 | 制酸劑,其他
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,劑型,71794,10,錠劑 | 外用液劑 | 軟膏劑,劑型
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,包裝,66593,5211,罐裝;;瓶裝 | 瓶裝 | 管裝,其他
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,藥品類別,71803,1,成藥 | 醫師藥師藥劑生指示藥品 | 乙類成藥,其他
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,管制藥品分類級別,2129,69675,第四級管制藥品 | 取消管制藥品註記 | 第三級管制藥品,其他
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,主成分略述,67816,3988,ASPIRIN | METHYL SALICYLATE;;MENTHOL | SODIUM BICARBONATE ( EQ TO SODIUM HYDROGEN CARBONATE),成分
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,申請商名稱,71776,28,洸洋化學製藥股份有限公司 | 仙臺藥品工業股份有限公司 | 臺南蓬萊企業有限公司,廠商/申請商/製造廠
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,申請商地址,71775,29,板橋市信義路２６巷１０號 | 台南市新營區新營工業區新工路３５號 | 台南巿裕農路６６８巷７３號,廠商/申請商/製造廠
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,申請商統一編號,69159,2645,15013427 | 71078598 | 68888882,廠商/申請商/製造廠
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,製造商名稱,71792,12,健康化學製藥股份有限公司 | 仙臺藥品工業股份有限公司 | 人生製藥股份有限公司,其他
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,製造廠廠址,71634,170,台中市大甲區幼獅工業區幼四路１２號 | 台南市新營區工業區新工路３５號 | 台南縣新營市工業區新工路３５號,廠商/申請商/製造廠
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,製造廠公司地址,4953,66851,"桃園市新屋區社子里２鄰社子８號 | 275 NORTH FIELD DRIVE, P.O. BOX 5045, LAKE FOREST, IL 60045-5045, USA | 1-1 DOSHOMACHI 4-CHOME,CHUO-KU,OSAKA,JAPAN",廠商/申請商/製造廠
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,製造廠國別,71690,114,TW | US | GB,廠商/申請商/製造廠
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,製程,6038,65766,二級包裝廠 | 許可證持有者 | 二級包裝廠(委託貼標及置入仿單),其他
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,異動日期,71804,0,2013/10/16 | 2013/09/30 | 2008/10/13,其他
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,用法用量,17740,54064,一天2次。 | 將一劑注入直腸內，若未見效果時可再注入一劑，一天最多可使用二劑。成人每劑20mL(1粒)，6歲以上適用成人劑量；3歲以上未滿6歲，每劑10mL(1/2粒)；未滿3歲之嬰幼兒，請洽醫師診治，不宜自行使用。使用時應注意管口插入角度並小心緩慢推入，以避免刺傷肛門。使用後之剩餘液需丟棄，不宜留存。 | 將一劑注入直腸內，若未見效果時可再注入一劑，一天最多可使用二劑。成人每劑20ml，6歲以上適用成人劑量；3歲以上未滿6歲，每劑10ml；未滿3歲之嬰幼兒，請洽醫師診治，不宜自行使用。使用時應注意管口插入角度並小心緩慢推入，以避免刺傷肛門。使用後之剩餘液需丟棄，不宜留存。,其他
+TFDA license,reference_data/drug/raw/tfda_drug_license_20260522.zip,36_2.csv,71804,包裝與國際條碼,0,71804,,其他
+TFDA ingredient,reference_data/drug/raw/tfda_drug_ingredient_20260522.zip,43_2.csv,125902,許可證字號,125902,0,內衛成製字第000012號 | 內衛成製字第000029號 | 內衛成製字第000030號,TFDA 許可證 join key 候選
+TFDA ingredient,reference_data/drug/raw/tfda_drug_ingredient_20260522.zip,43_2.csv,125902,處方標示,117577,8325,EACH GM CONTAINS: | EACH 100CC. CONTAINS: | EACH GRAM CONTAINS:,其他
+TFDA ingredient,reference_data/drug/raw/tfda_drug_ingredient_20260522.zip,43_2.csv,125902,成分名稱,125884,18,UNDECYLENATE ZINC | UNDECYLENIC ACID | MENTHOL,成分
+TFDA ingredient,reference_data/drug/raw/tfda_drug_ingredient_20260522.zip,43_2.csv,125902,成分代碼,125902,0,8404801510 | 8404801500 | 8408000300,成分
+TFDA ingredient,reference_data/drug/raw/tfda_drug_ingredient_20260522.zip,43_2.csv,125902,含量描述,93782,32120,200 | 50 | 25,規格/含量
+TFDA ingredient,reference_data/drug/raw/tfda_drug_ingredient_20260522.zip,43_2.csv,125902,含量,108837,17065,200.000000 | 50.000000 | 25.000000,規格/含量
+TFDA ingredient,reference_data/drug/raw/tfda_drug_ingredient_20260522.zip,43_2.csv,125902,含量單位,122112,3790,MG | GM | I.U.,規格/含量
+TFDA ATC,reference_data/drug/raw/tfda_atc_20260522.zip,41_2.csv,80290,許可證字號,80290,0,內衛成製字第000039號 | 內衛成製字第000040號 | 內衛成製字第000041號,TFDA 許可證 join key 候選
+TFDA ATC,reference_data/drug/raw/tfda_atc_20260522.zip,41_2.csv,80290,主或次項,80290,0,主 | 次,其他
+TFDA ATC,reference_data/drug/raw/tfda_atc_20260522.zip,41_2.csv,80290,代碼,80290,0,D08AA01 | D08AX01 | D08AE,ATC code/classification
+TFDA ATC,reference_data/drug/raw/tfda_atc_20260522.zip,41_2.csv,80290,英文分類名稱,75350,4940,ethacridine lactate | hydrogen peroxide | Phenol and derivatives,其他
+TFDA ATC,reference_data/drug/raw/tfda_atc_20260522.zip,41_2.csv,80290,中文分類名稱,0,80290,,其他
