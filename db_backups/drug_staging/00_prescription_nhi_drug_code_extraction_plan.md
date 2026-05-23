@@ -95,6 +95,35 @@ prescription_nhi_drug_code_candidates.normalized_nhi_drug_code
 
 人工核准後，寫入正式 mapping table：`drug_item_official_code_mappings`。
 
+
+## Cleaning Dry-run 結果與 Auto-accepted 規則
+
+已完成 regex extraction 與 cleaning dry-run：
+
+- 原本可直接 join `official_nhi_drug_payment_staging`：33 個 unique codes。
+- OCR 誤讀校正後可 join：8 個 unique codes。
+- `false_positive_word`：18 個，多為英文藥名被 broad regex 誤抓。
+- `needs_manual_review` / `no_official_match`：7 個。
+
+使用者決策：能明確 join official NHI staging 的碼，可以依官方資料自動接受，不必逐筆人工校正。因此 staging 匯入時建議：
+
+| cleaning classification | official_join_status | correction_method | effective_nhi_drug_code | review_status | 說明 |
+|---|---|---|---|---|---|
+| `official_match` | `matched` | `none` | `normalized_nhi_drug_code` | `auto_accepted` | 原始 normalized code 已直接對到官方 NHI。 |
+| `likely_ocr_confusion` 且 corrected code 可 join | `corrected_matched` | `ocr_confusion_rule` | `corrected_nhi_drug_code` | `auto_accepted` | 保留 raw OCR code，另存校正碼與 effective code。 |
+| `false_positive_word` | `false_positive` | `not_applicable` | 空 | `rejected` | 明顯是藥名或英文詞，不是健保碼。 |
+| `needs_manual_review` | `no_match` | `none` 或 `manual` | 空或人工確認碼 | `needs_review` | 需回 nearby text / 原圖確認。 |
+| `no_official_match` | `no_match` | `none` | 空 | `needs_review` | 格式像健保碼但查不到官方 NHI。 |
+
+重要資料治理原則：
+
+- `raw_nhi_drug_code` 永遠保留，不覆蓋。
+- `normalized_nhi_drug_code` 保存原始 OCR 標準化結果。
+- `corrected_nhi_drug_code` 保存規則或人工校正後的候選碼。
+- `effective_nhi_drug_code` 才是後續 join official NHI 與建立 mapping 使用的碼；false positive / no match 可以為空。
+- `official_*` 欄位只是匯入當下的 official join snapshot，不取代 `official_nhi_drug_payment_staging`。
+- 不建議把健保碼塞進 `drug_items.aliases`。健保碼應透過 `drug_item_official_code_mappings` 保存。
+
 ## Staging Table 草案：prescription_nhi_drug_code_candidates
 
 用途：保存從處方照片/OCR 文字抽出的健保藥品代碼候選。這是 raw/review staging，不是正式 mapping。
@@ -102,17 +131,48 @@ prescription_nhi_drug_code_candidates.normalized_nhi_drug_code
 核心欄位：
 
 - `source_photo`：原始照片檔名。
+- `source_csv`：來源 OCR CSV。
 - `source_photo_page_or_index`：若未來有 PDF/多頁，保存頁碼或圖片序號。
-- `source_row_number`：照片中藥品列序。
-- `raw_nhi_drug_code`：OCR 原始讀值。
-- `normalized_nhi_drug_code`：標準化後值，例如移除空白、全大寫、常見 OCR 校正前後需保留。
-- `raw_drug_name_text`、`raw_dosage_text`、`raw_frequency_text`、`raw_days_text`：同列文字。
-- `ocr_method`、`confidence`：來源方法與信心。
-- `review_status`、`review_decision`：人工審核狀態。
+- `source_row_number`：來源 CSV row number；不等同於照片實際藥品列，需 review。
+- `source_column`：健保碼從哪個 OCR 欄位抽出，例如 `drug_names_raw`。
+- `raw_nhi_drug_code`：OCR 原始讀值，永遠保留，不覆蓋。
+- `normalized_nhi_drug_code`：原始 OCR 值標準化後結果。
+- `corrected_nhi_drug_code`：OCR confusion rule 或人工校正後的碼。
+- `effective_nhi_drug_code`：後續 official join / mapping 使用的碼；false positive / no match 可為空。
+- `correction_method`：`none`、`ocr_confusion_rule`、`manual`、`not_applicable`。
+- `official_join_status`：`matched`、`corrected_matched`、`no_match`、`false_positive`。
+- `official_match_count` 與 `official_*` snapshot 欄位：保存匯入當下對 official NHI staging 的比對結果。
+- `nearby_text`：OCR 近旁文字，供 review 判斷同列藥名。
+- `raw_drug_name_text`、`raw_dosage_text`、`raw_frequency_text`、`raw_days_text`：同列文字；若初期只能從 nearby_text 拆分，可先留空。
+- `extraction_method`、`confidence`：來源方法與信心。
+- `review_status`：`auto_accepted`、`needs_review`、`rejected`、`pending`。
+- `review_decision`：人工審核決策。
+
+約束設計：
+
+- `effective_nhi_drug_code` 不設為 NOT NULL，因 false positive / no match 可能沒有有效碼。
+- `source_photo + source_row_number + raw_nhi_drug_code` 不設唯一，因同一 OCR row 可能多欄重複抽到同一碼。
+- source occurrence unique 建議使用：`source_csv + source_row_number + source_column + raw_nhi_drug_code + import_batch_id`。
 
 ## Formal Mapping Table 草案：drug_item_official_code_mappings
 
 用途：正式保存 `drug_items` 與官方代碼的關係，可支援 NHI、TFDA license、ATC。
+
+核心欄位：
+
+- `drug_item_id`：指向 `drug_items.id`。草案中建議 FK；若 migration 風險較高，可在第一次導入時先以報告確認資料一致再建立 FK。
+- `code_type`：`NHI`、`TFDA_LICENSE`、`ATC`。
+- `code_value`：官方碼，例如 NHI drug code。
+- `official_source_table`、`official_source_id`、`official_source_version`：官方來源定位。
+- `match_method`：`prescription_nhi_code`、`official_name_exact`、`official_name_contains`、`ingredient_match`、`manual`。
+- `confidence`、`review_status`、`review_decision`：審核狀態。
+- `source_candidate_id`：可回連 `prescription_nhi_drug_code_candidates.id`。
+- `note_text`：人工說明。
+
+約束設計：
+
+- 不讓 `code_value` 全域唯一，因不同 `drug_item` 或不同 `code_type` 可能有不同情境。
+- 建議唯一鍵：`drug_item_id + code_type + code_value + official_source_version`。
 
 不建議直接新增 `drug_items.nhi_drug_code` 作唯一欄位，原因：
 
