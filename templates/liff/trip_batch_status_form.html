@@ -177,19 +177,23 @@
     let trips = [];                // 已 fetch 的 trip 詳情
     let currentAction = '';
 
-    // idToken 共用：iOS LIFF WebView 在 Promise.all 並行對 liff.getIDToken()
-    // 快速連續呼叫時，第二次以後常吐含怪字元的 token,觸發 Headers.set 的
-    // 「The string did not match the expected pattern」。一次取乾淨後共用即可。
-    async function fetchTrip(id, idToken) {
+    // Alternative A：一次 fetch 拿全部,避開 iOS LIFF WebView 對同頁多次 fetch()
+    // 不穩的 bug（實測 Promise.all / sequential 都會在 client 端掉、server 收不到）。
+    // 回傳統一成 [{id, trip} | {id, error}],renderTripList 不必改。
+    async function fetchTripsBatch(ids, idToken) {
       try {
-        const resp = await fetch(`/liff/trip/${id}`, {
+        const resp = await fetch(`/liff/trips/batch?ids=${ids.join(',')}`, {
           headers: { 'Authorization': 'Bearer ' + idToken },
         });
         const data = await resp.json();
-        if (!data.ok) return { id, error: data.error || `HTTP ${resp.status}` };
-        return { id, trip: data.trip };
+        if (!data.ok) {
+          return ids.map(id => ({ id, error: data.error || `HTTP ${resp.status}` }));
+        }
+        return (data.trips || []).map(item => item.ok
+          ? { id: item.id, trip: item.trip }
+          : { id: item.id, error: item.error });
       } catch (e) {
-        return { id, error: e.message };
+        return ids.map(id => ({ id, error: e.message }));
       }
     }
 
@@ -465,13 +469,8 @@
       }
       const idToken = _safeIdToken();
       if (!idToken) { setLoading('LIFF idToken 取得失敗，請重新打開表單'); return; }
-      // 循序 await：iOS LIFF WebView 對同步排隊多個 fetch() 不穩
-      // (Promise.all 模式下 0/2 或 1/2 prefetch 會在 client 端拋掉,
-      //  server 連 GET 都收不到 → 改循序避開,2~5 筆延遲微忽略)
-      trips = [];
-      for (const id of TRIP_IDS) {
-        trips.push(await fetchTrip(id, idToken));
-      }
+      // 一次 fetch 拿全部（Alternative A，避開 iOS WebView 多 fetch bug）
+      trips = await fetchTripsBatch(TRIP_IDS, idToken);
       renderTripList();
       refreshActionPicker();
       showContent();

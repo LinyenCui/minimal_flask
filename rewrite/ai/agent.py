@@ -342,17 +342,20 @@ class Agent:
             return msg
 
         if isinstance(data, list) and data and isinstance(data[0], TripView):
-            # 註：原本掛了批次「對這批做狀態管理」LIFF 入口，但 iOS LIFF WebView
-            # 對同頁多次 fetch() 不穩，prefetch 失敗。回退到無 QR；明天改走
-            # 單一 batch GET endpoint (Alternative A) 再上。
-            # legacy 的「X 的狀態」regex picker (sandbox_handler._parse_status_query)
-            # 仍維持原 [全部請假/全部註銷/全部衝突] 文字 QR,不受影響。
+            # 批次「對這批做狀態管理」LIFF 入口（Alternative A：批次 LIFF 改用
+            # 單一 GET /liff/trips/batch 一次撈,避開 iOS WebView 多 fetch bug）。
+            # legacy 的「X 的狀態」regex picker 仍維持原文字 QR,兩條路並存。
             flex = render_trip_list_carousel(data)
-            return {
+            from rewrite.views.trip_flex import build_trip_list_batch_quick_reply
+            batch_qr = build_trip_list_batch_quick_reply(data, event_source=event_source)
+            msg = {
                 'type': 'flex',
                 'altText': f'查到 {len(data)} 筆班次',
                 'contents': flex,
             }
+            if batch_qr:
+                msg['quickReply'] = batch_qr
+            return msg
 
         # ----- CustomerView -----
         if isinstance(data, CustomerView):

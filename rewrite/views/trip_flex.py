@@ -225,11 +225,35 @@ def _qr_uri(label: str, uri: str) -> dict:
     }
 
 
-# 註：原本有 build_trip_list_batch_quick_reply (批次狀態管理 LIFF 入口),
-# 因 iOS LIFF WebView 對同頁多次 fetch() 不穩、prefetch 失敗回退;
-# 明天改走 Alternative A (單一 batch GET endpoint,前端只打一次 fetch)再加回。
-# 批次 LIFF 後端 (rewrite/handlers/liff/trip.py 的 trip_batch_status_form
-# 與 templates/liff/trip_batch_status_form.html) 暫保留作休眠,等明天接 A 方案。
+def build_trip_list_batch_quick_reply(
+    trips: List[TripView], event_source=None,
+) -> Optional[dict]:
+    """為「列表查詢」結果掛批次『狀態管理』LIFF 入口（skill 路徑,不疊 regex）。
+
+    任何走 AI query_trips 拿回的列表（不論「5/22中華北路」「…狀態」「…狀態管理」
+    哪種變形,AI 都認得意圖）→ 都看得到這顆鈕,點開批次 LIFF 直接操作。
+    批次 LIFF 用單一 GET /liff/trips/batch 一次撈(Alternative A),避開 iOS
+    WebView 多次 fetch bug。
+
+    篩掉「已完成 / 30 分鐘鎖內」的 trip(不可操作)。
+    無可操作 trip / LIFF_ID 未設 → 回 None。
+    """
+    actionable_ids = [
+        t.trip_id for t in trips
+        if t.display_status != '已完成' and not getattr(t, 'is_locked', False)
+    ]
+    if not actionable_ids:
+        return None
+    from rewrite.views.customer_flex import _liff_id
+    liff_id = _liff_id()
+    if not liff_id:
+        return None
+    from rewrite.utils.liff_url import build_liff_url
+    uri = build_liff_url(
+        liff_id, 'batch_trip_status', event_source,
+        extra_params={'trip_ids': ','.join(str(i) for i in actionable_ids)},
+    )
+    return {"items": [_qr_uri("⚙️ 對這批做狀態管理", uri)]}
 
 
 # ============================================================

@@ -81,8 +81,9 @@ def trip_batch_status_form():
     """批次班次狀態管理表單殼（無 auth — 頁面 HTML）。
 
     用 URL query `trip_ids=2534,2543` 帶入要批次操作的班次清單。
-    前端載入時呼叫單筆 GET `/liff/trip/<id>` 並行抓資料，
-    送出時迴圈 POST `/liff/trip/<id>/status`（每筆獨立 audit / 失敗逐筆顯示）。
+    前端載入時用單一 GET `/liff/trips/batch?ids=...` 一次撈全部（Alternative A,
+    避開 iOS WebView 多 fetch bug），送出時迴圈 POST `/liff/trip/<id>/status`
+    （每筆獨立 audit / 失敗逐筆顯示）。
     """
     return render_template(
         'liff/trip_batch_status_form.html',
@@ -105,6 +106,40 @@ def trip_get(trip_id):
     if not result.ok:
         return jsonify({'ok': False, 'error': result.error}), 404
     return jsonify({'ok': True, 'trip': _trip_to_jsonable(result.data)})
+
+
+@liff_bp.route('/trips/batch', methods=['GET'])
+@liff_auth_required
+def trips_batch_get():
+    """JSON prefill（批次）— 一次回傳多筆班次狀態。
+
+    Alternative A：批次表單只打這一支,避開 iOS LIFF WebView 對同頁多次
+    fetch() 不穩的 bug（實測 Promise.all 與 sequential 都會在 client 端掉、
+    server 連 GET 都收不到）。
+    query: ids=2534,2543
+    回: {ok: True, trips: [{id, ok, trip|error}, ...]}（逐筆標 ok/error,整體恆 ok）
+    """
+    ids_csv = (request.args.get('ids') or '').strip()
+    ids = []
+    for part in ids_csv.split(','):
+        n = _to_int_or_none(part.strip())
+        if n is not None:
+            ids.append(n)
+    if not ids:
+        return jsonify({'ok': False, 'error': 'ids 為空或格式錯'}), 400
+
+    results = []
+    session = Session()
+    try:
+        for tid in ids:
+            r = trip_tools.query_trip_by_id(tid, session=session)
+            if r.ok:
+                results.append({'id': tid, 'ok': True, 'trip': _trip_to_jsonable(r.data)})
+            else:
+                results.append({'id': tid, 'ok': False, 'error': r.error})
+    finally:
+        session.close()
+    return jsonify({'ok': True, 'trips': results})
 
 
 # ---------- POST: dispatch action ----------
