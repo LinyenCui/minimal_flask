@@ -140,11 +140,19 @@ def render_trip_detail(t: TripView) -> dict:
             "layout": "vertical",
             "backgroundColor": PRIMARY,
             "paddingAll": "md",
-            "contents": [{
-                "type": "text",
-                "text": f"🚖 班次 #{t.trip_id} 詳情",
-                "weight": "bold", "size": "lg", "color": "#ffffff",
-            }]
+            "contents": [
+                {
+                    "type": "text",
+                    "text": f"🚖 班次 #{t.trip_id} 詳情",
+                    "weight": "bold", "size": "lg", "color": "#ffffff",
+                },
+                # temp（預約叫車）班次:加一行小字標記,跟固定班次區別(固定班次不顯示)
+                *([{
+                    "type": "text",
+                    "text": "📌 預約班次",
+                    "size": "xs", "color": "#E3F2FD",
+                }] if t.trip_type == 'temp' else []),
+            ]
         },
         "body": {
             "type": "box", "layout": "vertical", "spacing": "sm",
@@ -386,8 +394,9 @@ def _trip_row(t: TripView) -> dict:
         },
         "contents": [
             {"type": "text", "text": t.status_emoji, "flex": 0, "size": "xs"},
-            {"type": "text", "text": f"#{t.trip_id}", "flex": 2, "size": "xxs",
-             "color": color, "weight": "bold"},
+            {"type": "text",
+             "text": (f"📌#{t.trip_id}" if t.trip_type == 'temp' else f"#{t.trip_id}"),
+             "flex": 2, "size": "xxs", "color": color, "weight": "bold"},
             {"type": "text", "text": time_text, "flex": 2, "size": "xxs",
              "color": BLACK},
             {"type": "text", "text": route_text, "flex": 5, "size": "xxs",

@@ -76,8 +76,9 @@ def _status_row(t: TripView) -> dict:
             {
                 'type': 'box', 'layout': 'horizontal', 'spacing': 'sm',
                 'contents': [
-                    {'type': 'text', 'text': f'#{t.trip_id}', 'size': 'sm',
-                     'color': PRIMARY, 'weight': 'bold', 'flex': 2},
+                    {'type': 'text',
+                     'text': (f'📌#{t.trip_id}' if t.trip_type == 'temp' else f'#{t.trip_id}'),
+                     'size': 'sm', 'color': PRIMARY, 'weight': 'bold', 'flex': 2},
                     {'type': 'text', 'text': time_text, 'size': 'sm',
                      'color': BLACK, 'flex': 2},
                     {'type': 'text', 'text': driver_text, 'size': 'sm',
