@@ -405,12 +405,11 @@ def _trip_row(t: TripView) -> dict:
              "color": MUTED, "align": "end"},
         ]
     }
-    # temp（預約叫車）班次：淡底色標記;列表 row 窄,不加字以免擠掉 ID
+    # temp（預約叫車）班次：淡底色標記;不加 padding(加了只有 temp row 內縮會
+    # 跟其他 row 欄位對不齊),只鋪背景色 → 欄位仍對齊
     if t.trip_type == 'temp':
         row["backgroundColor"] = TEMP_TINT
         row["cornerRadius"] = "sm"
-        row["paddingStart"] = "sm"
-        row["paddingEnd"] = "sm"
     return row
 
 
