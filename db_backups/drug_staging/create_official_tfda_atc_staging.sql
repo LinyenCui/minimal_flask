@@ -31,10 +31,13 @@ CREATE TABLE IF NOT EXISTS official_tfda_atc_staging (
     notes TEXT,
 
     CONSTRAINT official_tfda_atc_staging_source_row_uniq
-        UNIQUE (source_version, source_checksum, source_inner_file, source_row_number),
-    CONSTRAINT official_tfda_atc_staging_business_uniq
-        UNIQUE (source_version, normalized_license_no, normalized_atc_code, raw_primary_or_secondary)
+        UNIQUE (source_version, source_checksum, source_inner_file, source_row_number)
 );
+
+-- Raw TFDA ATC contains exact duplicate business keys. Raw staging should
+-- preserve source rows and only enforce source-row uniqueness.
+ALTER TABLE official_tfda_atc_staging
+    DROP CONSTRAINT IF EXISTS official_tfda_atc_staging_business_uniq;
 
 CREATE INDEX IF NOT EXISTS idx_official_tfda_atc_staging_batch
     ON official_tfda_atc_staging (import_batch_id);
@@ -42,3 +45,5 @@ CREATE INDEX IF NOT EXISTS idx_official_tfda_atc_staging_license
     ON official_tfda_atc_staging (normalized_license_no);
 CREATE INDEX IF NOT EXISTS idx_official_tfda_atc_staging_atc
     ON official_tfda_atc_staging (normalized_atc_code);
+CREATE INDEX IF NOT EXISTS idx_official_tfda_atc_staging_business_key
+    ON official_tfda_atc_staging (source_version, normalized_license_no, normalized_atc_code, raw_primary_or_secondary);
