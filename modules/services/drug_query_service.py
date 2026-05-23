@@ -22,6 +22,7 @@ CORE_COLUMNS = [
     'generic_name',
     'brand_name',
     'aliases',
+    'nhi_drug_code',
 ]
 
 OPTIONAL_DISPLAY_COLUMNS = [
@@ -169,6 +170,7 @@ class DrugQueryService:
             'generic_name': row.get('generic_name'),
             'brand_name': row.get('brand_name'),
             'aliases': row.get('aliases'),
+            'nhi_drug_code': row.get('nhi_drug_code'),
             'normalized_name': row.get('normalized_name'),
             'raw_name': row.get('raw_name') or row.get('original_name') or row.get('source_name'),
             'spec': row.get('spec') or row.get('specification') or row.get('strength'),

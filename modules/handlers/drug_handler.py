@@ -99,6 +99,8 @@ def _format_list(result: dict) -> str:
             lines.append(f"   成分：{item['generic_name']}")
         if item.get('brand_name') and item.get('brand_name') != title:
             lines.append(f"   藥名：{item['brand_name']}")
+        if item.get('nhi_drug_code'):
+            lines.append(f"   健保碼：{item['nhi_drug_code']}")
 
         type_parts = [part for part in (item.get('table_type'), item.get('item_kind')) if part]
         if type_parts:

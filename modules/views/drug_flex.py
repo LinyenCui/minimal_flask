@@ -129,6 +129,15 @@ def render_drug_bubble(item: dict) -> dict:
         body.append(_row("成分", _short(generic, 96), value_weight="bold"))
     if brand and brand != generic:
         body.append(_row("藥名", _short(brand, 96), value_weight="bold"))
+    if item.get("nhi_drug_code"):
+        body.append(
+            _row(
+                "健保碼",
+                _short(item["nhi_drug_code"], 32),
+                value_color=PRIMARY,
+                value_weight="bold",
+            )
+        )
 
     type_parts = [part for part in (item.get("table_type"), item.get("item_kind")) if part]
     if type_parts or item.get("category"):
@@ -205,4 +214,3 @@ def render_drug_results(items: list[dict]) -> dict:
     if len(bubbles) == 1:
         return bubbles[0]
     return {"type": "carousel", "contents": bubbles}
-
