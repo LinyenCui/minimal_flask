@@ -12,6 +12,9 @@ CREATE TABLE IF NOT EXISTS prescription_nhi_drug_code_candidates (
     source_photo_page_or_index TEXT,
     source_row_number INTEGER NOT NULL,
     source_column TEXT NOT NULL,
+    source_match_index INTEGER NOT NULL,
+    source_match_start INTEGER,
+    source_match_end INTEGER,
 
     -- OCR code values. raw is never overwritten.
     raw_nhi_drug_code TEXT NOT NULL,
@@ -63,7 +66,7 @@ CREATE TABLE IF NOT EXISTS prescription_nhi_drug_code_candidates (
     CONSTRAINT prescription_nhi_candidates_review_decision_chk
         CHECK (review_decision IS NULL OR review_decision IN ('approve', 'reject', 'needs_more_source', 'keep_for_reference')),
     CONSTRAINT prescription_nhi_candidates_source_occurrence_uniq
-        UNIQUE (source_csv, source_row_number, source_column, raw_nhi_drug_code, import_batch_id)
+        UNIQUE (source_csv, source_row_number, source_column, raw_nhi_drug_code, source_match_index, import_batch_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_prescription_nhi_candidates_effective_code
@@ -77,6 +80,9 @@ CREATE INDEX IF NOT EXISTS idx_prescription_nhi_candidates_official_code
 
 CREATE INDEX IF NOT EXISTS idx_prescription_nhi_candidates_photo
     ON prescription_nhi_drug_code_candidates (source_photo, source_row_number);
+
+CREATE INDEX IF NOT EXISTS idx_prescription_nhi_candidates_match_position
+    ON prescription_nhi_drug_code_candidates (source_csv, source_row_number, source_column, source_match_start, source_match_end);
 
 CREATE INDEX IF NOT EXISTS idx_prescription_nhi_candidates_batch
     ON prescription_nhi_drug_code_candidates (import_batch_id);
