@@ -698,7 +698,7 @@ def _decorate_with_conversation_hint(msg: dict) -> None:
     original = msg.get('text', '')
     if '對話模式' not in original:
         msg['text'] = original.rstrip() + (
-            f"\n\n💬 對話模式進行中（{int(SANDBOX_ACTIVE_TTL_MINUTES * 60)}秒內可不加 ! 前綴回覆）"
+            f"\n\n💬 對話模式進行中（{int(SANDBOX_ACTIVE_TTL_MINUTES * 60)}秒內可不加 / 前綴回覆）"
         )
 
     # 切到 type=quick_reply 讓 line_bot.py 的 quickReply 邏輯生效
