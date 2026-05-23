@@ -62,7 +62,7 @@ def _status_row(t: TripView) -> dict:
     status_text, status_color = _status_label(t)
     driver_text = f"🚗{t.driver_id}" if t.driver_id else "🚗?"
 
-    return {
+    row = {
         'type': 'box',
         'layout': 'vertical',
         'spacing': 'xs',
@@ -76,9 +76,8 @@ def _status_row(t: TripView) -> dict:
             {
                 'type': 'box', 'layout': 'horizontal', 'spacing': 'sm',
                 'contents': [
-                    {'type': 'text',
-                     'text': (f'📌#{t.trip_id}' if t.trip_type == 'temp' else f'#{t.trip_id}'),
-                     'size': 'sm', 'color': PRIMARY, 'weight': 'bold', 'flex': 2},
+                    {'type': 'text', 'text': f'#{t.trip_id}', 'size': 'sm',
+                     'color': PRIMARY, 'weight': 'bold', 'flex': 2},
                     {'type': 'text', 'text': time_text, 'size': 'sm',
                      'color': BLACK, 'flex': 2},
                     {'type': 'text', 'text': driver_text, 'size': 'sm',
@@ -101,6 +100,11 @@ def _status_row(t: TripView) -> dict:
             },
         ],
     }
+    # temp（預約）班次：淡底色標記,不加字（picker row 也窄）
+    if t.trip_type == 'temp':
+        row['backgroundColor'] = '#FFF8E1'
+        row['cornerRadius'] = 'sm'
+    return row
 
 
 def _qr(label: str, text: str) -> dict:

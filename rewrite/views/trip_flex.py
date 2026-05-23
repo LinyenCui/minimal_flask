@@ -18,6 +18,7 @@ DANGER = "#D32F2F"
 SUCCESS = "#2E7D32"
 MUTED = "#999999"
 BLACK = "#333333"
+TEMP_TINT = "#FFF8E1"   # 預約(temp)班次在列表 row 的淡底色標記(非紅綠、不加字)
 
 # 狀態著色
 STATUS_COLOR = {
@@ -380,7 +381,7 @@ def _trip_row(t: TripView) -> dict:
     route_text = f"{sp or '?'}→{ep or '?'}"
     color = STATUS_COLOR.get(t.display_status, BLACK)
 
-    return {
+    row = {
         "type": "box",
         "layout": "horizontal",
         "spacing": "xs",
@@ -394,9 +395,8 @@ def _trip_row(t: TripView) -> dict:
         },
         "contents": [
             {"type": "text", "text": t.status_emoji, "flex": 0, "size": "xs"},
-            {"type": "text",
-             "text": (f"📌#{t.trip_id}" if t.trip_type == 'temp' else f"#{t.trip_id}"),
-             "flex": 2, "size": "xxs", "color": color, "weight": "bold"},
+            {"type": "text", "text": f"#{t.trip_id}", "flex": 2, "size": "xxs",
+             "color": color, "weight": "bold"},
             {"type": "text", "text": time_text, "flex": 2, "size": "xxs",
              "color": BLACK},
             {"type": "text", "text": route_text, "flex": 5, "size": "xxs",
@@ -405,6 +405,13 @@ def _trip_row(t: TripView) -> dict:
              "color": MUTED, "align": "end"},
         ]
     }
+    # temp（預約叫車）班次：淡底色標記;列表 row 窄,不加字以免擠掉 ID
+    if t.trip_type == 'temp':
+        row["backgroundColor"] = TEMP_TINT
+        row["cornerRadius"] = "sm"
+        row["paddingStart"] = "sm"
+        row["paddingEnd"] = "sm"
+    return row
 
 
 def _render_more_indicator(remaining_bubbles: int, total_trips: int) -> dict:
