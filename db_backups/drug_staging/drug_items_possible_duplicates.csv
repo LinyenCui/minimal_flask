@@ -1,0 +1,18 @@
+﻿drug_item_id_1,drug_item_id_2,name_1,name_2,reason,risk_level
+1,34,Bisoprolol / Concor 康肯,Bisoprolol / Biso 百適歐 更換普康膜衣錠(bisoprolol),same normalized generic_name,high
+2,30,Doxazosin / Dophilin 道福寧,Doxazosin / Doxaben XL 可迅持續錠,same normalized generic_name,high
+5,17,GLIMEPIRIDE 2MG + METFORMIN 50 / Temilg F.C.  甜蜜克,Glimepiride2mg+Meformin500mg / Amaryl-M 美爾胰,very similar generic_name,high
+11,60,IRBESARTAN / IRBEPROVEL(APROVEL) 伊必特(台廠),Irbesartan / Aprotan 壓利安,same normalized generic_name,high
+12,59,Febuxostat / Fekuton/Fburic 服克痛,Febuxostat / Feburic/Febuton 達理痛,same normalized generic_name,high
+18,56,Tamsulosin / Harnalidge D 活路利淨,Tamsulosin / Tamlosin 暢利淨,same normalized generic_name,high
+24,61,Atorvastatin / Lipitor 立普妥,Atorvastatin / Atorva 立舒脂(立脂妥),same normalized generic_name,high
+29,140,PROCHLORPERAZINE / Novamin 諾安命,Prochlorperazine / Novamin 2ml Inj.,same normalized generic_name,medium
+31,35,Acetylcysteine / Actein 愛克痰,Acetylcysteine / Actein Effervescent 愛克痰發泡錠,same normalized generic_name,medium
+32,68,Carvedilol / Syntrend(CARDILO) 心全 6.25/Dilatrend 12.5),Carvedilol / Dilatrend 達利全,same normalized generic_name,medium
+40,137,Furosemide / Lasix/Rasitol 來喜妥,Furosemide / Lasix/Fursemide 2ml Inj.扶如泄民,same normalized generic_name,medium
+45,108,Benzbromarone / Beenrone 勉治,Benzbromarone / Nogout 杏定痛,same normalized generic_name,medium
+46,69,Rosuvastatin / Rosustin 優脂定,Rosuvastatin / Crestor 冠脂妥(阿斯),same normalized generic_name,high
+48,67,Olmesartan / Olmesardin 妥得降,Olmesartan / Olmetec 雅脈,same normalized generic_name,high
+91,143,Metoclopramide / Primperan(Chiaoweigen) 佐胃健,METOCLOPRAMIDE 10 MG / METOCLOPRAMIDE 美托拉麥注射液,very similar generic_name,medium
+122,141,DIPHENIDOL / DIPHENIDOL 敵芬尼朵,DIPHENIDOL / KPHADOL INJECTION (DIPHENIDOL) 敵芬尼朵,same normalized generic_name,medium
+148,149,BETAMETHASONE (17-VALERATE) 1 / Sinbeta derm cream 杏貝他健乳1000g/BT,BETAMETHASONE (17-VALERATE) 1 / Betaderm Cream(B-Gencin) 貝他健乳膏,same normalized generic_name,medium
