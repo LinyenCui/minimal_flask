@@ -1091,7 +1091,10 @@ def create_trip(
         'passenger_name': passenger_name,
         'week_number': week_number,
         'user_name': user_name or user_id,
-        'mod_reason': '[1] 新建班次',
+        # modification_reason 只記「對班次的修改」;建立不是修改(建立已由
+        # audit log action_type='create_trip' 記錄),故初始 NULL,與匯入固定
+        # 班次一致。首筆真實修改由 _bump_modification_reason 自動編號為 [1]。
+        'mod_reason': None,
     })
     new_trip_id = result.fetchone()[0]
 
