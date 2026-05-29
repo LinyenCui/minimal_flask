@@ -93,6 +93,10 @@ def _push_customer(target_id: str | None, view, action_label: str, source=None) 
         from modules.utils.line_bot import get_line_bot_api
         from rewrite.views.customer_flex import render_customer_detail
 
+        from modules.utils.line_bot import push_notify_enabled
+        if not push_notify_enabled():
+            logger.info("[LIFF] push skipped (PUSH_NOTIFY off)")
+            return
         api = get_line_bot_api()
         display = view.short_name or view.name or f'#{view.id}'
         text_msg = TextMessage(text=f"✅ 已{action_label}客戶 #{view.id} {display}")
