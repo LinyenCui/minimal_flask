@@ -39,7 +39,23 @@ if DATABASE_URL:
 else:
     url = _resolve_sqlalchemy_db_url(f'postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}')
 
-engine = create_engine(url)
+# 連線池韌性 — 修 Render Postgres 閒置斷線造成的
+# 「SSL connection has been closed unexpectedly」(查詢/LIFF 完成後 push 間歇性失敗):
+#   pool_pre_ping  取連線前先 ping,死連線自動丟棄重連(根治 stale 連線被發出)
+#   pool_recycle   連線用超過 280s 就主動回收,早於 Render 閒置斷線門檻
+#   keepalives     TCP 層保活,減少閒置被中斷(libpq 參數,psycopg/psycopg2 皆通用)
+_engine_kwargs = {
+    'pool_pre_ping': True,
+    'pool_recycle': 280,
+}
+if url.startswith('postgresql'):
+    _engine_kwargs['connect_args'] = {
+        'keepalives': 1,
+        'keepalives_idle': 30,
+        'keepalives_interval': 10,
+        'keepalives_count': 5,
+    }
+engine = create_engine(url, **_engine_kwargs)
 
 # 創建會話
 Session = sessionmaker(bind=engine)
