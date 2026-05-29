@@ -152,7 +152,10 @@ def _push_deposit(target_id, data) -> None:
         return
     try:
         from linebot.v3.messaging import PushMessageRequest, TextMessage
-        from modules.utils.line_bot import get_line_bot_api
+        from modules.utils.line_bot import get_line_bot_api, push_notify_enabled
+        if not push_notify_enabled():
+            logger.info("[LIFF] push skipped (PUSH_NOTIFY off)")
+            return
         api = get_line_bot_api()
         msg = (
             f"➕ 已記錄入金 NT$ {data['amount']:,}\n"
@@ -172,7 +175,10 @@ def _push_weekly_charge(target_id, data) -> None:
         return
     try:
         from linebot.v3.messaging import PushMessageRequest, TextMessage
-        from modules.utils.line_bot import get_line_bot_api
+        from modules.utils.line_bot import get_line_bot_api, push_notify_enabled
+        if not push_notify_enabled():
+            logger.info("[LIFF] push skipped (PUSH_NOTIFY off)")
+            return
         api = get_line_bot_api()
         msg = (
             f"💵 已記錄週扣款 NT$ {data['amount']:,}\n"

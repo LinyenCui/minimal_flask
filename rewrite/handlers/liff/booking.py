@@ -107,9 +107,12 @@ def _push_booking(target_id: str | None, view) -> None:
             PushMessageRequest,
             TextMessage,
         )
-        from modules.utils.line_bot import get_line_bot_api
+        from modules.utils.line_bot import get_line_bot_api, push_notify_enabled
         from rewrite.views.trip_flex import render_trip_detail
 
+        if not push_notify_enabled():
+            logger.info("[LIFF] push skipped (PUSH_NOTIFY off)")
+            return
         api = get_line_bot_api()
         sp, _, ep = view.display_route()
         route = f"{sp or '?'}→{ep or '?'}"

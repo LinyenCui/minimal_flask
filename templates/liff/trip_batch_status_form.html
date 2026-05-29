@@ -384,7 +384,8 @@
         return;
       }
       // 共用 payload
-      const basePayload = { action: currentAction };
+      // suppress_push:各筆不推,收尾再彙總成一則 push(省 LINE 月額度,N→1)
+      const basePayload = { action: currentAction, suppress_push: true };
       if (currentAction === 'leave') {
         const reason = (document.getElementById('reason-leave').value || '').trim();
         if (!reason) { showAlert('err', '❌ 請填請假原因'); return; }
@@ -412,6 +413,7 @@
       submitBtn.textContent = `送出中… (0/${selected.length})`;
       let okCnt = 0, failCnt = 0, skipCnt = 0;
       let i = 0;
+      const notifyResults = [];   // 收尾彙總 push 用(只收實際送出的)
       for (const t of selected) {
         i++;
         submitBtn.textContent = `送出中… (${i}/${selected.length})`;
@@ -433,10 +435,29 @@
         if (result.ok) {
           setRowResult(t.trip_id, 'ok', '✅');
           okCnt++;
+          notifyResults.push({ trip_id: t.trip_id, ok: true });
         } else {
           setRowResult(t.trip_id, 'err', '❌ ' + result.error);
           failCnt++;
+          notifyResults.push({ trip_id: t.trip_id, ok: false });
         }
+      }
+      // 收尾:把 N 筆結果彙總成「一則」push 回群組(N→1,省 LINE 月額度)
+      if (okCnt > 0) {
+        try {
+          const notifyPayload = {
+            action: currentAction,
+            results: notifyResults,
+            reason: basePayload.reason,
+            surcharge: basePayload.surcharge,
+          };
+          if (basePayload.source) notifyPayload.source = basePayload.source;
+          await fetch('/liff/trips/batch_status_notify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+            body: JSON.stringify(notifyPayload),
+          });
+        } catch (e) { /* 彙總通知失敗不影響已完成的操作 */ }
       }
       const summary = `成功 ${okCnt} / 失敗 ${failCnt} / 跳過 ${skipCnt}`;
       const inClient = liff.isInClient && liff.isInClient();

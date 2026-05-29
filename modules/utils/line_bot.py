@@ -70,6 +70,18 @@ def get_parser():
     logger.info("Using Channel Secret from configuration")
     return WebhookParser(channel_secret)
 
+def push_notify_enabled() -> bool:
+    """主動 push 通知總開關（措施 2:測試關 push 省 LINE 月額度）。
+
+    push 計入 LINE 月額度（免費 200 則/月）；reply 不計。測試期可設
+    PUSH_NOTIFY=off 讓所有 LIFF 完成後的群組廣播 push 跳過,不吃正式額度。
+    預設 on（未設或 on/1/true/yes 皆為開）。
+    """
+    return os.environ.get('PUSH_NOTIFY', 'on').strip().lower() not in (
+        'off', '0', 'false', 'no',
+    )
+
+
 def get_line_bot_api():
     """獲取LINE Messaging API客戶端"""
     # 優先從 Flask 配置中獲取
