@@ -94,10 +94,6 @@ def _push_schedule(target_id: str | None, view) -> None:
         from linebot.v3.messaging import PushMessageRequest, TextMessage
         from modules.utils.line_bot import get_line_bot_api
 
-        from modules.utils.line_bot import push_notify_enabled
-        if not push_notify_enabled():
-            logger.info("[LIFF] push skipped (PUSH_NOTIFY off)")
-            return
         api = get_line_bot_api()
         wd_map = {'1': '一', '2': '二', '3': '三', '4': '四',
                   '5': '五', '6': '六', '7': '日'}
@@ -212,10 +208,6 @@ def _push_schedule_leave(target_id, view, reason, surcharge):
     try:
         from linebot.v3.messaging import PushMessageRequest, TextMessage
         from modules.utils.line_bot import get_line_bot_api
-        from modules.utils.line_bot import push_notify_enabled
-        if not push_notify_enabled():
-            logger.info("[LIFF] push skipped (PUSH_NOTIFY off)")
-            return
         api = get_line_bot_api()
         wd_map = {'1': '一', '2': '二', '3': '三', '4': '四',
                   '5': '五', '6': '六', '7': '日'}
@@ -322,10 +314,6 @@ def _push_schedule_update(target_id: str | None, view) -> None:
     try:
         from linebot.v3.messaging import PushMessageRequest, TextMessage
         from modules.utils.line_bot import get_line_bot_api
-        from modules.utils.line_bot import push_notify_enabled
-        if not push_notify_enabled():
-            logger.info("[LIFF] push skipped (PUSH_NOTIFY off)")
-            return
         api = get_line_bot_api()
         wd_map = {'1': '一', '2': '二', '3': '三', '4': '四',
                   '5': '五', '6': '六', '7': '日'}

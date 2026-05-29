@@ -383,8 +383,8 @@
         showAlert('err', '❌ 沒勾選任何班次');
         return;
       }
-      // 共用 payload；suppress_push:各筆不推,收尾再彙總成一則(省 LINE 月額度)
-      const basePayload = { action: currentAction, suppress_push: true };
+      // 共用 payload
+      const basePayload = { action: currentAction };
       if (currentAction === 'leave') {
         const reason = (document.getElementById('reason-leave').value || '').trim();
         if (!reason) { showAlert('err', '❌ 請填請假原因'); return; }

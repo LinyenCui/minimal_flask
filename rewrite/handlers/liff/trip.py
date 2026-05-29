@@ -166,10 +166,6 @@ def trip_status_change(trip_id):
     reason = (body.get('reason') or '').strip()
     surcharge_raw = body.get('surcharge')
     surcharge = _to_int_or_none(surcharge_raw)
-    # 批次模式:前端逐筆 POST 時帶 suppress_push=true,各筆不推,
-    # 全部做完由前端呼叫 /trips/batch_status_notify 收尾推「一則彙總」,
-    # 把「N 筆 = N 則 push(N 個 LINE 額度)」降為「N 筆 = 1 則」。
-    suppress_push = bool(body.get('suppress_push'))
 
     session = Session()
     try:
@@ -215,10 +211,9 @@ def trip_status_change(trip_id):
         f"[LIFF] trip #{trip_id} action={action} "
         f"reason={reason!r} surcharge={surcharge} by {request.line_user_id}"
     )
-    if not suppress_push:
-        from rewrite.utils.liff_url import resolve_push_target
-        target = resolve_push_target(body.get('source'), request.line_user_id)
-        _push_trip_status(target, result.data, action, reason, surcharge)
+    from rewrite.utils.liff_url import resolve_push_target
+    target = resolve_push_target(body.get('source'), request.line_user_id)
+    _push_trip_status(target, result.data, action, reason, surcharge)
     return jsonify({'ok': True, 'trip': trip_data})
 
 
@@ -235,11 +230,8 @@ def _push_trip_status(target_id, view, action, reason, surcharge):
         return
     try:
         from linebot.v3.messaging import PushMessageRequest, TextMessage
-        from modules.utils.line_bot import get_line_bot_api, push_notify_enabled
+        from modules.utils.line_bot import get_line_bot_api
 
-        if not push_notify_enabled():
-            logger.info(f"[LIFF] push trip status #{view.trip_id} skipped (PUSH_NOTIFY off)")
-            return
         api = get_line_bot_api()
         verb = _ACTION_VERB.get(action, action)
         sp, _, ep = view.display_route()
@@ -275,71 +267,3 @@ def _push_trip_status(target_id, view, action, reason, surcharge):
     except Exception as e:
         body_attr = getattr(e, 'body', None)
         logger.warning(f"[LIFF] push trip status failed: {e} body={body_attr!r}")
-
-
-# ---------- POST: 批次收尾彙總 push（措施 1:N 筆 → 1 則） ----------
-
-@liff_bp.route('/trips/batch_status_notify', methods=['POST'])
-@liff_auth_required
-def trips_batch_status_notify():
-    """批次狀態管理收尾:把 N 筆結果彙總成「一則」push 回群組。
-
-    前端逐筆 POST /trip/<id>/status 時帶 suppress_push=true(各筆不推),
-    全部做完後呼叫本 endpoint 推一則彙總 → 把「N 筆 = N 則 push(N 個 LINE
-    月額度)」降為「N 筆 = 1 則」,這是 429 monthly limit 的主要止血點。
-
-    payload:
-      { action, results: [{trip_id, ok, label?}], reason?, surcharge?,
-        source?: {type, groupId/roomId} }
-    """
-    body = request.get_json(silent=True) or {}
-    action = (body.get('action') or '').strip().lower()
-    results = body.get('results') or []
-    if action not in VALID_ACTIONS or not isinstance(results, list):
-        return jsonify({'ok': False, 'error': 'action/results 格式錯'}), 400
-
-    ok_ids = [r.get('trip_id') for r in results if r.get('ok')]
-    fail = [r for r in results if not r.get('ok')]
-    if not ok_ids and not fail:
-        return jsonify({'ok': True, 'skipped': 'no results'})
-
-    from rewrite.utils.liff_url import resolve_push_target
-    target = resolve_push_target(body.get('source'), request.line_user_id)
-    if not target:
-        return jsonify({'ok': True, 'skipped': 'no target'})
-
-    try:
-        from linebot.v3.messaging import PushMessageRequest, TextMessage
-        from modules.utils.line_bot import get_line_bot_api, push_notify_enabled
-
-        if not push_notify_enabled():
-            logger.info("[LIFF] batch status notify skipped (PUSH_NOTIFY off)")
-            return jsonify({'ok': True, 'skipped': 'push off'})
-
-        verb = _ACTION_VERB.get(action, action)
-        reason = (body.get('reason') or '').strip()
-        surcharge = _to_int_or_none(body.get('surcharge'))
-        lines = [f"{verb} 共 {len(ok_ids)} 筆"]
-        if ok_ids:
-            lines.append("　" + "、".join(f"#{i}" for i in ok_ids))
-        if action == 'leave' and reason:
-            lines.append(f"📝 {reason}" + (f"　💰 {surcharge:+d} 元" if surcharge else ""))
-        elif action in ('cancel', 'conflict') and reason:
-            lines.append(f"📝 {reason}")
-        if action in ('cancel', 'conflict'):
-            lines.append("↩️ 可用「改回準備」還原")
-        if fail:
-            lines.append(f"⚠️ {len(fail)} 筆未成功(詳見表單)")
-
-        api = get_line_bot_api()
-        api.push_message(PushMessageRequest(
-            to=target, messages=[TextMessage(text='\n'.join(lines))],
-        ))
-        logger.info(
-            f"[LIFF] batch status notify ({action}) ok={len(ok_ids)} "
-            f"fail={len(fail)} → {target[:8]} (1 push)"
-        )
-    except Exception as e:
-        body_attr = getattr(e, 'body', None)
-        logger.warning(f"[LIFF] batch status notify failed: {e} body={body_attr!r}")
-    return jsonify({'ok': True})
