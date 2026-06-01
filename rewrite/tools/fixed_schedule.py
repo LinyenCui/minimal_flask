@@ -390,6 +390,53 @@ def restore_fixed_schedule(
 
 
 # ============================================================
+# Delete — 刪除固定班次模板（整備層;刪它不需先刪 trips）
+# ============================================================
+
+def delete_fixed_schedule(
+    *,
+    session,
+    schedule_id: int,
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """
+    刪除固定班次（整備層模板，硬刪除）。
+
+    整備層綁定原則:刪它**不需先刪 trips**——已匯出的 trips 是現在態獨立實例,
+    與模板脫鉤,刪模板後既有 trips 照常存在,只是未來不再從此模板匯入。
+    刪掉後其 start/end 客戶若不再被其他固定班次引用,該客戶即可被刪
+    （delete_customer 的 fixed_schedules 安全閘會通過）。
+    """
+    before = _fetch_schedule_snapshot(session=session, schedule_id=schedule_id)
+    if not before:
+        return ToolResult.fail(f"找不到固定班次 #{schedule_id}")
+
+    session.execute(
+        text("DELETE FROM fixed_schedules WHERE id = :id"),
+        {'id': schedule_id},
+    )
+    write_audit(
+        session=session, user_id=user_id, user_name=user_name,
+        action_type='delete_fixed_schedule', target_table='fixed_schedules',
+        target_id=schedule_id,
+        before_state=before, after_state=None,
+        changed_fields=list(before.keys()) if before else None,
+        via=via,
+    )
+    if auto_commit:
+        session.commit()
+    return ToolResult.success(data={
+        'deleted_id': schedule_id,
+        'start_point': before.get('start_point'),
+        'end_point': before.get('end_point'),
+        'route_number': before.get('route_number'),
+    })
+
+
+# ============================================================
 # Create — 新增固定班次模板（legacy 沒對應，rewrite 補齊）
 # ============================================================
 

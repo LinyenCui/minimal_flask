@@ -872,6 +872,102 @@ def update_trip_time(
     return query_trip_by_id(trip_id, session=session)
 
 
+@require_modifiable_window(allow_in_lock=True)  # 改地點不影響執行時間,鎖內可
+def update_trip_route(
+    *,
+    session,
+    trip_id: int,
+    new_start: Optional[str] = None,
+    new_end: Optional[str] = None,
+    reason: str = '',
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """
+    修改現在態班次「起點 / 終點」（途經 via 不在本工具範圍，使用者另有規劃）。
+
+    現在態鬆綁原則：trips 起終點對 customers 的 FK 已移除,故終點可改成
+    「南紡購物中心」這類**非客戶地點**。寫入依 trip_type 決定欄位,確保
+    display_route() 正確：
+      - trip_type='temp'：display_route 讀 custom_*，故寫 custom_start/end_point
+        （並同步 start/end_point 供 query 過濾，沿用 create_trip 雙寫精神）
+      - 其他（fixed 等）：display_route 讀 start/end_point，直接寫該欄
+
+    只動本班次(實例覆寫),不影響模板與其他班次。
+    已完成 / 註銷 拒絕。reason 必填。R-5 鎖：allow_in_lock=True。
+    """
+    if not reason or not reason.strip():
+        return ToolResult.fail("請提供修改原因")
+    ns = (new_start or '').strip()
+    ne = (new_end or '').strip()
+    if not ns and not ne:
+        return ToolResult.fail("請至少提供 new_start 或 new_end 其一")
+
+    before = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    if not before:
+        return ToolResult.fail(f"找不到班次 #{trip_id}")
+    status = before.get('status')
+    if status == '已完成':
+        return ToolResult.fail(f"班次 #{trip_id} 已完成，無法改起終點")
+    if status == '註銷':
+        return ToolResult.fail(
+            f"班次 #{trip_id} 為註銷狀態，無法改起終點（如要恢復請先『改回準備』）"
+        )
+
+    is_temp = before.get('trip_type') == 'temp'
+    sets, params, notes = [], {}, []
+
+    if ns:
+        old_sp = (before.get('custom_start_point') if is_temp else None) or before.get('start_point')
+        if is_temp:
+            sets.append("start_point = :sp")
+            sets.append("custom_start_point = :sp")
+        else:
+            sets.append("start_point = :sp")
+        params['sp'] = ns
+        notes.append(f"起點 {old_sp or '?'}→{ns}")
+    if ne:
+        old_ep = (before.get('custom_end_point') if is_temp else None) or before.get('end_point')
+        if is_temp:
+            sets.append("end_point = :ep")
+            sets.append("custom_end_point = :ep")
+        else:
+            sets.append("end_point = :ep")
+        params['ep'] = ne
+        notes.append(f"終點 {old_ep or '?'}→{ne}")
+
+    note = f"改路線: {', '.join(notes)} ({reason.strip()})"
+    new_mod = _bump_modification_reason(before.get('modification_reason'), note)
+    sets.append("modification_reason = :mod")
+    sets.append("modified_by = :who")
+    sets.append("modification_time = CURRENT_TIMESTAMP")
+    params['mod'] = new_mod
+    params['who'] = user_name or user_id
+    params['id'] = trip_id
+
+    session.execute(
+        text(f"UPDATE trips SET {', '.join(sets)} WHERE trip_id = :id"),
+        params,
+    )
+
+    after = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    write_audit(
+        session=session, user_id=user_id, user_name=user_name,
+        action_type='update_trip_route', target_table='trips', target_id=trip_id,
+        before_state=before, after_state=after,
+        changed_fields=diff_fields(before, after),
+        reason=reason.strip(),
+        extra={'new_start': ns or None, 'new_end': ne or None},
+        via=via,
+    )
+
+    if auto_commit:
+        session.commit()
+    return query_trip_by_id(trip_id, session=session)
+
+
 @require_modifiable_window(allow_in_lock=True)
 def record_fare_current(
     *,

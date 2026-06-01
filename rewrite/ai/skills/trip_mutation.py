@@ -27,6 +27,7 @@ from rewrite.tools.trip import (
     record_fare_current,
     update_trip_category,
     update_trip_time,
+    update_trip_route,
 )
 
 
@@ -52,6 +53,9 @@ def _system_prompt() -> str:
 - 改類別（key 錯時用，例「東洋」改「診所」）→ update_trip_category（reason 必填）
 - 改時間（同日改時段，例「#2575 改成 11:45」）→ update_trip_time
   （reason 必填；註銷/已完成不可改；30 分鐘鎖內擋；不改日期）
+- 改起點/終點（例「#2841 終點改南紡購物中心」「起點改成X」）→ update_trip_route
+  （new_start / new_end 任一或都給；reason 必填；終點可填非客戶地點；註銷/已完成不可改）
+  ※ 途經 via 暫不支援改（使用者另有規劃）
 
 ⚠️ 規則：
 1. trip_id 必填。用戶說「那筆」「剛剛那班」這種，問清楚再執行
@@ -232,6 +236,27 @@ UPDATE_TRIP_TIME_SCHEMA = {
 }
 
 
+UPDATE_TRIP_ROUTE_SCHEMA = {
+    'description': (
+        "Modify a CURRENT trip's start/end point (起點/終點). "
+        "Triggers: 「#N 終點改南紡購物中心」「#N 起點改成X」「把 N 的目的地改成…」. "
+        "new_start / new_end 至少給一個。終點/起點可以是非客戶地點（如商場、車站）。"
+        "途經 via 不在本工具範圍。Rejected if 註銷/已完成. Reason REQUIRED. "
+        "只改本班次,不影響固定班次模板與其他班次。"
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'trip_id': {'type': 'integer', 'description': "Trip ID（現在態 trips.trip_id）"},
+            'new_start': {'type': 'string', 'description': "新起點（可選;客戶簡稱或任意地點名）"},
+            'new_end': {'type': 'string', 'description': "新終點（可選;客戶簡稱或任意地點名，如『南紡購物中心』）"},
+            'reason': {'type': 'string', 'description': "修改原因（必填）"},
+        },
+        'required': ['trip_id', 'reason'],
+    },
+}
+
+
 # 也讓 mutation skill 能呼叫 query 類工具（規則 3：多筆 mutation 前先 query 確認）
 QUERY_TRIPS_SCHEMA = {
     'description': "Query trips for confirmation before mutation (e.g. user says 「明天龍埔街都請假」, query first to confirm trip_ids)",
@@ -274,6 +299,7 @@ def build_trip_mutation_skill() -> Skill:
             (record_fare_current, RECORD_FARE_CURRENT_SCHEMA),
             (update_trip_category, UPDATE_TRIP_CATEGORY_SCHEMA),
             (update_trip_time, UPDATE_TRIP_TIME_SCHEMA),
+            (update_trip_route, UPDATE_TRIP_ROUTE_SCHEMA),
             # 規則 3 用：mutation 前先 query 確認
             (query_trips, QUERY_TRIPS_SCHEMA),
             (query_trip_by_id, QUERY_TRIP_BY_ID_SCHEMA),

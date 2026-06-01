@@ -468,8 +468,10 @@ def delete_customer(
     """
     刪除客戶（硬刪除）。
 
-    安全閘：若 customer.short_name 仍被 trips 引用，**拒絕刪除**。
-    （v0.2 可改軟刪除 is_active = false，目前先硬刪）
+    安全閘（整備層綁定原則）：客戶是簡稱起源,若仍被 **fixed_schedules（未來態
+    整備層）** 的起/終點引用 → **拒絕刪除**,請先刪相關固定班次。
+    刻意**不檢查 trips（現在態）**：trips 是已匯出的獨立實例,刪客戶不受其阻擋
+    （trips 起終點對 customers 的 FK 已移除）。
     """
     # 確認存在
     customer = session.execute(
@@ -482,18 +484,17 @@ def delete_customer(
     short_name = customer[1]
     name = customer[2]
 
-    # 檢查 trips FK 引用
-    # via_point 可能是 '+'-joined 多段（例如 '中華南路+新建路'），用 string_to_array 拆
+    # 檢查 fixed_schedules（整備層）起/終點引用;via_point 不在此約束範圍。
+    # （DB 層 fixed_schedules FK ON DELETE RESTRICT 也會擋,這裡先給友善訊息）
     if short_name:
         ref_count = session.execute(text("""
-            SELECT COUNT(*) FROM trips
+            SELECT COUNT(*) FROM fixed_schedules
             WHERE start_point = :sn OR end_point = :sn
-               OR :sn = ANY(string_to_array(COALESCE(via_point, ''), '+'))
         """), {'sn': short_name}).scalar()
         if ref_count > 0:
             return ToolResult.fail(
-                f"無法刪除 #{customer_id}「{name}」：仍有 {ref_count} 筆 trip 引用簡稱「{short_name}」。"
-                f" 建議先處理這些 trips（軟刪除功能 v0.2 補）"
+                f"無法刪除 #{customer_id}「{name}」：仍有 {ref_count} 筆固定班次（整備層）"
+                f"引用簡稱「{short_name}」。請先刪除這些固定班次再刪客戶。"
             )
 
     # DELETE

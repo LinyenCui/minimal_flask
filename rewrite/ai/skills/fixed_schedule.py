@@ -23,6 +23,7 @@ from rewrite.tools.fixed_schedule import (
     apply_fixed_schedule_leave,
     restore_fixed_schedule,
     create_fixed_schedule,
+    delete_fixed_schedule,
 )
 from rewrite.utils.sun_week import sun_week_info
 
@@ -39,6 +40,8 @@ _SYSTEM_PROMPT = """\
 - 用戶說「修改」「改時間」「改地點」「改車資」→ update_fixed_schedule
 - 用戶說「請假」「長期請假」「出國」「住院」→ apply_fixed_schedule_leave
 - 用戶說「恢復」「改回準備」「不請假了」→ restore_fixed_schedule
+- 用戶說「刪除固定班次 N」「刪掉固定班表 N」→ delete_fixed_schedule
+  （刪模板不需先刪 trips;刪掉後客戶若無其他固定班次引用才可刪客戶）
 - 用戶說「新增固定班次」「建模板」（**通常該走 LIFF 表單**，欄位多 AI 容易漏，
   建議引導用戶打「新增固定班次」觸發 LIFF；若用戶堅持自然語言給齊欄位才 call）
   → create_fixed_schedule（必填: route_number/departure_time/start_point/category）
@@ -141,6 +144,22 @@ RESTORE_SCHEMA = {
     },
 }
 
+DELETE_FIXED_SCHEDULE_SCHEMA = {
+    'description': (
+        "Delete a fixed schedule template (固定班次模板, hard delete). "
+        "Triggers: 「刪除固定班次 N」「刪掉固定班表 N」. "
+        "刪它不需先刪 trips（已匯出的現在態班次獨立存在,不受影響）。"
+        "刪掉後其起/終點客戶若不再被其他固定班次引用,該客戶才可被刪。"
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'schedule_id': {'type': 'integer', 'description': "固定班次 id"},
+        },
+        'required': ['schedule_id'],
+    },
+}
+
 
 CREATE_FIXED_SCHEDULE_SCHEMA = {
     'description': (
@@ -200,5 +219,6 @@ def build_fixed_schedule_skill() -> Skill:
             (apply_fixed_schedule_leave, APPLY_LEAVE_SCHEMA),
             (restore_fixed_schedule, RESTORE_SCHEMA),
             (create_fixed_schedule, CREATE_FIXED_SCHEDULE_SCHEMA),
+            (delete_fixed_schedule, DELETE_FIXED_SCHEDULE_SCHEMA),
         ],
     )
