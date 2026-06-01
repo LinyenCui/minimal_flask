@@ -145,31 +145,34 @@ class Agent:
         last_tool_args: Optional[dict] = None
 
         for iteration in range(self.MAX_TOOL_LOOPS):
-            fc_part = self._extract_function_call(response)
-            if not fc_part:
+            fc_parts = self._extract_function_calls(response)
+            if not fc_parts:
                 # AI 沒再要 function call → 終止 loop
                 break
 
-            tc = ToolCall(
-                name=fc_part.name,
-                args={k: v for k, v in fc_part.args.items()} if fc_part.args else {},
-            )
-            logger.info(f"[Agent loop {iteration+1}] {tc.name}({tc.args})")
-
-            # 執行 tool
-            result, args_used = self._execute_tool(tc, user_id)
-            last_tool_result = result
-            last_tool_name = tc.name
-            last_tool_args = args_used
-
-            # 把 result feed 回 chat（讓 AI 看到結果決定下一步）
-            tool_response_payload = self._serialize_tool_result(result)
-            response = chat.send_message(
-                Content(parts=[Part.from_function_response(
+            # Gemini 同一輪可能回「多個」function_call(parallel function calling)
+            # — 例如用戶一句話要改時間+途經+終點+乘客。必須**全部執行**並回
+            #   **等量的 function_response**,否則 Gemini 報 400「response parts !=
+            #   call parts」。逐一執行,蒐集 response parts 一次送回。
+            response_parts = []
+            for fc in fc_parts:
+                tc = ToolCall(
+                    name=fc.name,
+                    args={k: v for k, v in fc.args.items()} if fc.args else {},
+                )
+                logger.info(f"[Agent loop {iteration+1}] {tc.name}({tc.args})")
+                result, args_used = self._execute_tool(tc, user_id)
+                # 記住最後「成功且可渲染」的結果供回覆;失敗也記(才有錯誤訊息)
+                last_tool_result = result
+                last_tool_name = tc.name
+                last_tool_args = args_used
+                response_parts.append(Part.from_function_response(
                     name=tc.name,
-                    response={'result': tool_response_payload},
-                )])
-            )
+                    response={'result': self._serialize_tool_result(result)},
+                ))
+
+            # 一次回等量 responses（數量必須 == 這輪的 fc 數）
+            response = chat.send_message(Content(parts=response_parts))
         else:
             logger.warning(f"[Agent] hit MAX_TOOL_LOOPS={self.MAX_TOOL_LOOPS}")
 
@@ -210,15 +213,17 @@ class Agent:
             session.close()
 
     @staticmethod
-    def _extract_function_call(response):
-        """從 Gemini response 抽出第一個 function_call part"""
+    def _extract_function_calls(response):
+        """從 Gemini response 抽出**所有** function_call parts（支援 parallel
+        function calling — 同一輪多個 fc）。回 list,無則空 list。"""
         if not response.candidates:
-            return None
+            return []
+        out = []
         for part in response.candidates[0].content.parts:
             fc = getattr(part, 'function_call', None)
             if fc and fc.name:
-                return fc
-        return None
+                out.append(fc)
+        return out
 
     @staticmethod
     def _extract_text(response) -> Optional[str]:
