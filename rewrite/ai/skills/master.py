@@ -106,9 +106,9 @@ def _system_prompt() -> str:
 [改時間 / 改起終點 / 刪除 的判別]（重要）
 - 「#N 改成 HH:MM」「把 N 時間改成 11:45」現在態班次 → update_trip_time
   （同日改時段、不改日期；reason 必填；註銷/已完成/30 分鐘鎖內會被擋）
-- 「#N 終點改南紡購物中心」「起點改成X」「目的地改成…」現在態班次起終點
-  → update_trip_route（new_start/new_end 任一或都給；終點可非客戶地點；reason 必填）
-  ※ 現在態可自由改起終點(實例覆寫,不影響模板與其他班次);途經 via 暫不支援
+- 「#N 終點改南紡」「起點改X」「途經改Y」「清空途經」現在態班次起終點/途經
+  → update_trip_route（new_start/new_end/new_via 任一或多個；可非客戶地點；reason 必填）
+  ※ 現在態可自由改起終點/途經(實例覆寫,不影響模板與其他班次)；清空途經傳 new_via 空字串/「無」
 - 「固定班次/班表 N 改時間/起終點」未來態模板 → update_fixed_schedule
 - 「刪除/刪掉固定班次 N」未來態模板 → delete_fixed_schedule（整備層,刪它不需先刪 trips）
 - 「刪除/刪掉 #N」現在態班次：本系統無真刪除,等同『註銷』（cancel_trip，可逆,

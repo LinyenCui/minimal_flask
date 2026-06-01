@@ -53,9 +53,9 @@ def _system_prompt() -> str:
 - 改類別（key 錯時用，例「東洋」改「診所」）→ update_trip_category（reason 必填）
 - 改時間（同日改時段，例「#2575 改成 11:45」）→ update_trip_time
   （reason 必填；註銷/已完成不可改；30 分鐘鎖內擋；不改日期）
-- 改起點/終點（例「#2841 終點改南紡購物中心」「起點改成X」）→ update_trip_route
-  （new_start / new_end 任一或都給；reason 必填；終點可填非客戶地點；註銷/已完成不可改）
-  ※ 途經 via 暫不支援改（使用者另有規劃）
+- 改起點/終點/途經（例「#2841 終點改南紡」「起點改X」「途經改Y」「清空途經」）
+  → update_trip_route（new_start/new_end/new_via 任一或多個；reason 必填；
+  可填非客戶地點；清空途經傳 new_via 空字串或「無」；註銷/已完成不可改）
 
 ⚠️ 規則：
 1. trip_id 必填。用戶說「那筆」「剛剛那班」這種，問清楚再執行
@@ -238,10 +238,10 @@ UPDATE_TRIP_TIME_SCHEMA = {
 
 UPDATE_TRIP_ROUTE_SCHEMA = {
     'description': (
-        "Modify a CURRENT trip's start/end point (起點/終點). "
-        "Triggers: 「#N 終點改南紡購物中心」「#N 起點改成X」「把 N 的目的地改成…」. "
-        "new_start / new_end 至少給一個。終點/起點可以是非客戶地點（如商場、車站）。"
-        "途經 via 不在本工具範圍。Rejected if 註銷/已完成. Reason REQUIRED. "
+        "Modify a CURRENT trip's start/end/via point (起點/終點/途經). "
+        "Triggers: 「#N 終點改南紡購物中心」「#N 起點改成X」「途經改成Y」「途經改null/清空途經」. "
+        "new_start / new_end / new_via 至少給一個。起終點/途經可為非客戶地點（如商場、車站）。"
+        "清空途經：new_via 傳空字串或「無」「null」。Rejected if 註銷/已完成. Reason REQUIRED. "
         "只改本班次,不影響固定班次模板與其他班次。"
     ),
     'parameters': {
@@ -250,6 +250,7 @@ UPDATE_TRIP_ROUTE_SCHEMA = {
             'trip_id': {'type': 'integer', 'description': "Trip ID（現在態 trips.trip_id）"},
             'new_start': {'type': 'string', 'description': "新起點（可選;客戶簡稱或任意地點名）"},
             'new_end': {'type': 'string', 'description': "新終點（可選;客戶簡稱或任意地點名，如『南紡購物中心』）"},
+            'new_via': {'type': 'string', 'description': "新途經（可選;設值或傳空字串/「無」表清空途經）"},
             'reason': {'type': 'string', 'description': "修改原因（必填）"},
         },
         'required': ['trip_id', 'reason'],

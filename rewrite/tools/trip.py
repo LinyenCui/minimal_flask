@@ -879,6 +879,7 @@ def update_trip_route(
     trip_id: int,
     new_start: Optional[str] = None,
     new_end: Optional[str] = None,
+    new_via: Optional[str] = None,
     reason: str = '',
     user_id: Optional[str] = None,
     user_name: Optional[str] = None,
@@ -886,14 +887,20 @@ def update_trip_route(
     auto_commit: bool = True,
 ) -> ToolResult:
     """
-    修改現在態班次「起點 / 終點」（途經 via 不在本工具範圍，使用者另有規劃）。
+    修改現在態班次「起點 / 終點 / 途經」。
 
-    現在態鬆綁原則：trips 起終點對 customers 的 FK 已移除,故終點可改成
+    現在態鬆綁原則：trips 起終點對 customers 的 FK 已移除,故可改成
     「南紡購物中心」這類**非客戶地點**。寫入依 trip_type 決定欄位,確保
     display_route() 正確：
-      - trip_type='temp'：display_route 讀 custom_*，故寫 custom_start/end_point
-        （並同步 start/end_point 供 query 過濾，沿用 create_trip 雙寫精神）
-      - 其他（fixed 等）：display_route 讀 start/end_point，直接寫該欄
+      - trip_type='temp'：display_route 讀 custom_*，故寫 custom_start/via/end_point
+        （並同步 start/via/end_point 供 query 過濾，沿用 create_trip 雙寫精神）
+      - 其他（fixed 等）：display_route 讀 start/via/end_point，直接寫該欄
+
+    途經 new_via 語意（trips 是單欄 via_point，與未來態 fixed_schedules 的途經
+    規劃無關）：
+      - None（未傳）→ 不動途經
+      - 空字串 / '無' / 'null' / 'none' → 清空途經（設 NULL）
+      - 其他 → 設為該途經點
 
     只動本班次(實例覆寫),不影響模板與其他班次。
     已完成 / 註銷 拒絕。reason 必填。R-5 鎖：allow_in_lock=True。
@@ -902,8 +909,13 @@ def update_trip_route(
         return ToolResult.fail("請提供修改原因")
     ns = (new_start or '').strip()
     ne = (new_end or '').strip()
-    if not ns and not ne:
-        return ToolResult.fail("請至少提供 new_start 或 new_end 其一")
+    # 途經三態：未傳(None)=不動;傳了=要改(可能設值或清空)
+    via_touched = new_via is not None
+    nv_raw = (new_via or '').strip()
+    via_clear = via_touched and nv_raw.lower() in ('', '無', 'null', 'none', '清空', '取消')
+    nv = '' if via_clear else nv_raw
+    if not ns and not ne and not via_touched:
+        return ToolResult.fail("請至少提供 new_start / new_end / new_via 其一")
 
     before = fetch_trip_snapshot(session=session, trip_id=trip_id)
     if not before:
@@ -937,6 +949,16 @@ def update_trip_route(
             sets.append("end_point = :ep")
         params['ep'] = ne
         notes.append(f"終點 {old_ep or '?'}→{ne}")
+    if via_touched:
+        old_vp = (before.get('custom_via_point') if is_temp else None) or before.get('via_point')
+        new_vp = None if via_clear else nv   # 清空→NULL
+        if is_temp:
+            sets.append("via_point = :vp")
+            sets.append("custom_via_point = :vp")
+        else:
+            sets.append("via_point = :vp")
+        params['vp'] = new_vp
+        notes.append(f"途經 {old_vp or '無'}→{new_vp or '無'}")
 
     note = f"改路線: {', '.join(notes)} ({reason.strip()})"
     new_mod = _bump_modification_reason(before.get('modification_reason'), note)
@@ -959,7 +981,8 @@ def update_trip_route(
         before_state=before, after_state=after,
         changed_fields=diff_fields(before, after),
         reason=reason.strip(),
-        extra={'new_start': ns or None, 'new_end': ne or None},
+        extra={'new_start': ns or None, 'new_end': ne or None,
+               'new_via': ('(清空)' if via_clear else nv) if via_touched else None},
         via=via,
     )
 
