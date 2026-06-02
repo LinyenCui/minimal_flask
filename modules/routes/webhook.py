@@ -73,6 +73,26 @@ def callback():
                     logger.error(f"Drug dispatch failed: {e}", exc_info=True)
                 # --- END PATCH: 藥名查詢 ---
 
+                # --- PATCH: 診所座標 / 車速 設定指令（文字）---
+                # 在群組閘門前攔（這些是明確設定指令,群組裡常無 / 前綴）
+                if getattr(event.message, 'type', None) == "text":
+                    _clinic_head = (event.message.text or '').strip().lstrip('/').strip().split(' ')[0]
+                    if _clinic_head in ('設定診所', '查看診所座標', '清除診所座標',
+                                        '設定平均車速', '查看平均車速'):
+                        try:
+                            from modules.handlers.clinic_commands_handler import handle_clinic_commands
+                            from modules.handlers.location_message_handler import _get_chat_id
+                            _resp = handle_clinic_commands(
+                                (event.message.text or '').strip().lstrip('/').strip(),
+                                _get_chat_id(event),
+                            )
+                            if _resp:
+                                reply_text(event.reply_token, _resp)
+                                continue
+                        except Exception as e:
+                            logger.error(f"診所指令處理失敗: {e}", exc_info=True)
+                # --- END PATCH: 診所指令 ---
+
                 # ============================================================
                 # Phase B（拆沙盒）：新路由規則
                 # ============================================================
