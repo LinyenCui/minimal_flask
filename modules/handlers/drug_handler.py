@@ -15,7 +15,9 @@ from modules.views.drug_flex import render_drug_results
 
 logger = logging.getLogger(__name__)
 
-PREFIXES = ['藥名 ', '藥名', '/藥名 ', '/藥名', '/drug ', '/drug', 'drug ', 'drug', '藥 ', '藥', '!drug', '！drug']
+# 觸發前綴：裸字「藥」「藥名」已移除(中文常用字,群聊易誤觸,如「藥師/藥膏/藥局」)
+# 查藥名請用 /藥名、/drug、!drug 等明確前綴;英文 drug 裸字保留(中文群聊幾乎不誤觸)
+PREFIXES = ['/藥名 ', '/藥名', '/drug ', '/drug', 'drug ', 'drug', '!drug ', '!drug', '！drug ', '！drug']
 
 
 def is_drug_trigger(text: str) -> bool:
