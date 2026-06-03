@@ -76,21 +76,25 @@ def callback():
                 # --- PATCH: 診所座標 / 車速 設定指令（文字）---
                 # 在群組閘門前攔（這些是明確設定指令,群組裡常無 / 前綴）
                 if getattr(event.message, 'type', None) == "text":
-                    _clinic_head = (event.message.text or '').strip().lstrip('/').strip().split(' ')[0]
-                    if _clinic_head in ('設定診所', '查看診所座標', '清除診所座標',
-                                        '設定平均車速', '查看平均車速'):
-                        try:
-                            from modules.handlers.clinic_commands_handler import handle_clinic_commands
-                            from modules.handlers.location_message_handler import _get_chat_id
-                            _resp = handle_clinic_commands(
-                                (event.message.text or '').strip().lstrip('/').strip(),
-                                _get_chat_id(event),
-                            )
+                    try:
+                        from modules.handlers.clinic_commands_handler import (
+                            handle_clinic_commands, is_waiting_for_location,
+                        )
+                        from modules.handlers.location_message_handler import _get_chat_id
+                        _clinic_chat = _get_chat_id(event)
+                        _clinic_msg = (event.message.text or '').strip().lstrip('/').strip()
+                        _clinic_head = _clinic_msg.split(' ')[0]
+                        # 命中條件:① 明確診所/車速指令 ② 正在「等待設定診所」中(讓打字座標也能接)
+                        if (_clinic_head in ('設定診所', '查看診所座標', '清除診所座標',
+                                             '設定平均車速', '查看平均車速')
+                                or is_waiting_for_location(_clinic_chat)):
+                            _resp = handle_clinic_commands(_clinic_msg, _clinic_chat)
                             if _resp:
                                 reply_text(event.reply_token, _resp)
                                 continue
-                        except Exception as e:
-                            logger.error(f"診所指令處理失敗: {e}", exc_info=True)
+                            # _resp is None（等待中但非合法座標）→ 不 continue,讓它走原本流程
+                    except Exception as e:
+                        logger.error(f"診所指令處理失敗: {e}", exc_info=True)
                 # --- END PATCH: 診所指令 ---
 
                 # ============================================================

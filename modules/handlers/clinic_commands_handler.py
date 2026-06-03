@@ -58,7 +58,26 @@ def handle_clinic_commands(message_text: str, chat_id: str):
 
     if text == "設定診所":
         set_wait_for_chat(chat_id)
-        return "請直接傳送一則位置訊息作為診所座標（等待 10 分鐘有效）"
+        return ("請傳一則「位置訊息」(＋→位置資訊) 作為診所座標,\n"
+                "或直接打字座標,例如:22.9908 120.2133（等待 10 分鐘有效）")
+
+    # 等待設定診所狀態中,收到「純座標文字」也接受(空白或逗號分隔)
+    # — 補 UX:不一定要傳 pin,打字座標也能設
+    if is_waiting_for_location(chat_id):
+        coords = re.split(r"[,\s]+", text.strip())
+        if len(coords) == 2:
+            try:
+                lat = float(coords[0])
+                lng = float(coords[1])
+                # 合理範圍檢查(台灣約 lat 21-26、lng 119-122),擋掉誤輸入
+                if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+                    raise ValueError
+            except ValueError:
+                return None  # 不是合法座標 → 不攔,讓它走原本流程
+            set_for_chat(chat_id, lat, lng)
+            clear_wait(chat_id)
+            return (f"✅ 已設定診所座標：({lat}, {lng})\n"
+                    f"之後群組有人傳位置時，會自動計算距離與到院時間。")
 
     if text == "查看診所座標":
         rec = get_for_chat(chat_id)
