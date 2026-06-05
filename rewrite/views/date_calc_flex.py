@@ -13,7 +13,28 @@ from typing import Any, Dict
 from rewrite.tools.date_calc import format_date_full
 
 # 粉紅 / 紫色系配色（醫療回診語境）
-HEADER_BG = "#EC407A"   # Material Pink 400 — header 底
+HEADER_BG = "#EC407A"   # Material Pink 400 — header 底（預設/測試用）
+
+# header 底色亂數色票（一組柔和耐看、白字皆清楚的深色;天天用不枯燥）
+# 用「看診日」當種子 → 同一張卡固定色、不同看診日換色,穩定不亂跳
+HEADER_PALETTE = [
+    "#EC407A",  # 粉紅
+    "#5C6BC0",  # 靛藍
+    "#26A69A",  # 青綠
+    "#EF6C00",  # 暖橘
+    "#7E57C2",  # 紫
+    "#42A5F5",  # 天藍
+    "#66BB6A",  # 草綠
+    "#AB47BC",  # 桃紫
+]
+
+
+def _pick_header_bg(seed_date: date) -> str:
+    """依看診日挑 header 底色（同一張卡穩定,跨日期換色）。"""
+    if not seed_date:
+        return HEADER_BG
+    return HEADER_PALETTE[seed_date.toordinal() % len(HEADER_PALETTE)]
+
 TAG_REPORT = "#1565C0"  # 藍 — 看報告
 TAG_28DAY = "#999999"   # 灰 — 28天（天數說明）
 TAG_BLOOD = "#AD1457"   # Material Pink 800 — 抽血
@@ -75,7 +96,7 @@ def render_date_calc(data: Dict[str, Any]) -> dict:
             "header": {
                 "type": "box",
                 "layout": "vertical",
-                "backgroundColor": HEADER_BG,
+                "backgroundColor": _pick_header_bg(base),
                 "paddingAll": "md",
                 "contents": [
                     {

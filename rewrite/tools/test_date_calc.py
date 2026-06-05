@@ -354,7 +354,8 @@ from rewrite.views.date_calc_flex import render_date_calc
 flex = render_date_calc(d)
 assert flex['type'] == 'flex'
 bubble = flex['contents']
-assert bubble['header']['backgroundColor'] == '#EC407A'
+from rewrite.views.date_calc_flex import HEADER_PALETTE
+assert bubble['header']['backgroundColor'] in HEADER_PALETTE  # header 底色亂數(色票內)
 body_texts = str(bubble['body'])
 for kw in ('看診日', '第1週', '看報告', '第4週', '28-1', '第8週', '28-2', '第11週', '抽血', '第12週', '回診'):
     assert kw in body_texts, f'Flex body 缺 {kw}'
