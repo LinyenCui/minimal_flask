@@ -356,7 +356,7 @@ assert flex['type'] == 'flex'
 bubble = flex['contents']
 assert bubble['header']['backgroundColor'] == '#EC407A'
 body_texts = str(bubble['body'])
-for kw in ('看診日', '第1週', '看報告', '第4週', '28天', '第11週', '抽血', '第12週', '回診'):
+for kw in ('看診日', '第1週', '看報告', '第4週', '28-1', '第8週', '28-2', '第11週', '抽血', '第12週', '回診'):
     assert kw in body_texts, f'Flex body 缺 {kw}'
 assert '115年06月18日（四）' in body_texts
 print(f'  ✅ Flex bubble 排版含 5 列 + 附註 + 民國年')

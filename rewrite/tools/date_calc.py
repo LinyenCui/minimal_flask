@@ -125,7 +125,8 @@ def _build_result(date_str: str, base: date) -> ToolResult:
         'input': date_str,
         'base': base,                              # 看診日
         'week1': base + timedelta(days=7),         # 第1週 看報告
-        'week4': base + timedelta(days=28),        # 第4週 28天
+        'week4': base + timedelta(days=28),        # 第4週 28-1
+        'week8': base + timedelta(days=56),        # 第8週 28-2
         'week11': base + timedelta(days=77),       # 第11週 抽血
         'week12': base + timedelta(days=84),       # 第12週 回診
     })
