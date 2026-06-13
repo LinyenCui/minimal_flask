@@ -124,6 +124,55 @@
     function showAlert(type, msg) { alertEl.innerHTML = `<div class="alert ${type}">${msg}</div>`; }
     function clearAlert() { alertEl.innerHTML = ''; }
 
+    // 連續預約 push 彙總：逐筆建立先不推,完成/關窗時把 N 筆合成「一則」push
+    const pending = [];      // 累積本次連續預約成功建立的班次（給彙總用）
+    let flushed = false;     // 防「完成關閉」與 pagehide 收尾保險雙推
+
+    function _getSource() {
+      const p = new URLSearchParams(window.location.search);
+      const gid = p.get('gid');
+      const rid = p.get('rid');
+      if (gid) return { type: 'group', groupId: gid, roomId: null };
+      if (rid) return { type: 'room', groupId: null, roomId: rid };
+      return null;
+    }
+
+    // 把累積的 pending 班次彙總成一則 push（成功才清空；失敗放回旗標讓收尾保險重試）
+    // keepalive：即使緊接著關窗,請求仍能送達（mobile WebView 關窗瞬間不被砍）
+    async function flushPending() {
+      if (flushed || pending.length === 0) return;
+      flushed = true;
+      const sent = pending.slice();        // 本批快照（只送這幾筆）
+      const payload = { bookings: sent };
+      const src = _getSource();
+      if (src) payload.source = src;
+      try {
+        const resp = await fetch('/liff/booking/batch_notify', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + _safeIdToken(),
+          },
+          body: JSON.stringify(payload),
+          keepalive: true,
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        // 只移除「已送出的這批」,不清空整個陣列 —— 避免 flush 在途時又新增的
+        // 班次(pending 只 append,按 count splice 安全)被一起清掉而漏推
+        pending.splice(0, sent.length);
+      } catch (e) {
+        console.warn('[booking] batch_notify failed', e);
+        flushed = false;   // 失敗：放回旗標，讓收尾保險還能再試
+      }
+    }
+
+    // flushPending 在第一個 await 前已同步發出 fetch（keepalive 保命）,故不 await 即可關窗,
+    // 避免網路卡住時「按了完成卻關不掉」
+    function closeWithFlush() {
+      flushPending();
+      _closeOrBack();
+    }
+
     // 防 LIFF SDK 偶爾回傳含 \r \n \0 的 idToken 導致 Headers.set 炸
     // (iOS Safari WebView 上常見「The string did not match the expected pattern.」)
     function _safeIdToken() {
@@ -183,8 +232,9 @@
       else history.back();
     }
 
-    cancelBtn.addEventListener('click', _closeOrBack);
-    doneBtn.addEventListener('click', _closeOrBack);
+    // 取消 / 完成關閉：先把連續預約的 N 筆彙總推一則,再關窗
+    cancelBtn.addEventListener('click', closeWithFlush);
+    doneBtn.addEventListener('click', () => { doneBtn.disabled = true; closeWithFlush(); });
 
     againBtn.addEventListener('click', () => {
       // 保留上一筆日期：連續預約多班的主場景是同日批次，
@@ -232,12 +282,11 @@
         const idToken = _safeIdToken();
         const payload = Object.fromEntries(fd.entries());
 
+        // 連續預約：各筆先不推,累積到「完成關閉」時彙總成一則 push
+        payload.suppress_push = true;
         // 從 URL params 拿真實 group/room ID（liff.getContext 給的 UUID 不能用）
-        const _params = new URLSearchParams(window.location.search);
-        const _gid = _params.get('gid');
-        const _rid = _params.get('rid');
-        if (_gid) payload.source = { type: 'group', groupId: _gid, roomId: null };
-        else if (_rid) payload.source = { type: 'room', groupId: null, roomId: _rid };
+        const src = _getSource();
+        if (src) payload.source = src;
 
         const resp = await fetch('/liff/booking', {
           method: 'POST',
@@ -250,6 +299,15 @@
         const data = await resp.json();
         if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
         const tid = data.trip && data.trip.trip_id;
+        // 累積本筆給收尾彙總（顯示欄位用表單值，trip_id 用回傳值）
+        pending.push({
+          trip_id: tid,
+          date: payload.date,
+          time: payload.time,
+          start_point: payload.start_point,
+          end_point: payload.end_point,
+        });
+        flushed = false;   // 又新增一筆 → 重置,確保收尾會再推
         showAlert('ok', `✅ 已建立預約 #${tid}，可繼續預約下一班`);
         // 連續預約：不自動關窗，改顯示「再預約一筆 / 完成關閉」
         form.hidden = true;
@@ -261,6 +319,14 @@
         submitBtn.textContent = '建立預約';
       }
     });
+
+    // 收尾保險：使用者直接滑掉/關窗（沒按「完成關閉」）時,仍把已建立的連續預約
+    // 彙總推一則（keepalive 讓關窗瞬間的請求仍送得出去）。
+    // 只用 pagehide(真正卸載) —— 刻意不用 visibilitychange,因為它在切 App /
+    // 下拉通知 / 鎖屏都會觸發,會在使用者只是暫時切背景(訂一筆→切出查地址→
+    // 回來訂下一筆,是派班高頻動作)時提早 flush,把同一次連續預約拆成多則 push,
+    // 破壞 N→1 省額度目標。
+    window.addEventListener('pagehide', () => flushPending());
 
     init();
   </script>

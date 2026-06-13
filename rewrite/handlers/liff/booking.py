@@ -47,6 +47,17 @@ def _to_int_or_none(v) -> int | None:
         return None
 
 
+def _fmt_md(iso_date) -> str:
+    """'2026-06-14' → '6/14'（彙總顯示用）；解析失敗回原字串。"""
+    if not iso_date:
+        return ''
+    try:
+        d = date.fromisoformat(str(iso_date)[:10])
+        return f"{d.month}/{d.day}"
+    except ValueError:
+        return str(iso_date)
+
+
 def _parse_payload(body: dict) -> tuple[dict, str | None]:
     """form payload → create_trip kwargs。錯誤回 (None, msg)"""
     fields: dict[str, Any] = {}
@@ -174,7 +185,68 @@ def booking_create():
 
     trip_data = _trip_to_jsonable(result.data)
     logger.info(f"[LIFF] booking #{trip_data.get('trip_id')} created by {request.line_user_id}")
+    # 連續預約：前端逐筆帶 suppress_push=true → 各筆不推,全部做完由
+    # /liff/booking/batch_notify 收尾推「一則彙總」,把「N 筆 = N 則 push」
+    # 降為「N 筆 = 1 則」,省 LINE 免費月額度（200 則/月）。
+    if not bool(body.get('suppress_push')):
+        from rewrite.utils.liff_url import resolve_push_target
+        target = resolve_push_target(body.get('source'), request.line_user_id)
+        _push_booking(target, result.data)
+    return jsonify({'ok': True, 'trip': trip_data}), 201
+
+
+@liff_bp.route('/booking/batch_notify', methods=['POST'])
+@liff_auth_required
+def booking_batch_notify():
+    """連續預約收尾：把 N 筆新預約彙總成「一則」push 回群組。
+
+    前端逐筆 POST /liff/booking 帶 suppress_push=true（各筆不推），全部做完
+    呼叫本 endpoint 推一則彙總 → 把「N 筆 = N 則 push」降為「N 筆 = 1 則」,
+    是 LINE 免費月額度（200 則/月）的止血點。沿用 trip.py 的
+    batch_status_notify 同款 pattern。
+
+    payload: { bookings:[{trip_id, date, time, start_point, end_point}],
+               source?:{type,groupId/roomId} }
+    """
+    body = request.get_json(silent=True) or {}
+    raw = body.get('bookings') or []
+    if not isinstance(raw, list):
+        return jsonify({'ok': False, 'error': 'bookings 格式錯'}), 400
+    bookings = [b for b in raw if isinstance(b, dict) and b.get('trip_id')]
+    if not bookings:
+        return jsonify({'ok': True, 'skipped': 'no bookings'})
+
     from rewrite.utils.liff_url import resolve_push_target
     target = resolve_push_target(body.get('source'), request.line_user_id)
-    _push_booking(target, result.data)
-    return jsonify({'ok': True, 'trip': trip_data}), 201
+    if not target:
+        return jsonify({'ok': True, 'skipped': 'no target'})
+
+    try:
+        from linebot.v3.messaging import PushMessageRequest, TextMessage
+        from modules.utils.line_bot import get_line_bot_api, push_notify_enabled
+
+        if not push_notify_enabled():
+            logger.info("[LIFF] booking batch notify skipped (PUSH_NOTIFY off)")
+            return jsonify({'ok': True, 'skipped': 'push off'})
+
+        lines = [f"✅ 已建立 {len(bookings)} 筆預約"]
+        for b in bookings:
+            tid = b.get('trip_id')
+            md = _fmt_md(b.get('date'))
+            hm = str(b.get('time') or '')[:5]
+            sp = (str(b.get('start_point') or '').strip()) or '?'
+            ep = str(b.get('end_point') or '').strip()
+            route = f"{sp}→{ep}" if ep else sp
+            lines.append(f"　#{tid}　{md} {hm} {route}".rstrip())
+
+        api = get_line_bot_api()
+        api.push_message(PushMessageRequest(
+            to=target, messages=[TextMessage(text='\n'.join(lines))],
+        ))
+        logger.info(
+            f"[LIFF] booking batch notify n={len(bookings)} → {target[:8]} (1 push)"
+        )
+    except Exception as e:
+        body_attr = getattr(e, 'body', None)
+        logger.warning(f"[LIFF] booking batch notify failed: {e} body={body_attr!r}")
+    return jsonify({'ok': True})
