@@ -110,6 +110,27 @@ _DB_SYNC_TRIGGERS = {
 # 幫助命令（取代 legacy help_router）
 _HELP_TRIGGERS = {'幫助', 'help', 'Help', '指令', '說明', '?', '？'}
 
+# 群聊閘門 / sandbox-active 共用：所有「exact-match 即視為指令」的觸發詞聯集。
+# 單一來源,避免和上面各 *_LIFF_TRIGGERS 漂移。
+# (修舊 bug：今天X的狀態 / 新增客戶 / 帳務處理 / 生成月報表 / 批量加成 /
+#  新增固定班次 等因白名單漏列,在群聊無 / 前綴時被靜默丟棄。)
+# 「的狀態」是 suffix pattern,另在 looks_like_quick_command 用 _RE_STATUS_QUERY 補認。
+_ALL_EXACT_COMMAND_TRIGGERS = (
+    _NEW_CUSTOMER_LIFF_TRIGGERS
+    | _BOOKING_LIFF_TRIGGERS
+    | _IMPORT_LIFF_TRIGGERS
+    | _NEW_FIXED_SCHEDULE_LIFF_TRIGGERS
+    | _REPORT_LIFF_TRIGGERS
+    | _ACCOUNTING_LIFF_TRIGGERS
+    | _ACCOUNTING_LEDGER_TRIGGERS
+    | _BATCH_ALLOWANCE_LIFF_TRIGGERS
+    | _DB_SYNC_TRIGGERS
+    | _HELP_TRIGGERS
+)
+# 註：_DRUG_DX_LINK_LIFF_TRIGGERS 刻意不納入聯集 —— 藥診關聯在群組有自己的前綴
+# 政策（_is_drug_dx_link_liff_trigger 群組只收 / ! ！ 前綴）。若把裸字「藥診關聯」
+# 放進群聊放行,閘門會放行但 dispatch 不接,白白多燒一次 AI call。
+
 _HELP_TEXT = """🤖 派班小幫手指令清單
 （群組需 / 開頭，私聊不用）
 
@@ -369,6 +390,18 @@ def looks_like_quick_command(text: str) -> bool:
     # 剝掉 / # 前綴（群組命令格式）
     cleaned = text.strip().lstrip('/').lstrip('#').strip()
     if cleaned.startswith(_QUICK_COMMAND_PREFIXES):
+        return True
+    # 已知 LIFF / 命令觸發詞（exact match）— 與 sandbox 實際能處理的一致,
+    # 修群聊閘門白名單漏列導致常用指令（今天X的狀態 / 新增客戶 / 帳務處理 /
+    # 生成月報表 / 批量加成 / 新增固定班次）在群組無 / 前綴時被靜默丟棄
+    if cleaned in _ALL_EXACT_COMMAND_TRIGGERS:
+        return True
+    # 「[日期][地點]的狀態」（最高頻群聊指令）— 用 _parse_status_query 而非寬鬆的
+    # _RE_STATUS_QUERY,確保只放行「有日期前綴 + 地點」的真指令(如 今天二井家的狀態 /
+    # 5/9馬鎮宮的狀態),不讓「他的狀態 / 病人的狀態 / 今天的狀態」這類群聊閒聊越過
+    # 閘門被丟給 AI(隱私 + 成本外洩)。相容 ! ／ ！ 前綴(用戶常打「!今天X的狀態」),
+    # 但只在這條 status 判斷剝 !,不動 cleaned —— date_calc 外掛靠 ! 辨識,不能全域剝。
+    if _parse_status_query(cleaned.lstrip('!').lstrip('！').strip()):
         return True
     # 回診日期計算外掛：!日期 / ！日期 — 不是 prefix 字串型，regex 認
     from rewrite.tools.date_calc import is_date_calc_command
