@@ -3,9 +3,9 @@
 
 觸發方式：
   /drug Concor
+  /藥名 立普妥
   drug Metformin
-  藥 胰島素
-  藥名 立普妥
+  !drug 胰島素
 """
 import logging
 
@@ -83,7 +83,7 @@ def _format_result(result: dict) -> str:
     if result['type'] == 'empty':
         return (
             f"🔍 {result['message']}\n\n"
-            "💡 試試：/drug Concor、藥 Metformin、藥名 胰島素"
+            "💡 試試：/drug Concor、/藥名 立普妥、!drug 胰島素"
         )
     return _format_list(result)
 
@@ -143,9 +143,9 @@ def _help_text() -> str:
 
 查詢方式：
   /drug Concor
+  /藥名 立普妥
   drug Metformin
-  藥 胰島素
-  藥名 立普妥
+  !drug 胰島素
 
 資料來源：正式表 drug_items
 最多顯示 10 筆結果"""
