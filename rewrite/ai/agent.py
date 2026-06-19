@@ -14,11 +14,9 @@ from typing import Any, Optional
 
 from database import Session
 from modules.utils.unified_date_parser import UnifiedDateParser
-from vertexai.generative_models import (
-    GenerativeModel, Tool, Content, Part,
-)
+from google.genai import types
 
-from modules.services.ai_service import init_vertexai, MODEL_ID
+from modules.services.ai_service import get_genai_client, MODEL_ID
 
 from rewrite.ai.client import LLMClient, LLMResponse, ToolCall
 from rewrite.ai.skill import Skill
@@ -129,12 +127,14 @@ class Agent:
 
     def _chat_with_tool_loop(self, text: str, user_id: Optional[str], event_source: Any = None) -> dict:
         """跑 multi-turn chat，每輪檢查是否有 function_call → 執行 → feed back"""
-        # init_vertexai() 已 idempotent（module-level _VERTEX_INITED guard），
-        # 這裡 call 是 defense in depth — 萬一 GeminiClient 沒先 init 過
-        init_vertexai()
-        gemini_tools = [Tool(function_declarations=self.skill.function_declarations())]
-        model = GenerativeModel(MODEL_ID, tools=gemini_tools)
-        chat = model.start_chat()
+        client = get_genai_client()
+        gemini_tools = [types.Tool(function_declarations=self.skill.function_declarations())]
+        # tools 掛在 chat 的 config；對話 history 由 chat 物件自動維護
+        # （取代舊 vertexai 的 model.start_chat()）
+        chat = client.chats.create(
+            model=MODEL_ID,
+            config=types.GenerateContentConfig(tools=gemini_tools),
+        )
 
         # 第一輪：system prompt + user message 合併
         full_prompt = f"{self.skill.system_prompt}\n\n用戶訊息：{text}"
@@ -166,13 +166,14 @@ class Agent:
                 last_tool_result = result
                 last_tool_name = tc.name
                 last_tool_args = args_used
-                response_parts.append(Part.from_function_response(
+                response_parts.append(types.Part.from_function_response(
                     name=tc.name,
                     response={'result': self._serialize_tool_result(result)},
                 ))
 
-            # 一次回等量 responses（數量必須 == 這輪的 fc 數）
-            response = chat.send_message(Content(parts=response_parts))
+            # 一次回等量 responses（數量必須 == 這輪的 fc 數）；
+            # genai chat.send_message 收 list[Part]，自動包成 function_response 回合
+            response = chat.send_message(response_parts)
         else:
             logger.warning(f"[Agent] hit MAX_TOOL_LOOPS={self.MAX_TOOL_LOOPS}")
 
@@ -218,8 +219,11 @@ class Agent:
         function calling — 同一輪多個 fc）。回 list,無則空 list。"""
         if not response.candidates:
             return []
+        content = response.candidates[0].content
+        if not content or not content.parts:
+            return []
         out = []
-        for part in response.candidates[0].content.parts:
+        for part in content.parts:
             fc = getattr(part, 'function_call', None)
             if fc and fc.name:
                 out.append(fc)
@@ -230,8 +234,11 @@ class Agent:
         """抽 response 的所有 text parts"""
         if not response.candidates:
             return None
+        content = response.candidates[0].content
+        if not content or not content.parts:
+            return None
         parts = []
-        for part in response.candidates[0].content.parts:
+        for part in content.parts:
             t = getattr(part, 'text', None)
             if t:
                 parts.append(t)

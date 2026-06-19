@@ -16,7 +16,7 @@ Skill 定義（spec §6.2）— 按意圖分類載入「prompt + tool subset」
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
-from vertexai.generative_models import FunctionDeclaration
+from google.genai import types
 
 
 @dataclass
@@ -25,10 +25,14 @@ class Skill:
     system_prompt: str
     tools: List[Tuple[Callable, dict]]  # [(fn, schema)]
 
-    def function_declarations(self) -> List[FunctionDeclaration]:
-        """產生 Gemini Tool 用的 FunctionDeclaration 清單"""
+    def function_declarations(self) -> List[types.FunctionDeclaration]:
+        """產生 Gemini Tool 用的 FunctionDeclaration 清單
+
+        parameters 直接傳手寫的 JSON-schema dict — google-genai 的 pydantic
+        會把小寫 type（object/string/integer）coerce 成 Type enum。
+        """
         return [
-            FunctionDeclaration(
+            types.FunctionDeclaration(
                 name=fn.__name__,
                 description=schema.get('description') or (fn.__doc__ or '').strip().split('\n')[0],
                 parameters=schema['parameters'],

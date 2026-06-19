@@ -14,13 +14,9 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
-from vertexai.generative_models import (
-    GenerativeModel,
-    GenerationConfig,
-    Tool,
-)
+from google.genai import types
 
-from modules.services.ai_service import init_vertexai, MODEL_ID
+from modules.services.ai_service import get_genai_client, MODEL_ID
 
 logger = logging.getLogger(__name__)
 
@@ -56,17 +52,12 @@ class GeminiClient(LLMClient):
 
     def __init__(self, model_name: Optional[str] = None,
                  temperature: float = 0.2):
-        init_vertexai()  # 重用 main 的 service account 設定
+        self.client = get_genai_client()  # 重用共用 genai client（service account）
         self.model_name = model_name or MODEL_ID
-        self.gen_config = GenerationConfig(
-            temperature=temperature,
-            top_p=0.8,
-            max_output_tokens=2048,
-        )
+        self.temperature = temperature
 
     def chat(self, messages: list, tools: Optional[list] = None) -> LLMResponse:
-        gemini_tools = [Tool(function_declarations=tools)] if tools else None
-        model = GenerativeModel(self.model_name, tools=gemini_tools)
+        gemini_tools = [types.Tool(function_declarations=tools)] if tools else None
 
         # Gemini chat 不分 system/user role，把 system 內容放最前面
         sys_parts = [m['content'] for m in messages if m.get('role') == 'system']
@@ -75,9 +66,15 @@ class GeminiClient(LLMClient):
 
         logger.info(f"[GeminiClient] prompt {len(full_prompt)} chars, "
                     f"tools={len(tools) if tools else 0}")
-        response = model.generate_content(
-            full_prompt,
-            generation_config=self.gen_config,
+        response = self.client.models.generate_content(
+            model=self.model_name,
+            contents=full_prompt,
+            config=types.GenerateContentConfig(
+                temperature=self.temperature,
+                top_p=0.8,
+                max_output_tokens=2048,
+                tools=gemini_tools,
+            ),
         )
 
         return self._parse_response(response)
@@ -91,7 +88,10 @@ class GeminiClient(LLMClient):
             logger.warning("[GeminiClient] no candidates in response")
             return LLMResponse(raw=response)
 
-        for part in response.candidates[0].content.parts:
+        content = response.candidates[0].content
+        if not content or not content.parts:
+            return LLMResponse(raw=response)
+        for part in content.parts:
             # function call
             fc = getattr(part, 'function_call', None)
             if fc and fc.name:

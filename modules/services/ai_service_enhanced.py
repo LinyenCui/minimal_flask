@@ -5,10 +5,8 @@ import re
 import base64
 from io import BytesIO
 from PIL import Image
-import vertexai
-from vertexai.generative_models import GenerativeModel, GenerationConfig, Part
-from google.oauth2 import service_account
-from google.auth import exceptions as auth_exceptions
+from google.genai import types
+from modules.services.ai_service import get_genai_client
 
 logger = logging.getLogger(__name__)
 
@@ -45,22 +43,8 @@ JSON輸出:'''
 JSON輸出:'''
 
 def init_vertexai():
-    """Initialize Vertex AI client with explicit credentials."""
-    credentials = None
-    try:
-        if os.path.exists(_KEY_FILE_PATH):
-            credentials = service_account.Credentials.from_service_account_file(_KEY_FILE_PATH)
-            logger.info(f"Loaded credentials from: {_KEY_FILE_PATH}")
-        else:
-            logger.error(f"Service account key file not found at: {_KEY_FILE_PATH}")
-
-        vertexai.init(project=PROJECT_ID, location=LOCATION, credentials=credentials)
-        logger.info(f"Vertex AI initialized for project: {PROJECT_ID}, location: {LOCATION}")
-
-    except auth_exceptions.DefaultCredentialsError as e:
-         logger.error(f"Failed to find default credentials: {e}")
-    except Exception as e:
-        logger.error(f"Failed to initialize Vertex AI: {e}", exc_info=True)
+    """向後相容別名：改用 ai_service 的共用 google-genai client。"""
+    get_genai_client()
 
 def detect_language(text: str) -> str:
     """簡單的語言檢測，檢查是否包含日文字符"""
@@ -88,19 +72,18 @@ def extract_booking_info_with_gemini(user_text: str) -> dict | None:
         base_prompt = load_prompt_from_file(_MULTILINGUAL_PROMPT_PATH)
         prompt = base_prompt.format(user_text=user_text)
 
-        model = GenerativeModel(MODEL_ID)
-        
-        generation_config = GenerationConfig(
-            temperature=0.2,
-            top_p=0.8,
-            top_k=40,
-            max_output_tokens=1024,
-        )
+        client = get_genai_client()
 
         logger.info(f"Calling enhanced Gemini API model: {MODEL_ID} with language: {language}...")
-        response = model.generate_content(
-            prompt,
-            generation_config=generation_config,
+        response = client.models.generate_content(
+            model=MODEL_ID,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.2,
+                top_p=0.8,
+                top_k=40,
+                max_output_tokens=1024,
+            ),
         )
         logger.info("Enhanced Gemini API response received.")
 
@@ -175,22 +158,21 @@ def extract_booking_info_from_image(image_data: bytes, image_format: str = "jpeg
             logger.error(f"Image processing error: {img_error}")
             return None
 
-        # 創建圖片部分
-        image_part = Part.from_data(processed_image_data, mime_type="image/jpeg")
-        
-        model = GenerativeModel(MODEL_ID)
-        
-        generation_config = GenerationConfig(
-            temperature=0.2,
-            top_p=0.8,
-            top_k=40,
-            max_output_tokens=1024,
-        )
+        # 創建圖片部分（google-genai：Part.from_bytes 取代舊 Part.from_data）
+        image_part = types.Part.from_bytes(data=processed_image_data, mime_type="image/jpeg")
+
+        client = get_genai_client()
 
         logger.info(f"Calling Gemini Vision API model: {MODEL_ID}...")
-        response = model.generate_content(
-            [image_prompt, image_part],
-            generation_config=generation_config,
+        response = client.models.generate_content(
+            model=MODEL_ID,
+            contents=[image_prompt, image_part],
+            config=types.GenerateContentConfig(
+                temperature=0.2,
+                top_p=0.8,
+                top_k=40,
+                max_output_tokens=1024,
+            ),
         )
         logger.info("Gemini Vision API response received.")
 

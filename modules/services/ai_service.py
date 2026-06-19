@@ -2,10 +2,10 @@ import os
 import logging
 import json
 import re
-# Use the high-level Vertex AI SDK for Gemini
-import vertexai
-from vertexai.generative_models import GenerativeModel, GenerationConfig
-# --- ADDED: Imports for explicit credential loading ---
+# google-genai SDK（取代已 deprecated 的 vertexai.generative_models，2026-06 移除）
+from google import genai
+from google.genai import types
+# --- Imports for explicit credential loading ---
 from google.oauth2 import service_account
 from google.auth import exceptions as auth_exceptions
 # --- END ADDED ---
@@ -52,43 +52,43 @@ def load_prompt_from_file(file_path):
         return '分析以下文字提取預約信息，以 JSON 格式回傳： "{user_text}"\nJSON輸出:' 
 # --- END ADDED ---
 
-# Module-level flag — Vertex AI 一個 process 只 init 一次就夠
-# 之前 caller（rewrite/ai/agent.py 每次 chat、ai_service.py 每次
-# extract_booking_info_with_gemini）都重複 call 這個函數，每次都 load 新的
-# Credentials object + 呼叫 vertexai.init()，物件 leak → Render Starter 512MB 撐爆。
-_VERTEX_INITED = False
+# Module-level singleton — 一個 process 只建一個 genai client 就夠
+# （舊版每次 call 都 alloc 新 Credentials + vertexai.init()，物件 leak → Render 512MB 撐爆）
+_GENAI_CLIENT = None
+
+
+def get_genai_client(force: bool = False):
+    """共用的 google-genai Client（Vertex 後端，explicit service-account 憑證）。
+
+    取代舊的 vertexai.init() 全域初始化：google-genai 改用 client 物件，
+    所有呼叫走 client.models.generate_content / client.chats.create。
+    """
+    global _GENAI_CLIENT
+    if _GENAI_CLIENT is not None and not force:
+        return _GENAI_CLIENT
+
+    if not os.path.exists(_KEY_FILE_PATH):
+        logger.error(f"❌ Service account key file not found at: {_KEY_FILE_PATH}")
+        raise FileNotFoundError(f"Service account key file not found: {_KEY_FILE_PATH}")
+
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = _KEY_FILE_PATH
+    credentials = service_account.Credentials.from_service_account_file(
+        _KEY_FILE_PATH,
+        scopes=['https://www.googleapis.com/auth/cloud-platform'],
+    )
+    _GENAI_CLIENT = genai.Client(
+        vertexai=True, project=PROJECT_ID, location=LOCATION, credentials=credentials,
+    )
+    logger.info(
+        f"✅ google-genai client ready (project={PROJECT_ID}, "
+        f"location={LOCATION}, model={MODEL_ID})"
+    )
+    return _GENAI_CLIENT
 
 
 def init_vertexai(force: bool = False):
-    """Initialize Vertex AI client with explicit credentials (idempotent)."""
-    global _VERTEX_INITED
-    if _VERTEX_INITED and not force:
-        return  # 已 init 過就直接 return，不再 alloc 新物件
-
-    credentials = None
-    try:
-        if os.path.exists(_KEY_FILE_PATH):
-            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = _KEY_FILE_PATH
-            credentials = service_account.Credentials.from_service_account_file(_KEY_FILE_PATH)
-            logger.info(f"✅ Loaded credentials from: {_KEY_FILE_PATH}")
-            logger.info(f"✅ Set GOOGLE_APPLICATION_CREDENTIALS environment variable")
-        else:
-            logger.error(f"❌ Service account key file not found at: {_KEY_FILE_PATH}")
-            logger.error(f"❌ Cannot initialize Vertex AI without credentials")
-            raise FileNotFoundError(f"Service account key file not found: {_KEY_FILE_PATH}")
-
-        vertexai.init(project=PROJECT_ID, location=LOCATION, credentials=credentials)
-        logger.info(f"✅ Vertex AI initialized successfully:")
-        logger.info(f"   Project: {PROJECT_ID}")
-        logger.info(f"   Location: {LOCATION}")
-        logger.info(f"   Model: {MODEL_ID}")
-
-        _VERTEX_INITED = True
-
-    except auth_exceptions.DefaultCredentialsError as e:
-         logger.error(f"Failed to find default credentials and key file was not found or invalid: {e}")
-    except Exception as e:
-        logger.error(f"Failed to initialize Vertex AI: {e}", exc_info=True)
+    """向後相容別名：舊 caller 仍呼叫此名，實際建/取共用 genai client。"""
+    get_genai_client(force=force)
 
 def extract_booking_info_with_gemini(user_text: str) -> dict | None:
     """Extract booking info from text using Gemini API."""
@@ -101,34 +101,26 @@ def extract_booking_info_with_gemini(user_text: str) -> dict | None:
                 logger.error(f"  - {error}")
             return None
         
-        # 必須先初始化 Vertex AI
-        init_vertexai()
-        
+        # 取共用 genai client
+        client = get_genai_client()
+
         # 載入 prompt 模板並格式化
         base_prompt = load_prompt_from_file(_PROMPT_FILE_PATH)
         prompt = base_prompt.format(user_text=user_text)
 
-        # 初始化模型
-        model = GenerativeModel(MODEL_ID)
-        # --- END ADDED ---
-        
-        # Configure generation parameters
-        generation_config = GenerationConfig(
-            temperature=0.2,
-            top_p=0.8,
-            top_k=40,
-            max_output_tokens=1024,
-            # Specify JSON output format if model supports it (check documentation)
-            # response_mime_type="application/json", # Uncomment if using a model/version that supports direct JSON output
-        )
-
         logger.info(f"🚀 Calling Gemini API model: {MODEL_ID}...")
         logger.info(f"🚀 Prompt length: {len(prompt)} characters")
-        
+
         # Call the Gemini API
-        response = model.generate_content(
-            prompt, # Send prompt as string directly
-            generation_config=generation_config,
+        response = client.models.generate_content(
+            model=MODEL_ID,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.2,
+                top_p=0.8,
+                top_k=40,
+                max_output_tokens=1024,
+            ),
         )
         logger.info("✅ Gemini API response received successfully")
         
