@@ -73,7 +73,10 @@ def _system_prompt() -> str:
   - 「跟診所相關」 → location（萬用比對）
 - customer_short_name：客戶簡稱完整且確定（如「龍埔街」「太子龍」），exact match 起/途/終
 - driver_id：司機編號（純整數，例 5386, 533）
-- has_fare=False：「未記錄車資的班次」這類查詢
+- has_fare=False：「未記錄車資的班次」「沒車資 / 金額為 0 的班次」這類查詢（錶價 0 也算未記錄）
+- fare_amount=N：「金額為 N 的班次」「車資 N 元的班次」「哪幾筆是 N 元」這類精確金額查詢（依總額=錶價+加成）
+- fare_min / fare_max：金額範圍。「大於 1400」→ fare_min=1401；「1400 以上」→ fare_min=1400；「小於 X」→ fare_max=X-1；「介於 X~Y」→ fare_min=X, fare_max=Y
+- 重要：若用戶的篩選條件目前工具參數**表達不了**，要**明說「目前只能查 ⋯⋯」**，不要默默忽略條件、把全部班次回給用戶（會誤導）
 
 ⚠️ 規則：
 - ID 區別：trips.trip_id 跟 completed_trips.id **不一樣**。本 skill 的 ID 是 completed_trips.id
@@ -130,7 +133,22 @@ QUERY_COMPLETED_TRIPS_SCHEMA = {
             },
             'has_fare': {
                 'type': 'boolean',
-                'description': "True=已記錄車資，False=未記錄。「未記錄車資」傳 False",
+                'description': "True=已記錄車資(總額>0)，False=未記錄(總額 0 或空，含錶價=0)。「未記錄車資」傳 False",
+            },
+            'fare_amount': {
+                'type': 'integer',
+                'description': (
+                    "依車資總額(錶價+加成)精確篩選。"
+                    "Triggers:「金額為 X 的班次」「車資 X 元的班次」「X 元的班次」「哪幾筆是 X 元」"
+                ),
+            },
+            'fare_min': {
+                'type': 'integer',
+                'description': "車資總額下限(含)。「大於 X」用 X+1；「X 以上/≥X」用 X;「介於 X~Y」配 fare_max",
+            },
+            'fare_max': {
+                'type': 'integer',
+                'description': "車資總額上限(含)。「小於 Y」用 Y-1；「Y 以下/≤Y」用 Y;「介於 X~Y」配 fare_min",
             },
             'limit': {'type': 'integer', 'description': "Max rows，預設 80"},
         },
@@ -177,6 +195,12 @@ AGGREGATE_COMPLETED_TRIPS_SCHEMA = {
             'location': {'type': 'string', 'description': "萬用地點模糊（任一欄）"},
             'start_location': {'type': 'string', 'description': "起點模糊比對"},
             'end_location': {'type': 'string', 'description': "終點模糊比對"},
+            'fare_amount': {
+                'type': 'integer',
+                'description': "依車資總額(錶價+加成)精確篩選再加總（「金額為 X 的班次加總」）",
+            },
+            'fare_min': {'type': 'integer', 'description': "車資總額下限(含);「大於 X」用 X+1"},
+            'fare_max': {'type': 'integer', 'description': "車資總額上限(含);「小於 Y」用 Y-1"},
         },
         'required': ['date_from', 'date_to'],
     },

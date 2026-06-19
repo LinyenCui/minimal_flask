@@ -279,7 +279,7 @@ def _ct_row(ct: CompletedTripView) -> dict:
     """Carousel 內一行已完成班次（可 tap 至詳情）"""
     driver_text = f"🚗{ct.driver_id}" if ct.driver_id else "🚗?"
     route_text = _short_route(ct)
-    if ct.computed_total is not None:
+    if ct.computed_total is not None and ct.computed_total > 0:
         fare_text = f"{ct.computed_total}元"
         fare_color = ACCENT_DARK
     else:

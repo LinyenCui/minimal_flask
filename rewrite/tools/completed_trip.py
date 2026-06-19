@@ -66,7 +66,7 @@ class CompletedTripView:
 
     # 計算欄位
     computed_total: Optional[int] = None  # meter+extra（兩者都 NULL→None）
-    has_fare: bool = False                # meter_fare 或 extra_fare 任一非 NULL
+    has_fare: bool = False                # 車資總額(錶價+加成)>0（0/空=未記錄）
     is_leave: bool = False                # passenger_leave_reason 非空
 
     @classmethod
@@ -79,7 +79,7 @@ class CompletedTripView:
             d['computed_total'] = None
         else:
             d['computed_total'] = (meter or 0) + (extra or 0)
-        d['has_fare'] = meter is not None or extra is not None
+        d['has_fare'] = (d['computed_total'] or 0) > 0  # 總額>0 才算已記錄（0/空=未記錄）
         d['is_leave'] = bool(d.get('passenger_leave_reason'))
 
         valid = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
@@ -113,6 +113,14 @@ _SELECT_ALL = """
 """
 
 
+def _coerce_int(v):
+    """AI 偶爾把 integer 參數傳成字串 → 轉 int；轉不動回 None。"""
+    if isinstance(v, str):
+        s = v.strip().lstrip('-')
+        return int(v) if s.isdigit() else None
+    return v
+
+
 def _build_filters(
     *,
     date_from: Optional[date],
@@ -124,6 +132,9 @@ def _build_filters(
     start_location: Optional[str] = None,
     end_location: Optional[str] = None,
     has_fare: Optional[bool] = None,
+    fare_amount: Optional[int] = None,
+    fare_min: Optional[int] = None,
+    fare_max: Optional[int] = None,
 ) -> tuple:
     """共用 WHERE 組合。回傳 (where_clause_list, params_dict)."""
     where: list = []
@@ -163,10 +174,28 @@ def _build_filters(
         # 「到 X」精準比對 end_point
         where.append("end_point ILIKE :end_loc")
         params['end_loc'] = f'%{end_location}%'
+    # 「已記錄車資」= 車資總額(錶價+加成)>0。錶價 0 或 NULL 都算「未記錄」——
+    # 0 是未填的預設值,不是真的免費班次(用戶回報:加總把 0 元班次算成已記錄是錯的)。
     if has_fare is True:
-        where.append("(meter_fare IS NOT NULL OR extra_fare IS NOT NULL)")
+        where.append("(COALESCE(meter_fare, 0) + COALESCE(extra_fare, 0)) > 0")
     elif has_fare is False:
-        where.append("(meter_fare IS NULL AND extra_fare IS NULL)")
+        where.append("(COALESCE(meter_fare, 0) + COALESCE(extra_fare, 0)) <= 0")
+
+    # 車資總額 = COALESCE(錶價,0)+COALESCE(加成,0)。fare_amount 精確、fare_min/max 範圍。
+    # schema 宣告 integer 但 AI 偶爾仍傳字串 → 在共用 builder 統一 coerce（list/aggregate 都受惠）
+    _TOTAL = "(COALESCE(meter_fare, 0) + COALESCE(extra_fare, 0))"
+    fare_amount = _coerce_int(fare_amount)
+    if fare_amount is not None:
+        where.append(f"{_TOTAL} = :fare_amount")
+        params['fare_amount'] = fare_amount
+    fare_min = _coerce_int(fare_min)
+    if fare_min is not None:
+        where.append(f"{_TOTAL} >= :fare_min")
+        params['fare_min'] = fare_min
+    fare_max = _coerce_int(fare_max)
+    if fare_max is not None:
+        where.append(f"{_TOTAL} <= :fare_max")
+        params['fare_max'] = fare_max
 
     return where, params
 
@@ -187,6 +216,9 @@ def query_completed_trips(
     start_location: Optional[str] = None,
     end_location: Optional[str] = None,
     has_fare: Optional[bool] = None,
+    fare_amount: Optional[int] = None,
+    fare_min: Optional[int] = None,
+    fare_max: Optional[int] = None,
     limit: int = 80,
 ) -> ToolResult:
     """
@@ -202,7 +234,9 @@ def query_completed_trips(
         location: 模糊地點（ILIKE 任一 start/via/end）— 用於「跟 X 有關」「經過 X」這類
         start_location: 模糊地點（ILIKE 僅 start_point）— 用於「從 X 出發」「X 起點」
         end_location: 模糊地點（ILIKE 僅 end_point）— 用於「到 X」「X 結束」
-        has_fare: True=已記錄車資 / False=未記錄 / None=不過濾
+        has_fare: True=已記錄車資（總額>0）/ False=未記錄（總額 0 或空）/ None=不過濾
+        fare_amount: 依車資總額（錶價+加成）精確篩選（例 1600）
+        fare_min / fare_max: 車資總額範圍下/上限（含界，例 大於 1400 → fare_min=1401）
         limit: 上限筆數（預設 80，避免 LINE Flex 50KB 上限）
     """
     where, params = _build_filters(
@@ -211,7 +245,8 @@ def query_completed_trips(
         customer_short_name=customer_short_name,
         category=category, location=location,
         start_location=start_location, end_location=end_location,
-        has_fare=has_fare,
+        has_fare=has_fare, fare_amount=fare_amount,
+        fare_min=fare_min, fare_max=fare_max,
     )
 
     sql = _SELECT_ALL
@@ -264,6 +299,9 @@ def aggregate_completed_trips(
     location: Optional[str] = None,
     start_location: Optional[str] = None,
     end_location: Optional[str] = None,
+    fare_amount: Optional[int] = None,
+    fare_min: Optional[int] = None,
+    fare_max: Optional[int] = None,
 ) -> ToolResult:
     """
     過去態車資統計（對應 legacy「統計金額」/「加總」模式）。
@@ -271,8 +309,8 @@ def aggregate_completed_trips(
     Return data:
         {
             'total_count': int,        # 符合 filter 的總筆數
-            'filled_count': int,       # meter_fare 或 extra_fare 任一非 NULL
-            'unfilled_count': int,     # 兩欄都 NULL
+            'filled_count': int,       # 車資總額(錶價+加成)>0
+            'unfilled_count': int,     # 總額 0 或空（含錶價=0 的未填班次）
             'sum_amount': int,         # NULL → 0 累加
         }
 
@@ -287,17 +325,18 @@ def aggregate_completed_trips(
         customer_short_name=customer_short_name,
         category=category, location=location,
         start_location=start_location, end_location=end_location,
-        has_fare=None,
+        has_fare=None, fare_amount=fare_amount,
+        fare_min=fare_min, fare_max=fare_max,
     )
 
     sql = """
         SELECT
             COUNT(*) AS total_count,
             COUNT(CASE
-                WHEN meter_fare IS NOT NULL OR extra_fare IS NOT NULL THEN 1
+                WHEN (COALESCE(meter_fare, 0) + COALESCE(extra_fare, 0)) > 0 THEN 1
             END) AS filled_count,
             COUNT(CASE
-                WHEN meter_fare IS NULL AND extra_fare IS NULL THEN 1
+                WHEN (COALESCE(meter_fare, 0) + COALESCE(extra_fare, 0)) <= 0 THEN 1
             END) AS unfilled_count,
             COALESCE(SUM(CASE
                 WHEN meter_fare IS NULL AND extra_fare IS NULL THEN 0
