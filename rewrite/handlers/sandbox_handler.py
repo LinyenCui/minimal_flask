@@ -108,7 +108,8 @@ _DB_SYNC_TRIGGERS = {
 }
 
 # 幫助命令（取代 legacy help_router）
-_HELP_TRIGGERS = {'幫助', 'help', 'Help', '指令', '說明', '?', '？'}
+# 註：不要放 '?' / '？' —— 群聊極常用,會被當 help 誤觸（同「藥」裸字教訓）。
+_HELP_TRIGGERS = {'幫助', 'help', 'Help', '指令', '說明'}
 
 # 群聊閘門 / sandbox-active 共用：所有「exact-match 即視為指令」的觸發詞聯集。
 # 單一來源,避免和上面各 *_LIFF_TRIGGERS 漂移。
