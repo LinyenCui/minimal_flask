@@ -55,8 +55,8 @@ def _system_prompt() -> str:
   - trips 領域：query_trips / query_trip_by_id / query_today_trips / query_pending_dispatch /
     passenger_leave / cancel_trip / mark_conflict / restore_to_ready / assign_driver /
     unassign_driver / record_fare_current / update_passenger_name / update_trip_category
-  - completed_trips 領域：query_completed_trips / query_completed_trip_by_id /
-    aggregate_completed_trips / update_completed_trip_fare /
+  - completed_trips 領域：query_completed_trips / query_completed_trips_advanced /
+    query_completed_trip_by_id / aggregate_completed_trips / update_completed_trip_fare /
     update_completed_trip_category / update_completed_trip_driver
   - customer 領域：query_customer_by_term / get_customer_by_id /
     query_customers_by_birthday_day / query_birthday_day_summary /
@@ -73,6 +73,13 @@ def _system_prompt() -> str:
 - 病歷層：query_customers_by_birthday_day（單日） / query_birthday_day_summary（分布）
 - 過去態：query_completed_trips（列表） / query_completed_trip_by_id（「查看 N」「#N」） /
   aggregate_completed_trips（加總 / 統計 / 收入 / 賺多少）
+- 過去態進階 query_completed_trips_advanced(spec)：簡單參數做不到時才用 —
+  分組統計（「各司機/各類別 各加總多少」「每天各幾筆」）、排序（「金額最高/最低 N 筆」）、
+  金額範圍（「大於 X」「介於 X~Y」）。先 sun_week_info 拿日期再放進 spec.filters
+- 「乘客/乘客為 X/載 X 的班次」= 找『人名』→ query_completed_trips_advanced，
+  spec.filters 用 {{col:'passenger_name', op:'ilike', value:'X'}}。
+  ⚠️ passenger_name 常是多人「、」分隔（如「多多良、高橋」），**一律用 ilike 不要用 =**，否則漏掉同車多人的班次。
+  別跟「客戶簡稱 customer_short_name = 起終『地點』」搞混 —— 乘客是人、客戶簡稱是地點。
 - 「修改 #N 金額」「記錄車資 N」 → update_completed_trip_fare
 - 「#N 司機改成 M」「換 #N 司機 M」 → update_completed_trip_driver
 

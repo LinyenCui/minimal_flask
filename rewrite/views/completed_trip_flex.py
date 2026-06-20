@@ -473,3 +473,78 @@ def render_aggregate_card(
             ]
         }
     }
+
+
+# ============================================================
+# 4. 分組統計卡（受護欄查詢層 grouped 結果）
+# ============================================================
+
+def render_grouped_stat_card(view, *, title: str = "📊 分組統計") -> dict:
+    """受護欄查詢層 grouped 結果卡：每組一列（組鍵 → 聚合值）。
+
+    Args:
+        view: GroupedStatView（group_cols / agg_cols / rows / subtitle）
+    """
+    rows = view.rows or []
+    group_cols = view.group_cols or []
+    agg_cols = view.agg_cols or []
+    agg_kinds = getattr(view, 'agg_kinds', None) or {}
+
+    def _group_label(r: dict) -> str:
+        parts = []
+        for gc in group_cols:
+            v = r.get(gc)
+            if gc == 'driver_id':
+                parts.append(f"🚗{v}" if v is not None else "🚗?")
+            elif gc == 'has_fare':
+                parts.append("已記錄" if v else "未記錄")
+            elif gc == 'is_leave':
+                parts.append("請假" if v else "正常")
+            else:
+                parts.append(str(v) if v not in (None, '') else "—")
+        return ' / '.join(parts) if parts else "合計"
+
+    def _fmt_agg(ac, v):
+        # 用編譯期帶來的 kind 決定 筆/元；缺 kind 才退回別名子字串 heuristic
+        kind = agg_kinds.get(ac) or ('count' if (ac == 'count' or '筆' in ac) else 'money')
+        if kind == 'count':
+            return f"{int(v)} 筆"
+        try:
+            return f"{int(v):,} 元"
+        except (TypeError, ValueError):
+            return str(v)
+
+    def _agg_label(r: dict) -> str:
+        return '　'.join(_fmt_agg(ac, r.get(ac)) for ac in agg_cols if r.get(ac) is not None)
+
+    MAX_ROWS = 40
+    body_rows = []
+    for r in rows[:MAX_ROWS]:
+        body_rows.append({
+            "type": "box", "layout": "horizontal",
+            "paddingTop": "xs", "paddingBottom": "xs",
+            "contents": [
+                {"type": "text", "text": _group_label(r), "size": "sm",
+                 "weight": "bold", "color": BLACK, "flex": 4},
+                {"type": "text", "text": _agg_label(r), "size": "sm",
+                 "color": ACCENT_DARK, "align": "end", "flex": 6, "wrap": True},
+            ],
+        })
+    if len(rows) > MAX_ROWS:
+        body_rows.append({"type": "text", "text": f"… 還有 {len(rows) - MAX_ROWS} 組",
+                          "size": "xs", "color": MUTED, "margin": "sm"})
+
+    header_contents = [{"type": "text", "text": title, "weight": "bold",
+                        "size": "lg", "color": "#ffffff"}]
+    sub = getattr(view, 'subtitle', None)
+    if sub:
+        header_contents.append({"type": "text", "text": sub, "size": "xs", "color": "#FFE0B2"})
+    header_contents.append({"type": "text", "text": f"{len(rows)} 組", "size": "xs", "color": "#FFE0B2"})
+
+    return {
+        "type": "bubble", "size": "mega",
+        "header": {"type": "box", "layout": "vertical", "backgroundColor": ACCENT,
+                   "paddingAll": "md", "contents": header_contents},
+        "body": {"type": "box", "layout": "vertical", "spacing": "sm",
+                 "contents": body_rows or [{"type": "text", "text": "（無資料）", "color": MUTED}]},
+    }

@@ -15,6 +15,7 @@ from datetime import date
 from rewrite.ai.skill import Skill
 from rewrite.tools.completed_trip import (
     query_completed_trips,
+    query_completed_trips_advanced,
     query_completed_trip_by_id,
     aggregate_completed_trips,
     update_completed_trip_fare,
@@ -304,6 +305,78 @@ SUN_WEEK_INFO_SCHEMA = {
 }
 
 
+QUERY_COMPLETED_TRIPS_ADVANCED_SCHEMA = {
+    'description': (
+        "過去態進階查詢/統計（受護欄查詢層）。**當簡單 query/aggregate 做不到時用**，尤其："
+        "GROUP BY 分組統計（「各司機/各類別 各加總多少」「每天各幾筆」）、"
+        "排序（「金額最高/最低 N 筆」「載最多次的客戶」）、金額範圍（「大於 X」「介於 X~Y」）。"
+        "先 call sun_week_info 拿日期，再把 date 放進 filters。"
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'spec': {
+                'type': 'object',
+                'description': (
+                    "查詢規格。可用欄位(col)：date / driver_id / category(診所|東洋|臨時) / "
+                    "total_fare(車資總額=錶價+加成) / has_fare / is_leave / start_point / end_point / "
+                    "passenger_name(乘客人名，常多人「、」分隔，查人名一律用 op=ilike) / "
+                    "customer(客戶簡稱=起終地點，不是人名) / location(模糊地點)"
+                ),
+                'properties': {
+                    'filters': {
+                        'type': 'array',
+                        'description': (
+                            "篩選(全 AND)。每項 {col, op, value}。op：=,!=,>,<,>=,<=,between,in,ilike。"
+                            "value 一律字串(日期 YYYY-MM-DD)。範圍**優先用兩個 filter**(>= 與 <=)，"
+                            "例「介於1400~2000」→ [{col:total_fare,op:'>=',value:'1400'},{col:total_fare,op:'<=',value:'2000'}]。"
+                        ),
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'col': {'type': 'string'},
+                                'op': {'type': 'string'},
+                                'value': {'type': 'string'},
+                            },
+                        },
+                    },
+                    'group_by': {
+                        'type': 'array',
+                        'description': "分組欄(date/driver_id/category/start_point/end_point/has_fare/is_leave)。「各司機」→ ['driver_id']",
+                        'items': {'type': 'string'},
+                    },
+                    'aggregates': {
+                        'type': 'array',
+                        'description': "聚合。每項 {fn, col, as}。fn：count/sum/avg/min/max。sum/avg/min/max 的 col 用 total_fare。as=顯示名(如「金額」)。分組統計時通常給 count + sum。",
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'fn': {'type': 'string'},
+                                'col': {'type': 'string'},
+                                'as': {'type': 'string'},
+                            },
+                        },
+                    },
+                    'order_by': {
+                        'type': 'array',
+                        'description': "排序。每項 {col, dir(asc|desc)}。col 可為欄位或聚合的 as 名。「金額最高」→ {col:'total_fare',dir:'desc'}(明細) 或聚合別名(分組)。",
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'col': {'type': 'string'},
+                                'dir': {'type': 'string'},
+                            },
+                        },
+                    },
+                    'limit': {'type': 'integer', 'description': "明細筆數上限(≤80)"},
+                },
+            },
+        },
+        'required': ['spec'],
+    },
+}
+
+
 def build_completed_trip_skill() -> Skill:
     return Skill(
         name='completed_trip',
@@ -311,6 +384,7 @@ def build_completed_trip_skill() -> Skill:
         tools=[
             (sun_week_info, SUN_WEEK_INFO_SCHEMA),
             (query_completed_trips, QUERY_COMPLETED_TRIPS_SCHEMA),
+            (query_completed_trips_advanced, QUERY_COMPLETED_TRIPS_ADVANCED_SCHEMA),
             (query_completed_trip_by_id, QUERY_COMPLETED_TRIP_BY_ID_SCHEMA),
             (aggregate_completed_trips, AGGREGATE_COMPLETED_TRIPS_SCHEMA),
             (update_completed_trip_fare, UPDATE_COMPLETED_TRIP_FARE_SCHEMA),

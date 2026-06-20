@@ -30,6 +30,8 @@ from rewrite.tools.base import (
 # legacy 共用：modification_reason 累加 + modified_by/time 寫入
 from modules.utils.modification_utils import append_modification_reason
 from modules.utils.taiwan_time import get_taiwan_time
+# 過去態唯讀受護欄查詢層編譯器（spec docs/specs/04）
+from rewrite.tools.query_spec import compile_query_spec, QuerySpecError, MAX_LIMIT as _SPEC_MAX_LIMIT
 
 # 過去態 category 受限值（對齊 legacy handle_modify_category）
 VALID_CATEGORIES = ('診所', '東洋', '臨時')
@@ -111,6 +113,19 @@ _SELECT_ALL = """
            modification_reason, created_at
     FROM completed_trips
 """
+
+# 明細欄組（給受護欄查詢層 detail 模式用，與 _SELECT_ALL 同欄，避免漂移）
+_DETAIL_COLUMNS = _SELECT_ALL.split('SELECT', 1)[1].split('FROM', 1)[0].strip()
+
+
+@dataclass
+class GroupedStatView:
+    """受護欄查詢層 grouped 模式結果（給 render_grouped_stat_card 用）。"""
+    group_cols: List[str]   # 分組欄名，如 ['driver_id']
+    agg_cols: List[str]     # 聚合輸出名，如 ['count', '金額']
+    rows: List[dict]        # [{'driver_id':5386,'count':124,'金額':141380}, ...]
+    subtitle: Optional[str] = None
+    agg_kinds: Optional[dict] = None   # {聚合名: 'count'|'money'}，給 render 決定 筆/元
 
 
 def _coerce_int(v):
@@ -361,6 +376,89 @@ def aggregate_completed_trips(
             'sum_amount': int(row.sum_amount or 0),
         },
         filters={k: str(v)[:50] for k, v in params.items()},
+    )
+
+
+# ============================================================
+# 過去態唯讀受護欄查詢層（spec docs/specs/04）
+# ============================================================
+
+def _spec_subtitle(spec: dict) -> Optional[str]:
+    """從 spec filters 組統計卡副標：日期區間 · 類別 · 司機 …"""
+    parts: list = []
+    for f in (spec.get('filters') or []):
+        if not isinstance(f, dict):
+            continue
+        col, op, val = f.get('col'), f.get('op'), f.get('value')
+        if col == 'date' and op == 'between' and isinstance(val, (list, tuple)) and len(val) == 2:
+            parts.append(f"{val[0]}~{val[1]}")
+        elif col == 'date':
+            parts.append(str(val))
+        elif col == 'category':
+            parts.append(str(val))
+        elif col == 'driver_id':
+            parts.append(f"司機{val}")
+        elif col == 'total_fare':
+            parts.append(f"車資{op}{val}")
+        elif col == 'customer':
+            parts.append(str(val))
+    return ' · '.join(str(p) for p in parts) if parts else None
+
+
+def query_completed_trips_advanced(*, session, spec: dict) -> ToolResult:
+    """過去態唯讀受護欄查詢層：AI 生「查詢規格(spec)」→ 編譯成安全 SQL → 執行。
+
+    取代「每個查詢維度手焊一個參數」。支援:
+      - filters：欄位 × 運算子（含範圍 >/</between、in、ilike），全 AND
+      - group_by + aggregates：分組統計（count/sum/avg/min/max）—「各司機加總」
+      - order_by：排序（「金額最高 5 筆」）
+    FROM 固定 completed_trips（過去態）；值全 named-param 綁定；唯讀交易（第二道防線）。
+    spec 形狀與可用欄位見 docs/specs/04。
+    """
+    if not isinstance(spec, dict):
+        return ToolResult.fail("查詢規格格式錯（要 JSON 物件）")
+    try:
+        compiled = compile_query_spec(spec, detail_columns=_DETAIL_COLUMNS)
+    except QuerySpecError as e:
+        return ToolResult.fail(f"這個查詢條件目前不支援：{e}")
+    except Exception as e:  # 殘餘型別/格式錯 → 友善訊息（不讓裸例外穿透）
+        return ToolResult.fail(f"查詢規格解析失敗：{str(e)[:100]}")
+
+    # 第二道防線：本次查詢交易設唯讀，即使編譯出意外 mutation 也被 DB 擋
+    try:
+        session.execute(text("SET TRANSACTION READ ONLY"))
+    except Exception:
+        session.rollback()
+
+    try:
+        rows = session.execute(text(compiled.sql), compiled.params).fetchall()
+    except Exception as e:
+        try:
+            session.rollback()   # 還原 failed tx，否則同 session 後續查詢拋 InFailedSqlTrans
+        except Exception:
+            pass
+        return ToolResult.fail(f"查詢執行失敗：{str(e)[:120]}")
+
+    if compiled.mode == 'grouped':
+        if not rows:
+            return ToolResult.fail("範圍內沒有符合條件的已完成班次")
+        return ToolResult.success(
+            data=GroupedStatView(
+                group_cols=compiled.group_display,
+                agg_cols=compiled.agg_display,
+                rows=[dict(r._mapping) for r in rows],
+                subtitle=_spec_subtitle(spec),
+                agg_kinds=compiled.agg_kinds,
+            ),
+            count=len(rows),
+        )
+
+    if not rows:
+        return ToolResult.fail("找不到符合條件的已完成班次")
+    return ToolResult.success(
+        data=[CompletedTripView.from_row(r) for r in rows],
+        count=len(rows),
+        truncated=len(rows) >= _SPEC_MAX_LIMIT,
     )
 
 

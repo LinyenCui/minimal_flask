@@ -24,7 +24,7 @@ from rewrite.tools.base import ToolResult
 from rewrite.tools.trip import TripView
 from rewrite.tools.customer import CustomerView
 from rewrite.tools.fixed_schedule import FixedScheduleView
-from rewrite.tools.completed_trip import CompletedTripView
+from rewrite.tools.completed_trip import CompletedTripView, GroupedStatView
 
 logger = logging.getLogger(__name__)
 
@@ -299,6 +299,7 @@ class Agent:
             render_completed_trip_detail,
             render_completed_trip_list_carousel,
             render_aggregate_card,
+            render_grouped_stat_card,
         )
 
         if not result.ok:
@@ -324,6 +325,15 @@ class Agent:
                 'type': 'flex',
                 'altText': f'查到 {len(data)} 筆已完成班次',
                 'contents': flex,
+            }
+
+        # ----- GroupedStatView（受護欄查詢層 grouped 結果：各司機加總…）-----
+        if isinstance(data, GroupedStatView):
+            bubble = render_grouped_stat_card(data)
+            return {
+                'type': 'flex',
+                'altText': f'分組統計 {result.meta.get("count", len(data.rows))} 組',
+                'contents': bubble,
             }
 
         # ----- sun_week_info dict（純查週資訊「本週是哪一週」）-----
