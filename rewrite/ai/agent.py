@@ -8,7 +8,9 @@ Multi-turn tool loop（spec §6.3 雛形）：
   AI 可以連續呼叫多個 tool（如先 query 拿 id，再 update by id）
   避免 single-turn 限制讓 AI 卡在「先確認再執行」的中間步驟
 """
+import inspect
 import logging
+import re
 from datetime import date, datetime
 from typing import Any, Optional
 
@@ -44,6 +46,56 @@ def _is_quota_error(e: Exception) -> bool:
     msg = str(e).lower()
     return ('429' in msg or 'resource exhausted' in msg or 'quota' in msg
             or 'rate limit' in msg)
+
+
+def _lev_le1(a: str, b: str) -> bool:
+    """a, b 編輯距離 ≤ 1（一次 增/刪/改）。"""
+    if a == b:
+        return True
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 1:
+        return False
+    i = 0
+    while i < min(la, lb) and a[i] == b[i]:
+        i += 1
+    if la == lb:          # 替換
+        return a[i + 1:] == b[i + 1:]
+    if la > lb:           # a 多一字 → 刪
+        return a[i + 1:] == b[i:]
+    return a[i:] == b[i + 1:]  # a 少一字 → 增
+
+
+def _repair_arg_keys(fn, args: dict) -> dict:
+    """修 AI 偶爾打錯的參數名。
+
+    gemini-2.5-flash 在 function-calling 會「確定性地」把某些參數名插入數字
+    （實測 reason→reas1on、passenger_name→pas1senger_name，與 thinking/溫度/
+    schema 路徑無關）。未知 key → 先去數字比對、再編輯距離 1 比對到合法參數名，
+    修不了才原樣（讓 tool 自己報錯）。
+    """
+    if not isinstance(args, dict):
+        return args
+    try:
+        valid = set(inspect.signature(fn).parameters) - {'session'}
+    except (TypeError, ValueError):
+        return args
+    out: dict = {}
+    for k, v in args.items():
+        if k in valid:
+            out[k] = v
+            continue
+        stripped = re.sub(r'\d', '', k)
+        if stripped in valid and stripped not in args:
+            logger.warning(f"[Agent] repaired arg key {k!r} → {stripped!r}")
+            out[stripped] = v
+            continue
+        cands = [p for p in valid if p not in args and _lev_le1(k, p)]
+        if len(cands) == 1:
+            logger.warning(f"[Agent] repaired arg key {k!r} → {cands[0]!r}")
+            out[cands[0]] = v
+        else:
+            out[k] = v
+    return out
 
 
 def _to_json_safe(obj: Any) -> Any:
@@ -199,7 +251,8 @@ class Agent:
             logger.warning(f"[Agent] unknown tool: {tc.name}")
             return ToolResult.fail(f"unknown tool: {tc.name}"), tc.args
 
-        args = self._normalize_args(tc.args)
+        args = _repair_arg_keys(fn, tc.args)   # 修 AI 打錯的參數名（reas1on→reason）
+        args = self._normalize_args(args)
         session = Session()
         try:
             result = fn(session=session, **args)
