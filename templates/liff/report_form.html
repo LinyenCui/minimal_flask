@@ -79,6 +79,16 @@
         </select>
       </div>
 
+      <div class="field">
+        <label>檔案格式</label>
+        <select name="file_format">
+          <option value="xlsx" selected>📊 Excel（xlsx）</option>
+          <option value="pdf">📄 PDF</option>
+          <option value="both">📊＋📄 兩者都要</option>
+        </select>
+        <div class="helper">同一份資料、同一個雲端資料夾；PDF 適合直接轉給對方看</div>
+      </div>
+
       <div class="actions">
         <button type="button" class="secondary" id="btn-cancel">取消</button>
         <button type="submit" id="btn-submit">產生報表</button>
@@ -167,6 +177,7 @@
         const payload = {
           report_type: fd.get('report_type'),
           category: fd.get('category'),
+          file_format: fd.get('file_format') || 'xlsx',
           target_date: fd.get('report_type') === 'daily' && fd.get('target_date')
             ? fd.get('target_date') : null,
         };
@@ -190,9 +201,19 @@
         if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
 
         let html = '<div class="alert ok">✅ 報表已產生！</div>';
-        if (data.drive_url) {
-          html += `<a class="drive-link" href="${data.drive_url}" target="_blank">📂 點此開啟 Google Drive 連結</a>`;
-        }
+        // 逐一列出所有 Drive 連結。Drive URL 不含副檔名 → 用「使用者選的格式 +
+        // 上傳順序（xlsx 在前、pdf 在後）」決定標籤，deterministic。
+        const urls = (data.drive_urls && data.drive_urls.length)
+          ? data.drive_urls
+          : (data.drive_url ? [data.drive_url] : []);
+        const fmt = payload.file_format || 'xlsx';
+        urls.forEach((u, i) => {
+          let label = '📂 報表';
+          if (fmt === 'pdf') label = '📄 PDF';
+          else if (fmt === 'xlsx') label = '📊 Excel';
+          else label = (i === 0 && urls.length > 1) ? '📊 Excel' : (urls.length > 1 ? '📄 PDF' : '📂 報表');
+          html += `<a class="drive-link" href="${u}" target="_blank">${label}：開啟 Google Drive 連結</a>`;
+        });
         if (data.result_text) {
           // 顯示完整訊息（含統計），但連結那行因為已單獨展示就裁掉
           const cleanText = data.result_text

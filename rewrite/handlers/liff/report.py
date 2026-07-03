@@ -45,10 +45,15 @@ def _parse_payload(body: dict) -> tuple[dict, str | None]:
             except ValueError:
                 return {}, f"日期格式錯（要 YYYY-MM-DD）：{d_raw!r}"
 
+    file_format = (body.get('file_format') or 'xlsx').strip() or 'xlsx'
+    if file_format not in report_tools.VALID_FILE_FORMATS:
+        return {}, f"檔案格式必須是 {report_tools.VALID_FILE_FORMATS} 之一"
+
     return {
         'report_type': rtype,
         'category': cat,
         'target_date': target_date,
+        'file_format': file_format,
     }, None
 
 
@@ -66,10 +71,14 @@ def _push_report_result(target_id, result_data) -> None:
         type_map = {'daily': '日', 'weekly': '週', 'monthly': '月'}
         rt = type_map.get(result_data.get('report_type'), '?')
         cat = result_data.get('category') or '全部'
-        url = result_data.get('drive_url')
         msg = f"📊 {cat} {rt}報表已產生"
-        if url:
-            msg += f"\n📂 {url}"
+        # result_text 已含帶標籤的連結行（📊 Excel：… / 📄 PDF：…），直接沿用
+        url_lines = [ln for ln in (result_data.get('result_text') or '').split('\n')
+                     if 'http' in ln]
+        if url_lines:
+            msg += '\n' + '\n'.join(url_lines)
+        elif result_data.get('drive_url'):
+            msg += f"\n📂 {result_data['drive_url']}"
         api.push_message(PushMessageRequest(
             to=target_id, messages=[TextMessage(text=msg)],
         ))
@@ -127,6 +136,7 @@ def report_generate():
         'ok': True,
         'result_text': data.get('result_text', ''),
         'drive_url': data.get('drive_url'),
+        'drive_urls': data.get('drive_urls') or [],
         'report_type': data.get('report_type'),
         'category': data.get('category'),
     })

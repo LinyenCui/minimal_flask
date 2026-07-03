@@ -86,8 +86,15 @@ def upload_file_to_drive(file_path, file_name=None, folder_id=None):
         if folder_id:
             file_metadata['parents'] = [folder_id]
             
-        # 準備上傳
-        media = MediaFileUpload(file_path, resumable=True)
+        # 準備上傳（xlsx/pdf 給明確 mimetype — 系統 mimetypes 猜錯時
+        # Google Sheets 手機版對 xlsx 的預覽轉檔更容易失敗）
+        _MIMES = {
+            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            '.pdf': 'application/pdf',
+        }
+        ext = os.path.splitext(file_path)[1].lower()
+        mimetype = _MIMES.get(ext)
+        media = MediaFileUpload(file_path, mimetype=mimetype, resumable=True)
         
         # 執行上傳
         file = drive_service.files().create(

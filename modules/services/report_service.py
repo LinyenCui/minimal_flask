@@ -238,7 +238,44 @@ def _create_excel_report(worksheet, df, driver_stats, filename, start_date, end_
     category_text = ""
     return f"已生成上{report_type} ({start_date.strftime('%m/%d')} - {end_date.strftime('%m/%d')}) {category_text}報表。", filename
 
-def generate_monthly_report(category=None):
+VALID_FILE_FORMATS = ('xlsx', 'pdf', 'both')
+
+
+def _build_output_files(xlsx_file, file_format, pdf_renderer):
+    """依 file_format 組要上傳的檔案清單。回 (files, pdf_error)。
+
+    xlsx 永遠已生成（沿用既有流程）；要 PDF 時呼叫 pdf_renderer(pdf_path)
+    從同一份 DataFrame 渲染（數字與 xlsx 保證一致）。
+    PDF 失敗不擋 xlsx，但錯誤要浮上訊息 — 不可默默假成功。
+    """
+    if file_format not in VALID_FILE_FORMATS:
+        file_format = 'xlsx'
+    files = []
+    pdf_error = None
+    if file_format in ('xlsx', 'both'):
+        files.append(xlsx_file)
+    if file_format in ('pdf', 'both'):
+        pdf_file = xlsx_file.rsplit('.', 1)[0] + '.pdf'
+        try:
+            pdf_renderer(pdf_file)
+            files.append(pdf_file)
+        except Exception as e:
+            logger.error(f"PDF 生成失敗（xlsx 不受影響）: {e}", exc_info=True)
+            pdf_error = str(e)[:120]
+    return files, pdf_error
+
+
+def _finalize_report_output(msg, files, pdf_error):
+    """把 PDF 失敗浮上訊息：pdf-only 全失敗 → 明確失敗訊息（含「失敗」字樣，
+    讓上層 heuristic 判 fail）；both 部分失敗 → 附警告。"""
+    if pdf_error:
+        if not files:
+            return f"報表 PDF 生成失敗：{pdf_error}", None
+        msg = f"{msg}\n⚠️ PDF 生成失敗（僅產出 Excel）：{pdf_error}"
+    return msg, files
+
+
+def generate_monthly_report(category=None, file_format='xlsx'):
     """
     生成上個月的統計圖表報表（不是明細表）
     
@@ -320,9 +357,17 @@ def generate_monthly_report(category=None):
         
         # 刪除默認工作表，重新創建
         workbook.remove(workbook.active)
-        
+
         # 創建統計報表
-        return _create_monthly_statistics_report(workbook, df, filename, last_month_start, last_month_end, category)
+        msg, xlsx_file = _create_monthly_statistics_report(workbook, df, filename, last_month_start, last_month_end, category)
+
+        def _pdf(pdf_path):
+            from modules.services.pdf_report_service import render_monthly_stats_pdf
+            render_monthly_stats_pdf(df, filename=pdf_path,
+                                     start_date=last_month_start, end_date=last_month_end,
+                                     category=category)
+        files, pdf_error = _build_output_files(xlsx_file, file_format, _pdf)
+        return _finalize_report_output(msg, files, pdf_error)
         
     except Exception as e:
         logger.error(f"生成月報表失敗: {str(e)}", exc_info=True)
@@ -538,15 +583,16 @@ def _create_monthly_statistics_report(workbook, df, filename, start_date, end_da
     return f"已生成上月 ({start_date.strftime('%m/%d')} - {end_date.strftime('%m/%d')}) {category_text}統計報表。", filename
 
 
-def generate_weekly_report(category=None):
+def generate_weekly_report(category=None, file_format='xlsx'):
     """
     生成上週的班次報表
-    
+
     Args:
         category: 選擇性的班次類別過濾（例如"診所"或"東洋"）
-        
+        file_format: 'xlsx' / 'pdf' / 'both'
+
     Returns:
-        tuple: (結果消息, 生成的文件名)
+        tuple: (結果消息, 生成的文件名清單 list[str] | None)
     """
     try:
         # 獲取日期範圍
@@ -665,7 +711,15 @@ def generate_weekly_report(category=None):
         worksheet.merge_cells('A1:K1')  # 擴展到K列，因為多了說明欄
         
         # 使用共用的Excel格式化函數
-        return _create_excel_report(worksheet, df, driver_stats, filename, last_sunday, last_saturday, "週")
+        msg, xlsx_file = _create_excel_report(worksheet, df, driver_stats, filename, last_sunday, last_saturday, "週")
+
+        def _pdf(pdf_path):
+            from modules.services.pdf_report_service import render_report_pdf
+            render_report_pdf(df, driver_stats, filename=pdf_path, title=title,
+                              start_date=last_sunday, end_date=last_saturday,
+                              category=category)
+        files, pdf_error = _build_output_files(xlsx_file, file_format, _pdf)
+        return _finalize_report_output(msg, files, pdf_error)
         
     except Exception as e:
         logger.error(f"生成報表失敗: {str(e)}", exc_info=True)
@@ -699,13 +753,31 @@ def upload_to_google_drive(file_path, folder_id=None):
         logger.error(f"上傳到Google Drive過程中出錯: {str(e)}", exc_info=True)
         return f"上傳到Google Drive失敗: {str(e)}"
 
-def handle_generate_weekly_report(text):
+def _upload_report_files(result, files, folder_id):
+    """把生成的檔案（xlsx/pdf）逐一上傳 Drive，組合結果訊息。"""
+    if not files:
+        return result
+    lines = [result]
+    for f in files:
+        label = '📄 PDF' if str(f).lower().endswith('.pdf') else '📊 Excel'
+        drive_url = upload_to_google_drive(f, folder_id)
+        if drive_url and not drive_url.startswith("上傳到Google Drive失敗"):
+            logger.info(f"報表已上傳: {f} → {drive_url}")
+            lines.append(f"{label}：{drive_url}")
+        else:
+            logger.warning(f"報表上傳失敗: {f} → {drive_url}")
+            lines.append(f"{label}：上傳失敗（{drive_url}）")
+    return "\n".join(lines)
+
+
+def handle_generate_weekly_report(text, file_format='xlsx'):
     """
     處理生成周報表命令
-    
+
     Args:
         text: 用戶輸入的文本命令
-        
+        file_format: 'xlsx' / 'pdf' / 'both'
+
     Returns:
         str: 處理結果消息
     """
@@ -730,39 +802,28 @@ def handle_generate_weekly_report(text):
         logger.info(f"使用類別: {category}, 對應文件夾ID: {folder_id}")
     
     try:
-        logger.info(f"開始生成週報表，類別: {category}")
-        # 生成報表
-        result, filename = generate_weekly_report(category)
-        
-        if not filename:
+        logger.info(f"開始生成週報表，類別: {category}, 格式: {file_format}")
+        result, files = generate_weekly_report(category, file_format=file_format)
+        if not files:
             logger.warning("沒有生成報表文件")
             return result
-        
-        # 上傳到Google Drive
-        logger.info(f"報表生成成功，準備上傳到Google Drive: {filename}")
-        drive_url = upload_to_google_drive(filename, folder_id)
-        
-        if drive_url and not drive_url.startswith("上傳到Google Drive失敗"):
-            logger.info(f"報表已成功上傳: {drive_url}")
-            return f"{result}\n報表已上傳到Google Drive: {drive_url}"
-        else:
-            logger.warning(f"報表上傳失敗: {drive_url}")
-            return f"{result}\n報表已生成，但上傳到Google Drive失敗: {drive_url}"
+        return _upload_report_files(result, files, folder_id)
     except Exception as e:
         logger.error(f"處理生成週報表命令時出錯: {str(e)}", exc_info=True)
         return f"生成報表時出錯: {str(e)}"
 
 
-def generate_daily_report(target_date=None, category=None):
+def generate_daily_report(target_date=None, category=None, file_format='xlsx'):
     """
     生成指定日期（預設昨天）的班次報表
-    
+
     Args:
         target_date: 目標日期 (date 物件)，預設為昨天
         category: 選擇性的班次類別過濾（例如"診所"或"東洋"）
-        
+        file_format: 'xlsx' / 'pdf' / 'both'
+
     Returns:
-        tuple: (結果消息, 生成的文件名)
+        tuple: (結果消息, 生成的文件名清單 list[str] | None)
     """
     try:
         if target_date is None:
@@ -863,14 +924,22 @@ def generate_daily_report(target_date=None, category=None):
         worksheet.cell(row=1, column=1).value = title
         worksheet.merge_cells('A1:K1')
         
-        return _create_excel_report(worksheet, df, driver_stats, filename, target_date, target_date, "日")
+        msg, xlsx_file = _create_excel_report(worksheet, df, driver_stats, filename, target_date, target_date, "日")
+
+        def _pdf(pdf_path):
+            from modules.services.pdf_report_service import render_report_pdf
+            render_report_pdf(df, driver_stats, filename=pdf_path, title=title,
+                              start_date=target_date, end_date=target_date,
+                              category=category)
+        files, pdf_error = _build_output_files(xlsx_file, file_format, _pdf)
+        return _finalize_report_output(msg, files, pdf_error)
         
     except Exception as e:
         logger.error(f"生成日報表失敗: {str(e)}", exc_info=True)
         return f"生成日報表失敗: {str(e)}", None
 
 
-def handle_generate_daily_report(text_input):
+def handle_generate_daily_report(text_input, file_format='xlsx'):
     """
     處理生成日報表命令
     
@@ -925,34 +994,25 @@ def handle_generate_daily_report(text_input):
         logger.info(f"使用類別: {category}, 對應文件夾ID: {folder_id}")
     
     try:
-        logger.info(f"開始生成日報表，日期: {target_date}, 類別: {category}")
-        result, filename = generate_daily_report(target_date, category)
-        
-        if not filename:
+        logger.info(f"開始生成日報表，日期: {target_date}, 類別: {category}, 格式: {file_format}")
+        result, files = generate_daily_report(target_date, category, file_format=file_format)
+        if not files:
             logger.warning("沒有生成報表文件")
             return result
-        
-        logger.info(f"日報表生成成功，準備上傳到Google Drive: {filename}")
-        drive_url = upload_to_google_drive(filename, folder_id)
-        
-        if drive_url and not drive_url.startswith("上傳到Google Drive失敗"):
-            logger.info(f"日報表已成功上傳: {drive_url}")
-            return f"{result}\n報表已上傳到Google Drive: {drive_url}"
-        else:
-            logger.warning(f"日報表上傳失敗: {drive_url}")
-            return f"{result}\n報表已生成，但上傳到Google Drive失敗: {drive_url}"
+        return _upload_report_files(result, files, folder_id)
     except Exception as e:
         logger.error(f"處理生成日報表命令時出錯: {str(e)}", exc_info=True)
         return f"生成日報表時出錯: {str(e)}"
 
 
-def handle_generate_monthly_report(text):
+def handle_generate_monthly_report(text, file_format='xlsx'):
     """
     處理生成月報表命令
-    
+
     Args:
         text: 用戶輸入的文本命令
-        
+        file_format: 'xlsx' / 'pdf' / 'both'
+
     Returns:
         str: 處理結果消息
     """
@@ -977,24 +1037,12 @@ def handle_generate_monthly_report(text):
         logger.info(f"使用類別: {category}, 對應文件夾ID: {folder_id}")
     
     try:
-        logger.info(f"開始生成月報表，類別: {category}")
-        # 生成報表
-        result, filename = generate_monthly_report(category)
-        
-        if not filename:
+        logger.info(f"開始生成月報表，類別: {category}, 格式: {file_format}")
+        result, files = generate_monthly_report(category, file_format=file_format)
+        if not files:
             logger.warning("沒有生成報表文件")
             return result
-        
-        # 上傳到Google Drive
-        logger.info(f"月報表生成成功，準備上傳到Google Drive: {filename}")
-        drive_url = upload_to_google_drive(filename, folder_id)
-        
-        if drive_url and not drive_url.startswith("上傳到Google Drive失敗"):
-            logger.info(f"月報表已成功上傳: {drive_url}")
-            return f"{result}\n報表已上傳到Google Drive: {drive_url}"
-        else:
-            logger.warning(f"月報表上傳失敗: {drive_url}")
-            return f"{result}\n報表已生成，但上傳到Google Drive失敗: {drive_url}"
+        return _upload_report_files(result, files, folder_id)
     except Exception as e:
         logger.error(f"處理生成月報表命令時出錯: {str(e)}", exc_info=True)
         return f"生成月報表時出錯: {str(e)}"
