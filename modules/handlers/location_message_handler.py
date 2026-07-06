@@ -105,11 +105,8 @@ def handle_location_message(event):
             },
         )
 
-        # Flex 標題帶群組自訂地點名稱：有命名 → 通用文案（不限診所使用）；
-        # 未命名 → 維持原「請準備輪椅」（診所群行為不變，向後相容）
-        has_name = bool(meta and meta.place_name)
-        header_text = (f"🚗 注意：來程車輛接近「{place_name}」" if has_name
-                       else "🧑‍🦽 請準備輪椅")
+        # Flex 標題一律帶地點名稱（未命名預設「診所」，不特殊對待 — 用戶指示）
+        header_text = f"🚗 注意：來程車輛接近「{place_name}」"
 
         # 文字為主，Flex 可選
         try:

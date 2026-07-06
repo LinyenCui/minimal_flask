@@ -25,14 +25,9 @@ def render_arrival_message(place_name: Optional[str], template: Optional[str], c
         s = s.replace("{speed}", str(speed) if speed is not None else "")
         return s
 
-    # 預設模板
-    if not name or name == "診所":
-        return (
-            "🧑‍🦽 請準備輪椅\n"
-            f"距離：{distance_km:.1f} 公里，約 {eta_min} 分鐘到達（{provider}）{speed_note}"
-        )
-    else:
-        return (
-            f"🚗 注意：來程車輛接近「{name}」\n"
-            f"距離：{distance_km:.1f} 公里，約 {eta_min} 分鐘（{provider}）{speed_note}"
-        )
+    # 預設模板：一律帶名稱（未命名預設「診所」，不特殊對待 — 用戶指示；
+    # 想要客製文案的群可用 message_template）
+    return (
+        f"🚗 注意：來程車輛接近「{name}」\n"
+        f"距離：{distance_km:.1f} 公里，約 {eta_min} 分鐘（{provider}）{speed_note}"
+    )
