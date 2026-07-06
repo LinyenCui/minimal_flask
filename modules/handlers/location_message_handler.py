@@ -105,6 +105,12 @@ def handle_location_message(event):
             },
         )
 
+        # Flex 標題帶群組自訂地點名稱：有命名 → 通用文案（不限診所使用）；
+        # 未命名 → 維持原「請準備輪椅」（診所群行為不變，向後相容）
+        has_name = bool(meta and meta.place_name)
+        header_text = (f"🚗 注意：來程車輛接近「{place_name}」" if has_name
+                       else "🧑‍🦽 請準備輪椅")
+
         # 文字為主，Flex 可選
         try:
             from linebot.v3.messaging import FlexMessage, FlexContainer, URIAction, ButtonComponent, BoxComponent, TextComponent
@@ -114,7 +120,7 @@ def handle_location_message(event):
                     "type": "box",
                     "layout": "vertical",
                     "contents": [
-                        {"type": "text", "text": "🧑‍🦽 請準備輪椅", "weight": "bold", "size": "lg"},
+                        {"type": "text", "text": header_text, "weight": "bold", "size": "lg", "wrap": True},
                         {"type": "text", "text": f"距離：約 {distance:.1f} 公里", "margin": "md"},
                         {"type": "text", "text": f"ETA：約 {eta_min_val} 分", "margin": "sm"},
                         {"type": "text", "text": (f"提供者：{provider_label} {speed_note}").strip(), "size": "xs", "color": "#666666", "margin": "sm"},
@@ -125,7 +131,7 @@ def handle_location_message(event):
             }
             msg = {
                 "type": "flex",
-                "altText": "請準備輪椅",
+                "altText": header_text,
                 "contents": flex
             }
             reply_message(event.reply_token, [msg])

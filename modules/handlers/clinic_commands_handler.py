@@ -39,8 +39,46 @@ def clear_wait(chat_id: str) -> None:
 
 
 def handle_clinic_commands(message_text: str, chat_id: str):
-    """處理診所座標相關指令。回傳純文字。"""
+    """處理地點（診所）座標相關指令。回傳純文字。
+
+    「設定地點」系列是「設定診所」的通用同義詞 — 每個群組可設定一個
+    固定目的地並命名（group_location_meta.place_name），不限診所使用。
+    """
     text = _normalize_spaces(message_text)
+
+    # 通用同義詞 → 正規化成診所指令（座標表共用 clinic_locations）
+    for alias, canon in (
+        ("設定地點名稱", None),   # 名稱指令自己處理,不正規化
+        ("查看地點名稱", None),
+        ("設定地點", "設定診所"),
+        ("查看地點座標", "查看診所座標"),
+        ("清除地點座標", "清除診所座標"),
+    ):
+        if canon and (text == alias or text.startswith(alias + " ")):
+            text = canon + text[len(alias):]
+            break
+
+    # === 地點命名（group_location_meta.place_name，提醒訊息會帶名稱）===
+    if text.startswith("設定地點名稱 "):
+        name = text[len("設定地點名稱 "):].strip()
+        if not name:
+            return "❌ 請給名稱，例如：設定地點名稱 達恩診所"
+        if len(name) > 50:
+            return "❌ 名稱太長（上限 50 字）"
+        from modules.services.group_location_meta_service import set_name
+        set_name(chat_id, name)
+        return (f"✅ 已設定地點名稱：「{name}」\n"
+                f"之後司機傳位置，提醒會顯示「來程車輛接近『{name}』」。")
+
+    if text == "設定地點名稱":
+        return "請輸入：設定地點名稱 <名稱>\n例如：設定地點名稱 達恩診所"
+
+    if text == "查看地點名稱":
+        from modules.services.group_location_meta_service import get as get_meta
+        meta = get_meta(chat_id)
+        if meta and meta.place_name:
+            return f"📍 本群地點名稱：「{meta.place_name}」"
+        return "尚未設定地點名稱（提醒會用預設文案）。\n輸入：設定地點名稱 <名稱>"
 
     if text.startswith("設定診所 "):
         parts = text.split(" ")

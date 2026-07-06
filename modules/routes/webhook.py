@@ -84,8 +84,11 @@ def callback():
                         _clinic_chat = _get_chat_id(event)
                         _clinic_msg = (event.message.text or '').strip().lstrip('/').strip()
                         _clinic_head = _clinic_msg.split(' ')[0]
-                        # 命中條件:① 明確診所/車速指令 ② 正在「等待設定診所」中(讓打字座標也能接)
+                        # 命中條件:① 明確地點/車速指令 ② 正在「等待設定地點」中(讓打字座標也能接)
+                        # 「設定地點」系列 = 「設定診所」的通用同義詞(每群可自訂目的地並命名,不限診所)
                         if (_clinic_head in ('設定診所', '查看診所座標', '清除診所座標',
+                                             '設定地點', '查看地點座標', '清除地點座標',
+                                             '設定地點名稱', '查看地點名稱',
                                              '設定平均車速', '查看平均車速')
                                 or is_waiting_for_location(_clinic_chat)):
                             _resp = handle_clinic_commands(_clinic_msg, _clinic_chat)

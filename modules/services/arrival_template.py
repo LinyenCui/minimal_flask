@@ -33,6 +33,6 @@ def render_arrival_message(place_name: Optional[str], template: Optional[str], c
         )
     else:
         return (
-            f"🚗 即將抵達「{name}」\n"
+            f"🚗 注意：來程車輛接近「{name}」\n"
             f"距離：{distance_km:.1f} 公里，約 {eta_min} 分鐘（{provider}）{speed_note}"
         )
