@@ -159,6 +159,25 @@ def callback():
                             pass
 
                 if not is_bot_addressed:
+                    # 群組閘門吞掉前的例外：該用戶多輪對話「剛逾時」（grace 期內）
+                    # → 提示一次再清掉標記，避免用戶以為 bot 沒反應
+                    #（清掉後之後的閒聊照常靜默跳過，只提示這一次）
+                    if source_type in ('group', 'room') and user_id:
+                        try:
+                            from rewrite.conversation_state import (
+                                peek_recently_expired as _rew_peek_expired,
+                                clear_state as _rew_clear_state,
+                                get_chat_id_from_event as _rew_chat_of,
+                            )
+                            if _rew_peek_expired(user_id, chat_id=_rew_chat_of(event)):
+                                _rew_clear_state(user_id)
+                                reply_text(
+                                    event.reply_token,
+                                    "⏰ 對話已逾時，請重新操作（群組指令請加 / 開頭）",
+                                )
+                                continue
+                        except Exception as _exp_err:
+                            logger.warning(f"逾時提示處理失敗: {_exp_err}")
                     logger.info(f"Skip {source_type} non-/ message: {original_message_text!r}")
                     continue
 

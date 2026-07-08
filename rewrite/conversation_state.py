@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 # user_id → {type: str, payload: dict, expires_at: datetime}
 _STATES: dict = {}
 _TTL = timedelta(minutes=30)
+# 過期後的 grace 期：條目過期先不刪，保留這段時間讓 webhook 能用
+# peek_recently_expired 判斷「剛逾時」提示用戶一次，超過 grace 才真正清除。
+# get_state 對過期條目仍回 None（語義不變）。
+_GRACE = timedelta(minutes=3)
 _LOCK = threading.Lock()
 
 
@@ -64,16 +68,46 @@ def get_chat_id_from_event(event) -> Optional[str]:
 
 
 def get_state(user_id: str) -> Optional[dict]:
-    """取 user 的當前狀態（過期會自動清除並回 None）"""
+    """取 user 的當前狀態（過期一律回 None）
+
+    過期條目不會馬上刪：保留 _GRACE 期供 peek_recently_expired 判斷
+    「剛逾時」，超過 grace 才真正清除。對 caller 語義不變（過期 = None）。
+    """
     with _LOCK:
         s = _STATES.get(user_id)
         if not s:
             return None
-        if datetime.now() > s['expires_at']:
-            del _STATES[user_id]
-            logger.info(f"[conversation_state] expired {user_id[:8]}..")
+        now = datetime.now()
+        if now > s['expires_at']:
+            if now > s['expires_at'] + _GRACE:
+                del _STATES[user_id]
+                logger.info(f"[conversation_state] expired {user_id[:8]}..")
             return None
         return dict(s)  # 回 copy，避免 caller 改到內部
+
+
+def peek_recently_expired(user_id: str, chat_id: Optional[str] = None) -> bool:
+    """該 user 是否有「剛過期（grace 期內）」的對話狀態。
+
+    給 webhook 群組閘門用：多輪對話剛逾時、用戶又送了無 / 前綴訊息時，
+    可提示一次「對話已逾時」而不是靜默吞掉。純 peek，不刪條目——
+    提示過後由 caller 呼叫 clear_state 清掉標記（避免每句閒聊都被回）。
+
+    Args:
+        chat_id：若給定，只在 state 記錄的 chat_id 相同時才算
+            （防止私聊逾時的 state 讓群組閒聊被提示；比照 webhook
+            active-state bypass 的同對話判定）。
+    """
+    with _LOCK:
+        s = _STATES.get(user_id)
+        if not s:
+            return False
+        now = datetime.now()
+        if not (s['expires_at'] < now <= s['expires_at'] + _GRACE):
+            return False
+        if chat_id is not None and s.get('chat_id') != chat_id:
+            return False
+        return True
 
 
 def clear_state(user_id: str) -> None:
@@ -95,13 +129,16 @@ def sweep_expired() -> int:
     平常 get_state 會 lazy expire（被查到才 pop），但有些 state 設了沒人再查
     就會留在 dict 裡到永遠（直到下次同 user_id 進來才被驗）。
     給 scheduler 5 分鐘呼叫一次，主動掃。
+
+    只清「過期超過 grace 期」的條目——grace 期內的保留，
+    讓 webhook 的 peek_recently_expired 還來得及提示一次。
     """
     now = datetime.now()
     cleaned = 0
     with _LOCK:
         for user_id in list(_STATES.keys()):
             s = _STATES.get(user_id)
-            if s and now > s['expires_at']:
+            if s and now > s['expires_at'] + _GRACE:
                 del _STATES[user_id]
                 cleaned += 1
     if cleaned > 0:

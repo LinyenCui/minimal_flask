@@ -26,11 +26,40 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import text, Row
 from sqlalchemy.engine import ResultProxy
 from flask import current_app
+import os
 import traceback
 from modules.utils.taiwan_time import get_taiwan_time, get_taiwan_date
 from modules.utils.helpers import row_to_dict
 
 from modules.models.base import db
+
+
+def _notify_admin(text_msg: str) -> None:
+    """排程異常時 push 通知管理員（讀環境變數 LINE_ADMIN_CHAT_ID）。
+
+    - 未設定 LINE_ADMIN_CHAT_ID → 靜默 return（不是每個環境都要開告警）
+    - 告警本身絕不能噴錯影響主流程 → 全包 try/except，失敗只 log warning
+    - 沿用 modules/utils/line_bot 的 push 介面（get_line_bot_api + PushMessageRequest），
+      並尊重 PUSH_NOTIFY 總開關（測試期關 push 省 LINE 月額度）
+    """
+    try:
+        admin_chat_id = (os.environ.get('LINE_ADMIN_CHAT_ID') or '').strip()
+        if not admin_chat_id:
+            return
+        from linebot.v3.messaging import PushMessageRequest, TextMessage
+        from modules.utils.line_bot import get_line_bot_api, push_notify_enabled
+        if not push_notify_enabled():
+            return
+        api = get_line_bot_api()
+        api.push_message(PushMessageRequest(
+            to=admin_chat_id,
+            messages=[TextMessage(text=text_msg)],
+        ))
+    except Exception as notify_err:
+        try:
+            current_app.logger.warning(f"排程告警發送失敗（不影響主流程）: {notify_err}")
+        except Exception:
+            pass
 
 def schedule_all_trip_updates(app):
     """安排所有未來班次的自動更新任務"""
@@ -111,18 +140,21 @@ def update_single_trip(app, trip_id):
             now = get_taiwan_time()
             
             # 查詢班次詳細信息，確保包含 trip_type, custom_*, passenger_name/leave/modification 欄位
+            # FOR UPDATE：與批次路徑（update_completed_trips）對齊，鎖住該 row 直到本
+            # session commit/rollback，避免兩條路徑同時讀到同一 snapshot 造成掉單競態
             query = """
-            SELECT 
-                t.trip_id, t.date, t.time, 
-                t.start_point, t.via_point, t.end_point, 
+            SELECT
+                t.trip_id, t.date, t.time,
+                t.start_point, t.via_point, t.end_point,
                 t.meter_fare, t.extra_fare, t.category, t.driver_id,
                 t.status, t.unique_code, t.fixed_trip_id,
                 t.trip_type, t.custom_start_point, t.custom_end_point, t.custom_via_point,
                 t.passenger_name, t.passenger_leave_reason, t.modification_reason
-            FROM 
+            FROM
                 trips t
-            WHERE 
+            WHERE
                 t.trip_id = :trip_id
+            FOR UPDATE
             """
             result: ResultProxy = db.session.execute(text(query), {"trip_id": trip_id})
             trip_info_row: Row = result.fetchone()
@@ -272,6 +304,7 @@ def update_single_trip(app, trip_id):
             error_msg = f"更新班次 #{trip_id} 失敗: {str(e)}"
             current_app.logger.error(error_msg)
             traceback.print_exc()
+            _notify_admin(f"⚠️ 排程異常：班次 #{trip_id} 自動完成失敗，請檢查\n原因：{e}")
 
 def update_completed_trips():
     """
@@ -321,7 +354,8 @@ def update_completed_trips():
         updated_count = 0
         error_count = 0
         skipped_count = 0
-        
+        failed_trip_ids = []  # 收集失敗班次，loop 結束後彙總告警一次（避免連發 push）
+
         for trip_row in completed_trips: # Rename variable
             trip_id = trip_row[0]
             current_app.logger.info(f"開始處理班次 #{trip_id}")
@@ -473,9 +507,10 @@ def update_completed_trips():
                 current_app.logger.error(f"處理班次 #{trip_id} 時出錯: {e}")
                 traceback.print_exc()
                 error_count += 1
+                failed_trip_ids.append(trip_id)
                 db.session.rollback()
                 continue
-        
+
         # 提交事務
         try:
             db.session.commit()
@@ -484,7 +519,17 @@ def update_completed_trips():
             current_app.logger.error(f"提交事務時出錯: {e}")
             db.session.rollback()
             raise
-        
+
+        # 有單筆失敗 → 彙總一則告警（不再靜默）
+        if failed_trip_ids:
+            if len(failed_trip_ids) == 1:
+                _notify_admin(f"⚠️ 排程異常：班次 #{failed_trip_ids[0]} 自動完成失敗，請檢查")
+            else:
+                ids_text = '、'.join(f"#{t}" for t in failed_trip_ids)
+                _notify_admin(
+                    f"⚠️ 排程異常：{len(failed_trip_ids)} 個班次自動完成失敗（{ids_text}），請檢查"
+                )
+
         result_message = f"更新已完成班次任務結束。成功: {updated_count}, 跳過: {skipped_count}, 錯誤: {error_count}"
         current_app.logger.info(result_message)
         return f"✅ {result_message}"
@@ -501,6 +546,7 @@ def update_completed_trips():
         except RuntimeError:
              print(f"ERROR (outside context): {error_msg}") # fallback
         traceback.print_exc()
+        _notify_admin(f"⚠️ 排程異常：自動完成班次任務整體失敗，請檢查\n原因：{e}")
         return error_msg
 
 def initialize_unique_codes():
