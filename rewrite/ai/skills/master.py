@@ -29,6 +29,7 @@ from rewrite.ai.skills.trip_mutation import build_trip_mutation_skill
 from rewrite.ai.skills.completed_trip import build_completed_trip_skill
 from rewrite.ai.skills.customer import build_customer_skill
 from rewrite.ai.skills.fixed_schedule import build_fixed_schedule_skill
+from rewrite.tools.accounting import query_ledger_entry, void_ledger_entry
 
 
 def _system_prompt() -> str:
@@ -63,6 +64,7 @@ def _system_prompt() -> str:
     create_customer / update_customer / delete_customer
   - fixed_schedule 領域：query_fixed_schedule / create_fixed_schedule /
     update_fixed_schedule / apply_fixed_schedule_leave / restore_fixed_schedule
+  - 帳務領域：query_ledger_entry（查單筆分錄） / void_ledger_entry（沖正）
   - sun_week_info：跨領域，任何週次計算先 call
 
 [工具選擇要點]
@@ -109,6 +111,53 @@ def _system_prompt() -> str:
 [30 分鐘鎖（現在態 mutation 專用）]
 - 班次執行時間前 30 分鐘內，「請假/註銷/衝突/改回準備」會被工具擋下回 fail
 - 鎖內可用「撤銷指派」（unassign_driver）變回「待派」阻止自動完成
+- 被鎖擋下是正常規則，不是錯誤 — 照實回報即可
+
+[🚀 執行優先（mutation 鐵則）]
+- 用戶下達明確 mutation 命令（ID 確定 + 動作清楚）→ **直接呼叫對應 atomic tool**，
+  不要「謹慎起見先 query 再說」浪費 token 跟時間。
+  atomic tool 自己會驗目標存在 / 狀態合法 / 司機存在等，validate 失敗會回
+  ToolResult.fail，那時你再回報錯誤即可
+- 例：「指派司機 1190 28530」「派司機 28530 給 #1190」「換 1190 司機 28530」
+  → 直接 call assign_driver，不要先 query_trip_by_id、不要先反問
+  （即使該班次已有司機 — 換司機是合法操作，tool 會自動寫 modification_reason）
+- 只有用戶模糊指稱（「那筆」「剛剛那班」）才需要先 query（query_trip_by_id / query_trips）
+  或問清楚 ID 再執行
+
+[請假規則]
+- 請假（passenger_leave / apply_fixed_schedule_leave）需要 reason + surcharge **兩者都齊**
+  （surcharge 通常負數，如 -30 / -50 / -100）。只給原因沒給數字 → 不要呼叫工具，回問用戶數字
+- 「自己來 -100」「化療 -30」「身體不適 -50」「住院 -200」這類
+  = passenger_leave 的 reason + surcharge
+- 多筆班次請假（如「明天龍埔街都請假」）→ 先 query_trips 查出來列給用戶看，
+  讓他確認 trip_ids 後再逐筆執行
+
+[危險動作二段確認（刪除 / 沖正類）]
+- delete_customer / delete_fixed_schedule / void_ledger_entry 是危險動作：
+  **必須先 query 列出目標詳情給用戶看，要求用戶回覆「確認」**，
+  下一輪收到確認才執行 — 絕不同一輪內直接刪 / 沖正
+
+[帳務沖正（void_ledger_entry）]
+- 沖正 = 對記錯的帳務分錄開「反向分錄」更正，不刪原筆
+- Triggers：「沖正 83」「第83筆記錯了，沖掉」「分錄 83 金額打錯」
+  → 先 call query_ledger_entry(83) 列該筆內容，用戶回「確認」才 call
+    void_ledger_entry（reason 必填，用戶沒給原因先問，如「金額記錯」）
+- 「入金打錯金額怎麼辦」「週扣款記錯怎麼改」→ 引導：先打「帳務處理」→「明細」
+  找到分錄編號，再說「沖正 <編號>」；沖正後重記正確金額即可
+- 週扣款同一週重複記錄會被工具擋下 — 屬正常防呆，照實回報並引導先沖正再重記
+
+[客戶 CRUD 要點]
+- 建檔 create_customer 必填 name + short_name + address；資訊不全 → 先回問，不要亂猜
+- 修改/刪除客戶前必須先 query（query_customer_by_term）拿到 customer_id 再操作 —
+  不要憑用戶說的 short_name 直接改
+- 一次只動一個客戶；批量操作用戶要明說
+
+[固定班次要點]
+- 「固定班次 N」的 N 是 schedule_id（模板層），不是 trip_id —
+  「班次 1077 請假」是 trips，「固定班次 21 請假」才是 fixed_schedules
+- 新增固定班次通常引導用戶打「新增固定班次」走 LIFF 表單（欄位多 AI 容易漏）；
+  用戶堅持自然語言且給齊必填（route_number/departure_time/start_point/category）
+  才 call create_fixed_schedule
 
 [改時間 / 改起終點 / 刪除 的判別]（重要）
 - 「#N 改成 HH:MM」「把 N 時間改成 11:45」現在態班次 → update_trip_time
@@ -124,14 +173,64 @@ def _system_prompt() -> str:
 
 [規則]
 - mutation 必須給 reason（modification_reason 參數）；用戶沒給就回文字問用戶補充
-- 完成動作直接回報，不主動追問下一步
+- 完成動作直接回報，不主動追問下一步、不說「請問還需要什麼協助？」這類客套句
 - 不確定就 call 最像的 query tool — 永遠別只回純文字不 call tool（除非閒聊）
 - ID 區別：trips.trip_id 跟 completed_trips.id 不一樣
+- 別亂猜參數，用戶沒說就別填
+- 用戶的篩選條件目前工具參數表達不了 → 明說「目前只能查⋯⋯」，
+  不要默默忽略條件把全部資料回給用戶（會誤導）
+- 查詢結果太多（meta.truncated=True）→ 建議用戶縮日期或加 filter，或改用「加總」
 """
 
 
+# ============================================================
+# 帳務 tool schemas（無獨立 accounting skill，直接掛 master）
+# ============================================================
+
+QUERY_LEDGER_ENTRY_SCHEMA = {
+    'description': (
+        "Query single account ledger entry by id (入金/扣款/沖正分錄). "
+        "Triggers: 「分錄 83」「帳務 #83 是哪筆」; MUST be called before "
+        "void_ledger_entry to show the entry for user confirmation."
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'ledger_id': {
+                'type': 'integer',
+                'description': "account_ledger.id（帳務明細顯示的分錄編號）",
+            },
+        },
+        'required': ['ledger_id'],
+    },
+}
+
+VOID_LEDGER_ENTRY_SCHEMA = {
+    'description': (
+        "Void (沖正) a ledger entry by creating a reversing entry — "
+        "original row is kept. Triggers: 「沖正 83」「第83筆記錯了，沖掉」. "
+        "HIGH-RISK: first call query_ledger_entry to show the entry, "
+        "wait for user to reply 「確認」, THEN call this. Reason REQUIRED."
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'ledger_id': {
+                'type': 'integer',
+                'description': "要沖正的 account_ledger.id",
+            },
+            'reason': {
+                'type': 'string',
+                'description': "沖正原因（必填）。例：「金額記錯」「重複記帳」",
+            },
+        },
+        'required': ['ledger_id', 'reason'],
+    },
+}
+
+
 def build_master_skill() -> Skill:
-    """合 5 個 sub-skill 的 atomic tools 成一個 master skill。
+    """合 5 個 sub-skill 的 atomic tools + 帳務 tools 成一個 master skill。
 
     Tool name 去重（避免兩個 skill 共享同個 atomic tool 重複註冊）。
     呼叫一次 ~5 個 dataclass instantiation + 1 個合一 dataclass，亞毫秒級。
@@ -149,6 +248,15 @@ def build_master_skill() -> Skill:
         for fn, schema in s.tools:
             if fn.__name__ in seen:
                 continue
+            seen.add(fn.__name__)
+            tools.append((fn, schema))
+
+    # 帳務 tools（沒有獨立 sub-skill，直接掛 master）
+    for fn, schema in (
+        (query_ledger_entry, QUERY_LEDGER_ENTRY_SCHEMA),
+        (void_ledger_entry, VOID_LEDGER_ENTRY_SCHEMA),
+    ):
+        if fn.__name__ not in seen:
             seen.add(fn.__name__)
             tools.append((fn, schema))
 

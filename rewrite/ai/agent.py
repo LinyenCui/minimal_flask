@@ -20,7 +20,7 @@ from google.genai import types
 
 from modules.services.ai_service import get_genai_client, MODEL_ID
 
-from rewrite.ai.client import LLMClient, LLMResponse, ToolCall
+from rewrite.ai.client import LLMClient, LLMResponse, ToolCall, LLM_TIMEOUT_MS
 from rewrite.ai.skill import Skill
 from rewrite.tools.base import ToolResult
 from rewrite.tools.trip import TripView
@@ -46,6 +46,134 @@ def _is_quota_error(e: Exception) -> bool:
     msg = str(e).lower()
     return ('429' in msg or 'resource exhausted' in msg or 'quota' in msg
             or 'rate limit' in msg)
+
+
+def _is_timeout_error(e: Exception) -> bool:
+    """偵測 Gemini 呼叫逾時（http_options.timeout 到期）
+
+    google-genai 底層走 httpx → 逾時拋 httpx.TimeoutException 系列；
+    保險起見再用字串 fallback 抓（deadline = grpc DEADLINE_EXCEEDED 包裝）。
+    """
+    try:
+        import httpx
+        if isinstance(e, httpx.TimeoutException):
+            return True
+    except ImportError:
+        pass
+    msg = str(e).lower()
+    return 'timeout' in msg or 'timed out' in msg or 'deadline' in msg
+
+
+# ============================================================
+# ToolResult.fail 文案人話化（英文欄位名 → 業務用語）
+# ============================================================
+
+_FIELD_TERMS = {
+    'completed_trip_id': '班次編號',
+    'trip_id': '班次編號',
+    'trip_date': '日期',
+    'meter_fare': '錶跳車資',
+    'extra_fare': '加成',
+    'deposit_date': '入金日期',
+    'last4': '帳號末4碼',
+    'customer_id': '客戶編號',
+    'short_name': '簡稱',
+    'driver_id': '司機編號',
+    'schedule_id': '固定班次編號',
+    'amount': '金額',
+    'week_offset': '週次',
+    'reason': '原因',
+    'category': '類別',
+    'status': '狀態',
+    'gender': '性別',
+}
+
+# 工程詞偵測：前後不是英文字母才算（避免 point 誤中 int、string 誤中 str）
+_TECH_WORD_RE = re.compile(
+    r'(?<![A-Za-z_])(JSON|json|dict|int|str|float|bool|list|None|'
+    r'Traceback|TypeError|ValueError|KeyError)(?![A-Za-z_])'
+)
+
+
+def humanize_tool_error(error: Optional[str]) -> str:
+    """ToolResult.fail 的錯誤訊息 → 用戶看得懂的話
+
+    1. 常見英文欄位名替換成業務用語（長 key 先換，避免子字串誤傷）
+    2. 替換後若仍含 JSON / dict / int 等工程詞 → 句尾補「幫助」提示
+    """
+    if not error:
+        return '發生未知錯誤，請再試一次'
+    msg = error
+    for key in sorted(_FIELD_TERMS, key=len, reverse=True):
+        msg = msg.replace(key, _FIELD_TERMS[key])
+    if _TECH_WORD_RE.search(msg):
+        msg += '（輸入格式可打「幫助」查看）'
+    return msg
+
+
+# ============================================================
+# 唯讀 / mutation 工具判定 + mutation 彙總（多筆時看得到全貌）
+# ============================================================
+
+_READONLY_PREFIXES = ('query_', 'aggregate_', 'get_', 'sun_week')
+
+
+def _is_readonly_tool(name: str) -> bool:
+    """工具是否唯讀（query/aggregate/get/sun_week 開頭）— 非唯讀就算 mutation"""
+    return (name or '').startswith(_READONLY_PREFIXES)
+
+
+_TOOL_ACTION_LABELS = {
+    'passenger_leave': '請假',
+    'cancel_trip': '註銷',
+    'mark_conflict': '標記衝突',
+    'restore_to_ready': '改回準備',
+    'assign_driver': '指派司機',
+    'unassign_driver': '撤銷指派',
+    'update_passenger_name': '改乘客名',
+    'record_fare_current': '記錄車資',
+    'update_trip_category': '改類別',
+    'update_trip_time': '改時間',
+    'update_trip_route': '改起終點',
+    'update_completed_trip_fare': '修改車資',
+    'update_completed_trip_category': '改類別',
+    'update_completed_trip_driver': '改司機',
+    'create_customer': '新增客戶',
+    'update_customer': '更新客戶',
+    'delete_customer': '刪除客戶',
+    'create_fixed_schedule': '新增固定班次',
+    'update_fixed_schedule': '更新固定班次',
+    'apply_fixed_schedule_leave': '固定班次請假',
+    'restore_fixed_schedule': '恢復固定班次',
+    'delete_fixed_schedule': '刪除固定班次',
+    'void_ledger_entry': '沖正帳務分錄',
+}
+
+
+def _inject_context_args(fn, args: dict, *, user_id: Optional[str] = None,
+                         user_name: Optional[str] = None) -> dict:
+    """工具若明確接受 user_id / user_name / via 參數 → 注入 agent context
+
+    audit log（R-6）才記得到「誰、經由哪裡」改的。
+    - 不覆蓋 AI 已明確傳的同名參數
+    - 只認「具名參數」— **kwargs 型工具（如 update_customer 的 **fields）不注入，
+      避免 user_id 被當成業務欄位寫進資料
+    """
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return args
+    context = {'user_id': user_id, 'user_name': user_name, 'via': 'ai_agent'}
+    out = dict(args)
+    for key, value in context.items():
+        p = params.get(key)
+        if (p is not None
+                and p.kind in (inspect.Parameter.KEYWORD_ONLY,
+                               inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                and key not in out
+                and value is not None):
+            out[key] = value
+    return out
 
 
 def _lev_le1(a: str, b: str) -> bool:
@@ -167,6 +295,10 @@ class Agent:
         try:
             return self._chat_with_tool_loop(text, user_id, event_source)
         except Exception as e:
+            # Gemini 呼叫逾時（LLM_TIMEOUT_MS）用友善訊息，技術細節進 log
+            if _is_timeout_error(e):
+                logger.warning(f"[Agent] Gemini timeout: {str(e)[:200]}")
+                return {'type': 'text', 'text': '⏳ AI 處理逾時，請再試一次。'}
             # Vertex AI 429 配額/burst 用友善訊息，技術細節進 log
             if _is_quota_error(e):
                 logger.warning(f"[Agent] Vertex AI 429: {str(e)[:200]}")
@@ -185,7 +317,11 @@ class Agent:
         # （取代舊 vertexai 的 model.start_chat()）
         chat = client.chats.create(
             model=MODEL_ID,
-            config=types.GenerateContentConfig(tools=gemini_tools),
+            config=types.GenerateContentConfig(
+                tools=gemini_tools,
+                # 逾時保護：HttpOptions.timeout 單位是毫秒（見 client.LLM_TIMEOUT_MS）
+                http_options=types.HttpOptions(timeout=LLM_TIMEOUT_MS),
+            ),
         )
 
         # 第一輪：system prompt + user message 合併
@@ -195,6 +331,8 @@ class Agent:
         last_tool_result: Optional[ToolResult] = None
         last_tool_name: Optional[str] = None
         last_tool_args: Optional[dict] = None
+        # 本輪全部「非唯讀」工具的結果 — ≥2 筆時改渲染文字彙總（部分成功要看得到全貌）
+        mutation_results: list = []  # [(tool_name, args, ToolResult)]
 
         for iteration in range(self.MAX_TOOL_LOOPS):
             fc_parts = self._extract_function_calls(response)
@@ -218,6 +356,8 @@ class Agent:
                 last_tool_result = result
                 last_tool_name = tc.name
                 last_tool_args = args_used
+                if not _is_readonly_tool(tc.name):
+                    mutation_results.append((tc.name, args_used, result))
                 response_parts.append(types.Part.from_function_response(
                     name=tc.name,
                     response={'result': self._serialize_tool_result(result)},
@@ -230,6 +370,14 @@ class Agent:
             logger.warning(f"[Agent] hit MAX_TOOL_LOOPS={self.MAX_TOOL_LOOPS}")
 
         # 決定 reply
+        # mutation ≥2 筆 → 不走 flex，渲染文字彙總（逐筆列成功/失敗，全貌可見）
+        if len(mutation_results) >= 2:
+            rendered = self._render_mutation_summary(mutation_results)
+            ai_text = self._extract_text(response)
+            if ai_text:
+                rendered['text'] = ai_text + '\n\n' + rendered['text']
+            return rendered
+
         # 優先：最後執行的 tool 結果（如果有）渲染 → LINE flex/text
         if last_tool_result is not None:
             rendered = self._render_result(last_tool_result, last_tool_name, last_tool_args or {}, event_source=event_source)
@@ -253,6 +401,8 @@ class Agent:
 
         args = _repair_arg_keys(fn, tc.args)   # 修 AI 打錯的參數名（reas1on→reason）
         args = self._normalize_args(args)
+        # audit（R-6）要記得到誰改的：工具接受 user_id / via 就注入 agent context
+        args = _inject_context_args(fn, args, user_id=user_id)
         session = Session()
         try:
             result = fn(session=session, **args)
@@ -320,6 +470,36 @@ class Agent:
         }
 
     @staticmethod
+    def _render_mutation_summary(results: list) -> dict:
+        """多筆 mutation 結果 → 文字彙總（格式比照 sandbox 批次操作回報）
+
+        results: [(tool_name, args, ToolResult)]
+        """
+        ok_lines: list = []
+        fail_lines: list = []
+        for name, args, r in results:
+            label = _TOOL_ACTION_LABELS.get(name, name)
+            target = ''
+            for key in ('trip_id', 'completed_trip_id', 'schedule_id', 'customer_id'):
+                if isinstance(args, dict) and args.get(key) is not None:
+                    target = f"#{args[key]} "
+                    break
+            if r.ok:
+                ok_lines.append(f"  ・{target}{label} 完成")
+            else:
+                err = humanize_tool_error(r.error)[:80]
+                fail_lines.append(f"  ・{target}{label}：{err}")
+
+        lines = [f"📋 本次共執行 {len(results)} 筆修改"]
+        if ok_lines:
+            lines.append(f"✅ 成功 {len(ok_lines)} 筆")
+            lines.extend(ok_lines)
+        if fail_lines:
+            lines.append(f"❌ 失敗 {len(fail_lines)} 筆")
+            lines.extend(fail_lines)
+        return {'type': 'text', 'text': '\n'.join(lines)}
+
+    @staticmethod
     def _normalize_args(args: dict) -> dict:
         """LLM 給的字串日期 → date 物件等"""
         normalized: dict = {}
@@ -356,12 +536,24 @@ class Agent:
         )
 
         if not result.ok:
-            return {'type': 'text', 'text': f'❌ {result.error}'}
+            return {'type': 'text', 'text': f'❌ {humanize_tool_error(result.error)}'}
 
         data = result.data
 
         # ----- CompletedTripView -----
         if isinstance(data, CompletedTripView):
+            # 帳務勾稽警語（update_completed_trip_fare 設 meta.warning）：
+            # flex bubble 塞不下警語 → 改回文字訊息把警語帶出來
+            warning = result.meta.get('warning')
+            if warning:
+                return {
+                    'type': 'text',
+                    'text': (
+                        f"✅ 已完成班次 #{data.id} 已更新"
+                        f"（錶價 {data.meter_fare or 0}、加成 {data.extra_fare or 0}）\n"
+                        f"{warning}"
+                    ),
+                }
             bubble = render_completed_trip_detail(data)
             return {
                 'type': 'flex',

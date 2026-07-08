@@ -20,6 +20,10 @@ from modules.services.ai_service import get_genai_client, MODEL_ID
 
 logger = logging.getLogger(__name__)
 
+# Gemini 單次呼叫逾時。google-genai 的 HttpOptions.timeout 單位是「毫秒」
+# （SDK 內部 _get_timeout_in_seconds 會 /1000 轉秒餵給 httpx）
+LLM_TIMEOUT_MS = 40_000
+
 
 @dataclass
 class ToolCall:
@@ -74,6 +78,7 @@ class GeminiClient(LLMClient):
                 top_p=0.8,
                 max_output_tokens=2048,
                 tools=gemini_tools,
+                http_options=types.HttpOptions(timeout=LLM_TIMEOUT_MS),
             ),
         )
 
