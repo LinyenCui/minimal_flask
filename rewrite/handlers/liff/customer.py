@@ -5,7 +5,8 @@ Routes
 GET  /liff/customer/form           HTML 新增表單（無 auth — 頁面殼）
 GET  /liff/customer/<id>/form      HTML 編輯表單殼
 GET  /liff/customer/<id>           JSON 客戶資料供前端 prefill（auth required）
-POST /liff/customer                新增（auth required）
+POST /liff/customer                新增（auth required；支援多筆 {customers:[...]}，
+                                   同時相容舊單筆 body — LINE 端頁面可能有快取）
 POST /liff/customer/<id>           更新（auth required）
 
 業務邏輯一律呼叫 rewrite.tools.customer 的 atomic tools，不重做。
@@ -65,6 +66,40 @@ def _parse_payload(body: dict) -> tuple[dict, str | None]:
     return fields, None
 
 
+# 一次新增上限（防呆；正常表單一次頂多幾位）
+_BATCH_MAX = 20
+
+
+def _extract_customer_items(body: dict) -> tuple[list[dict], bool, str | None]:
+    """解析 POST /liff/customer 的 body → (items, is_batch, err)
+
+    兩種格式：
+      1. 新版多筆：{'customers': [{...}, {...}], 'source': {...}}
+      2. 舊版單筆：直接就是欄位 dict（LINE 端頁面可能快取舊表單，必須相容）
+
+    純函數（不碰 Flask / DB），方便單元測試。
+    """
+    if 'customers' in body:
+        raw = body.get('customers')
+        if not isinstance(raw, list) or not raw:
+            return [], True, "customers 必須是至少一筆的清單"
+        if not all(isinstance(item, dict) for item in raw):
+            return [], True, "customers 每一筆必須是物件"
+        if len(raw) > _BATCH_MAX:
+            return [], True, f"一次最多新增 {_BATCH_MAX} 位客戶，請分批送出"
+        return list(raw), True, None
+    return [body], False, None
+
+
+def _item_label(item: dict, idx: int) -> str:
+    """逐筆結果顯示用的名字：簡稱 → 姓名 → 第 N 位（純函數）"""
+    for k in ('short_name', 'name'):
+        v = item.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return f"第 {idx + 1} 位"
+
+
 def _serve_form(customer_id: int | None):
     return render_template(
         'liff/customer_form.html',
@@ -112,6 +147,50 @@ def _push_customer(target_id: str | None, view, action_label: str, source=None) 
     except Exception as e:
         body_attr = getattr(e, 'body', None)
         logger.warning(f"[LIFF] push customer detail failed: {e} body={body_attr!r}")
+
+
+def _push_customer_batch(target_id: str | None, created_views: list, failures: list) -> None:
+    """多筆新增完成後推「一則」彙總 text 到來源聊天室。
+
+    比照 booking.py 的 batch_notify 整合推播：把「N 筆 = N 則 push」降為
+    「N 筆 = 1 則」，省 LINE 免費月額度（200 則/月）。
+
+    Args:
+        created_views: 成功建立的 CustomerView 列表
+        failures: [(label, error), ...] 失敗清單（簡稱＋原因）
+
+    沒有任何成功就不推 — 失敗原因表單頁上已逐筆顯示，推到群組只是干擾
+    （比照 booking：只彙總已成功建立的）。失敗只 log warning，不 raise。
+    """
+    if not target_id or not created_views:
+        return
+    try:
+        from linebot.v3.messaging import PushMessageRequest, TextMessage
+        from modules.utils.line_bot import get_line_bot_api, push_notify_enabled
+
+        if not push_notify_enabled():
+            logger.info("[LIFF] customer batch push skipped (PUSH_NOTIFY off)")
+            return
+
+        lines = [f"✅ 已新增 {len(created_views)} 位客戶"]
+        for v in created_views:
+            display = v.short_name or v.name or ''
+            lines.append(f"　#{v.id} {display}".rstrip())
+        if failures:
+            lines.append(f"❌ {len(failures)} 位新增失敗")
+            for label, err in failures:
+                lines.append(f"　{label}：{err}")
+
+        api = get_line_bot_api()
+        api.push_message(PushMessageRequest(
+            to=target_id, messages=[TextMessage(text='\n'.join(lines))],
+        ))
+        logger.info(
+            f"[LIFF] customer batch push n={len(created_views)} → {target_id[:8]} (1 push)"
+        )
+    except Exception as e:
+        body_attr = getattr(e, 'body', None)
+        logger.warning(f"[LIFF] customer batch push failed: {e} body={body_attr!r}")
 
 
 # ---------- HTML 殼 ----------
@@ -208,6 +287,17 @@ def customer_get(customer_id):
 @liff_auth_required
 def customer_create():
     body = request.get_json(silent=True) or {}
+    items, is_batch, err = _extract_customer_items(body)
+    if err:
+        return jsonify({'ok': False, 'error': err}), 400
+    if not is_batch:
+        # 舊單筆格式（LINE 端頁面可能快取舊表單）— 行為完全不變
+        return _customer_create_single(body)
+    return _customer_create_batch(items, body)
+
+
+def _customer_create_single(body: dict):
+    """舊單筆路徑：回應格式 / 推播（text + Flex 詳情）都維持原樣。"""
     fields, err = _parse_payload(body)
     if err:
         return jsonify({'ok': False, 'error': err}), 400
@@ -234,6 +324,69 @@ def customer_create():
     target = resolve_push_target(source, request.line_user_id)
     _push_customer(target, result.data, '新增', source=source)
     return jsonify({'ok': True, 'customer': customer_data}), 201
+
+
+def _customer_create_batch(items: list[dict], body: dict):
+    """多筆新增：逐筆獨立 create（各自 commit，比照 booking 連續預約 —
+    一筆失敗不影響其他筆），全部處理完只推「一則」整合推播。
+
+    回應 JSON 含逐筆結果（results），讓表單頁能顯示成功打勾 / 失敗原因。
+    """
+    results: list[dict] = []
+    created_views: list = []
+    failures: list[tuple[str, str]] = []
+
+    session = Session()
+    try:
+        for idx, item in enumerate(items):
+            label = _item_label(item, idx)
+            fields, perr = _parse_payload(item)
+            if perr:
+                results.append({'ok': False, 'label': label, 'error': perr})
+                failures.append((label, perr))
+                continue
+            try:
+                result = customer_tools.create_customer(session=session, **fields)
+            except SQLAlchemyError as e:
+                session.rollback()
+                logger.exception("create_customer failed (batch)")
+                results.append({'ok': False, 'label': label, 'error': f"DB error: {e}"})
+                failures.append((label, f"DB error: {e}"))
+                continue
+            if result.ok:
+                created_views.append(result.data)
+                results.append({
+                    'ok': True, 'label': label,
+                    'customer': _customer_to_jsonable(result.data),
+                })
+            else:
+                results.append({'ok': False, 'label': label, 'error': result.error})
+                failures.append((label, result.error))
+    finally:
+        session.close()
+
+    n_created = len(created_views)
+    logger.info(
+        f"[LIFF] customer batch by {request.line_user_id}: "
+        f"created={n_created} failed={len(failures)}"
+    )
+
+    from rewrite.utils.liff_url import resolve_push_target
+    source = body.get('source')
+    target = resolve_push_target(source, request.line_user_id)
+    if n_created == 1 and not failures:
+        # 一位全成功 → 沿用單筆推播（text + 客戶詳情 Flex，含編輯按鈕）
+        _push_customer(target, created_views[0], '新增', source=source)
+    else:
+        _push_customer_batch(target, created_views, failures)
+
+    status = 201 if n_created and not failures else 200
+    return jsonify({
+        'ok': True,
+        'results': results,
+        'created': n_created,
+        'failed': len(failures),
+    }), status
 
 
 @liff_bp.route('/customer/<int:customer_id>', methods=['POST'])

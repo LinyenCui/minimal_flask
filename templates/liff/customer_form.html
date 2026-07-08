@@ -22,10 +22,14 @@
     .radio-row label { font-weight: normal; display: inline-flex; align-items: center; gap: 6px; }
     .radio-row input[type=radio] { width: auto; }
     .actions { margin-top: 24px; display: flex; gap: 8px; }
+    /* .actions 是 display:flex，會蓋過 [hidden] 的 display:none，
+       需更高特異性的規則，hidden 時才真的收起（比照 booking form） */
+    .actions[hidden] { display: none; }
     button { flex: 1; padding: 12px; font-size: 16px; border-radius: 6px; border: 0; cursor: pointer; }
     button[type=submit] { background: #06c755; color: #fff; font-weight: 600; }
     button[type=submit]:disabled { background: #aaa; }
     button.secondary { background: #f3f3f3; color: #333; }
+    button.primary { background: #06c755; color: #fff; font-weight: 600; }
     .alert { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 14px; }
     .alert.err { background: #fdecea; color: #c0392b; border: 1px solid #f5c2bf; }
     .alert.ok { background: #e8f5e9; color: #1a7a1a; border: 1px solid #b8e0bb; }
@@ -34,6 +38,19 @@
     details { margin-bottom: 14px; border: 1px solid #eee; border-radius: 6px; padding: 8px 12px; }
     details summary { font-weight: 600; cursor: pointer; padding: 4px 0; color: #555; }
     details[open] { background: #fafafa; }
+    /* 多筆客戶卡（新增模式） */
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin-bottom: 16px; background: #fff; }
+    .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .card-head[hidden] { display: none; }
+    .card-title { font-weight: 700; color: #333; }
+    .card-remove { flex: 0 0 auto; background: #fdecea; color: #c0392b; border: 0; border-radius: 6px; padding: 6px 10px; font-size: 14px; cursor: pointer; }
+    .card-err { background: #fdecea; color: #c0392b; border: 1px solid #f5c2bf; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; font-size: 14px; }
+    .card-err[hidden] { display: none; }
+    /* 提交後逐筆結果 */
+    .result-list { border: 1px solid #eee; border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; }
+    .result-line { padding: 4px 0; font-size: 15px; }
+    .result-line.ok { color: #1a7a1a; }
+    .result-line.err { color: #c0392b; }
   </style>
 </head>
 <body>
@@ -41,22 +58,47 @@
   <div id="content" hidden>
     <h2 id="form-title">客戶資料</h2>
     <div id="alert"></div>
+    <div id="results" hidden></div>
     <form id="customer-form" novalidate>
+      <div id="cards"></div>
+      <div class="actions" id="add-actions" hidden>
+        <button type="button" class="secondary" id="btn-add">＋ 再新增一位</button>
+      </div>
+      <div class="actions">
+        <button type="button" class="secondary" id="btn-cancel">取消</button>
+        <button type="submit" id="btn-submit">儲存</button>
+      </div>
+    </form>
+
+    <div id="post-actions" class="actions" hidden>
+      <button type="button" class="secondary" id="btn-done">✅ 完成關閉</button>
+      <button type="button" class="primary" id="btn-again">✏️ 再新增一位</button>
+    </div>
+  </div>
+
+  <!-- 一組客戶欄位卡（新增模式可複製多張；編輯模式只用一張） -->
+  <template id="card-tpl">
+    <div class="card">
+      <div class="card-head" hidden>
+        <span class="card-title">客戶</span>
+        <button type="button" class="card-remove">✕ 移除</button>
+      </div>
+      <div class="card-err" hidden></div>
       <div class="field">
         <label>姓名<span class="req">*</span></label>
-        <input name="name" type="text" required maxlength="100">
+        <input data-field="name" type="text" required maxlength="100">
       </div>
       <div class="field">
         <label>簡稱<span class="req">*</span><small style="font-weight:normal;color:#888;">（唯一）</small></label>
-        <input name="short_name" type="text" required maxlength="50">
+        <input data-field="short_name" type="text" required maxlength="50">
       </div>
       <div class="field">
         <label>地址<span class="req">*</span></label>
-        <input name="address" type="text" required maxlength="200">
+        <input data-field="address" type="text" required maxlength="200">
       </div>
       <div class="field">
         <label>類別<span class="req">*</span></label>
-        <select name="category" required>
+        <select data-field="category" required>
           <option value="">（請選擇）</option>
           <option value="診所">診所</option>
           <option value="東洋">東洋</option>
@@ -65,43 +107,38 @@
       </div>
       <div class="field">
         <label>聯絡電話</label>
-        <input name="contact_phone" type="tel" maxlength="20" placeholder="例：0912-345-678">
+        <input data-field="contact_phone" type="tel" maxlength="20" placeholder="例：0912-345-678">
       </div>
       <div class="field">
         <label>備註</label>
-        <textarea name="remarks" rows="3" maxlength="500" placeholder="（自費、特殊情況、注意事項…）"></textarea>
+        <textarea data-field="remarks" rows="3" maxlength="500" placeholder="（自費、特殊情況、注意事項…）"></textarea>
       </div>
 
       <details>
         <summary>填寫更多資料（生日 / 性別 / 病歷號 / 共照網代號）</summary>
         <div class="field" style="margin-top: 10px;">
           <label>生日</label>
-          <input name="birthday" type="date">
+          <input data-field="birthday" type="date">
         </div>
         <div class="field">
           <label>性別</label>
           <fieldset class="radio-row">
-            <label><input type="radio" name="gender" value="" checked>不填</label>
-            <label><input type="radio" name="gender" value="M">男</label>
-            <label><input type="radio" name="gender" value="F">女</label>
+            <label><input type="radio" data-field="gender" value="" checked>不填</label>
+            <label><input type="radio" data-field="gender" value="M">男</label>
+            <label><input type="radio" data-field="gender" value="F">女</label>
           </fieldset>
         </div>
         <div class="field">
           <label>病歷號</label>
-          <input name="medical_record_no" type="text" maxlength="50">
+          <input data-field="medical_record_no" type="text" maxlength="50">
         </div>
         <div class="field">
           <label>糖尿病共照網代號</label>
-          <input name="dm_care_no" type="text" maxlength="10" inputmode="numeric" placeholder="診所內部編號（約 4 位數，可留空）">
+          <input data-field="dm_care_no" type="text" maxlength="10" inputmode="numeric" placeholder="診所內部編號（約 4 位數，可留空）">
         </div>
       </details>
-
-      <div class="actions">
-        <button type="button" class="secondary" id="btn-cancel">取消</button>
-        <button type="submit" id="btn-submit">儲存</button>
-      </div>
-    </form>
-  </div>
+    </div>
+  </template>
 
   <script>
     const LIFF_ID = "{{ liff_id }}";
@@ -149,16 +186,28 @@
     const contentEl = document.getElementById('content');
     const titleEl = document.getElementById('form-title');
     const alertEl = document.getElementById('alert');
+    const resultsEl = document.getElementById('results');
     const form = document.getElementById('customer-form');
+    const cardsEl = document.getElementById('cards');
+    const cardTpl = document.getElementById('card-tpl');
+    const addActions = document.getElementById('add-actions');
+    const addBtn = document.getElementById('btn-add');
     const submitBtn = document.getElementById('btn-submit');
     const cancelBtn = document.getElementById('btn-cancel');
-    const advancedDetails = document.querySelector('details');
+    const postActions = document.getElementById('post-actions');
+    const doneBtn = document.getElementById('btn-done');
+    const againBtn = document.getElementById('btn-again');
 
     function showAlert(type, msg) {
       alertEl.innerHTML = `<div class="alert ${type}">${msg}</div>`;
     }
 
     function clearAlert() { alertEl.innerHTML = ''; }
+
+    function esc(s) {
+      return String(s ?? '').replace(/[&<>"']/g,
+        m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+    }
 
     // 防 LIFF SDK 偶爾回傳含 \r \n \0 的 idToken 導致 Headers.set 炸
     // (iOS Safari WebView 上常見「The string did not match the expected pattern.」)
@@ -187,27 +236,70 @@
     function setLoading(text) { loadingEl.textContent = text; loadingEl.hidden = false; contentEl.hidden = true; }
     function showContent() { loadingEl.hidden = true; contentEl.hidden = false; }
 
-    // 編輯模式 prefill 時，若進階欄位有資料就把 details 預設展開
-    function _expandAdvancedIfHasData(c) {
-      if (advancedDetails && (c.birthday || c.gender || c.medical_record_no || c.dm_care_no)) {
-        advancedDetails.open = true;
-      }
+    // ---------- 多筆客戶卡管理 ----------
+
+    let cardSeq = 0;
+
+    function cards() { return Array.from(cardsEl.querySelectorAll('.card')); }
+
+    // 卡片標頭（客戶 1 / 2 / …＋移除鈕）只在新增模式且 >1 張時顯示
+    function refreshCardHeads() {
+      const all = cards();
+      all.forEach((c, i) => {
+        c.querySelector('.card-head').hidden = (MODE === 'edit') || all.length === 1;
+        c.querySelector('.card-title').textContent = `客戶 ${i + 1}`;
+      });
     }
 
-    function fillForm(c) {
-      for (const [k, v] of Object.entries(c)) {
-        const el = form.elements.namedItem(k);
-        if (!el) continue;
-        if (el instanceof RadioNodeList) {
-          // gender radio group
-          form.querySelectorAll(`input[name="${k}"]`).forEach(r => {
-            r.checked = (r.value === (v ?? ''));
-          });
+    function addCard() {
+      const frag = cardTpl.content.cloneNode(true);
+      const card = frag.querySelector('.card');
+      const seq = ++cardSeq;
+      // radio group 每張卡要有獨立 name，才不會跨卡互斥
+      card.querySelectorAll('input[type=radio][data-field="gender"]').forEach(r => {
+        r.name = 'gender_' + seq;
+      });
+      card.querySelector('.card-remove').addEventListener('click', () => {
+        card.remove();
+        refreshCardHeads();
+      });
+      // 使用者修改內容 → 收掉這張卡上一輪的失敗紅字
+      card.addEventListener('input', () => {
+        const errEl = card.querySelector('.card-err');
+        if (errEl) errEl.hidden = true;
+      }, true);
+      cardsEl.appendChild(frag);
+      refreshCardHeads();
+      return card;
+    }
+
+    function collectCard(card) {
+      const obj = {};
+      card.querySelectorAll('[data-field]').forEach(el => {
+        const k = el.dataset.field;
+        if (el.type === 'radio') {
+          if (el.checked) obj[k] = el.value;
         } else {
-          el.value = v ?? '';
+          obj[k] = el.value;
         }
+      });
+      return obj;
+    }
+
+    // 編輯模式 prefill：填值＋進階欄位有資料就展開 details
+    function fillCard(card, c) {
+      card.querySelectorAll('[data-field]').forEach(el => {
+        const k = el.dataset.field;
+        if (el.type === 'radio') {
+          el.checked = (el.value === (c.gender ?? ''));
+        } else if (k in c) {
+          el.value = c[k] ?? '';
+        }
+      });
+      const det = card.querySelector('details');
+      if (det && (c.birthday || c.gender || c.medical_record_no || c.dm_care_no)) {
+        det.open = true;
       }
-      _expandAdvancedIfHasData(c);
     }
 
     async function loadCustomer(id) {
@@ -236,22 +328,90 @@
         return;
       }
       titleEl.textContent = MODE === 'edit' ? `編輯客戶 #${CUSTOMER_ID}` : '新增客戶';
+      const firstCard = addCard();
       if (MODE === 'edit') {
         try {
           const c = await loadCustomer(CUSTOMER_ID);
-          fillForm(c);
+          fillCard(firstCard, c);
         } catch (e) {
           setLoading('載入客戶資料失敗：' + e.message);
           return;
         }
+      } else {
+        // 新增模式才有「＋ 再新增一位」；編輯維持單筆
+        addActions.hidden = false;
       }
       showContent();
     }
 
-    cancelBtn.addEventListener('click', () => {
+    function _closeOrBack() {
       if (liff.isInClient && liff.isInClient()) liff.closeWindow();
       else history.back();
+    }
+
+    cancelBtn.addEventListener('click', _closeOrBack);
+    doneBtn.addEventListener('click', () => { doneBtn.disabled = true; _closeOrBack(); });
+
+    addBtn.addEventListener('click', () => {
+      const card = addCard();
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const nameEl = card.querySelector('[data-field="name"]');
+      if (nameEl && nameEl.focus) nameEl.focus();
     });
+
+    // 完成後「再新增一位」：清結果、重開一張空白卡
+    againBtn.addEventListener('click', () => {
+      clearAlert();
+      resultsEl.hidden = true;
+      resultsEl.innerHTML = '';
+      cards().forEach(c => c.remove());
+      addCard();
+      form.hidden = false;
+      postActions.hidden = true;
+      submitBtn.disabled = false;
+      submitBtn.textContent = '儲存';
+      window.scrollTo(0, 0);
+    });
+
+    // 逐筆結果（成功打勾、失敗紅字原因）
+    function renderResults(results) {
+      const lines = results.map(r => r.ok
+        ? `<div class="result-line ok">✅ #${r.customer.id} ${esc(r.label)}</div>`
+        : `<div class="result-line err">❌ ${esc(r.label)}：${esc(r.error || '新增失敗')}</div>`
+      ).join('');
+      resultsEl.innerHTML = `<div class="result-list">${lines}</div>`;
+      resultsEl.hidden = false;
+    }
+
+    // 新增模式提交後處理：成功卡移除；失敗卡留在表單上帶紅字原因，可修正重送
+    function handleBatchResults(results, submittedCards) {
+      results.forEach((r, i) => {
+        const card = submittedCards[i];
+        if (!card) return;
+        if (r.ok) {
+          card.remove();
+        } else {
+          const errEl = card.querySelector('.card-err');
+          errEl.textContent = '❌ ' + (r.error || '新增失敗');
+          errEl.hidden = false;
+        }
+      });
+      refreshCardHeads();
+
+      const okCount = results.filter(r => r.ok).length;
+      const errCount = results.length - okCount;
+      renderResults(results);
+      if (errCount === 0) {
+        showAlert('ok', `✅ 已新增 ${okCount} 位客戶`);
+        form.hidden = true;
+        postActions.hidden = false;
+      } else {
+        showAlert('err', `⚠️ ${okCount} 位成功、${errCount} 位失敗 — 請修正下方紅字後再按「儲存」`);
+        submitBtn.disabled = false;
+        submitBtn.textContent = '儲存';
+      }
+      window.scrollTo(0, 0);
+    }
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -273,9 +433,18 @@
         const idToken = _safeIdToken();
         console.log('[submit] idToken len=', idToken.length);
 
-        _stage = 'formData';
-        const fd = new FormData(form);
-        const payload = Object.fromEntries(fd.entries());
+        _stage = 'payload';
+        const submittedCards = cards();
+        let url, payload;
+        if (MODE === 'edit') {
+          // 編輯維持單筆 payload — 後端行為完全不變
+          url = `/liff/customer/${CUSTOMER_ID}`;
+          payload = collectCard(submittedCards[0]);
+        } else {
+          // 新增：一次多筆 {customers: [...]}，後端逐筆處理＋單次整合推播
+          url = '/liff/customer';
+          payload = { customers: submittedCards.map(collectCard) };
+        }
 
         // 讀 source — 同時看 window.location.search 和 liff.state（iOS LIFF 有時不解 liff.state）
         _stage = 'readSource';
@@ -284,7 +453,6 @@
         console.log('[submit] payload.source=', payload.source);
 
         _stage = 'fetch';
-        const url = MODE === 'edit' ? `/liff/customer/${CUSTOMER_ID}` : '/liff/customer';
         const resp = await fetch(url, {
           method: 'POST',
           headers: {
@@ -299,13 +467,16 @@
         if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
 
         _stage = 'success';
-        const inClient = liff.isInClient && liff.isInClient();
-        const action = MODE === 'edit' ? '更新' : '新增';
-        if (inClient) {
-          showAlert('ok', `✅ 已${action}客戶 #${data.customer.id}（1.5 秒後關閉）`);
-          setTimeout(() => liff.closeWindow(), 1500);
+        if (MODE === 'edit') {
+          const inClient = liff.isInClient && liff.isInClient();
+          if (inClient) {
+            showAlert('ok', `✅ 已更新客戶 #${data.customer.id}（1.5 秒後關閉）`);
+            setTimeout(() => liff.closeWindow(), 1500);
+          } else {
+            showAlert('ok', `✅ 已更新客戶 #${data.customer.id}（可關閉視窗）`);
+          }
         } else {
-          showAlert('ok', `✅ 已${action}客戶 #${data.customer.id}（可關閉視窗）`);
+          handleBatchResults(data.results || [], submittedCards);
         }
       } catch (err) {
         console.error(`[submit] failed at stage=${_stage}`, err);
