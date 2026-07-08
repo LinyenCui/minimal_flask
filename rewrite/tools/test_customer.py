@@ -43,8 +43,15 @@ try:
     # ============================================================
     # T2: 病歷號精確
     # ============================================================
-    banner('T2: 病歷號 medical_record_no = "001026"')
-    r = query_customer(medical_record_no='001026', session=session)
+    # 動態取庫裡現存的一筆病歷號 — 固定值會因 DB 同步/資料漂移而消失
+    from sqlalchemy import text as _text
+    _mrn = session.execute(_text(
+        "SELECT medical_record_no FROM customers "
+        "WHERE medical_record_no IS NOT NULL AND medical_record_no != '' LIMIT 1"
+    )).scalar()
+    assert _mrn, '本地 DB 無任何含病歷號的客戶，無法測 T2'
+    banner(f'T2: 病歷號 medical_record_no = "{_mrn}"')
+    r = query_customer(medical_record_no=_mrn, session=session)
     assert r.ok
     c = r.data[0]
     print(f'  matched_by: {r.meta.get("matched_by")}')
@@ -55,7 +62,7 @@ try:
     # T3: mask_id 參數仍接受（backward-compat）
     # ============================================================
     banner('T3: mask_id=False 不該炸（drop national_id 後參數變 noop）')
-    r = query_customer(medical_record_no='001026', session=session, mask_id=False)
+    r = query_customer(medical_record_no=_mrn, session=session, mask_id=False)
     assert r.ok
     c = r.data[0]
     print(f'  mask_id=False ok: #{c.id} {c.name}')
