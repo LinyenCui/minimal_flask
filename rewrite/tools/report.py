@@ -38,6 +38,8 @@ def generate_report(
     session=None,  # 簽名一致，不用 DB（report_service 自己拿 session）
     report_type: str,
     target_date: Optional[date] = None,
+    year: Optional[int] = None,
+    month: Optional[int] = None,
     category: Optional[str] = '全部',
     file_format: str = 'xlsx',
     user_id: Optional[str] = None,
@@ -48,7 +50,9 @@ def generate_report(
 
     Args:
         report_type: 'daily' / 'weekly' / 'monthly'
-        target_date: 只 daily 用（可選；不給用 legacy 預設「昨天」）
+        target_date: daily = 指定日期；weekly = 指定「該日所在太陽週」
+                     （可選；不給用 legacy 預設「昨天」/「上週」）
+        year / month: 只 monthly 用（可選；兩者都給才生效，不給預設「上月」）
         category: '全部' / '診所' / '東洋'（預設全部）
         file_format: 'xlsx'（預設）/ 'pdf' / 'both'
 
@@ -74,6 +78,23 @@ def generate_report(
         )
     cat = category or '全部'
 
+    # type coerce（AI / 表單可能傳 str）
+    if isinstance(target_date, str):
+        try:
+            target_date = date.fromisoformat(target_date.strip())
+        except ValueError:
+            return ToolResult.fail(f"日期格式錯（要 YYYY-MM-DD）：{target_date!r}")
+    if year is not None or month is not None:
+        try:
+            year = int(year)
+            month = int(month)
+        except (TypeError, ValueError):
+            return ToolResult.fail("year / month 必須是整數且要一起給")
+        if not (1 <= month <= 12):
+            return ToolResult.fail(f"month 必須是 1-12（給的是 {month}）")
+        if not (2000 <= year <= 2100):
+            return ToolResult.fail(f"year 不合理（給的是 {year}）")
+
     # 組 legacy 預期 text
     parts = []
     if report_type == 'daily':
@@ -94,7 +115,7 @@ def generate_report(
 
     logger.info(
         f"[report wrapper] type={report_type} cat={cat} date={target_date} "
-        f"→ legacy text={text!r}"
+        f"ym={year}/{month} → legacy text={text!r}"
     )
 
     # call legacy
@@ -104,10 +125,12 @@ def generate_report(
             result_text = handle_generate_daily_report(text, file_format=file_format)
         elif report_type == 'weekly':
             from modules.services.report_service import handle_generate_weekly_report
-            result_text = handle_generate_weekly_report(text, file_format=file_format)
+            result_text = handle_generate_weekly_report(
+                text, file_format=file_format, target_date=target_date)
         else:
             from modules.services.report_service import handle_generate_monthly_report
-            result_text = handle_generate_monthly_report(text, file_format=file_format)
+            result_text = handle_generate_monthly_report(
+                text, file_format=file_format, year=year, month=month)
     except Exception as e:
         logger.exception("legacy report 失敗")
         return ToolResult.fail(f"報表生成失敗：{str(e)[:200]}")

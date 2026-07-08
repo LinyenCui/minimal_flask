@@ -138,6 +138,9 @@ def _push_batch_allowance(target_id, data) -> None:
             f"加成：{amt:+d} 元\n"
             f"原因：{data['reason']}"
         )
+        warnings = data.get('weekly_charge_warnings') or []
+        if warnings:
+            msg += '\n' + '\n'.join(warnings)
         api.push_message(PushMessageRequest(
             to=target_id, messages=[TextMessage(text=msg)],
         ))

@@ -311,7 +311,12 @@
         if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
 
         const inClient = liff.isInClient && liff.isInClient();
-        if (inClient) {
+        const warnings = data.weekly_charge_warnings || [];
+        if (warnings.length) {
+          // 有帳務勾稽警語 → 不自動關閉，讓用戶看完警語再手動關
+          showAlert('ok', `✅ 已批量加成 ${data.updated_count} 筆<br>` +
+            warnings.join('<br>') + '<br>（請確認後手動關閉視窗）');
+        } else if (inClient) {
           showAlert('ok', `✅ 已批量加成 ${data.updated_count} 筆（1.5 秒後關閉）`);
           setTimeout(() => liff.closeWindow(), 1500);
         } else {

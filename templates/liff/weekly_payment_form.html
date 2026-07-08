@@ -47,8 +47,9 @@
 
       <div class="field">
         <label>上週總金額（NT$）<span class="req">*</span></label>
-        <input name="amount" type="number" min="1" required placeholder="例：12500">
-        <div class="helper">必須是正整數</div>
+        <input name="amount" id="input-amount" type="number" min="1" required placeholder="例：12500">
+        <div class="helper" id="calc-hint">計算系統金額中…</div>
+        <div class="helper" id="diff-hint" style="color:#c0392b; font-weight:600;"></div>
       </div>
 
       <div class="actions">
@@ -109,6 +110,58 @@
       return `${yy}-${mm}-${dd}（六）23:59`;
     }
 
+    const amountInput = document.getElementById('input-amount');
+    const calcHintEl = document.getElementById('calc-hint');
+    const diffHintEl = document.getElementById('diff-hint');
+    let systemAmount = null;  // 後端算的系統金額（null = 取不到，不做差額比對）
+
+    function _fmtMD(iso) {
+      const [y, m, d] = iso.split('-').map(Number);
+      return `${m}/${d}`;
+    }
+
+    function updateDiffHint() {
+      if (systemAmount === null) { diffHintEl.textContent = ''; return; }
+      const v = parseInt(amountInput.value, 10);
+      if (!Number.isFinite(v) || v === systemAmount) {
+        diffHintEl.textContent = '';
+        return;
+      }
+      const diff = v - systemAmount;
+      diffHintEl.textContent =
+        `⚠️ 與系統計算差 ${diff > 0 ? '+' : ''}${diff.toLocaleString()}`;
+    }
+    amountInput.addEventListener('input', updateDiffHint);
+
+    async function loadPrefill() {
+      try {
+        const resp = await fetch('/liff/accounting/weekly_payment/prefill', {
+          headers: { 'Authorization': 'Bearer ' + _safeIdToken() },
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+        systemAmount = data.total_amount;
+        const range = `${_fmtMD(data.week_start)}〜${_fmtMD(data.week_end)}`;
+        calcHintEl.textContent =
+          `🧮 系統計算：${data.trip_count} 趟、NT$ ${data.total_amount.toLocaleString()}（${range}）`;
+        if (!amountInput.value && data.total_amount > 0) {
+          amountInput.value = data.total_amount;
+        }
+        if (data.existing_charge) {
+          showAlert('err',
+            `⚠️ 該週已記過扣款 NT$ ${data.existing_charge.amount.toLocaleString()}` +
+            `（#${data.existing_charge.id}）。重複送出會被擋下；` +
+            `金額有誤請先沖正（輸入「沖正 ${data.existing_charge.id}」）再重記。`);
+        }
+        updateDiffHint();
+      } catch (e) {
+        // 預填失敗不擋表單 — 手填照常
+        calcHintEl.textContent = '（系統金額計算失敗，請手動填寫）';
+        console.warn('[weekly_payment] prefill failed:', e);
+      }
+    }
+
     async function init() {
       if (!LIFF_ID) { setLoading('LIFF_ID 未設定'); return; }
       try { await liff.init({ liffId: LIFF_ID }); }
@@ -120,6 +173,7 @@
       }
       lastSatEl.textContent = _lastSaturday();
       showContent();
+      loadPrefill();
     }
 
     cancelBtn.addEventListener('click', () => {

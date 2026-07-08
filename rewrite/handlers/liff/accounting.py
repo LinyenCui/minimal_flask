@@ -105,6 +105,26 @@ def accounting_deposit():
     return jsonify({'ok': True, **data}), 201
 
 
+# ---------- JSON API: 週扣款表單預填 ----------
+
+@liff_bp.route('/accounting/weekly_payment/prefill', methods=['GET'])
+@liff_auth_required
+def accounting_weekly_payment_prefill():
+    """表單載入時算「上個完整太陽週」診所實收總額 + 該週是否已記扣款"""
+    session = Session()
+    try:
+        result = acct_tools.weekly_charge_prefill(session=session)
+    except SQLAlchemyError as e:
+        logger.exception("weekly_charge_prefill failed")
+        return jsonify({'ok': False, 'error': f'DB error: {e}'}), 500
+    finally:
+        session.close()
+
+    if not result.ok:
+        return jsonify({'ok': False, 'error': result.error}), 400
+    return jsonify({'ok': True, **result.data})
+
+
 # ---------- JSON API: 週扣款 ----------
 
 @liff_bp.route('/accounting/weekly_payment', methods=['POST'])

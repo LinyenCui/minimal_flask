@@ -116,6 +116,8 @@ def _fmt_type(t: str) -> str:
         return '入金'
     if t == 'weekly_charge':
         return '扣款'
+    if t == 'void':
+        return '沖正'
     return t or ''
 
 

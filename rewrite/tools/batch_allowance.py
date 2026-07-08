@@ -11,7 +11,7 @@
   execute_batch_allowance — 執行 batch UPDATE
 """
 import logging
-from datetime import date as _date
+from datetime import date as _date, timedelta
 from typing import Optional
 
 from sqlalchemy import text
@@ -143,7 +143,7 @@ def execute_batch_allowance(
         params['category'] = category
 
     rows = session.execute(text(f"""
-        SELECT id, modification_reason
+        SELECT id, date, modification_reason
         FROM completed_trips
         WHERE {' AND '.join(where)}
         ORDER BY id
@@ -156,7 +156,7 @@ def execute_batch_allowance(
 
     # 逐筆 UPDATE（modification_reason 累加要看舊值）
     updated = 0
-    for trip_id, current_reason in rows:
+    for trip_id, _trip_date, current_reason in rows:
         new_reason = append_modification_reason(
             current_reason, reason, 'completed_trips',
         )
@@ -199,4 +199,45 @@ def execute_batch_allowance(
         'date_from': date_from.isoformat(),
         'date_to': date_to.isoformat(),
         'category': category or '全部',
+        # 帳務勾稽：受影響太陽週若已記週扣款 → 附警語（只提示不改帳）
+        'weekly_charge_warnings': _weekly_charge_warnings(
+            session=session, rows=rows, amount=amount,
+        ),
     })
+
+
+def _weekly_charge_warnings(*, session, rows, amount: int) -> list:
+    """算批量加成影響到的太陽週勾稽警語清單
+
+    rows: [(id, date, modification_reason), ...]（本次被加成的班次）
+    每個受影響太陽週若已有「有效」weekly_charge 分錄，
+    差額 = amount × 該週被加成筆數。
+    """
+    try:
+        # lazy import 避免循環 import
+        from rewrite.tools.accounting import find_weekly_charge_for_week
+        from rewrite.utils.sun_week import sun_week_start
+
+        week_counts: dict = {}
+        for _trip_id, trip_date, _reason in rows:
+            if not trip_date:
+                continue
+            ws = sun_week_start(trip_date)
+            week_counts[ws] = week_counts.get(ws, 0) + 1
+
+        warnings = []
+        for ws in sorted(week_counts):
+            we = ws + timedelta(days=6)
+            charge = find_weekly_charge_for_week(session=session, week_end_date=we)
+            if not charge:
+                continue
+            delta = amount * week_counts[ws]
+            warnings.append(
+                f"⚠️ 該週（{ws.month}/{ws.day}〜{we.month}/{we.day}）已記扣款 "
+                f"NT$ {charge['amount_out']:,}，本次調整差額 {delta:+,}，"
+                f"帳務需補沖正/補記"
+            )
+        return warnings
+    except Exception as e:  # 勾稽失敗不擋主流程
+        logger.warning(f"batch_allowance weekly_charge 勾稽檢查失敗: {e}")
+        return []

@@ -36,14 +36,28 @@ def _parse_payload(body: dict) -> tuple[dict, str | None]:
     if cat not in report_tools.VALID_REPORT_CATEGORIES:
         return {}, f"類別必須是 {report_tools.VALID_REPORT_CATEGORIES} 之一"
 
+    # daily = 指定日期；weekly = 指定「該日所在太陽週」的任一天（通常送週日）
     target_date = None
-    if rtype == 'daily':
+    if rtype in ('daily', 'weekly'):
         d_raw = (body.get('target_date') or '').strip()
         if d_raw:
             try:
                 target_date = date.fromisoformat(d_raw)
             except ValueError:
                 return {}, f"日期格式錯（要 YYYY-MM-DD）：{d_raw!r}"
+
+    # monthly = 指定月份 'YYYY-MM'（不給預設上月）
+    year = month = None
+    if rtype == 'monthly':
+        m_raw = (body.get('month') or '').strip()
+        if m_raw:
+            try:
+                y_s, m_s = m_raw.split('-', 1)
+                year, month = int(y_s), int(m_s)
+                if not (1 <= month <= 12):
+                    raise ValueError
+            except ValueError:
+                return {}, f"月份格式錯（要 YYYY-MM）：{m_raw!r}"
 
     file_format = (body.get('file_format') or 'xlsx').strip() or 'xlsx'
     if file_format not in report_tools.VALID_FILE_FORMATS:
@@ -53,6 +67,8 @@ def _parse_payload(body: dict) -> tuple[dict, str | None]:
         'report_type': rtype,
         'category': cat,
         'target_date': target_date,
+        'year': year,
+        'month': month,
         'file_format': file_format,
     }, None
 

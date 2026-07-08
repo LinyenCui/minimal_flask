@@ -3,7 +3,7 @@
 """
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import date as _date, datetime, timedelta
 import pandas as pd
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
@@ -236,7 +236,8 @@ def _create_excel_report(worksheet, df, driver_stats, filename, start_date, end_
     logger.info(f"報表已成功生成: {filename}")
     
     category_text = ""
-    return f"已生成上{report_type} ({start_date.strftime('%m/%d')} - {end_date.strftime('%m/%d')}) {category_text}報表。", filename
+    # 不寫死「上週/上日」— 週/日可由參數指定，日期範圍才是準的
+    return f"已生成{report_type}報表 ({start_date.strftime('%m/%d')} - {end_date.strftime('%m/%d')}) {category_text}。", filename
 
 VALID_FILE_FORMATS = ('xlsx', 'pdf', 'both')
 
@@ -275,32 +276,36 @@ def _finalize_report_output(msg, files, pdf_error):
     return msg, files
 
 
-def generate_monthly_report(category=None, file_format='xlsx'):
+def generate_monthly_report(category=None, file_format='xlsx', year=None, month=None):
     """
-    生成上個月的統計圖表報表（不是明細表）
-    
+    生成月統計圖表報表（不是明細表）
+
     Args:
         category: 選擇性的班次類別過濾（例如"診所"或"東洋"）
-        
+        year / month: 指定月份（int；兩者都給才生效，None=維持現行「上月」）
+
     Returns:
         tuple: (結果消息, 生成的文件名)
     """
     try:
-        # 獲取日期範圍 - 上個月的第一天和最後一天
-        today = get_taiwan_date()
-        # 計算上個月
-        if today.month == 1:
-            last_month_start = today.replace(year=today.year-1, month=12, day=1)
+        # 獲取日期範圍 - 指定月份或上個月的第一天和最後一天
+        if year and month:
+            last_month_start = _date(int(year), int(month), 1)
         else:
-            last_month_start = today.replace(month=today.month-1, day=1)
-        
-        # 計算上個月最後一天
+            today = get_taiwan_date()
+            # 計算上個月
+            if today.month == 1:
+                last_month_start = today.replace(year=today.year-1, month=12, day=1)
+            else:
+                last_month_start = today.replace(month=today.month-1, day=1)
+
+        # 計算該月最後一天
         if last_month_start.month == 12:
             next_month_first = last_month_start.replace(year=last_month_start.year+1, month=1, day=1)
         else:
             next_month_first = last_month_start.replace(month=last_month_start.month+1, day=1)
         last_month_end = next_month_first - timedelta(days=1)
-        
+
         logger.info(f"生成月報表統計圖表，日期範圍: {last_month_start} 至 {last_month_end}")
         
         # 查詢數據
@@ -338,8 +343,10 @@ def generate_monthly_report(category=None, file_format='xlsx'):
         
         if not completed_trips:
             category_text = f"類別「{category}」的" if category and category != "全部" else ""
-            logger.warning(f"上個月沒有{category_text}已完成的班次")
-            return f"上個月沒有{category_text}已完成的班次。", None
+            month_text = (last_month_start.strftime('%Y/%m') + ' '
+                          if year and month else "上個月")
+            logger.warning(f"{month_text}沒有{category_text}已完成的班次")
+            return f"{month_text}沒有{category_text}已完成的班次。", None
         
         logger.info(f"找到 {len(completed_trips)} 條班次記錄")
         
@@ -580,27 +587,38 @@ def _create_monthly_statistics_report(workbook, df, filename, start_date, end_da
     logger.info(f"月度統計報表已成功生成: {filename}")
     
     category_text = f"類別「{category}」的" if category and category != "全部" else ""
-    return f"已生成上月 ({start_date.strftime('%m/%d')} - {end_date.strftime('%m/%d')}) {category_text}統計報表。", filename
+    return (f"已生成 {start_date.strftime('%Y/%m')} 月 "
+            f"({start_date.strftime('%m/%d')} - {end_date.strftime('%m/%d')}) "
+            f"{category_text}統計報表。"), filename
 
 
-def generate_weekly_report(category=None, file_format='xlsx'):
+def generate_weekly_report(category=None, file_format='xlsx', target_date=None):
     """
-    生成上週的班次報表
+    生成週班次報表
 
     Args:
         category: 選擇性的班次類別過濾（例如"診所"或"東洋"）
         file_format: 'xlsx' / 'pdf' / 'both'
+        target_date: 指定週次用的日期（date；None=維持現行「上週」推算）。
+                     有值 → 產「該日所在太陽週」（週日~週六，用
+                     rewrite/utils/sun_week.py 算，禁止自算）
 
     Returns:
         tuple: (結果消息, 生成的文件名清單 list[str] | None)
     """
     try:
         # 獲取日期範圍
-        today = get_taiwan_date()
-        days_since_sunday = today.weekday() + 1 if today.weekday() < 6 else 0
-        last_sunday = today - timedelta(days=days_since_sunday + 7)
-        last_saturday = last_sunday + timedelta(days=6)
-        
+        if target_date is not None:
+            # 太陽週：週日起算（sun_week helper，勿自算）
+            from rewrite.utils.sun_week import sun_week_start
+            last_sunday = sun_week_start(target_date)
+            last_saturday = last_sunday + timedelta(days=6)
+        else:
+            today = get_taiwan_date()
+            days_since_sunday = today.weekday() + 1 if today.weekday() < 6 else 0
+            last_sunday = today - timedelta(days=days_since_sunday + 7)
+            last_saturday = last_sunday + timedelta(days=6)
+
         logger.info(f"生成週報表，日期範圍: {last_sunday} 至 {last_saturday}")
         
         # 查詢數據
@@ -642,11 +660,13 @@ def generate_weekly_report(category=None, file_format='xlsx'):
         
         if not completed_trips:
             category_text = f"類別「{category}」的" if category and category != "全部" else ""
-            logger.warning(f"上周沒有{category_text}已完成的班次")
-            return f"上周沒有{category_text}已完成的班次。", None
-        
+            week_text = (f"{last_sunday.strftime('%m/%d')}~{last_saturday.strftime('%m/%d')} "
+                         if target_date is not None else "上周")
+            logger.warning(f"{week_text}沒有{category_text}已完成的班次")
+            return f"{week_text}沒有{category_text}已完成的班次。", None
+
         logger.info(f"找到 {len(completed_trips)} 條班次記錄")
-        
+
         # 創建DataFrame
         df = pd.DataFrame(completed_trips)
         df.columns = ['ID', '日期', '起點', '途經點', '終點', '錶價', '加成', '實收', '司機編號', '修改原因', '請假原因']
@@ -770,13 +790,14 @@ def _upload_report_files(result, files, folder_id):
     return "\n".join(lines)
 
 
-def handle_generate_weekly_report(text, file_format='xlsx'):
+def handle_generate_weekly_report(text, file_format='xlsx', target_date=None):
     """
     處理生成周報表命令
 
     Args:
         text: 用戶輸入的文本命令
         file_format: 'xlsx' / 'pdf' / 'both'
+        target_date: 指定週次用的日期（date；None=維持現行「上週」推算）
 
     Returns:
         str: 處理結果消息
@@ -802,8 +823,10 @@ def handle_generate_weekly_report(text, file_format='xlsx'):
         logger.info(f"使用類別: {category}, 對應文件夾ID: {folder_id}")
     
     try:
-        logger.info(f"開始生成週報表，類別: {category}, 格式: {file_format}")
-        result, files = generate_weekly_report(category, file_format=file_format)
+        logger.info(f"開始生成週報表，類別: {category}, 格式: {file_format}, "
+                    f"指定日期: {target_date}")
+        result, files = generate_weekly_report(category, file_format=file_format,
+                                               target_date=target_date)
         if not files:
             logger.warning("沒有生成報表文件")
             return result
@@ -1005,13 +1028,14 @@ def handle_generate_daily_report(text_input, file_format='xlsx'):
         return f"生成日報表時出錯: {str(e)}"
 
 
-def handle_generate_monthly_report(text, file_format='xlsx'):
+def handle_generate_monthly_report(text, file_format='xlsx', year=None, month=None):
     """
     處理生成月報表命令
 
     Args:
         text: 用戶輸入的文本命令
         file_format: 'xlsx' / 'pdf' / 'both'
+        year / month: 指定月份（int；None=維持現行「上月」）
 
     Returns:
         str: 處理結果消息
@@ -1037,8 +1061,10 @@ def handle_generate_monthly_report(text, file_format='xlsx'):
         logger.info(f"使用類別: {category}, 對應文件夾ID: {folder_id}")
     
     try:
-        logger.info(f"開始生成月報表，類別: {category}, 格式: {file_format}")
-        result, files = generate_monthly_report(category, file_format=file_format)
+        logger.info(f"開始生成月報表，類別: {category}, 格式: {file_format}, "
+                    f"指定月份: {year}/{month}")
+        result, files = generate_monthly_report(category, file_format=file_format,
+                                                year=year, month=month)
         if not files:
             logger.warning("沒有生成報表文件")
             return result

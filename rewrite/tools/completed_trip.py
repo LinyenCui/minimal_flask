@@ -18,7 +18,7 @@ completed_trips（過去態）查詢工具
 """
 
 from dataclasses import dataclass, asdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional, List
 from sqlalchemy import text
 
@@ -479,6 +479,31 @@ def _fetch_completed_trip_snapshot(
     return dict(row._mapping) if row else None
 
 
+def _weekly_charge_warning(*, session, trip_date, delta: int) -> Optional[str]:
+    """改錢後的帳務勾稽提示：若班次所在太陽週已記過（有效的）週扣款，
+    回警語字串提醒補沖正/補記；只提示不自動改帳。"""
+    if not trip_date or not delta:
+        return None
+    try:
+        # lazy import 避免 completed_trip ↔ accounting 循環 import
+        from rewrite.tools.accounting import find_weekly_charge_for_week
+        from rewrite.utils.sun_week import sun_week_start
+        ws = sun_week_start(trip_date)
+        we = ws + timedelta(days=6)
+        charge = find_weekly_charge_for_week(session=session, week_end_date=we)
+        if not charge:
+            return None
+        return (
+            f"⚠️ 該週（{ws.month}/{ws.day}〜{we.month}/{we.day}）已記扣款 "
+            f"NT$ {charge['amount_out']:,}，本次調整差額 {delta:+,}，"
+            f"帳務需補沖正/補記"
+        )
+    except Exception as e:  # 勾稽查詢失敗不擋主流程
+        import logging
+        logging.getLogger(__name__).warning(f"weekly_charge 勾稽檢查失敗: {e}")
+        return None
+
+
 def update_completed_trip_fare(
     *,
     session,
@@ -580,7 +605,21 @@ def update_completed_trip_fare(
 
     if auto_commit:
         session.commit()
-    return query_completed_trip_by_id(completed_trip_id, session=session)
+
+    # 帳務勾稽：車資總額有變且該週已記週扣款 → meta 附警語（只提示不改帳；
+    # data 仍回 CompletedTripView，渲染層決定怎麼顯示警語）
+    old_total = (before.get('meter_fare') or 0) + (before.get('extra_fare') or 0)
+    new_total = (
+        (meter_fare if meter_fare is not None else (before.get('meter_fare') or 0))
+        + (extra_fare if extra_fare is not None else (before.get('extra_fare') or 0))
+    )
+    warning = _weekly_charge_warning(
+        session=session, trip_date=before.get('date'), delta=new_total - old_total,
+    )
+    result = query_completed_trip_by_id(completed_trip_id, session=session)
+    if warning and result.ok:
+        result.meta['warning'] = warning
+    return result
 
 
 def update_completed_trip_category(
