@@ -135,6 +135,11 @@ def callback():
                                 ACCT_LEDGER_RANGE_INPUT_STATE_TYPE,
                                 looks_like_quick_command,
                             )
+                            from rewrite.conversation_state import (
+                                PENDING_MUTATION_STATE_TYPE,
+                                MUTATION_CONFIRM_TEXT,
+                                MUTATION_CANCEL_TEXT,
+                            )
                             # (a) 看起來像按鈕 callback / 已知快速命令 → 讓過
                             if looks_like_quick_command(original_message_text):
                                 is_bot_addressed = True
@@ -143,13 +148,28 @@ def callback():
                                 #     但只在「同對話」才算 — 防止私聊 state 跨到群組
                                 #     讓所有閒聊被當 bot 訊息
                                 _rew_st = _rew_state_get(user_id) if user_id else None
+                                _st_type = _rew_st.get('type') if _rew_st else None
                                 _active_types = (
                                     SANDBOX_ACTIVE_STATE_TYPE,
                                     TRIP_STATUS_PICKER_STATE_TYPE,
                                     TRIP_STATUS_LEAVE_INPUT_STATE_TYPE,
                                     ACCT_LEDGER_RANGE_INPUT_STATE_TYPE,
                                 )
-                                if _rew_st and _rew_st.get('type') in _active_types:
+                                _gate_ok = False
+                                if _st_type == PENDING_MUTATION_STATE_TYPE:
+                                    # AI mutation 機制層確認不是自由對話 state：
+                                    # 只放行「確認執行」「取消操作」兩個 exact 文字，
+                                    # 其他閒聊照常靜默跳過 — 避免 pending 期間群組
+                                    # 閒聊被丟給 AI（成本/隱私外洩），也避免 AI 回覆
+                                    # 判定成 follow-up 後 SANDBOX_ACTIVE 覆蓋掉
+                                    # pending state（確認按鈕變死）
+                                    _gate_ok = original_message_text.strip() in (
+                                        MUTATION_CONFIRM_TEXT,
+                                        MUTATION_CANCEL_TEXT,
+                                    )
+                                elif _st_type in _active_types:
+                                    _gate_ok = True
+                                if _gate_ok:
                                     state_chat = _rew_st.get('chat_id')
                                     current_chat = _rew_get_chat(event)
                                     if state_chat and state_chat == current_chat:

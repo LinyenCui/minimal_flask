@@ -31,6 +31,12 @@ from rewrite.conversation_state import (
     set_state as _state_set,
     get_state as _state_get,
     clear_state as _state_clear,
+    # AI mutation 機制層確認共用常數（定義在 conversation_state 這個 leaf
+    # module 防 import 循環）— 從這裡 re-export 給 webhook / 測試用
+    PENDING_MUTATION_STATE_TYPE,
+    PENDING_MUTATION_TTL_MINUTES,
+    MUTATION_CONFIRM_TEXT as _MUTATION_CONFIRM_TEXT,
+    MUTATION_CANCEL_TEXT as _MUTATION_CANCEL_TEXT,
 )
 
 
@@ -180,6 +186,12 @@ _BATCH_STATUS_ACTIONS = {
     '全部衝突': 'conflict',
     '全部改回準備': 'restore',
 }
+
+# ====== AI mutation 機制層確認 ======
+# agent.py 的 tool loop 攔下 AI 發出的 mutation calls（不執行）後設此 state，
+# payload = {'calls': [(tool_name, args)], 'preview': str}，chat_id 必填（防跨對話）。
+# 用戶按 [✅ 確認執行] 才由 execute_confirmed_calls 真正執行、[❌ 取消操作] 放棄。
+# 常數本體在 rewrite/conversation_state.py（頂部 import 進來 re-export）。
 
 # 用戶用 / 開頭時剝掉再 match：「/今天二井家的狀態」也認
 _RE_STATUS_QUERY = re.compile(r'^/?(.+?)的狀態$')
@@ -447,6 +459,12 @@ def try_handle_sandbox(event) -> bool:
     trip_status_handled = _try_handle_trip_status_actions(event, user_id, text, short_uid)
     if trip_status_handled is not None:
         return trip_status_handled
+
+    # 0a'. AI mutation 機制層確認：[✅ 確認執行] / [❌ 取消操作]
+    #      （在 master agent 之前攔，避免確認詞被丟給 AI 燒 call）
+    pending_handled = _try_handle_pending_mutation(event, user_id, text, short_uid)
+    if pending_handled is not None:
+        return pending_handled
 
     # 0b. LIFF 表單 exact-match 觸發詞（要在 hard fall-through 之前 check）
     #     rewrite 已用 LIFF 接管 customer/booking/import → 訊息 in *_LIFF_TRIGGERS
@@ -921,6 +939,77 @@ def _try_handle_trip_status_actions(event, user_id: Optional[str], text: str,
         return True
 
     return None
+
+
+def _try_handle_pending_mutation(event, user_id: Optional[str], text: str,
+                                  short_uid: str) -> Optional[bool]:
+    """AI mutation 機制層確認：處理 [✅ 確認執行] / [❌ 取消操作]
+
+    - 確認執行：原子 pop state（type + chat_id 都符合才取出）→ **先 pop 再執行**
+      防雙擊重複執行 → execute_confirmed_calls 逐筆執行 stashed calls（不經 Gemini）
+      → 單筆走既有 flex 渲染、多筆走文字彙總
+    - 取消操作：pop 掉 state，回「已取消」
+    - 沒 pending / 已逾時 / chat_id 不符 → 友善提示（不動別的對話的 pending）
+
+    Returns:
+        True — 已處理；None — 非本流程訊息（caller 繼續正常流程）
+    """
+    if text not in (_MUTATION_CONFIRM_TEXT, _MUTATION_CANCEL_TEXT):
+        return None
+
+    from rewrite.conversation_state import get_chat_id_from_event, pop_state
+    state = None
+    if user_id:
+        state = pop_state(
+            user_id,
+            state_type=PENDING_MUTATION_STATE_TYPE,
+            chat_id=get_chat_id_from_event(event),
+        )
+    if state is None:
+        reply_message(event.reply_token, {
+            'type': 'text',
+            'text': '⌛ 沒有待確認的修改（可能已逾時或已處理），請重新下指令',
+        })
+        logger.info(
+            f"[rewrite sandbox] {short_uid} pending-mutation {text!r} "
+            f"but no matching state"
+        )
+        return True
+
+    if text == _MUTATION_CANCEL_TEXT:
+        reply_message(event.reply_token, {
+            'type': 'text', 'text': '🚫 已取消，未做任何修改',
+        })
+        logger.info(f"[rewrite sandbox] {short_uid} pending-mutation cancelled")
+        return True
+
+    calls = (state.get('payload') or {}).get('calls') or []
+    if not calls:
+        reply_message(event.reply_token, {
+            'type': 'text', 'text': '⌛ 待確認清單是空的，請重新下指令',
+        })
+        return True
+
+    from rewrite.ai.agent import execute_confirmed_calls
+    results = execute_confirmed_calls(calls, user_id)
+    if len(results) == 1:
+        name, args, r = results[0]
+        # 單筆：走既有 flex 渲染路徑（成功回詳情卡、失敗回人話錯誤）
+        msg = Agent._render_result(r, name, args, event_source=event.source)
+    else:
+        msg = Agent._render_mutation_summary(results)
+    try:
+        reply_message(event.reply_token, msg)
+    except Exception as e:
+        logger.error(
+            f"[rewrite sandbox] {short_uid} pending-mutation reply failed: {e}",
+            exc_info=True,
+        )
+    logger.info(
+        f"[rewrite sandbox] {short_uid} pending-mutation executed "
+        f"{len(results)} call(s), ok={sum(1 for _, _, r in results if r.ok)}"
+    )
+    return True
 
 
 def _parse_leave_input(text: str) -> Optional[tuple[str, int]]:

@@ -22,6 +22,13 @@ from modules.services.ai_service import get_genai_client, MODEL_ID
 
 from rewrite.ai.client import LLMClient, LLMResponse, ToolCall, LLM_TIMEOUT_MS
 from rewrite.ai.skill import Skill
+from rewrite.conversation_state import (
+    set_state,
+    PENDING_MUTATION_STATE_TYPE,
+    PENDING_MUTATION_TTL_MINUTES,
+    MUTATION_CONFIRM_TEXT,
+    MUTATION_CANCEL_TEXT,
+)
 from rewrite.tools.base import ToolResult
 from rewrite.tools.trip import TripView
 from rewrite.tools.customer import CustomerView
@@ -148,6 +155,247 @@ _TOOL_ACTION_LABELS = {
     'delete_fixed_schedule': '刪除固定班次',
     'void_ledger_entry': '沖正帳務分錄',
 }
+
+
+# ============================================================
+# 機制層確認（pending mutation）
+#   AI 自然語言路徑發出的 mutation call 先攔下不執行 → 產生人話預覽 +
+#   [✅ 確認執行 / ❌ 取消操作]，用戶確認後 sandbox_handler 呼叫
+#   execute_confirmed_calls 才真正寫入。防「key 錯 id 直接進資料庫」。
+# ============================================================
+
+# 預覽的參數 key → 中文（humanize 對照表 _FIELD_TERMS 為底，補 mutation 常見參數）
+_ARG_LABELS = {
+    **_FIELD_TERMS,
+    'surcharge': '加成',
+    'passenger_name': '乘客名',
+    'new_category': '新類別',
+    'new_time': '新時間',
+    'new_start': '新起點',
+    'new_end': '新終點',
+    'new_via': '新途經',
+    'name': '姓名',
+    'address': '地址',
+    'contact_phone': '電話',
+    'remarks': '備註',
+    'birthday': '生日',
+    'note': '備註',
+    'memo': '備註',
+    'route_number': '路線編號',
+    'departure_time': '出發時間',
+    'start_point': '起點',
+    'via_point': '途經',
+    'end_point': '終點',
+    'direction': '方向',
+    'base_fare': '基本車資',
+    'total_fare': '車資總額',
+    'actual_fare': '實收車資',
+    'new_driver_id': '新司機編號',
+}
+
+# 預覽編號 ①②③…
+_CIRCLED_NUMBERS = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'
+
+# 目標資料的 id key（順序 = 優先序；第一個非 None 的當目標）
+_PENDING_TARGET_KEYS = (
+    'trip_id', 'completed_trip_id', 'customer_id', 'ledger_id', 'schedule_id',
+)
+
+# 預覽不顯示的 context / 技術參數
+_PENDING_HIDDEN_KEYS = {'session', 'user_id', 'user_name', 'via', 'auto_commit'}
+
+
+def _chat_id_from_source(event_source: Any, user_id: Optional[str]) -> Optional[str]:
+    """從 webhook event.source 抽 chat_id（群組/聊天室/私聊統一）；
+    無 event_source（測試 / repl）→ 用 user_id 當私聊 chat_id。"""
+    if event_source is not None:
+        cid = (
+            getattr(event_source, 'group_id', None)
+            or getattr(event_source, 'room_id', None)
+            or getattr(event_source, 'user_id', None)
+        )
+        if cid:
+            return cid
+    return user_id
+
+
+def _fmt_preview_value(v: Any) -> str:
+    """預覽的參數值 → 人話字串"""
+    if isinstance(v, bool):
+        return '是' if v else '否'
+    if hasattr(v, 'isoformat'):
+        return v.isoformat()
+    return str(v)
+
+
+def _describe_mutation_target(session, args: dict) -> Optional[str]:
+    """撈 pending mutation 的目標資料 → 一行人話描述；撈不到回 None（只列參數）"""
+    try:
+        if args.get('trip_id') is not None:
+            from rewrite.tools.trip import query_trip_by_id
+            r = query_trip_by_id(int(args['trip_id']), session=session)
+            if r.ok and isinstance(r.data, TripView):
+                t = r.data
+                d = f"{t.date.month}/{t.date.day}" if t.date else '?'
+                hm = t.time.strftime('%H:%M') if t.time else '?'
+                start = t.custom_start_point or t.start_point or '?'
+                end = t.custom_end_point or t.end_point or '?'
+                drv = f"司機{t.driver_id}" if t.driver_id else '未指派'
+                who = f"{t.passenger_name} " if t.passenger_name else ''
+                return (f"#{t.trip_id} {who}{d} {hm} {start}→{end}"
+                        f"（{drv}｜{t.display_status or '?'}）")
+        if args.get('completed_trip_id') is not None:
+            from rewrite.tools.completed_trip import query_completed_trip_by_id
+            r = query_completed_trip_by_id(
+                int(args['completed_trip_id']), session=session)
+            if r.ok and isinstance(r.data, CompletedTripView):
+                t = r.data
+                d = f"{t.date.month}/{t.date.day}" if t.date else '?'
+                who = f"{t.passenger_name} " if t.passenger_name else ''
+                drv = f"司機{t.driver_id}" if t.driver_id else '無司機'
+                return (f"#{t.id} {who}{d} {t.short_route()}"
+                        f"（{drv}｜錶{t.meter_fare or 0} 加{t.extra_fare or 0}）")
+        if args.get('customer_id') is not None:
+            from rewrite.tools.customer import get_customer_by_id
+            r = get_customer_by_id(int(args['customer_id']), session=session)
+            if r.ok and isinstance(r.data, CustomerView):
+                c = r.data
+                addr = f"｜{c.address}" if c.address else ''
+                return f"#{c.id} {c.name or '?'}（{c.short_name or '—'}{addr}）"
+        if args.get('ledger_id') is not None:
+            from rewrite.tools.accounting import query_ledger_entry
+            r = query_ledger_entry(session=session, ledger_id=args['ledger_id'])
+            if r.ok and isinstance(r.data, str) and r.data:
+                return r.data.split('\n')[0].replace('📒 帳務分錄 ', '')
+        if args.get('schedule_id') is not None:
+            from rewrite.tools.fixed_schedule import get_fixed_schedule_by_id
+            r = get_fixed_schedule_by_id(int(args['schedule_id']), session=session)
+            if r.ok and isinstance(r.data, FixedScheduleView):
+                s = r.data
+                hm = (s.departure_time.strftime('%H:%M')
+                      if s.departure_time else '?')
+                drv = f"司機{s.driver_id}" if s.driver_id else '未指派'
+                return f"#{s.id} 固定班次 {hm} {s.short_route()}（{drv}｜{s.status or '?'}）"
+    except Exception as e:
+        logger.warning(f"[Agent] describe mutation target failed: {e}")
+        try:
+            session.rollback()
+        except Exception:
+            pass
+    return None
+
+
+def build_mutation_preview(calls: list) -> str:
+    """pending mutation calls → 人話預覽文字
+
+    calls: [(tool_name, args_dict)]
+    每筆：動作名（_TOOL_ACTION_LABELS）+ 目標資料（DB 撈）+ 參數（key 轉中文）。
+    """
+    lines = [f"📋 即將執行 {len(calls)} 筆修改，請確認："]
+    session = Session()
+    try:
+        for i, (name, args) in enumerate(calls):
+            label = _TOOL_ACTION_LABELS.get(name, name)
+            args = args if isinstance(args, dict) else {}
+            no = _CIRCLED_NUMBERS[i] if i < len(_CIRCLED_NUMBERS) else f"{i + 1}."
+            target_key = next(
+                (k for k in _PENDING_TARGET_KEYS if args.get(k) is not None), None)
+            target = _describe_mutation_target(session, args)
+            if target is None and target_key:
+                target = f"#{args[target_key]}"
+            lines.append(f"{no} {label}" + (f" — {target}" if target else ""))
+            parts = []
+            for k, v in args.items():
+                if k in _PENDING_HIDDEN_KEYS or k == target_key or v is None:
+                    continue
+                parts.append(f"{_ARG_LABELS.get(k, k)}：{_fmt_preview_value(v)}")
+            if parts:
+                lines.append("　 " + "｜".join(parts))
+    finally:
+        session.close()
+    lines.append("確認後才會寫入。")
+    return '\n'.join(lines)
+
+
+def stash_pending_mutations(calls: list, user_id: str,
+                            event_source: Any = None) -> dict:
+    """把攔下的 mutation calls 存 conversation state（**覆蓋**既有 pending），
+    回「待確認」預覽訊息（quick_reply 帶 [✅ 確認執行 / ❌ 取消操作]）。
+
+    calls: [(tool_name, args_dict)] — args 已 repair + normalize 過，
+    in-memory state 直接存 python 物件（date 等不需序列化）。
+    """
+    preview = build_mutation_preview(calls)
+    set_state(
+        user_id,
+        PENDING_MUTATION_STATE_TYPE,
+        {'calls': calls, 'preview': preview},
+        ttl_minutes=PENDING_MUTATION_TTL_MINUTES,
+        chat_id=_chat_id_from_source(event_source, user_id),
+    )
+    logger.info(
+        f"[Agent] stashed {len(calls)} pending mutation(s) "
+        f"for {(user_id or '?')[:8]}.. : {[c[0] for c in calls]}"
+    )
+    return {
+        'type': 'quick_reply',
+        'text': preview,
+        'quick_reply': {'items': [
+            {'type': 'action',
+             'action': {'type': 'message',
+                        'label': f'✅ {MUTATION_CONFIRM_TEXT}',
+                        'text': MUTATION_CONFIRM_TEXT}},
+            {'type': 'action',
+             'action': {'type': 'message',
+                        'label': f'❌ {MUTATION_CANCEL_TEXT}',
+                        'text': MUTATION_CANCEL_TEXT}},
+        ]},
+    }
+
+
+def resolve_tool(name: str):
+    """從 master skill 註冊表 resolve atomic tool。
+
+    pending state 只存 tool_name 不存 fn 本身，「確認執行」時用這個換回 callable。
+    """
+    from rewrite.ai.skills.master import build_master_skill
+    return build_master_skill().get_tool(name)
+
+
+def execute_confirmed_calls(calls: list, user_id: Optional[str]) -> list:
+    """執行用戶「確認執行」後的 stashed mutation calls（不經 Gemini）。
+
+    calls: [(tool_name, args_dict)]（args 已在攔截時 repair + normalize 過）
+
+    Returns:
+        [(tool_name, args, ToolResult)] — 單筆走 Agent._render_result、
+        多筆走 Agent._render_mutation_summary 渲染
+    """
+    results: list = []
+    for name, stored_args in calls:
+        fn = resolve_tool(name)
+        if fn is None:
+            logger.warning(f"[Agent confirm] unknown tool: {name}")
+            results.append(
+                (name, stored_args, ToolResult.fail(f"unknown tool: {name}")))
+            continue
+        # audit（R-6）記得到誰確認執行的
+        args = _inject_context_args(fn, dict(stored_args), user_id=user_id)
+        session = Session()
+        try:
+            r = fn(session=session, **args)
+        except TypeError as e:
+            logger.error(f"[Agent confirm] {name} args mismatch: {e}",
+                         exc_info=True)
+            r = ToolResult.fail(f"工具參數錯：{e}")
+        except Exception as e:
+            logger.error(f"[Agent confirm] {name} failed: {e}", exc_info=True)
+            r = ToolResult.fail(f"執行錯誤：{str(e)[:120]}")
+        finally:
+            session.close()
+        logger.info(f"[Agent confirm] {name} ok={r.ok}")
+        results.append((name, args, r))
+    return results
 
 
 def _inject_context_args(fn, args: dict, *, user_id: Optional[str] = None,
@@ -332,6 +580,8 @@ class Agent:
         last_tool_name: Optional[str] = None
         last_tool_args: Optional[dict] = None
         # 本輪全部「非唯讀」工具的結果 — ≥2 筆時改渲染文字彙總（部分成功要看得到全貌）
+        # 註：有 user_id 時 mutation 會先被 _intercept_mutations 攔成 pending，
+        #     這條只剩「無 user_id（測試 / repl）直接執行」的 fallback 路徑會走到
         mutation_results: list = []  # [(tool_name, args, ToolResult)]
 
         for iteration in range(self.MAX_TOOL_LOOPS):
@@ -340,16 +590,27 @@ class Agent:
                 # AI 沒再要 function call → 終止 loop
                 break
 
+            tool_calls = [
+                ToolCall(
+                    name=fc.name,
+                    args={k: v for k, v in fc.args.items()} if fc.args else {},
+                )
+                for fc in fc_parts
+            ]
+
+            # 機制層確認：batch 內含 mutation → 全部 mutation 攔下不執行、
+            # 存 pending state、回「待確認」預覽（唯讀 call 照常執行）。
+            # 防 AI 自然語言路徑 key 錯 id 的錯誤修改直接進資料庫。
+            pending_msg = self._intercept_mutations(tool_calls, user_id, event_source)
+            if pending_msg is not None:
+                return pending_msg
+
             # Gemini 同一輪可能回「多個」function_call(parallel function calling)
             # — 例如用戶一句話要改時間+途經+終點+乘客。必須**全部執行**並回
             #   **等量的 function_response**,否則 Gemini 報 400「response parts !=
             #   call parts」。逐一執行,蒐集 response parts 一次送回。
             response_parts = []
-            for fc in fc_parts:
-                tc = ToolCall(
-                    name=fc.name,
-                    args={k: v for k, v in fc.args.items()} if fc.args else {},
-                )
+            for tc in tool_calls:
                 logger.info(f"[Agent loop {iteration+1}] {tc.name}({tc.args})")
                 result, args_used = self._execute_tool(tc, user_id)
                 # 記住最後「成功且可渲染」的結果供回覆;失敗也記(才有錯誤訊息)
@@ -390,6 +651,52 @@ class Agent:
         # AI 純文字回應（無 tool call）
         ai_text = self._extract_text(response)
         return {'type': 'text', 'text': ai_text or '🤔 不太理解你的意思'}
+
+    def _intercept_mutations(self, tool_calls: list, user_id: Optional[str],
+                             event_source: Any = None) -> Optional[dict]:
+        """機制層確認：本輪 tool call batch 含「非唯讀」工具時攔截。
+
+        - 全部 mutation calls **不執行**、原封收集成 pending state
+          （args 先 repair + normalize，確認執行時直接用）
+        - 同 batch 的唯讀 call **跳過不執行**：本輪 loop 隨即被預覽訊息終止，
+          查詢結果既不渲染給用戶也不 feed 回 AI，執行只是浪費 DB 查詢
+        - 無 user_id 且無 event_source（測試 / repl 直呼）→ 回 None（照原流程執行）
+        - 無 user_id 但**有 event_source**（真實 webhook 事件 — 群組成員未加
+          bot 好友 / 未同意授權時 source.user_id 可為 None）→ fail-closed：
+          pending state 無法綁定確認者身分，mutation 一律不執行，回提示訊息
+          （純唯讀 batch 不受影響 — 上面 mutation 檢查先回 None 放行）
+
+        Returns:
+            「待確認」預覽訊息 dict / fail-closed 提示 dict，
+            或 None（batch 無 mutation / 測試 repl 不攔截）
+        """
+        if not any(not _is_readonly_tool(tc.name) for tc in tool_calls):
+            return None
+        if not user_id:
+            if event_source is None:
+                return None  # 測試 / repl：無確認流程可走
+            logger.warning(
+                "[Agent intercept] mutation blocked: real event without "
+                f"user_id, tools={[tc.name for tc in tool_calls]}"
+            )
+            return {
+                'type': 'text',
+                'text': '⚠️ 無法識別操作者身分（請先加 bot 好友並同意授權），'
+                        '修改類指令未執行',
+            }
+
+        pending_calls: list = []
+        for tc in tool_calls:
+            if _is_readonly_tool(tc.name):
+                logger.info(f"[Agent intercept] skip readonly {tc.name}({tc.args})")
+                continue
+            fn = self.skill.get_tool(tc.name)
+            args = _repair_arg_keys(fn, tc.args) if fn else dict(tc.args)
+            args = self._normalize_args(args)
+            logger.info(f"[Agent intercept] pending mutation {tc.name}({args})")
+            pending_calls.append((tc.name, args))
+
+        return stash_pending_mutations(pending_calls, user_id, event_source)
 
     def _execute_tool(self, tc: ToolCall,
                        user_id: Optional[str]) -> tuple:

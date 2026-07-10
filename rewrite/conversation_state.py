@@ -17,6 +17,15 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# ====== AI mutation 機制層確認（pending mutation）共用常數 ======
+# 定義在這個 leaf module（無 rewrite 內部依賴），讓 agent / sandbox_handler /
+# webhook / repl 都能 top-level import，不需 lazy import 防循環、
+# 也不會各處硬編碼「確認執行」字面值造成文案漂移。
+PENDING_MUTATION_STATE_TYPE = 'rewrite_pending_mutation'
+PENDING_MUTATION_TTL_MINUTES = 5.0
+MUTATION_CONFIRM_TEXT = '確認執行'
+MUTATION_CANCEL_TEXT = '取消操作'
+
 # user_id → {type: str, payload: dict, expires_at: datetime}
 _STATES: dict = {}
 _TTL = timedelta(minutes=30)
@@ -115,6 +124,35 @@ def clear_state(user_id: str) -> None:
     with _LOCK:
         if _STATES.pop(user_id, None) is not None:
             logger.info(f"[conversation_state] cleared {user_id[:8]}..")
+
+
+def pop_state(user_id: str, state_type: Optional[str] = None,
+              chat_id: Optional[str] = None) -> Optional[dict]:
+    """原子地取出並清除 user 的狀態（條件都符合才 pop）。
+
+    給「確認執行」這類一次性動作用：**先 pop 再執行**，天然防雙擊重複執行
+    （第二次 pop 拿到 None 就不會重跑）。條件不符（type / chat_id 不對）
+    或已過期 → 回 None 且**不動**既有條目（跨對話的 pending 不被誤清）。
+
+    Args:
+        state_type：若給定，state['type'] 相同才 pop
+        chat_id：若給定，state['chat_id'] 相同才 pop（防跨對話誤觸）
+    """
+    with _LOCK:
+        s = _STATES.get(user_id)
+        if not s:
+            return None
+        if datetime.now() > s['expires_at']:
+            return None
+        if state_type is not None and s.get('type') != state_type:
+            return None
+        if chat_id is not None and s.get('chat_id') != chat_id:
+            return None
+        del _STATES[user_id]
+        logger.info(
+            f"[conversation_state] popped {user_id[:8]}.. type={s.get('type')}"
+        )
+        return dict(s)
 
 
 def state_count() -> int:

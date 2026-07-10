@@ -136,19 +136,23 @@ def _system_prompt() -> str:
   （surcharge 通常負數，如 -30 / -50 / -100）。只給原因沒給數字 → 不要呼叫工具，回問用戶數字
 - 「自己來 -100」「化療 -30」「身體不適 -50」「住院 -200」這類
   = passenger_leave 的 reason + surcharge
-- 多筆班次請假（如「明天龍埔街都請假」）→ 先 query_trips 查出來列給用戶看，
-  讓他確認 trip_ids 後再逐筆執行
+- 多筆班次請假（如「明天龍埔街都請假」）→ 先 query_trips 解出 trip_ids
+  （這步是為了拿 id，**不是**要用戶確認），拿到後直接逐筆 call passenger_leave —
+  系統機制層會自動列出明細請用戶按「確認執行」，不要自己先列清單問「確認嗎？」
+  （那會變成煩人的雙重確認）
 
-[危險動作二段確認（刪除 / 沖正類）]
-- delete_customer / delete_fixed_schedule / void_ledger_entry 是危險動作：
-  **必須先 query 列出目標詳情給用戶看，要求用戶回覆「確認」**，
-  下一輪收到確認才執行 — 絕不同一輪內直接刪 / 沖正
+[危險動作（刪除 / 沖正類）]
+- delete_customer / delete_fixed_schedule / void_ledger_entry 等 mutation
+  **直接呼叫工具** — 系統機制層會自動攔下、列出目標詳情並要求用戶按「確認執行」，
+  用戶確認後才會真正寫入
+- 不要自己先 query 列詳情再等用戶回「確認」（機制層已保證確認，
+  AI 層再確認會變成煩人的雙重確認）
 
 [帳務沖正（void_ledger_entry）]
 - 沖正 = 對記錯的帳務分錄開「反向分錄」更正，不刪原筆
 - Triggers：「沖正 83」「第83筆記錯了，沖掉」「分錄 83 金額打錯」
-  → 先 call query_ledger_entry(83) 列該筆內容，用戶回「確認」才 call
-    void_ledger_entry（reason 必填，用戶沒給原因先問，如「金額記錯」）
+  → 直接 call void_ledger_entry（reason 必填，用戶沒給原因先問，如「金額記錯」）；
+    系統會自動列出該筆內容請用戶確認後才寫入
 - 「入金打錯金額怎麼辦」「週扣款記錯怎麼改」→ 引導：先打「帳務處理」→「明細」
   找到分錄編號，再說「沖正 <編號>」；沖正後重記正確金額即可
 - 週扣款同一週重複記錄會被工具擋下 — 屬正常防呆，照實回報並引導先沖正再重記
@@ -197,8 +201,7 @@ def _system_prompt() -> str:
 QUERY_LEDGER_ENTRY_SCHEMA = {
     'description': (
         "Query single account ledger entry by id (入金/扣款/沖正分錄). "
-        "Triggers: 「分錄 83」「帳務 #83 是哪筆」; MUST be called before "
-        "void_ledger_entry to show the entry for user confirmation."
+        "Triggers: 「分錄 83」「帳務 #83 是哪筆」."
     ),
     'parameters': {
         'type': 'object',
@@ -216,8 +219,8 @@ VOID_LEDGER_ENTRY_SCHEMA = {
     'description': (
         "Void (沖正) a ledger entry by creating a reversing entry — "
         "original row is kept. Triggers: 「沖正 83」「第83筆記錯了，沖掉」. "
-        "HIGH-RISK: first call query_ledger_entry to show the entry, "
-        "wait for user to reply 「確認」, THEN call this. Reason REQUIRED."
+        "Call directly — the system intercepts, shows the entry and asks "
+        "the user to confirm before anything is written. Reason REQUIRED."
     ),
     'parameters': {
         'type': 'object',

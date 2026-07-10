@@ -16,6 +16,13 @@ load_dotenv()
 
 sys.path.insert(0, '/Users/linyancui/minimal_flask')
 from rewrite.ai.multi_skill_agent import build_default_multi_skill_agent
+# 確認/取消字面值 import 共用常數，避免文案改動後 repl 漂移
+from rewrite.conversation_state import (
+    MUTATION_CONFIRM_TEXT,
+    MUTATION_CANCEL_TEXT,
+    PENDING_MUTATION_STATE_TYPE,
+    pop_state,
+)
 
 
 def render_msg_for_terminal(msg: dict) -> str:
@@ -23,6 +30,14 @@ def render_msg_for_terminal(msg: dict) -> str:
     t = msg.get('type')
     if t == 'text':
         return msg.get('text', '')
+
+    if t == 'quick_reply':
+        # main 自定義格式（text + quick_reply 按鈕）— 機制層確認預覽等
+        qr_labels = [
+            i['action']['label']
+            for i in (msg.get('quick_reply') or {}).get('items', [])
+        ]
+        return msg.get('text', '') + f"\n   └─ 快速回覆：{qr_labels}"
 
     if t == 'flex':
         alt = msg.get('altText', '')
@@ -91,6 +106,29 @@ def main():
         if text == ':reset':
             agent = build_default_multi_skill_agent()
             print('🔄 Agent 重新初始化')
+            continue
+
+        # AI mutation 機制層確認（比照 sandbox_handler 的確認/取消流程）
+        if text in (MUTATION_CONFIRM_TEXT, MUTATION_CANCEL_TEXT):
+            from rewrite.ai.agent import Agent, execute_confirmed_calls
+            state = pop_state('repl_user',
+                              state_type=PENDING_MUTATION_STATE_TYPE,
+                              chat_id='repl_user')
+            if state is None:
+                print('\n🤖 ⌛ 沒有待確認的修改（可能已逾時或已處理）')
+            elif text == MUTATION_CANCEL_TEXT:
+                print('\n🤖 🚫 已取消，未做任何修改')
+            else:
+                results = execute_confirmed_calls(
+                    (state.get('payload') or {}).get('calls') or [],
+                    'repl_user',
+                )
+                if len(results) == 1:
+                    n, a, r = results[0]
+                    out = Agent._render_result(r, n, a)
+                else:
+                    out = Agent._render_mutation_summary(results)
+                print('\n🤖 ' + render_msg_for_terminal(out))
             continue
 
         try:
