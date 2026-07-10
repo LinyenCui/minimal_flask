@@ -83,6 +83,10 @@ def _system_prompt() -> str:
   ⚠️ passenger_name 常是多人「、」分隔（如「多多良、高橋」），**一律用 ilike 不要用 =**，否則漏掉同車多人的班次。
   別跟「客戶簡稱 customer_short_name = 起終『地點』」搞混 —— 乘客是人、客戶簡稱是地點。
 - 「修改 #N 金額」「記錄車資 N」 → update_completed_trip_fare
+- 慣用簡寫「修改#2674$700（記賬）」= update_completed_trip_fare(
+  completed_trip_id=2674, meter_fare=700, reason='記賬') —
+  括號附註就是 reason；「記賬」「補登」「多收」這類簡短詞是**有效 reason 直接用**，
+  不要追問「更具體的原因」（機制層確認會讓用戶再把關一次）
 - 「#N 司機改成 M」「換 #N 司機 M」 → update_completed_trip_driver
 
 [地點 query 規則]（重要）

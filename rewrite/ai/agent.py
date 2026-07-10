@@ -567,6 +567,9 @@ class Agent:
             model=MODEL_ID,
             config=types.GenerateContentConfig(
                 tools=gemini_tools,
+                # 低溫穩定 tool calling — 不設會用模型預設 1.0，同一句話
+                # 這次抽出 reason、下次反問原因，行為抽獎（實測 log 2026-07-10）
+                temperature=0.2,
                 # 逾時保護：HttpOptions.timeout 單位是毫秒（見 client.LLM_TIMEOUT_MS）
                 http_options=types.HttpOptions(timeout=LLM_TIMEOUT_MS),
             ),
