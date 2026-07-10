@@ -158,6 +158,29 @@ try:
             else:
                 print(f'  ℹ️  trip 未到 30 分內 → 不鎖')
 
+    # ============================================================
+    # T10: 時段篩選 time_from / time_to（str coerce）
+    # ============================================================
+    banner('T10: query_trips(time_from="09:00") — 全部結果 time >= 09:00')
+    from datetime import time as dt_time
+    r = query_trips(time_from='09:00', session=session, limit=50)
+    if r.ok:
+        assert all(t.time >= dt_time(9, 0) for t in r.data if t.time), '有 09:00 前的班次漏進來'
+        print(f'  ✅ {len(r.data)} 筆全部 >= 09:00')
+    else:
+        print(f'  ℹ️  無資料（{r.error}）— 篩選語法有跑即可')
+
+    r = query_trips(time_to='0900', session=session, limit=50)  # 無冒號格式
+    if r.ok:
+        assert all(t.time <= dt_time(9, 0) for t in r.data if t.time), '有 09:00 後的班次漏進來'
+        print(f'  ✅ time_to="0900" coerce OK，{len(r.data)} 筆全部 <= 09:00')
+    else:
+        print(f'  ℹ️  time_to 無資料（{r.error}）')
+
+    r = query_trips(time_from='亂打', session=session)
+    assert not r.ok and '時間格式' in r.error, '壞格式應回人話錯誤'
+    print(f'  ✅ 壞格式擋下：{r.error}')
+
     print('\n' + '='*60)
     print('✅ 全部 trips 查詢測試通過')
     print('='*60)

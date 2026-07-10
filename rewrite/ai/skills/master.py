@@ -94,6 +94,13 @@ def _system_prompt() -> str:
   * 「到龍埔街的班次」 → query_trips(end_location='龍埔街')
   * 「上週從診所出發」 → 先 sun_week_info 拿日期 → query_completed_trips
 
+[日期/時段 query 規則]（重要）
+- 查**單日**（今天/明天/7/10）必須 date_from 和 date_to 都設同一天 —— 只給 date_from 會撈到未來所有班次
+- 時段條件用 time_from / time_to：
+  * 「九點之後」「執行時間09:00之後」 → time_from='09:00'
+  * 「下午的班次」 → time_from='12:00'；「上午的」 → time_to='12:00'
+  * 例：「今天司機533九點之後的診所班次」 → query_trips(date_from=今天, date_to=今天, driver_id=533, category='診所', time_from='09:00')
+
 [改類別 / mutation + trip_id 的判別]
 - 「改類別 + 數字」沒指明過去/現在態 → 預設**過去態** update_completed_trip_category
   （「改類別」最常出現在「車已開完後發現分類錯誤」）

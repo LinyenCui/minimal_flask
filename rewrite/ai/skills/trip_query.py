@@ -59,12 +59,33 @@ QUERY_TRIPS_SCHEMA = {
         'type': 'object',
         'properties': {
             'date_from': {'type': 'string', 'description': "Start date YYYY-MM-DD"},
-            'date_to': {'type': 'string', 'description': "End date YYYY-MM-DD (omit if single day)"},
+            'date_to': {
+                'type': 'string',
+                'description': "End date YYYY-MM-DD。⚠️ 省略 = 不設上限（會撈到未來所有班次）；"
+                               "查「單日」（今天/明天/某一天）必須把 date_to 設成跟 date_from 同一天",
+            },
             'driver_id': {'type': 'integer', 'description': "Driver ID (e.g. 533, 28530)"},
             'category': {'type': 'string', 'description': "診所 or 東洋"},
             'customer_short_name': {
                 'type': 'string',
                 'description': "客戶簡稱（如「龍埔街」「新建路」），會自動 match 起點/途經/終點",
+            },
+            'start_location': {
+                'type': 'string',
+                'description': "起點含此字串（方向性）。Triggers: 「從診所出發的班次」→ '診所'",
+            },
+            'end_location': {
+                'type': 'string',
+                'description': "終點含此字串（方向性）。Triggers: 「到龍埔街的班次」→ '龍埔街'",
+            },
+            'time_from': {
+                'type': 'string',
+                'description': "執行時間下限 HH:MM。Triggers: 「九點之後」「執行時間09:00之後」→ '09:00'、"
+                               "「下午的班次」→ '12:00'",
+            },
+            'time_to': {
+                'type': 'string',
+                'description': "執行時間上限 HH:MM。Triggers: 「九點以前」→ '09:00'、「上午的班次」→ '12:00'",
             },
             'exclude_status': {
                 'type': 'array',

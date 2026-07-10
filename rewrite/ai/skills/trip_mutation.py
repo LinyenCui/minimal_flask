@@ -265,10 +265,14 @@ QUERY_TRIPS_SCHEMA = {
         'type': 'object',
         'properties': {
             'date_from': {'type': 'string', 'description': "YYYY-MM-DD"},
-            'date_to': {'type': 'string', 'description': "YYYY-MM-DD"},
+            'date_to': {'type': 'string', 'description': "YYYY-MM-DD。省略=不設上限；查單日要跟 date_from 同值"},
             'driver_id': {'type': 'integer'},
             'category': {'type': 'string', 'description': "診所/東洋"},
             'customer_short_name': {'type': 'string', 'description': "客戶簡稱"},
+            'start_location': {'type': 'string', 'description': "起點含此字串（「從X出發」）"},
+            'end_location': {'type': 'string', 'description': "終點含此字串（「到X」）"},
+            'time_from': {'type': 'string', 'description': "執行時間下限 HH:MM（「九點之後」→'09:00'）"},
+            'time_to': {'type': 'string', 'description': "執行時間上限 HH:MM"},
         },
     },
 }

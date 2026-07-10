@@ -164,6 +164,24 @@ _SELECT_ALL = """
 # 查詢函數
 # ============================================================
 
+def _coerce_time_arg(v) -> Optional[time]:
+    """AI 傳的時間字串 → time。接受 '09:00' / '9:00' / '0900' / '9'。
+
+    解析失敗 raise ValueError（呼叫端轉 ToolResult.fail）。
+    """
+    if v is None or isinstance(v, time):
+        return v
+    s = str(v).strip().replace('：', ':')
+    import re as _re
+    m = _re.match(r'^(\d{1,2})(?::?(\d{2}))?$', s)
+    if not m:
+        raise ValueError(f"時間格式看不懂：{v}（請用 09:00 格式）")
+    hh, mm = int(m.group(1)), int(m.group(2) or 0)
+    if hh > 23 or mm > 59:
+        raise ValueError(f"時間格式看不懂：{v}（請用 09:00 格式）")
+    return time(hh, mm)
+
+
 def query_trips(
     *,
     session,
@@ -173,6 +191,10 @@ def query_trips(
     category: Optional[str] = None,
     status: Optional[str] = None,
     customer_short_name: Optional[str] = None,
+    start_location: Optional[str] = None,
+    end_location: Optional[str] = None,
+    time_from: Optional[time] = None,
+    time_to: Optional[time] = None,
     exclude_status: Optional[List[str]] = None,
     limit: int = 200,
 ) -> ToolResult:
@@ -182,8 +204,16 @@ def query_trips(
     所有條件 AND。沒給就不限制。
 
     customer_short_name：起、途、終 任一含此 → 命中（用於「龍埔街今天的班次」這類查詢）
+    start_location / end_location：方向性地點（ILIKE 含），「從 X 出發」「到 X」用
+    time_from / time_to：執行時間篩選（「九點之後」→ time_from=09:00）
     exclude_status：要排除的狀態列表（例：排除「已完成」）
     """
+    try:
+        time_from = _coerce_time_arg(time_from)
+        time_to = _coerce_time_arg(time_to)
+    except ValueError as e:
+        return ToolResult.fail(str(e))
+
     where = []
     params: dict = {}
 
@@ -193,6 +223,18 @@ def query_trips(
     if date_to:
         where.append('date <= :date_to')
         params['date_to'] = date_to
+    if time_from is not None:
+        where.append('time >= :time_from')
+        params['time_from'] = time_from
+    if time_to is not None:
+        where.append('time <= :time_to')
+        params['time_to'] = time_to
+    if start_location:
+        where.append('start_point ILIKE :sl')
+        params['sl'] = f'%{start_location}%'
+    if end_location:
+        where.append('end_point ILIKE :el')
+        params['el'] = f'%{end_location}%'
     if driver_id is not None:
         where.append('driver_id = :driver_id')
         params['driver_id'] = driver_id
