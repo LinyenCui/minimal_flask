@@ -11,6 +11,7 @@ completed_trips（過去態）查詢工具
   query_completed_trips         — 多條件查詢（list mode）
   query_completed_trip_by_id    — 單筆詳情（對應 legacy「查看 [id]」）
   aggregate_completed_trips     — 統計（aggregate mode，對應「加總」/「統計金額」）
+  query_reconciliation_text     — 對帳單純文字（直列、可複製/轉傳跟司機對帳）
 
 ⚠️ schema 來源：
   legacy modules/services/scheduler_service.py INSERT 反推（models.py 過時）。
@@ -30,6 +31,8 @@ from rewrite.tools.base import (
 # legacy 共用：modification_reason 累加 + modified_by/time 寫入
 from modules.utils.modification_utils import append_modification_reason
 from modules.utils.taiwan_time import get_taiwan_time
+# ✅ 日期解析唯一來源（禁自建）— 對帳 tool 的 str 日期 coerce 用
+from modules.utils.unified_date_parser import UnifiedDateParser
 # 過去態唯讀受護欄查詢層編譯器（spec docs/specs/04）
 from rewrite.tools.query_spec import compile_query_spec, QuerySpecError, MAX_LIMIT as _SPEC_MAX_LIMIT
 
@@ -134,6 +137,18 @@ def _coerce_int(v):
         s = v.strip().lstrip('-')
         return int(v) if s.isdigit() else None
     return v
+
+
+def _coerce_date(v):
+    """AI 傳字串日期 → date（走 unified_date_parser，禁自建解析）；轉不動回 None。"""
+    if v is None or isinstance(v, date):
+        return v
+    if isinstance(v, str):
+        try:
+            return UnifiedDateParser.parse(v)
+        except Exception:
+            return None
+    return None
 
 
 def _build_filters(
@@ -463,6 +478,213 @@ def query_completed_trips_advanced(*, session, spec: dict) -> ToolResult:
 
 
 # ============================================================
+# 對帳單（純文字直列，給複製/轉傳到別的聊天室跟司機對帳）
+# ============================================================
+
+# LINE 單則文字訊息上限 5000 字元；留 headroom 在 4900 切分
+LINE_TEXT_CHUNK_SIZE = 4900
+# LINE reply 一次最多 5 則訊息（API 限制）
+LINE_REPLY_MAX_MESSAGES = 5
+
+# date.weekday()：0=星期一 .. 6=星期日
+_WEEKDAY_ZH = ('一', '二', '三', '四', '五', '六', '日')
+
+
+@dataclass
+class ReconciliationTextView:
+    """對帳單純文字 view — 渲染層直接輸出 text 訊息（可長按複製/轉傳）。
+
+    text 可能超過 LINE 單則 5000 上限 → 渲染層用 split_text_for_line
+    切成多則（最多 LINE_REPLY_MAX_MESSAGES 則）。
+    """
+    text: str
+    count: int = 0
+    total_amount: int = 0
+
+    def to_dict(self) -> dict:
+        # 給 LLM function_response 的摘要 — 全文已直接渲染給用戶，
+        # 整份餵回 model 只會撐爆 context
+        return {
+            'count': self.count,
+            'total_amount': self.total_amount,
+            'preview': self.text[:200],
+            'note': '對帳單全文已以純文字訊息直接回覆用戶',
+        }
+
+
+def split_text_for_line(
+    text_str: str,
+    *,
+    chunk_size: int = LINE_TEXT_CHUNK_SIZE,
+    max_parts: int = LINE_REPLY_MAX_MESSAGES,
+) -> tuple:
+    """長文字 → 多則 LINE 訊息切分（純函數，無 DB）。
+
+    - 每則 ≤ chunk_size；優先在換行處切（對帳單一行一筆，不把一筆切兩半），
+      單行本身超過 chunk_size 才 hard-split
+    - 最多 max_parts 則
+
+    Returns:
+        (chunks: list[str], overflow: bool)
+        overflow=True = 超過 max_parts 塞不下，chunks 只含前 max_parts 則，
+        呼叫端應提示縮小範圍。
+    """
+    remaining = text_str or ''
+    chunks: list = []
+    while remaining:
+        if len(chunks) >= max_parts:
+            return chunks, True
+        if len(remaining) <= chunk_size:
+            chunks.append(remaining)
+            break
+        # 在 chunk_size 內找最後一個換行處切（rfind end 參數 exclusive）
+        cut = remaining.rfind('\n', 1, chunk_size + 1)
+        if cut <= 0:
+            # 單行超長 → hard-split
+            chunks.append(remaining[:chunk_size])
+            remaining = remaining[chunk_size:]
+        else:
+            chunks.append(remaining[:cut])
+            remaining = remaining[cut + 1:]
+    if not chunks:
+        chunks = ['']
+    return chunks, False
+
+
+def _fmt_month_day(d: date) -> str:
+    """7/6 這類無前導零的 月/日"""
+    return f"{d.month}/{d.day}"
+
+
+def _short_loc(s: Optional[str], max_len: int = 10) -> str:
+    """地點精簡：過長截斷（對帳單一行放 起→終，途經省略）"""
+    s = (s or '?').strip() or '?'
+    return s if len(s) <= max_len else s[:max_len - 1] + '…'
+
+
+def query_reconciliation_text(
+    *,
+    session,
+    date_from,
+    date_to,
+    driver_id: Optional[int] = None,
+    category: Optional[str] = None,
+    limit: int = 200,
+) -> ToolResult:
+    """
+    對帳單（純文字直列）— 給複製/轉傳到別的聊天室跟司機對帳用。唯讀。
+
+    Triggers: 「對帳」「對帳單」「班次對帳」，如「上週司機28530東洋班次對帳」。
+    跟 query_completed_trips 的 Flex carousel 不同：carousel 不能轉傳，
+    這裡輸出純文字，可長按複製/轉傳。
+
+    格式：
+      📋 對帳單 2026/7/5～7/11
+      司機 28530｜東洋
+      ──────────
+      7/6（一）
+      #2585 萬年七街→太子龍 330
+      #2593 健康三街→建平七街 請假 -30
+      ──────────
+      共 23 筆｜合計 5,285 元
+
+    - 金額口徑 = 錶價+加成（同 aggregate_completed_trips）
+    - 請假班次標「請假」但金額照列（照常計入合計）
+    - 起→終精簡（過長截斷），途經省略
+    """
+    date_from = _coerce_date(date_from)
+    date_to = _coerce_date(date_to)
+    if not date_from or not date_to:
+        return ToolResult.fail(
+            "對帳需要 date_from 與 date_to（週次講法先用 sun_week_info 拿日期）"
+        )
+    if date_from > date_to:
+        return ToolResult.fail("date_from 不能晚於 date_to")
+    driver_id = _coerce_int(driver_id)
+    limit = _coerce_int(limit) or 200
+    if category:
+        category = str(category).strip()
+        if category not in VALID_CATEGORIES:
+            return ToolResult.fail(
+                f"無效的類別 '{category}'，必須是：{', '.join(VALID_CATEGORIES)}"
+            )
+
+    where, params = _build_filters(
+        date_from=date_from, date_to=date_to,
+        driver_id=driver_id,
+        customer_short_name=None,
+        category=category, location=None,
+    )
+    sql = _SELECT_ALL + '\nWHERE ' + ' AND '.join(where)
+    sql += '\nORDER BY date, id\nLIMIT :limit'
+    params['limit'] = limit
+
+    rows = session.execute(text(sql), params).fetchall()
+    if not rows:
+        return ToolResult.fail("找不到符合條件的已完成班次")
+
+    views = [CompletedTripView.from_row(r) for r in rows]
+    truncated = len(views) >= limit
+
+    # ---- header ----
+    if date_from == date_to:
+        range_str = f"{date_from.year}/{_fmt_month_day(date_from)}"
+    elif date_from.year == date_to.year:
+        range_str = (
+            f"{date_from.year}/{_fmt_month_day(date_from)}"
+            f"～{_fmt_month_day(date_to)}"
+        )
+    else:
+        range_str = (
+            f"{date_from.year}/{_fmt_month_day(date_from)}"
+            f"～{date_to.year}/{_fmt_month_day(date_to)}"
+        )
+    lines = [f"📋 對帳單 {range_str}"]
+    filter_parts = []
+    if driver_id is not None:
+        filter_parts.append(f"司機 {driver_id}")
+    if category:
+        filter_parts.append(category)
+    if filter_parts:
+        lines.append("｜".join(filter_parts))
+    divider = "──────────"
+    lines.append(divider)
+
+    # ---- body（按日期分段，段首 7/6（一））----
+    total = 0
+    cur_date = None
+    for v in views:
+        if v.date != cur_date:
+            cur_date = v.date
+            if cur_date:
+                lines.append(f"{_fmt_month_day(cur_date)}（{_WEEKDAY_ZH[cur_date.weekday()]}）")
+            else:
+                lines.append("（無日期）")
+        amount = v.computed_total
+        total += amount or 0
+        amount_str = f"{amount:,}" if amount is not None else '未記錄'
+        leave_mark = "請假 " if v.is_leave else ""
+        route = f"{_short_loc(v.start_point)}→{_short_loc(v.end_point)}"
+        lines.append(f"#{v.id} {route} {leave_mark}{amount_str}")
+
+    # ---- footer ----
+    lines.append(divider)
+    lines.append(f"共 {len(views)} 筆｜合計 {total:,} 元")
+    if truncated:
+        lines.append(f"⚠️ 超過 {limit} 筆已截斷，請縮小日期範圍")
+
+    return ToolResult.success(
+        data=ReconciliationTextView(
+            text='\n'.join(lines),
+            count=len(views),
+            total_amount=total,
+        ),
+        count=len(views),
+        truncated=truncated,
+    )
+
+
+# ============================================================
 # Mutation 工具（無 R-5 鎖：過去態無時間鎖意義）
 # 共用：modification_reason 累加（[N] 格式）+ modified_by + time 寫入
 #       audit log（R-6）
@@ -608,14 +830,18 @@ def update_completed_trip_fare(
 
     # 帳務勾稽：車資總額有變且該週已記週扣款 → meta 附警語（只提示不改帳；
     # data 仍回 CompletedTripView，渲染層決定怎麼顯示警語）
-    old_total = (before.get('meter_fare') or 0) + (before.get('extra_fare') or 0)
-    new_total = (
-        (meter_fare if meter_fare is not None else (before.get('meter_fare') or 0))
-        + (extra_fare if extra_fare is not None else (before.get('extra_fare') or 0))
-    )
-    warning = _weekly_charge_warning(
-        session=session, trip_date=before.get('date'), delta=new_total - old_total,
-    )
+    # ⚠️ 僅限「診所」類班次 — weekly_charge 是達恩診所的車資週扣款，
+    #    東洋/臨時班次與週扣款無關，改錢不該跳警語（用戶實測回報 2026-07）
+    warning = None
+    if before.get('category') == '診所':
+        old_total = (before.get('meter_fare') or 0) + (before.get('extra_fare') or 0)
+        new_total = (
+            (meter_fare if meter_fare is not None else (before.get('meter_fare') or 0))
+            + (extra_fare if extra_fare is not None else (before.get('extra_fare') or 0))
+        )
+        warning = _weekly_charge_warning(
+            session=session, trip_date=before.get('date'), delta=new_total - old_total,
+        )
     result = query_completed_trip_by_id(completed_trip_id, session=session)
     if warning and result.ok:
         result.meta['warning'] = warning

@@ -216,6 +216,125 @@ try:
         b = render_aggregate_card(r.data, filters_text='4/26~5/2 · 東洋')
         print(f'  aggregate bubble keys: {list(b.keys())}')
 
+    # ============================================================
+    # T11: query_reconciliation_text 對帳單格式
+    # tx 內 seed 假資料（遠未來日期，避開真資料）→ 驗格式 → rollback
+    # ============================================================
+    banner('T11: query_reconciliation_text 對帳單格式（tx 內 seed + rollback）')
+    from sqlalchemy import text as _sqltext
+    from rewrite.tools.completed_trip import (
+        query_reconciliation_text,
+        ReconciliationTextView,
+    )
+
+    T11_FROM, T11_TO = date(2035, 1, 5), date(2035, 1, 11)
+    # 前置：確認該範圍沒真資料（有的話 seed 斷言會失真）
+    r = query_reconciliation_text(
+        session=session, date_from=T11_FROM, date_to=T11_TO,
+    )
+    assert not r.ok, f'2035/1/5-1/11 不該有真資料（有 {r.meta.get("count")} 筆）'
+
+    def _seed(d, sp, ep, mf, ef, cat, drv, leave, code):
+        return session.execute(_sqltext("""
+            INSERT INTO completed_trips
+            (date, start_point, via_point, end_point, meter_fare, extra_fare,
+             category, driver_id, unique_code, trip_type, passenger_leave_reason)
+            VALUES (:d, :sp, NULL, :ep, :mf, :ef, :cat, :drv, :code, 'temp', :leave)
+            RETURNING id
+        """), {'d': d, 'sp': sp, 'ep': ep, 'mf': mf, 'ef': ef,
+               'cat': cat, 'drv': drv, 'code': code, 'leave': leave}).fetchone()[0]
+
+    id1 = _seed(date(2035, 1, 8), '萬年七街', '太子龍', 330, 0,
+                '東洋', 28530, None, 'test_recon_1')
+    id2 = _seed(date(2035, 1, 8), '健康三街', '建平七街', 0, -30,
+                '東洋', 28530, '住院', 'test_recon_2')
+    id3 = _seed(date(2035, 1, 10), '超過十個字的超長起點地名截斷', '太子龍', 500, 50,
+                '東洋', 28530, None, 'test_recon_3')
+    id4 = _seed(date(2035, 1, 9), '診所', '馬鎮宮', 999, 0,
+                '診所', 533, None, 'test_recon_4')  # 不同司機+類別 → 應被 filter 掉
+
+    # date coerce：字串日期也要吃（AI 傳 'YYYY-MM-DD'）
+    r = query_reconciliation_text(
+        session=session, date_from='2035-01-05', date_to='2035-01-11',
+        driver_id='28530',  # int coerce
+        category='東洋',
+    )
+    assert r.ok, r.error
+    view = r.data
+    assert isinstance(view, ReconciliationTextView)
+    txt = view.text
+    print(txt)
+    assert '📋 對帳單 2035/1/5～1/11' in txt
+    assert '司機 28530｜東洋' in txt
+    assert '──────────' in txt
+    assert '1/8（一）' in txt and '1/10（三）' in txt   # 按日期分段 + 星期
+    assert f'#{id1} 萬年七街→太子龍 330' in txt
+    assert f'#{id2} 健康三街→建平七街 請假 -30' in txt  # 請假標記 + 金額照列
+    assert '…' in txt                                    # 超長地點截斷
+    assert f'#{id4}' not in txt                          # 司機/類別 filter 生效
+    assert '共 3 筆' in txt
+    assert '合計 850 元' in txt                           # 330 + (-30) + 550
+    assert view.count == 3 and view.total_amount == 850
+    # to_dict（給 LLM 的摘要）不含全文
+    d = view.to_dict()
+    assert d['count'] == 3 and d['total_amount'] == 850
+    assert len(d['preview']) <= 200
+
+    # 無 filter（撈全部 4 筆，無第二行 header）
+    r = query_reconciliation_text(
+        session=session, date_from=T11_FROM, date_to=T11_TO,
+    )
+    assert r.ok and r.data.count == 4
+    assert f'#{id4} 診所→馬鎮宮 999' in r.data.text
+
+    # 無效類別 → fail
+    r = query_reconciliation_text(
+        session=session, date_from=T11_FROM, date_to=T11_TO, category='飛機',
+    )
+    assert not r.ok and '無效' in r.error
+
+    # 缺日期 → fail
+    r = query_reconciliation_text(session=session, date_from=None, date_to=None)
+    assert not r.ok
+
+    session.rollback()  # T11 seed 全部還原
+    print('  ✅ T11 pass（seed 已 rollback）')
+
+    # ============================================================
+    # T12: split_text_for_line 5000 字切分（純函數）
+    # ============================================================
+    banner('T12: split_text_for_line 切分邏輯（純函數）')
+    from rewrite.tools.completed_trip import split_text_for_line
+
+    # 短文 → 1 則
+    chunks, overflow = split_text_for_line('hello\nworld')
+    assert chunks == ['hello\nworld'] and not overflow
+
+    # 多行長文 → 多則、各 ≤4900、在換行處切（每則第一行是完整一列）
+    line = '#1234 萬年七街→太子龍 330'
+    big = '\n'.join(f'{line} {i}' for i in range(400))
+    chunks, overflow = split_text_for_line(big)
+    print(f'  {len(big)} 字 → {len(chunks)} 則, overflow={overflow}')
+    assert not overflow and len(chunks) >= 2
+    assert all(len(c) <= 4900 for c in chunks)
+    assert '\n'.join(chunks) == big          # 內容不掉字
+    for c in chunks:
+        assert c.split('\n')[0].startswith('#1234')  # 不把一筆切兩半
+
+    # 單行超長 → hard-split，內容不掉字
+    mono = 'x' * 10000
+    chunks, overflow = split_text_for_line(mono)
+    assert not overflow and len(chunks) == 3  # 4900 + 4900 + 200
+    assert ''.join(chunks) == mono
+
+    # 超過 5 則塞不下 → overflow=True，只回前 5 則
+    huge = '\n'.join(f'{line} {i}' for i in range(2000))
+    chunks, overflow = split_text_for_line(huge)
+    print(f'  {len(huge)} 字 → {len(chunks)} 則, overflow={overflow}')
+    assert overflow and len(chunks) == 5
+    assert all(len(c) <= 4900 for c in chunks)
+    print('  ✅ T12 pass')
+
     print('\n✅ 全部 pass')
 finally:
     session.close()

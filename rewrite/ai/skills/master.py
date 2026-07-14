@@ -30,6 +30,7 @@ from rewrite.ai.skills.completed_trip import build_completed_trip_skill
 from rewrite.ai.skills.customer import build_customer_skill
 from rewrite.ai.skills.fixed_schedule import build_fixed_schedule_skill
 from rewrite.tools.accounting import query_ledger_entry, void_ledger_entry
+from rewrite.tools.completed_trip import query_reconciliation_text
 
 
 def _system_prompt() -> str:
@@ -57,8 +58,8 @@ def _system_prompt() -> str:
     passenger_leave / cancel_trip / mark_conflict / restore_to_ready / assign_driver /
     unassign_driver / record_fare_current / update_passenger_name / update_trip_category
   - completed_trips 領域：query_completed_trips / query_completed_trips_advanced /
-    query_completed_trip_by_id / aggregate_completed_trips / update_completed_trip_fare /
-    update_completed_trip_category / update_completed_trip_driver
+    query_completed_trip_by_id / aggregate_completed_trips / query_reconciliation_text /
+    update_completed_trip_fare / update_completed_trip_category / update_completed_trip_driver
   - customer 領域：query_customer_by_term / get_customer_by_id /
     query_customers_by_birthday_day / query_birthday_day_summary /
     create_customer / update_customer / delete_customer
@@ -82,6 +83,10 @@ def _system_prompt() -> str:
   spec.filters 用 {{col:'passenger_name', op:'ilike', value:'X'}}。
   ⚠️ passenger_name 常是多人「、」分隔（如「多多良、高橋」），**一律用 ilike 不要用 =**，否則漏掉同車多人的班次。
   別跟「客戶簡稱 customer_short_name = 起終『地點』」搞混 —— 乘客是人、客戶簡稱是地點。
+- 「…班次對帳」「對帳」「對帳單」（如「上週司機28530東洋班次對帳」）→
+  週次講法先 sun_week_info 拿日期 → query_reconciliation_text —
+  純文字直列對帳單，給用戶複製/轉傳到別的聊天室跟司機對帳用
+  （query_completed_trips 的卡片列表不能轉傳；沒說「對帳」的一般查詢仍用它）
 - 「修改 #N 金額」「記錄車資 N」 → update_completed_trip_fare
 - 慣用簡寫「修改#2674$700（記賬）」= update_completed_trip_fare(
   completed_trip_id=2674, meter_fare=700, reason='記賬') —
@@ -199,7 +204,7 @@ def _system_prompt() -> str:
 
 
 # ============================================================
-# 帳務 tool schemas（無獨立 accounting skill，直接掛 master）
+# 直掛 master 的 tool schemas（無獨立 sub-skill：帳務 + 對帳）
 # ============================================================
 
 QUERY_LEDGER_ENTRY_SCHEMA = {
@@ -242,6 +247,30 @@ VOID_LEDGER_ENTRY_SCHEMA = {
     },
 }
 
+QUERY_RECONCILIATION_TEXT_SCHEMA = {
+    'description': (
+        "產生純文字直列「對帳單」— 給用戶複製/轉傳到別的聊天室跟司機對帳用（唯讀）。"
+        "Triggers: 「對帳」「對帳單」「班次對帳」，如「上週司機28530東洋班次對帳」"
+        "「7/5-7/11 司機533診所班次對帳」。"
+        "週次講法（本週/上週/第N週）先 call sun_week_info 拿 date_from/date_to。"
+        "一般列表查詢（沒說「對帳」）仍用 query_completed_trips。"
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'date_from': {'type': 'string', 'description': "Start date YYYY-MM-DD"},
+            'date_to': {'type': 'string', 'description': "End date YYYY-MM-DD"},
+            'driver_id': {'type': 'integer', 'description': "司機 ID（例 28530, 533）"},
+            'category': {
+                'type': 'string',
+                'description': "業務類別『診所』『東洋』『臨時』之一；可省略=全部類別",
+            },
+            'limit': {'type': 'integer', 'description': "上限筆數，預設 200"},
+        },
+        'required': ['date_from', 'date_to'],
+    },
+}
+
 
 def build_master_skill() -> Skill:
     """合 5 個 sub-skill 的 atomic tools + 帳務 tools 成一個 master skill。
@@ -265,10 +294,11 @@ def build_master_skill() -> Skill:
             seen.add(fn.__name__)
             tools.append((fn, schema))
 
-    # 帳務 tools（沒有獨立 sub-skill，直接掛 master）
+    # 帳務 + 對帳 tools（沒有獨立 sub-skill，直接掛 master）
     for fn, schema in (
         (query_ledger_entry, QUERY_LEDGER_ENTRY_SCHEMA),
         (void_ledger_entry, VOID_LEDGER_ENTRY_SCHEMA),
+        (query_reconciliation_text, QUERY_RECONCILIATION_TEXT_SCHEMA),
     ):
         if fn.__name__ not in seen:
             seen.add(fn.__name__)

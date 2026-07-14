@@ -143,7 +143,7 @@ def execute_batch_allowance(
         params['category'] = category
 
     rows = session.execute(text(f"""
-        SELECT id, date, modification_reason
+        SELECT id, date, modification_reason, category
         FROM completed_trips
         WHERE {' AND '.join(where)}
         ORDER BY id
@@ -156,7 +156,7 @@ def execute_batch_allowance(
 
     # 逐筆 UPDATE（modification_reason 累加要看舊值）
     updated = 0
-    for trip_id, _trip_date, current_reason in rows:
+    for trip_id, _trip_date, current_reason, _trip_category in rows:
         new_reason = append_modification_reason(
             current_reason, reason, 'completed_trips',
         )
@@ -209,9 +209,11 @@ def execute_batch_allowance(
 def _weekly_charge_warnings(*, session, rows, amount: int) -> list:
     """算批量加成影響到的太陽週勾稽警語清單
 
-    rows: [(id, date, modification_reason), ...]（本次被加成的班次）
+    rows: [(id, date, modification_reason, category), ...]（本次被加成的班次）
+    ⚠️ 只統計「診所」類班次 — weekly_charge 是達恩診所的車資週扣款，
+    東洋/臨時班次與週扣款無關（用戶實測回報 2026-07）。
     每個受影響太陽週若已有「有效」weekly_charge 分錄，
-    差額 = amount × 該週被加成筆數。
+    差額 = amount × 該週被加成的**診所**筆數；該週沒有診所班次就不出警語。
     """
     try:
         # lazy import 避免循環 import
@@ -219,8 +221,8 @@ def _weekly_charge_warnings(*, session, rows, amount: int) -> list:
         from rewrite.utils.sun_week import sun_week_start
 
         week_counts: dict = {}
-        for _trip_id, trip_date, _reason in rows:
-            if not trip_date:
+        for _trip_id, trip_date, _reason, trip_category in rows:
+            if not trip_date or trip_category != '診所':
                 continue
             ws = sun_week_start(trip_date)
             week_counts[ws] = week_counts.get(ws, 0) + 1

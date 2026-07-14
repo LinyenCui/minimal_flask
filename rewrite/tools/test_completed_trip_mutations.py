@@ -210,6 +210,97 @@ try:
             raise AssertionError(r.error)
 
     # ============================================================
+    # M4: 帳務勾稽警語只對「診所」類班次（東洋/臨時不警）
+    # tx 內 seed（completed_trips ×2 + 該週 weekly_charge 分錄），
+    # 遠未來日期避開真資料；最後跟全案一起 rollback
+    # ============================================================
+    banner('M4: 勾稽警語 — 診所警 / 東洋不警')
+    from datetime import datetime, time as _time, timedelta
+    from rewrite.utils.sun_week import sun_week_start
+    from rewrite.tools.batch_allowance import execute_batch_allowance
+
+    M4_DATE = date(2035, 2, 7)
+    m4_ws = sun_week_start(M4_DATE)
+    m4_we = m4_ws + timedelta(days=6)
+    # 確認該週乾淨（無真 weekly_charge / 無真班次）
+    from rewrite.tools.accounting import find_weekly_charge_for_week
+    assert find_weekly_charge_for_week(session=s, week_end_date=m4_we) is None, \
+        f'{m4_we} 該測試週不該已有 weekly_charge'
+    n_real = s.execute(text(
+        "SELECT COUNT(*) FROM completed_trips WHERE date >= :ws AND date <= :we"
+    ), {'ws': m4_ws, 'we': m4_we}).scalar()
+    assert n_real == 0, f'{m4_ws}~{m4_we} 不該有真班次（有 {n_real} 筆）'
+
+    # seed 該週 weekly_charge（occurred_at = 該週六 23:59，
+    # 對齊 accounting.record_weekly_charge 的寫入口徑）
+    s.execute(text("""
+        INSERT INTO account_ledger
+            (occurred_at, type, counterparty, amount_in, amount_out,
+             bank_name, bank_account_last4, reference_no, memo, created_at)
+        VALUES (:oa, 'weekly_charge', '車資扣款', 0, 26270,
+                NULL, NULL, NULL, :memo, NOW())
+    """), {'oa': datetime.combine(m4_we, _time(23, 59)),
+           'memo': f'週末 {m4_we.isoformat()} 扣款(測試勾稽)'})
+    assert find_weekly_charge_for_week(session=s, week_end_date=m4_we) is not None
+
+    def _seed_m4(cat, code):
+        return s.execute(text("""
+            INSERT INTO completed_trips
+            (date, start_point, via_point, end_point, meter_fare, extra_fare,
+             category, driver_id, unique_code, trip_type)
+            VALUES (:d, '甲地', NULL, '乙地', 100, 0, :cat, NULL, :code, 'temp')
+            RETURNING id
+        """), {'d': M4_DATE, 'cat': cat, 'code': code}).fetchone()[0]
+
+    clinic_id = _seed_m4('診所', 'test_audit_clinic')
+    toyo_id = _seed_m4('東洋', 'test_audit_toyo')
+
+    # M4a: 診所班次改車資 → 該週已記扣款 → 應有警語
+    r = update_completed_trip_fare(
+        session=s, completed_trip_id=clinic_id,
+        meter_fare=150, reason='測試勾稽', user_name='test',
+        auto_commit=False,
+    )
+    assert r.ok, r.error
+    print(f'  診所 meta.warning = {r.meta.get("warning")!r}')
+    assert r.meta.get('warning'), '診所類改車資該週已記扣款 → 應附警語'
+    assert '已記扣款' in r.meta['warning'] and '26,270' in r.meta['warning']
+
+    # M4b: 東洋班次改車資 → 不該有警語
+    # （用戶實測回報 bug：東洋改車資誤跳「診所週扣款」警語）
+    r = update_completed_trip_fare(
+        session=s, completed_trip_id=toyo_id,
+        meter_fare=150, reason='測試勾稽', user_name='test',
+        auto_commit=False,
+    )
+    assert r.ok, r.error
+    print(f'  東洋 meta.warning = {r.meta.get("warning")!r}')
+    assert r.meta.get('warning') is None, '東洋類改車資不該跳週扣款警語'
+
+    # M4c: 批量加成混合批（診所1+東洋1）→ 差額只算「診所」筆數（+50×1）
+    r = execute_batch_allowance(
+        session=s, date_from=M4_DATE, date_to=M4_DATE,
+        amount=50, reason='測試混合批勾稽', user_name='test',
+        auto_commit=False,
+    )
+    assert r.ok, r.error
+    assert r.data['updated_count'] == 2  # 兩筆都有加成
+    warns = r.data['weekly_charge_warnings']
+    print(f'  批量(診所1+東洋1) warnings = {warns}')
+    assert len(warns) == 1, '該週有診所班次 → 應出一則警語'
+    assert '+50' in warns[0], f'差額應 = 50×診所1筆（非 ×2 筆）: {warns[0]!r}'
+
+    # M4d: 批量加成純東洋批 → 該週有扣款也不警
+    r = execute_batch_allowance(
+        session=s, date_from=M4_DATE, date_to=M4_DATE,
+        amount=50, reason='測試東洋批勾稽', category='東洋',
+        user_name='test', auto_commit=False,
+    )
+    assert r.ok, r.error
+    print(f'  批量(純東洋) warnings = {r.data["weekly_charge_warnings"]}')
+    assert r.data['weekly_charge_warnings'] == [], '純東洋批不該出週扣款警語'
+
+    # ============================================================
     # 全部 rollback，不留痕
     # ============================================================
     s.rollback()

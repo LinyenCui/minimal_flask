@@ -33,7 +33,12 @@ from rewrite.tools.base import ToolResult
 from rewrite.tools.trip import TripView
 from rewrite.tools.customer import CustomerView
 from rewrite.tools.fixed_schedule import FixedScheduleView
-from rewrite.tools.completed_trip import CompletedTripView, GroupedStatView
+from rewrite.tools.completed_trip import (
+    CompletedTripView,
+    GroupedStatView,
+    ReconciliationTextView,
+    split_text_for_line,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -645,9 +650,10 @@ class Agent:
         # 優先：最後執行的 tool 結果（如果有）渲染 → LINE flex/text
         if last_tool_result is not None:
             rendered = self._render_result(last_tool_result, last_tool_name, last_tool_args or {}, event_source=event_source)
-            # 如果 AI 結尾還有補充文字，附加在前頭（除非 rendered 是 flex）
+            # 如果 AI 結尾還有補充文字，附加在前頭（除非 rendered 是 flex
+            # 或多則 list — 對帳單切多則時不併 AI 文字）
             ai_text = self._extract_text(response)
-            if ai_text and rendered.get('type') == 'text':
+            if ai_text and isinstance(rendered, dict) and rendered.get('type') == 'text':
                 rendered['text'] = ai_text + '\n\n' + rendered['text']
             return rendered
 
@@ -824,10 +830,13 @@ class Agent:
         return normalized
 
     @staticmethod
-    def _render_result(result: ToolResult, tool_name: str, args: dict, event_source: Any = None) -> dict:
-        """ToolResult → LINE message dict
+    def _render_result(result: ToolResult, tool_name: str, args: dict, event_source: Any = None):
+        """ToolResult → LINE message dict（或 list[dict]）
 
         event_source 沿用過來給 Flex bubble 上的 LIFF 按鈕用（編輯/請假後 push 才會回到群組）。
+
+        ⚠️ ReconciliationTextView（對帳單）超過 LINE 單則 5000 字上限時回
+        list[dict]（多則 text）— reply_message 收 list，其他呼叫端維持 dict。
         """
         from rewrite.views.trip_flex import (
             render_trip_detail,
@@ -881,6 +890,16 @@ class Agent:
                 'altText': f'查到 {len(data)} 筆已完成班次',
                 'contents': flex,
             }
+
+        # ----- ReconciliationTextView（對帳單純文字 — 可長按複製/轉傳）-----
+        if isinstance(data, ReconciliationTextView):
+            chunks, overflow = split_text_for_line(data.text)
+            if overflow:
+                chunks[-1] += '\n\n⚠️ 對帳單過長已截斷，請縮小日期範圍或加司機/類別條件'
+            msgs = [{'type': 'text', 'text': c} for c in chunks]
+            # 單則維持 dict（既有契約）；多則回 list（reply_message 收 list，
+            # LINE reply 一次最多 5 則 — split_text_for_line 已 cap）
+            return msgs[0] if len(msgs) == 1 else msgs
 
         # ----- GroupedStatView（受護欄查詢層 grouped 結果：各司機加總…）-----
         if isinstance(data, GroupedStatView):
