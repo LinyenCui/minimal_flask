@@ -651,9 +651,12 @@ class Agent:
         if last_tool_result is not None:
             rendered = self._render_result(last_tool_result, last_tool_name, last_tool_args or {}, event_source=event_source)
             # 如果 AI 結尾還有補充文字，附加在前頭（除非 rendered 是 flex
-            # 或多則 list — 對帳單切多則時不併 AI 文字）
+            # 或多則 list — 對帳單切多則時不併 AI 文字）。
+            # 對帳單（reconciliation）一律不前綴 AI 文字 — view 自足，
+            # 且 Gemini 收尾常複述單子內容造成重複（2026-07-14 實測）
             ai_text = self._extract_text(response)
-            if ai_text and isinstance(rendered, dict) and rendered.get('type') == 'text':
+            if (ai_text and isinstance(rendered, dict) and rendered.get('type') == 'text'
+                    and last_tool_name != 'query_reconciliation_text'):
                 rendered['text'] = ai_text + '\n\n' + rendered['text']
             return rendered
 

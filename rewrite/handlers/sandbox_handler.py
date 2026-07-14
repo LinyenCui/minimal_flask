@@ -272,6 +272,13 @@ def _is_short_followup(text: str) -> bool:
 SANDBOX_ACTIVE_STATE_TYPE = 'rewrite_sandbox_active'
 SANDBOX_ACTIVE_TTL_MINUTES = 1.5  # 90 秒，避免長期卡住
 
+# 同指令進行中防抖 — Gemini 偶發慢呼叫（實測 40s+）時用戶會重發同一句，
+# 兩個請求平行打 Gemini 互撞 429、又各回一則造成重複（2026-07-14 log）。
+# in-flight dict：(user_id, text) → 開始時間；處理完 finally 清除，
+# MAX_SECONDS 是崩潰未清時的保險失效線。
+_AGENT_INFLIGHT: dict = {}
+_AGENT_INFLIGHT_MAX_SECONDS = 120
+
 logger = logging.getLogger(__name__)
 
 
@@ -610,6 +617,21 @@ def try_handle_sandbox(event) -> bool:
             payload = prev.get('payload') or {}
             history = payload.get('history') or []
 
+    # 0.6 同指令進行中防抖：同 user 同文字且前一則還在跑 → 擋下不開新 agent run
+    _inflight_key = None
+    if user_id:
+        from datetime import datetime as _dt
+        _inflight_key = (user_id, text)
+        _started = _AGENT_INFLIGHT.get(_inflight_key)
+        if _started and (_dt.now() - _started).total_seconds() < _AGENT_INFLIGHT_MAX_SECONDS:
+            logger.info(f"[rewrite sandbox] {short_uid} duplicate in-flight blocked: {text[:30]!r}")
+            reply_message(event.reply_token, {
+                'type': 'text',
+                'text': '⏳ 上一則相同指令還在處理中（AI 偶爾要跑十幾秒），請稍候，不用重發。',
+            })
+            return True
+        _AGENT_INFLIGHT[_inflight_key] = _dt.now()
+
     # 1. 跑 Master Agent — 一個 LLM call 含全部 ~25 atomic tools
     #    取代原本「intent classifier (call 1) + skill agent (call 2+)」雙 call 架構
     #    收益：延遲砍 ~50%、無 intent misclassify 風險
@@ -644,6 +666,9 @@ def try_handle_sandbox(event) -> bool:
             'text': '⚠️ 處理時發生錯誤，請稍後再試或輸入「幫助」',
         })
         return True
+    finally:
+        if _inflight_key:
+            _AGENT_INFLIGHT.pop(_inflight_key, None)
 
     # 3. 判斷 AI 是否在等 follow-up
     #    是 → decorate（進度條 + 結束按鈕）+ 設 sandbox-active state（90 秒可不加 !）

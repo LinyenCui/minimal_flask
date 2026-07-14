@@ -503,12 +503,13 @@ class ReconciliationTextView:
 
     def to_dict(self) -> dict:
         # 給 LLM function_response 的摘要 — 全文已直接渲染給用戶，
-        # 整份餵回 model 只會撐爆 context
+        # 整份餵回 model 只會撐爆 context。
+        # ⚠️ 不放 preview 片段：實測 Gemini 會把 preview 原文抄進收尾文字，
+        #    用戶就看到「半張截斷單 + 完整單」黏在一起（2026-07-14 log）
         return {
             'count': self.count,
             'total_amount': self.total_amount,
-            'preview': self.text[:200],
-            'note': '對帳單全文已以純文字訊息直接回覆用戶',
+            'note': '對帳單全文已以純文字訊息直接回覆用戶，你不需要重述內容',
         }
 
 

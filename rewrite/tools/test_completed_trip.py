@@ -275,10 +275,12 @@ try:
     assert '共 3 筆' in txt
     assert '合計 850 元' in txt                           # 330 + (-30) + 550
     assert view.count == 3 and view.total_amount == 850
-    # to_dict（給 LLM 的摘要）不含全文
+    # to_dict（給 LLM 的摘要）不含全文、也不含 preview 片段
+    # （preview 會被 Gemini 抄進收尾文字造成重複 — 2026-07-14 實測移除）
     d = view.to_dict()
     assert d['count'] == 3 and d['total_amount'] == 850
-    assert len(d['preview']) <= 200
+    assert 'preview' not in d
+    assert view.text[:50] not in str(d)   # 單子內容完全不外洩給 LLM
 
     # 無 filter（撈全部 4 筆，無第二行 header）
     r = query_reconciliation_text(
