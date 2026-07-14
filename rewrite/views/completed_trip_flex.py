@@ -22,6 +22,8 @@ PRIMARY = "#1565C0"
 SUCCESS = "#2E7D32"
 DANGER = "#D32F2F"
 LEAVE = "#7B1FA2"
+LEAVE_TINT = "#F3E5F5"      # 請假列在列表 row 的淡紫底色標記（比照現在態 temp 列
+                            # 的 TEMP_TINT 做法；紫系呼應 LEAVE 主色、避開 temp 的暖色）
 MUTED = "#999999"
 BLACK = "#333333"
 
@@ -279,17 +281,15 @@ def _ct_row(ct: CompletedTripView) -> dict:
     """Carousel 內一行已完成班次（可 tap 至詳情）"""
     driver_text = f"🚗{ct.driver_id}" if ct.driver_id else "🚗?"
     route_text = _short_route(ct)
-    if ct.computed_total is not None and ct.computed_total > 0:
+    # 金額恆顯示（請假列可能是負數加成，如 -30，照顯示）；None/0 才顯佔位
+    if ct.computed_total:
         fare_text = f"{ct.computed_total}元"
-        fare_color = ACCENT_DARK
+        fare_color = LEAVE if ct.is_leave else ACCENT_DARK
     else:
-        fare_text = "未記錄"
+        fare_text = "—" if ct.is_leave else "未記錄"
         fare_color = MUTED
-    if ct.is_leave:
-        fare_text = "🏷️請假"
-        fare_color = LEAVE
 
-    return {
+    row = {
         "type": "box",
         "layout": "horizontal",
         "spacing": "xs",
@@ -311,6 +311,12 @@ def _ct_row(ct: CompletedTripView) -> dict:
              "color": fare_color, "align": "end", "weight": "bold"},
         ]
     }
+    # 請假列：整列淡紫底色標記（比照現在態 temp 列 TEMP_TINT 做法，
+    # 不加 padding 免得欄位跟其他 row 對不齊），「請假」字樣移除 — 底色已表達
+    if ct.is_leave:
+        row["backgroundColor"] = LEAVE_TINT
+        row["cornerRadius"] = "sm"
+    return row
 
 
 def _render_more_indicator(remaining_bubbles: int, total_trips: int) -> dict:
