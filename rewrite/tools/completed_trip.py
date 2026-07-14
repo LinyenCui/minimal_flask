@@ -583,9 +583,14 @@ def query_reconciliation_text(
       📋 對帳單 2026/7/5～7/11
       司機 28530｜東洋
       ──────────
-      7/6（一）
+
+      【7/6（一）】2 筆
       #2585 萬年七街→太子龍 330
       #2593 健康三街→建平七街 請假 -30
+      　小計 300 元
+
+      【7/8（三）】…（每天空行分段；單日查詢不顯示小計）
+
       ──────────
       共 23 筆｜合計 5,285 元
 
@@ -651,24 +656,37 @@ def query_reconciliation_text(
     divider = "──────────"
     lines.append(divider)
 
-    # ---- body（按日期分段，段首 7/6（一））----
-    total = 0
-    cur_date = None
+    # ---- body（按日期分段：空行 +【7/6（一）】N 筆 + 逐筆 + 小計）----
+    # 先分組（views 已按 date 排序）
+    day_groups: list = []   # [(date, [views])]
     for v in views:
-        if v.date != cur_date:
-            cur_date = v.date
-            if cur_date:
-                lines.append(f"{_fmt_month_day(cur_date)}（{_WEEKDAY_ZH[cur_date.weekday()]}）")
-            else:
-                lines.append("（無日期）")
-        amount = v.computed_total
-        total += amount or 0
-        amount_str = f"{amount:,}" if amount is not None else '未記錄'
-        leave_mark = "請假 " if v.is_leave else ""
-        route = f"{_short_loc(v.start_point)}→{_short_loc(v.end_point)}"
-        lines.append(f"#{v.id} {route} {leave_mark}{amount_str}")
+        if day_groups and day_groups[-1][0] == v.date:
+            day_groups[-1][1].append(v)
+        else:
+            day_groups.append((v.date, [v]))
+
+    total = 0
+    multi_day = len(day_groups) > 1
+    for d, group in day_groups:
+        lines.append("")   # 每天前空一行，跟上一段隔開
+        header = (f"【{_fmt_month_day(d)}（{_WEEKDAY_ZH[d.weekday()]}）】"
+                  if d else "【無日期】")
+        lines.append(f"{header} {len(group)} 筆")
+        day_sum = 0
+        for v in group:
+            amount = v.computed_total
+            total += amount or 0
+            day_sum += amount or 0
+            amount_str = f"{amount:,}" if amount is not None else '未記錄'
+            leave_mark = "請假 " if v.is_leave else ""
+            route = f"{_short_loc(v.start_point)}→{_short_loc(v.end_point)}"
+            lines.append(f"#{v.id} {route} {leave_mark}{amount_str}")
+        # 單日查詢時小計＝合計，不重複顯示
+        if multi_day:
+            lines.append(f"　小計 {day_sum:,} 元")
 
     # ---- footer ----
+    lines.append("")
     lines.append(divider)
     lines.append(f"共 {len(views)} 筆｜合計 {total:,} 元")
     if truncated:
