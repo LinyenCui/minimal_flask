@@ -31,6 +31,7 @@
     .alert { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 14px; }
     .alert.err { background: #fdecea; color: #c0392b; border: 1px solid #f5c2bf; }
     .alert.ok { background: #e8f5e9; color: #1a7a1a; border: 1px solid #b8e0bb; }
+    .alert.warn { background: #fff8e1; color: #b85c00; border: 1px solid #ffd180; }
     .loading { text-align: center; color: #666; padding: 40px 0; }
     details { margin-bottom: 14px; border: 1px solid #eee; border-radius: 6px; padding: 8px 12px; }
     details summary { font-weight: 600; cursor: pointer; padding: 4px 0; color: #555; }
@@ -309,6 +310,13 @@
         });
         flushed = false;   // 又新增一筆 → 重置,確保收尾會再推
         showAlert('ok', `✅ 已建立預約 #${tid}，可繼續預約下一班`);
+        // 起/終點未對應客戶簡稱 → 黃色警示（只在表單內提醒，不佔 push 額度）
+        const warns = data.warnings || [];
+        if (warns.length) {
+          alertEl.innerHTML += warns
+            .map(w => `<div class="alert warn">⚠️ ${w}</div>`)
+            .join('');
+        }
         // 連續預約：不自動關窗，改顯示「再預約一筆 / 完成關閉」
         form.hidden = true;
         postActions.hidden = false;
