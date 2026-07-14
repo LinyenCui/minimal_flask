@@ -28,6 +28,42 @@ from modules.utils.week_utils import calculate_target_week, is_week_in_past
 VALID_IMPORT_CATEGORIES = ('診所', '東洋', '臨時')
 """類別必須在 enum 內 — 跟 legacy import_handler 一致"""
 
+SEQ_RESET_THRESHOLD = 5000
+"""trips 序號自動歸位門檻 — 週更清空後序號超過此值才歸 1。
+
+不設成每週歸 1 的原因：聊天室裡舊班次卡片的按鈕帶著 trip_id，
+週週重用 id 會讓「上週的請假按鈕」打到「本週的同號班次」。
+門檻制讓 id 重用約 8-10 個月才發生一次，舊按鈕早已沉底。
+（completed_trips 的 id 是歷史累積、被 #N 指令引用，永不重置。）"""
+
+
+def reset_trips_sequence(*, session) -> ToolResult:
+    """手動重置 trips 序號 — 僅當 trips 已清空才執行（防誤用）。
+
+    Triggers: 「重置班次序號」。
+    setval 立即生效且不受 rollback 保護，故不吃 auto_commit 參數。
+    """
+    count = session.execute(text("SELECT COUNT(*) FROM trips")).scalar()
+    seq_name = session.execute(text(
+        "SELECT pg_get_serial_sequence('trips', 'trip_id')"
+    )).scalar()
+    if not seq_name:
+        return ToolResult.fail("找不到 trips 的序號 sequence")
+    next_val = session.execute(
+        text(f"SELECT last_value FROM {seq_name}")).scalar()
+    if count and count > 0:
+        return ToolResult.fail(
+            f"trips 還有 {count} 筆班次（目前序號 #{next_val}），"
+            f"清空本週班次後才能重置。序號會在匯入清空時自動歸位，"
+            f"通常不需手動操作"
+        )
+    session.execute(text("SELECT setval(:s, 1, false)"), {'s': seq_name})
+    session.commit()
+    return ToolResult.success(data={
+        'from': int(next_val or 0),
+        'message': f"🔁 班次序號已重置：原 #{next_val} → 下一班從 #1 開始",
+    })
+
 
 def _check_existing(*, session, dates, category) -> int:
     """查該週該類別的 fixed_trip_id 既有筆數"""
@@ -230,6 +266,28 @@ def import_fixed_to_trips(
         """), {'before': dates[0], 'category': category})
         purged_count = result.rowcount
 
+    # === 序號自動歸位 ===
+    # 週更清完舊班次後，trips 若已清空且序號墊高過門檻 → 歸 1（用戶需求：
+    # 序號不要無限堆高）。⚠️ setval 不受 rollback 保護 — 先 commit 上面的
+    # DELETE 再 reset，之後 INSERT 若失敗回滾，也不會出現「舊班次還在、
+    # 序號卻歸 1」的 PK 撞擊（重匯即可，fixed_schedules 是資料來源）。
+    seq_reset_from = None
+    if auto_commit:  # 測試的 rollback 模式（auto_commit=False）不動序號
+        remaining = session.execute(text("SELECT COUNT(*) FROM trips")).scalar()
+        if remaining == 0:
+            seq_name = session.execute(text(
+                "SELECT pg_get_serial_sequence('trips', 'trip_id')"
+            )).scalar()
+            if seq_name:
+                next_val = session.execute(
+                    text(f"SELECT last_value FROM {seq_name}")).scalar()
+                if next_val and next_val >= SEQ_RESET_THRESHOLD:
+                    session.commit()   # 先落地 DELETE
+                    session.execute(text("SELECT setval(:s, 1, false)"),
+                                    {'s': seq_name})
+                    session.commit()
+                    seq_reset_from = int(next_val)
+
     # week_offset 重算（防 user 給負/錯）
     week_offset_actual = (week_start - today).days // 7
 
@@ -353,5 +411,6 @@ def import_fixed_to_trips(
             'leave_count': leave_count,
             'normal_count': normal_count,
             'skipped_dup': skipped_dup,
+            'seq_reset_from': seq_reset_from,
         },
     )

@@ -192,6 +192,8 @@ def _push_import_broadcast(target_id: str, data: dict, operator_user_id: str | N
             lines.append(f"🗑️ 清過去週：{data['purged_past']} 筆")
         if data.get('skipped_dup', 0) > 0:
             lines.append(f"⏭️ 跳過重複：{data['skipped_dup']} 筆")
+        if data.get('seq_reset_from'):
+            lines.append(f"🔁 班次序號已自動歸位（原 #{data['seq_reset_from']} → 本週從小號重編）")
         msg_text = '\n'.join(lines)
 
         api = get_line_bot_api()

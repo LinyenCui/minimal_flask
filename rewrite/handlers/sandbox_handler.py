@@ -133,6 +133,7 @@ _ALL_EXACT_COMMAND_TRIGGERS = (
     | _BATCH_ALLOWANCE_LIFF_TRIGGERS
     | _DB_SYNC_TRIGGERS
     | _HELP_TRIGGERS
+    | {'重置班次序號'}
 )
 # 註：_DRUG_DX_LINK_LIFF_TRIGGERS 刻意不納入聯集 —— 藥診關聯在群組有自己的前綴
 # 政策（_is_drug_dx_link_liff_trigger 群組只收 / ! ！ 前綴）。若把裸字「藥診關聯」
@@ -581,6 +582,22 @@ def try_handle_sandbox(event) -> bool:
     if text in _HELP_TRIGGERS:
         reply_message(event.reply_token, {'type': 'text', 'text': _HELP_TEXT})
         logger.info(f"[rewrite sandbox] {short_uid} → help")
+        return True
+
+    # 0b''''. 手動重置班次序號（維護指令；trips 非空會被工具拒絕，防誤用）
+    if text == '重置班次序號':
+        from database import Session
+        from rewrite.tools.import_fixed import reset_trips_sequence
+        _seq_sess = Session()
+        try:
+            _seq_r = reset_trips_sequence(session=_seq_sess)
+        finally:
+            _seq_sess.close()
+        reply_message(event.reply_token, {
+            'type': 'text',
+            'text': _seq_r.data['message'] if _seq_r.ok else f"❌ {_seq_r.error}",
+        })
+        logger.info(f"[rewrite sandbox] {short_uid} → reset_trips_sequence ok={_seq_r.ok}")
         return True
 
     # 0b''. admin 命令橋接：資料庫同步（保留 legacy database_sync_handler 業務邏輯）
