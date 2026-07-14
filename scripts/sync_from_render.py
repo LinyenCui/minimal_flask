@@ -340,8 +340,9 @@ def incremental_sync_completed_trips(local_conn, render_conn):
 
     新邏輯雙路徑：
       路徑 1: created_at > last_sync_time → 抓 Render 新加的（標準 incremental）
-      路徑 2: created_at IS NULL **且本地沒這個 id** → 補漏失 NULL row
-              （本地已有這個 id 的不抓，避免覆蓋本地修改）
+      路徑 2: 缺 id 補漏 — Render 有、本地沒有的 id 一律補回
+              （2026-07-15 由「只補 NULL created_at」擴成全 id 比對；
+               本地已有這個 id 的不抓，避免覆蓋本地修改）
     """
     table_name = "completed_trips"
     print(f"--- 開始增量同步資料表: {table_name}（時間錨點 + NULL 補漏） ---")
@@ -371,46 +372,40 @@ def incremental_sync_completed_trips(local_conn, render_conn):
 
             # ----- 路徑 2: 補本地沒的 NULL row -----
             # Render 上 NULL row 是 schema 升級遺留，數量固定（不會新增）
-            # 本地已有的 id 不抓，避免蓋掉本地修改
-            print("   - [路徑2] 抓 Render created_at IS NULL **且本地沒此 id** 的補漏...")
-            render_cur.execute(
-                f"SELECT id FROM {table_name} WHERE created_at IS NULL ORDER BY id;"
-            )
-            render_null_ids = [r['id'] for r in render_cur.fetchall()]
+            # 本地已有的 id 一律不抓 → 維持「不洗本地修改、只增不減」。
+            # 原版只補 created_at IS NULL 的漏（schema 升級遺留），有個夾縫：
+            # 本地清空重同步時，「有 created_at 但早於錨點」的舊資料
+            # （實測 473 筆 id 205-678）時間過濾撈不到、NULL 補漏也不管，
+            # 永遠補不回來 → 2026-07-15 擴成全 id 比對，任何本地缺口都自癒。
+            print("   - [路徑2] 比對 id 集合，補 Render 有、本地沒有的紀錄...")
+            render_cur.execute(f"SELECT id FROM {table_name} ORDER BY id;")
+            render_ids = [r['id'] for r in render_cur.fetchall()]
+            local_cur.execute(f"SELECT id FROM {table_name}")
+            local_ids = {r[0] for r in local_cur.fetchall()}
+            time_ids = {r['id'] for r in records_by_time}  # 路徑1 已抓的不重複抓
+            missing_ids = [
+                i for i in render_ids if i not in local_ids and i not in time_ids
+            ]
+            print(f"   - [路徑2] Render {len(render_ids)} 筆, 本地 {len(local_ids)} 筆, "
+                  f"待補 {len(missing_ids)} 筆")
 
-            if render_null_ids:
-                local_cur.execute(
-                    f"SELECT id FROM {table_name} WHERE id = ANY(%s)",
-                    (render_null_ids,),
+            if missing_ids:
+                render_cur.execute(
+                    f"SELECT * FROM {table_name} WHERE id = ANY(%s) ORDER BY id",
+                    (missing_ids,),
                 )
-                local_existing_null_ids = {r[0] for r in local_cur.fetchall()}
-                missing_null_ids = [
-                    i for i in render_null_ids if i not in local_existing_null_ids
-                ]
-                print(f"   - [路徑2] Render NULL: {len(render_null_ids)}, "
-                      f"本地已有: {len(local_existing_null_ids)}, "
-                      f"待補: {len(missing_null_ids)}")
-
-                if missing_null_ids:
-                    render_cur.execute(
-                        f"SELECT * FROM {table_name} WHERE id = ANY(%s) ORDER BY id",
-                        (missing_null_ids,),
-                    )
-                    records_null_missing = list(render_cur.fetchall())
-                    description_full = render_cur.description  # SELECT * 重新 cache
-                else:
-                    records_null_missing = []
+                records_missing = list(render_cur.fetchall())
+                description_full = render_cur.description  # SELECT * 重新 cache
             else:
-                print("   - [路徑2] Render 上沒 NULL row")
-                records_null_missing = []
+                records_missing = []
 
             # ----- 合併 -----
-            new_records = records_by_time + records_null_missing
+            new_records = records_by_time + records_missing
             if not new_records:
                 print("   - ✅ 沒有需要同步的新紀錄")
                 return
             print(f"   - 總共需同步 {len(new_records)} 筆 "
-                  f"(路徑1 新增 {len(records_by_time)} + 路徑2 NULL 補漏 {len(records_null_missing)})")
+                  f"(路徑1 新增 {len(records_by_time)} + 路徑2 缺id補漏 {len(records_missing)})")
 
             # 3. 過濾生成欄位（用 cached description，避免被 path 2 的 SELECT id 覆寫）
             all_cols = [desc[0] for desc in description_full]
