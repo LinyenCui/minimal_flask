@@ -759,7 +759,7 @@ def update_trip_category(
     session,
     trip_id: int,
     new_category: str,
-    reason: str,
+    reason: str = '',
     user_id: Optional[str] = None,
     user_name: Optional[str] = None,
     via: str = 'unknown',
@@ -772,12 +772,12 @@ def update_trip_category(
 
     Args:
         new_category: '診所' / '東洋' / '臨時'
-        reason: 修改原因（必填）
+        reason: 修改原因（選填，空值記「修改」）
 
     R-5 鎖：allow_in_lock=True（改類別不影響時間執行）
     """
-    if not reason or not reason.strip():
-        return ToolResult.fail("請提供修改原因")
+    # 現在態不進報表，reason 不強制（防改錯靠機制層確認卡）；空值記通用「修改」
+    reason = (reason or '').strip() or '修改' 
     if not new_category or not new_category.strip():
         return ToolResult.fail("new_category 不可空")
     new_category = new_category.strip()
@@ -838,7 +838,7 @@ def update_trip_time(
     session,
     trip_id: int,
     new_time: str,
-    reason: str,
+    reason: str = '',
     user_id: Optional[str] = None,
     user_name: Optional[str] = None,
     via: str = 'unknown',
@@ -856,8 +856,8 @@ def update_trip_time(
     R-5 鎖：allow_in_lock=False（時間敏感，30 分鐘鎖內擋）
     R-6 audit：寫 'update_trip_time'
     """
-    if not reason or not reason.strip():
-        return ToolResult.fail("請提供修改原因")
+    # 現在態不進報表，reason 不強制（防改錯靠機制層確認卡）；空值記通用「修改」
+    reason = (reason or '').strip() or '修改' 
     if not new_time or not str(new_time).strip():
         return ToolResult.fail("new_time 不可空")
     raw = str(new_time).strip()
@@ -945,10 +945,10 @@ def update_trip_route(
       - 其他 → 設為該途經點
 
     只動本班次(實例覆寫),不影響模板與其他班次。
-    已完成 / 註銷 拒絕。reason 必填。R-5 鎖：allow_in_lock=True。
+    已完成 / 註銷 拒絕。reason 選填。R-5 鎖：allow_in_lock=True。
     """
-    if not reason or not reason.strip():
-        return ToolResult.fail("請提供修改原因")
+    # 現在態不進報表，reason 不強制（防改錯靠機制層確認卡）；空值記通用「修改」
+    reason = (reason or '').strip() or '修改' 
     ns = (new_start or '').strip()
     ne = (new_end or '').strip()
     # 途經三態：未傳(None)=不動;傳了=要改(可能設值或清空)
