@@ -1,11 +1,10 @@
 """
 診斷碼查詢 LINE Bot 處理器
 
-觸發方式：
-  dx 2749        → 精確碼查詢
-  碼 痛風        → 關鍵字搜尋
-  dx 泌尿高頻碼  → 章節 + 高頻篩選
-  /dx ...        → 群組相容
+觸發方式（一律帶 /，裸字 dx/碼 已停用 — 會吞「碼頭見」這類正常訊息）：
+  /dx 2749        → 精確碼查詢
+  /碼 痛風        → 關鍵字搜尋
+  /dx 泌尿高頻碼  → 章節 + 高頻篩選
 """
 import logging
 from modules.utils.line_bot import reply_message, reply_text
@@ -14,7 +13,9 @@ from modules.views.diagnosis_flex import render_diagnosis_detail
 
 logger = logging.getLogger(__name__)
 
-PREFIXES = ['dx ', 'dx', '碼 ', '碼', '/dx ', '/dx', '/碼 ', '/碼', '!dx', '！dx']
+# 一律帶「/」（用戶定調 2026-07-15）：裸字 dx/碼 會在群組閘門前攔截，
+# 「碼頭見」這類正常訊息會被吞；! 前綴保留給回診日期計算（!日期）
+PREFIXES = ['/dx ', '/dx', '/碼 ', '/碼']
 
 
 def is_diagnosis_trigger(text: str) -> bool:
@@ -87,7 +88,7 @@ def _format_result(result: dict) -> str:
     if result['type'] == 'error':
         return f"❌ {result['message']}"
     if result['type'] == 'empty':
-        return f"🔍 {result['message']}\n\n💡 試試：dx 章節 查看所有分類"
+        return f"🔍 {result['message']}\n\n💡 試試：/dx 章節 查看所有分類"
     if result['type'] == 'single':
         return _format_single(result['codes'][0])
     if result['type'] == 'table':
@@ -214,7 +215,7 @@ def _format_list(codes: list, total: int, query: str) -> str:
     if total > 15:
         lines.append(f"\n... 還有 {total - 15} 筆，請縮小查詢範圍")
 
-    lines.append(f"\n💡 輸入 dx <碼號> 查看詳情")
+    lines.append(f"\n💡 輸入 /dx <碼號> 查看詳情")
     return '\n'.join(lines)
 
 
@@ -260,13 +261,13 @@ def _help_text() -> str:
 
 🔍 查詢方式：
 
-  dx 2749          精確碼查詢
-  dx I13.10        ICD-10 查詢
-  dx 痛風          名稱搜尋
-  dx 泌尿高頻碼    章節 + 高頻篩選
-  dx 洗腎 貧血     多關鍵字搜尋
-  碼 肝炎          中文前綴
-  dx 章節          查看所有章節
+  /dx 2749          精確碼查詢
+  /dx I13.10        ICD-10 查詢
+  /dx 痛風          名稱搜尋
+  /dx 泌尿高頻碼    章節 + 高頻篩選
+  /dx 洗腎 貧血     多關鍵字搜尋
+  /碼 肝炎          中文前綴
+  /dx 章節          查看所有章節
 
 📁 支援章節：
   皮膚、骨關節、泌尿腎臟、
