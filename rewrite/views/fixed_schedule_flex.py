@@ -178,8 +178,11 @@ def render_fixed_schedule_detail(view: FixedScheduleView, event_source=None) -> 
             body.append(_row("加成", f"{view.surcharge:+d} 元",
                              value_color=LEAVE if view.surcharge < 0 else BLACK))
 
-    if view.note:
+    if view.passenger_name or view.note:
         body.append(_separator())
+    if view.passenger_name:
+        body.append(_row("乘客", view.passenger_name, value_color=BLACK))
+    if view.note:
         body.append(_row("備註", view.note, value_color=MUTED))
 
     return {

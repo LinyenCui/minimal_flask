@@ -56,6 +56,7 @@ class FixedScheduleView:
     driver_id: Optional[str] = None     # legacy: varchar
     direction: Optional[str] = None     # 來 / 回
     status: Optional[str] = None
+    passenger_name: Optional[str] = None   # 乘客/接送順序（008 起；note 只留請假原因）
     note: Optional[str] = None
     modified_by: Optional[str] = None
     modification_time: Optional[datetime] = None
@@ -89,7 +90,7 @@ _SELECT_ALL = """
     SELECT id, route_number, departure_time,
            start_point, via_point, end_point,
            base_fare, surcharge, total_fare,
-           category, driver_id, direction, status, note,
+           category, driver_id, direction, status, note, passenger_name,
            modified_by, modification_time
     FROM fixed_schedules
 """
@@ -186,6 +187,7 @@ _UPDATABLE_FIELDS = {
     'driver_id',
     'direction',
     'note',
+    'passenger_name',
 }
 
 
@@ -457,6 +459,7 @@ def create_fixed_schedule(
     driver_id: Optional[str] = None,
     direction: Optional[str] = None,
     note: Optional[str] = None,
+    passenger_name: Optional[str] = None,
     user_id: Optional[str] = None,
     user_name: Optional[str] = None,
     via: str = 'unknown',
@@ -471,7 +474,8 @@ def create_fixed_schedule(
         start_point: 起點客戶簡稱
         category: 診所 / 東洋 / 臨時
 
-    選填: via_point/end_point/base_fare/surcharge/driver_id/direction/note
+    選填: via_point/end_point/base_fare/surcharge/driver_id/direction/note/passenger_name
+    （note 只放請假原因等備註；乘客/接送順序放 passenger_name — 不會進請款報表）
 
     自動: status='準備'、modified_by、modification_time
     """
@@ -510,14 +514,14 @@ def create_fixed_schedule(
             start_point, via_point, end_point,
             base_fare, surcharge,
             category, driver_id, direction,
-            note, status,
+            note, passenger_name, status,
             modified_by, modification_time
         ) VALUES (
             :route_number, :departure_time,
             :start_point, :via_point, :end_point,
             :base_fare, :surcharge,
             :category, :driver_id, :direction,
-            :note, '準備',
+            :note, :passenger_name, '準備',
             :modified_by, CURRENT_TIMESTAMP
         )
         RETURNING id
@@ -533,6 +537,7 @@ def create_fixed_schedule(
         'driver_id': (driver_id or '').strip() or None if isinstance(driver_id, str) else driver_id,
         'direction': direction,
         'note': (note or '').strip() or None,
+        'passenger_name': (passenger_name or '').strip() or None,
         'modified_by': user_name or user_id,
     })
     new_id = result.fetchone()[0]

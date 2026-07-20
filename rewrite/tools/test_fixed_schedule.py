@@ -27,8 +27,17 @@ def banner(label):
 
 session = Session()
 fake_ids = [99701, 99702, 99703]
+# fs_start_point_fkey → customers.short_name：測試客戶要自帶
+# （本地 customers 會被 Render 同步 TRUNCATE 洗掉，不能假設存在）
+_fixture_customers = ['測試街A', '測試街B']
 try:
-    # 準備 — 造 3 筆假固定班次
+    # 準備 — 造測試客戶（FK 需要）+ 3 筆假固定班次
+    for sn in _fixture_customers:
+        session.execute(text("""
+            INSERT INTO customers (name, short_name, address)
+            VALUES (:sn, :sn, '測試地址')
+            ON CONFLICT DO NOTHING
+        """), {'sn': sn})
     for fid in fake_ids:
         session.execute(text("DELETE FROM fixed_schedules WHERE id = :id"), {'id': fid})
     session.execute(text("""
@@ -192,6 +201,7 @@ try:
     print('✅ 全部 12 個 fixed_schedule 測試通過')
     print('=' * 60)
 finally:
+    session.rollback()   # 若中途有 aborted transaction，先清狀態才能跑清理
     for fid in fake_ids:
         try:
             session.execute(text("DELETE FROM fixed_schedules WHERE id = :id"), {'id': fid})
@@ -201,6 +211,10 @@ finally:
         DELETE FROM audit_log
         WHERE target_table = 'fixed_schedules' AND target_id = ANY(:ids)
     """), {'ids': fake_ids})
+    for sn in _fixture_customers:
+        session.execute(text(
+            "DELETE FROM customers WHERE short_name = :sn AND address = '測試地址'"
+        ), {'sn': sn})
     session.commit()
-    print(f'\n🧹 清理 fixed_schedules: {fake_ids} + audit_log')
+    print(f'\n🧹 清理 fixed_schedules: {fake_ids} + audit_log + 測試客戶')
     session.close()

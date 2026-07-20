@@ -98,7 +98,12 @@
       </div>
 
       <details>
-        <summary>選填欄位（司機 / 車資 / 方向 / 備註）</summary>
+        <summary>選填欄位（乘客 / 司機 / 車資 / 方向 / 備註）</summary>
+        <div class="field">
+          <label>乘客／接送順序</label>
+          <textarea name="passenger_name" rows="2" maxlength="200" placeholder="例：惠真12:00 →合文12:05 →診所12:15"></textarea>
+          <div class="helper">顯示在班次詳情的乘客欄，不會出現在請款報表</div>
+        </div>
 
         <div class="field" style="margin-top: 10px;">
           <label>指派司機 ID</label>
@@ -127,8 +132,8 @@
         </div>
 
         <div class="field">
-          <label>備註</label>
-          <textarea name="note" rows="2" maxlength="200"></textarea>
+          <label>備註（請假原因專用）</label>
+          <textarea name="note" rows="2" maxlength="200" placeholder="請假原因會進報表說明欄；乘客請填上面的乘客欄"></textarea>
         </div>
       </details>
 
@@ -227,6 +232,7 @@
       setVal('base_fare', s.base_fare);
       setVal('surcharge', s.surcharge);
       setVal('note', s.note);
+      setVal('passenger_name', s.passenger_name);
     }
 
     async function init() {
@@ -293,6 +299,7 @@
           base_fare: fd.get('base_fare') ? parseInt(fd.get('base_fare'), 10) : null,
           surcharge: fd.get('surcharge') ? parseInt(fd.get('surcharge'), 10) : null,
           note: fd.get('note') || null,
+          passenger_name: fd.get('passenger_name') || null,
         };
 
         // 從 URL params 拿真實 group/room ID（liff.getContext 給的 UUID 不能用，

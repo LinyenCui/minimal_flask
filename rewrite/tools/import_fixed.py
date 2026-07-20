@@ -109,7 +109,7 @@ def _fetch_fixed_for_day(*, session, weekday: int, category: str):
                start_point, via_point, end_point,
                base_fare, surcharge, total_fare,
                category, driver_id, direction,
-               status, note
+               status, note, passenger_name
         FROM fixed_schedules
         WHERE route_number LIKE :pat
           AND (status IS NULL OR status != '停用')
@@ -348,6 +348,7 @@ def import_fixed_to_trips(
                 'meter': r.base_fare, 'extra': extra_fare,
                 'cat': r.category, 'did': r.driver_id,
                 'leave': leave_reason,
+                'pname': r.passenger_name,   # 乘客/接送順序 → 班次詳情顯示，不進報表
                 'uc': unique_code, 'wn': week_number,
             })
             inserted += 1
@@ -359,13 +360,13 @@ def import_fixed_to_trips(
             (fixed_trip_id, date, time,
              start_point, via_point, end_point,
              meter_fare, extra_fare, category, driver_id,
-             status, passenger_leave_reason,
+             status, passenger_leave_reason, passenger_name,
              unique_code, week_number, trip_type)
             VALUES
             (:fid, :date, :time,
              :sp, :vp, :ep,
              :meter, :extra, :cat, :did,
-             '準備', :leave,
+             '準備', :leave, :pname,
              :uc, :wn, 'fixed')
         """), insert_batch)
 

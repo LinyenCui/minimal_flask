@@ -73,7 +73,7 @@ def _parse_payload(body: dict) -> tuple[dict, str | None]:
     fields['category'] = cat
 
     # 選填字串
-    for k in ('via_point', 'end_point', 'driver_id', 'direction', 'note'):
+    for k in ('via_point', 'end_point', 'driver_id', 'direction', 'note', 'passenger_name'):
         v = body.get(k)
         if v and isinstance(v, str):
             v = v.strip() or None
@@ -293,7 +293,7 @@ def _parse_payload_for_update(body: dict) -> tuple[dict, str | None]:
             return {}, f"時間格式錯（要 HH:MM）：{t_raw!r}"
 
     for k in ('start_point', 'via_point', 'end_point',
-              'driver_id', 'direction', 'note', 'category'):
+              'driver_id', 'direction', 'note', 'passenger_name', 'category'):
         v = body.get(k)
         if v and isinstance(v, str):
             v = v.strip() or None
