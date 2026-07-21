@@ -10,4 +10,6 @@ class GroupLocationMeta(db.Model):
     chat_id = Column(String(128), unique=True, index=True, nullable=False)
     place_name = Column(String(255))
     message_template = Column(Text)
+    # 到院通知接送群：本（工作）群綁定的接送群 chat_id（migration 009）
+    relay_chat_id = Column(String(128))
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

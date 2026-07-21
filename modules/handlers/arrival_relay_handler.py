@@ -1,0 +1,312 @@
+"""到院通知接送群 handler
+
+業務設計：
+  接送群 = 接送人員 + 司機 + bot 的專用群。
+  ・司機在接送群傳位置 → bot reply 到院通知（免費）＋建事件
+  ・司機忘記、跑回工作群傳 → 工作群照常回 ETA 卡，另 push 一則到綁定的
+    接送群（fallback，吃額度）
+  ・到院通知附 [✅ 收到] 按鈕；60 秒沒人按 → push 催促一次，再 60 秒沒按
+    → 最後催一次後停（最多 2 次）
+  ・接送群對其他一切訊息靜默（不進 AI、不理指令）— webhook 靜默閘在
+    modules/routes/webhook.py，白名單 = 本檔 ACK_HANDLERS 的關鍵字
+
+綁定流程（指令橋接照 clinic_commands 模式，webhook 群組閘門前攔）：
+  工作群「設定到院轉發」→ 生成 4 位數配對碼（TTL 10 分鐘）
+  接送群「綁定到院通知 XXXX」→ 驗碼 → set_relay(工作群, 本群)
+  工作群「查看到院轉發」/「取消到院轉發」→ 查詢 / 解除
+
+事件節流：同一接送群 20 分鐘內只建立一個事件（新位置釘不重發通知、
+不重啟催促；工作群自己的 ETA reply 不受節流影響照常回）。
+"""
+import logging
+import random
+import re
+import threading
+import time
+from typing import Dict, Optional
+
+from modules.utils.line_bot import reply_text, reply_message
+
+logger = logging.getLogger(__name__)
+
+# ============================================================
+# 配對碼（模組級 dict，TTL 10 分鐘，一次性使用）
+# ============================================================
+_PAIR_CODES: Dict[str, dict] = {}  # code -> {work_chat_id, expires_at}
+PAIR_CODE_TTL_SEC = 10 * 60
+
+
+def _prune_expired_codes() -> None:
+    now = time.time()
+    for code in [c for c, rec in _PAIR_CODES.items() if rec['expires_at'] < now]:
+        _PAIR_CODES.pop(code, None)
+
+
+def _gen_pair_code(work_chat_id: str) -> str:
+    """生成 4 位數配對碼並登記（同工作群重打會生新碼，舊碼仍在 TTL 內有效）。"""
+    _prune_expired_codes()
+    code = f"{random.randint(0, 9999):04d}"
+    for _ in range(20):  # 避免撞到現存碼
+        if code not in _PAIR_CODES:
+            break
+        code = f"{random.randint(0, 9999):04d}"
+    _PAIR_CODES[code] = {
+        'work_chat_id': work_chat_id,
+        'expires_at': time.time() + PAIR_CODE_TTL_SEC,
+    }
+    return code
+
+
+def _pop_valid_code(code: str) -> Optional[str]:
+    """驗碼（一次性：取走即失效）。合法 → 回工作群 chat_id；錯誤/過期 → None。"""
+    rec = _PAIR_CODES.pop((code or '').strip(), None)
+    if not rec:
+        return None
+    if rec['expires_at'] < time.time():
+        return None
+    return rec['work_chat_id']
+
+
+# ============================================================
+# 到院事件狀態（模組級 dict + Lock）
+# key = 接送群 chat_id → {started_at, acked, nag_count, timer}
+# ============================================================
+_EVENTS: Dict[str, dict] = {}
+_EVENTS_LOCK = threading.Lock()
+EVENT_THROTTLE_SEC = 20 * 60   # 同一接送群 20 分鐘內只建一個事件
+NAG_INTERVAL_SEC = 60          # 催促間隔
+MAX_NAGS = 2                   # 最多催 2 次
+NAG_TEXT = "⏰ 提醒：來程車輛接近，尚未有人確認"
+
+
+def start_arrival_event(relay_chat_id: str) -> bool:
+    """建立到院事件並排第一次催促。
+
+    節流：20 分鐘窗內已有事件 → 回 False（呼叫端不重發通知、不重啟催促）。
+    回 True = 新事件已建立，催促計時已啟動。
+    """
+    if not relay_chat_id:
+        return False
+    now = time.time()
+    old_timer = None
+    with _EVENTS_LOCK:
+        ev = _EVENTS.get(relay_chat_id)
+        if ev and (now - ev['started_at']) < EVENT_THROTTLE_SEC:
+            return False
+        old_timer = ev.get('timer') if ev else None
+        _EVENTS[relay_chat_id] = {
+            'started_at': now, 'acked': False, 'nag_count': 0, 'timer': None,
+        }
+    if old_timer:
+        try:
+            old_timer.cancel()
+        except Exception:
+            pass
+    _schedule_nag(relay_chat_id)
+    logger.info(f"[relay] 到院事件建立: {relay_chat_id[:8]}…")
+    return True
+
+
+def _schedule_nag(relay_chat_id: str) -> None:
+    t = threading.Timer(NAG_INTERVAL_SEC, _nag, args=(relay_chat_id,))
+    t.daemon = True
+    with _EVENTS_LOCK:
+        ev = _EVENTS.get(relay_chat_id)
+        if ev is not None:
+            ev['timer'] = t
+    t.start()
+
+
+def _nag(relay_chat_id: str) -> None:
+    """催促計時到點：未 acked 且未達上限 → push 催促 + [✅ 收到]，再排下一次。"""
+    with _EVENTS_LOCK:
+        ev = _EVENTS.get(relay_chat_id)
+        if not ev or ev['acked'] or ev['nag_count'] >= MAX_NAGS:
+            return
+        ev['nag_count'] += 1
+        count = ev['nag_count']
+    _push_to_relay(relay_chat_id, NAG_TEXT)  # push 失敗只 log，狀態機照走
+    if count < MAX_NAGS:
+        _schedule_nag(relay_chat_id)
+    else:
+        logger.info(f"[relay] 催促達上限（{MAX_NAGS} 次），停止: {relay_chat_id[:8]}…")
+
+
+# ============================================================
+# LINE 發送（reply 免費 / push 吃額度）
+# ============================================================
+
+def _ack_quick_reply():
+    from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
+    return QuickReply(items=[
+        QuickReplyItem(action=MessageAction(label="✅ 收到", text="收到")),
+    ])
+
+
+def _build_ack_text_message(text: str):
+    """純文字 + [✅ 收到] Quick Reply。"""
+    from linebot.v3.messaging import TextMessage
+    return TextMessage(text=text, quick_reply=_ack_quick_reply())
+
+
+def _push_to_relay(relay_chat_id: str, text: str) -> None:
+    """push 帶 [✅ 收到] 按鈕的文字到接送群。失敗只 log 不 raise。
+
+    threading.Timer 的執行緒沒有 Flask app context（get_line_bot_api 讀
+    current_app.config 會炸）→ 沒 context 時自己包一層。
+    尊重 PUSH_NOTIFY 總開關（測試期關 push 省 LINE 月額度）。
+    """
+    try:
+        from modules.utils.line_bot import (
+            get_line_bot_api, push_notify_enabled,
+        )
+        if not push_notify_enabled():
+            logger.info(f"[relay] push skipped (PUSH_NOTIFY off): {relay_chat_id[:8]}…")
+            return
+        from flask import has_app_context
+        if has_app_context():
+            api = get_line_bot_api()
+        else:
+            from app import app
+            with app.app_context():
+                api = get_line_bot_api()
+        from linebot.v3.messaging import PushMessageRequest
+        api.push_message(PushMessageRequest(
+            to=relay_chat_id,
+            messages=[_build_ack_text_message(text)],
+        ))
+        logger.info(f"[relay] pushed to {relay_chat_id[:8]}…")
+    except Exception as e:
+        logger.warning(f"[relay] push 失敗（只 log 不中斷）: {e}")
+
+
+# ============================================================
+# 位置釘 → 到院通知（location_message_handler 掛鉤點）
+# ============================================================
+
+def notify_relay_by_reply(reply_token: str, relay_chat_id: str, text: str) -> None:
+    """(a) 司機把位置釘直接發在接送群 → reply 到院通知（免費）+ 建事件。
+
+    節流窗內已有事件 → 不重發通知、不重啟催促（保持靜默）。
+    """
+    if not start_arrival_event(relay_chat_id):
+        logger.info(f"[relay] 節流中，接送群位置釘不重發通知: {relay_chat_id[:8]}…")
+        return
+    reply_message(reply_token, [_build_ack_text_message(text)])
+
+
+def notify_relay_by_push(relay_chat_id: str, text: str) -> None:
+    """(b) 位置釘發在有綁定的工作群 → push 通知到接送群（fallback，吃額度）。
+
+    過節流才推；push 失敗只 log。工作群自己的 ETA reply 由呼叫端照常回。
+    """
+    if not start_arrival_event(relay_chat_id):
+        logger.info(f"[relay] 節流中，不重 push 到接送群: {relay_chat_id[:8]}…")
+        return
+    _push_to_relay(relay_chat_id, text)
+
+
+# ============================================================
+# 接送群白名單文字（「收到」確認）
+# ============================================================
+
+def _ack_received(reply_token: str, relay_chat_id: str) -> None:
+    """[✅ 收到] — 標記已確認、停止催促。"""
+    timer = None
+    with _EVENTS_LOCK:
+        ev = _EVENTS.get(relay_chat_id)
+        if ev:
+            ev['acked'] = True
+            timer = ev.get('timer')
+            ev['timer'] = None
+    if timer:
+        try:
+            timer.cancel()
+        except Exception:
+            pass
+    reply_text(reply_token, "👌 已確認")
+
+
+# 關鍵字 → 處理器（接送群靜默閘的白名單，加 entry 即自動放行）。
+# 🔧 延伸鉤子：未來「已接到乘客」等回報要加在這裡，例如：
+#   '已接到乘客': _ack_picked_up,   # ← 只留結構，尚未實作
+ACK_HANDLERS = {
+    '收到': _ack_received,
+}
+
+
+def handle_ack(reply_token: str, relay_chat_id: str, text: str) -> bool:
+    """接送群文字入口。認得關鍵字 → 處理並回 True；不認得 → False（呼叫端靜默跳過）。"""
+    key = (text or '').strip().lstrip('/').strip()
+    handler = ACK_HANDLERS.get(key)
+    if not handler:
+        return False
+    handler(reply_token, relay_chat_id)
+    return True
+
+
+# ============================================================
+# 綁定指令（webhook 群組閘門前的 PATCH 區攔，照 clinic_commands 模式）
+# ============================================================
+
+def _normalize_spaces(s: str) -> str:
+    s = s.replace("　", " ")  # 全形空白轉半形
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
+
+
+def handle_relay_commands(message_text: str, chat_id: str) -> Optional[str]:
+    """處理到院轉發綁定指令。命中 → 回覆文字；不命中 → None。"""
+    from modules.services.group_location_meta_service import (
+        set_relay, clear_relay, get_relay_of, find_work_by_relay,
+    )
+    text = _normalize_spaces(message_text)
+
+    if text == '設定到院轉發':
+        if find_work_by_relay(chat_id):
+            return "❌ 本群是接送群，請到「工作群」輸入：設定到院轉發"
+        code = _gen_pair_code(chat_id)
+        return (
+            "🚐 到院轉發設定\n"
+            f"配對碼：{code}（10 分鐘內有效）\n\n"
+            "請把機器人拉進接送群後，在該群輸入：\n"
+            f"綁定到院通知 {code}"
+        )
+
+    if text.startswith('綁定到院通知'):
+        code = text[len('綁定到院通知'):].strip()
+        if not code:
+            return ("請輸入：綁定到院通知 <配對碼>\n"
+                    "（配對碼由工作群輸入「設定到院轉發」取得）")
+        work_chat_id = _pop_valid_code(code)
+        if not work_chat_id:
+            return "❌ 配對碼錯誤或已過期，請回工作群重新輸入「設定到院轉發」"
+        if work_chat_id == chat_id:
+            return "❌ 請在「接送群」輸入綁定指令（不能把工作群綁定成自己的接送群）"
+        set_relay(work_chat_id, chat_id)
+        return (
+            "✅ 綁定完成！本群已成為到院通知接送群。\n"
+            "・司機在本群傳位置 → 立即收到到院通知\n"
+            "・司機在工作群傳位置 → 通知也會轉發到本群\n"
+            "・收到通知請點 [✅ 收到] 確認（60 秒未確認會提醒，最多 2 次）\n"
+            "・本群其他訊息機器人一律靜默"
+        )
+
+    if text == '查看到院轉發':
+        relay = get_relay_of(chat_id)
+        if relay:
+            return (f"📡 本群已綁定接送群（ID 末碼 …{relay[-6:]}）\n"
+                    "取消請輸入：取消到院轉發")
+        work = find_work_by_relay(chat_id)
+        if work:
+            return f"🚐 本群是接送群（綁定工作群 ID 末碼 …{work[-6:]}）"
+        return ("尚未設定到院轉發。\n"
+                "在工作群輸入「設定到院轉發」取得配對碼。")
+
+    if text == '取消到院轉發':
+        if not get_relay_of(chat_id):
+            return "本群沒有綁定中的到院轉發。"
+        clear_relay(chat_id)
+        return "✅ 已取消到院轉發綁定。"
+
+    return None

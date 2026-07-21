@@ -100,6 +100,44 @@ def callback():
                         logger.error(f"診所指令處理失敗: {e}", exc_info=True)
                 # --- END PATCH: 診所指令 ---
 
+                # --- PATCH: 到院轉發綁定指令（文字）---
+                # 在群組閘門前攔（明確設定指令,群組裡常無 / 前綴）
+                try:
+                    from modules.handlers.arrival_relay_handler import handle_relay_commands
+                    from modules.handlers.location_message_handler import _get_chat_id
+                    _relay_chat = _get_chat_id(event)
+                    _relay_msg = (event.message.text or '').strip().lstrip('/').strip()
+                    _relay_head = _relay_msg.split(' ')[0]
+                    if (_relay_head in ('設定到院轉發', '查看到院轉發', '取消到院轉發')
+                            or _relay_msg.startswith('綁定到院通知')):
+                        _resp = handle_relay_commands(_relay_msg, _relay_chat)
+                        if _resp:
+                            reply_text(event.reply_token, _resp)
+                            continue
+                except Exception as e:
+                    logger.error(f"到院轉發指令處理失敗: {e}", exc_info=True)
+                # --- END PATCH: 到院轉發綁定指令 ---
+
+                # --- PATCH: 接送群靜默 ---
+                # 註冊過的接送群只認白名單關鍵字（「收到」→ handle_ack）,
+                # 其他文字一律靜默跳過（不進 router/sandbox/AI）。
+                # 位置訊息不在此攔（LocationMessage 走下面另一分支照常）。
+                try:
+                    from modules.services.group_location_meta_service import find_work_by_relay
+                    from modules.handlers.arrival_relay_handler import handle_ack
+                    from modules.handlers.location_message_handler import _get_chat_id
+                    _silence_chat = _get_chat_id(event)
+                    if _silence_chat and find_work_by_relay(_silence_chat):
+                        if not handle_ack(event.reply_token, _silence_chat,
+                                          original_message_text):
+                            logger.info(
+                                f"Skip relay-group message: {original_message_text!r}"
+                            )
+                        continue
+                except Exception as e:
+                    logger.error(f"接送群靜默判定失敗: {e}", exc_info=True)
+                # --- END PATCH: 接送群靜默 ---
+
                 # ============================================================
                 # Phase B（拆沙盒）：新路由規則
                 # ============================================================
