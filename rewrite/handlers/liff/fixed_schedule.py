@@ -292,13 +292,16 @@ def _parse_payload_for_update(body: dict) -> tuple[dict, str | None]:
         except (ValueError, IndexError):
             return {}, f"時間格式錯（要 HH:MM）：{t_raw!r}"
 
+    # 清空語意：欄位「有出現在 payload」但值為空/None → 傳空字串給 tool 當
+    # 清空信號（tool 端只對可清空白名單生效）；欄位沒出現 → 不動
     for k in ('start_point', 'via_point', 'end_point',
               'driver_id', 'direction', 'note', 'passenger_name', 'category'):
+        if k not in body:
+            continue
         v = body.get(k)
-        if v and isinstance(v, str):
-            v = v.strip() or None
-        if v:
-            fields[k] = v
+        if isinstance(v, str):
+            v = v.strip()
+        fields[k] = v if v else ''
 
     bf = _to_int_or_none(body.get('base_fare'))
     if bf is not None:

@@ -222,11 +222,18 @@ def update_fixed_schedule(
     if invalid:
         return ToolResult.fail(f"不允許更新的欄位：{sorted(invalid)}")
 
-    # 過濾沒實際變動 + 沒給的
+    # 過濾沒實際變動 + 沒給的。
+    # 清空語意（與 trips update_trip_route 慣例一致）：
+    #   None = 沒給，不動；空字串 = 清空該欄（僅限可清空白名單）→ 存 NULL
+    _clearable = {'via_point', 'driver_id', 'direction', 'note', 'passenger_name'}
     changes: dict = {}
     for k, v in fields.items():
         if v is None:
             continue
+        if isinstance(v, str) and not v.strip():
+            if k not in _clearable:
+                continue   # 必要欄位不接受清空
+            v = None       # 清空 → NULL
         if before.get(k) != v:
             changes[k] = v
 

@@ -291,7 +291,7 @@
           route_number: weekdays || null,
           departure_time: fd.get('departure_time'),
           start_point: fd.get('start_point'),
-          via_point: fd.get('via_point') || null,
+          via_point: fd.get('via_point'),   // 空字串=清空（勿 ||null，會吞掉清空動作）
           end_point: fd.get('end_point') || null,
           category: fd.get('category'),
           driver_id: fd.get('driver_id') || null,
