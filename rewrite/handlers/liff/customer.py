@@ -108,6 +108,36 @@ def _serve_form(customer_id: int | None):
     )
 
 
+def _customer_chat_text(view, action_label: str) -> str:
+    """單筆成功的聊天室文字（chat_text 協議 — push text+Flex 的純文字等價版）"""
+    display = view.short_name or view.name or f'#{view.id}'
+    lines = [f"✅ 已{action_label}客戶 #{view.id} {display}"]
+    if view.name and view.name != display:
+        lines.append(f"姓名：{view.name}")
+    if view.address:
+        lines.append(f"地址：{view.address}")
+    if view.category:
+        lines.append(f"類別：{view.category}")
+    if view.contact_phone:
+        lines.append(f"電話：{view.contact_phone}")
+    return '\n'.join(lines)
+
+
+def _customer_batch_chat_text(created_views: list, failures: list) -> str | None:
+    """多筆新增的彙總文字。沒有任何成功回 None（失敗表單頁上已逐筆顯示）。"""
+    if not created_views:
+        return None
+    lines = [f"✅ 已新增 {len(created_views)} 位客戶"]
+    for v in created_views:
+        display = v.short_name or v.name or ''
+        lines.append(f"　#{v.id} {display}".rstrip())
+    if failures:
+        lines.append(f"❌ {len(failures)} 位新增失敗")
+        for label, err in failures:
+            lines.append(f"　{label}：{err}")
+    return '\n'.join(lines)
+
+
 def _push_customer(target_id: str | None, view, action_label: str, source=None) -> None:
     """存完 push 一則 text + 客戶詳情 Flex 到指定目標（群組 / 聊天室 / 個人）。
 
@@ -172,18 +202,11 @@ def _push_customer_batch(target_id: str | None, created_views: list, failures: l
             logger.info("[LIFF] customer batch push skipped (PUSH_NOTIFY off)")
             return
 
-        lines = [f"✅ 已新增 {len(created_views)} 位客戶"]
-        for v in created_views:
-            display = v.short_name or v.name or ''
-            lines.append(f"　#{v.id} {display}".rstrip())
-        if failures:
-            lines.append(f"❌ {len(failures)} 位新增失敗")
-            for label, err in failures:
-                lines.append(f"　{label}：{err}")
+        text = _customer_batch_chat_text(created_views, failures)
 
         api = get_line_bot_api()
         api.push_message(PushMessageRequest(
-            to=target_id, messages=[TextMessage(text='\n'.join(lines))],
+            to=target_id, messages=[TextMessage(text=text)],
         ))
         logger.info(
             f"[LIFF] customer batch push n={len(created_views)} → {target_id[:8]} (1 push)"
@@ -248,6 +271,11 @@ def customer_form_new():
     if form_kind == 'batch_trip_status':
         qs = request.query_string.decode('utf-8')
         target = '/liff/trips/batch_status_form'
+        return redirect(f"{target}?{qs}" if qs else target, code=302)
+    # 動態目標：ocr_import_review（OCR 匯入批次審核 LIFF，run_id=...）
+    if form_kind == 'ocr_import_review':
+        qs = request.query_string.decode('utf-8')
+        target = '/liff/ocr-import/review'
         return redirect(f"{target}?{qs}" if qs else target, code=302)
 
     if form_kind in redirect_targets:
@@ -317,13 +345,18 @@ def _customer_create_single(body: dict):
 
     customer_data = _customer_to_jsonable(result.data)
     logger.info(f"[LIFF] customer #{customer_data.get('id')} created by {request.line_user_id}")
-    # 決定 push 目標：群組觸發 → 群組；私聊 → 個人
-    # source 也傳進去 — bubble 上的「編輯」按鈕才會帶 gid 讓編輯後 push 回群組
-    from rewrite.utils.liff_url import resolve_push_target
-    source = body.get('source')
-    target = resolve_push_target(source, request.line_user_id)
-    _push_customer(target, result.data, '新增', source=source)
-    return jsonify({'ok': True, 'customer': customer_data}), 201
+    resp = {'ok': True, 'customer': customer_data}
+    # chat_text 協議：前端可 sendMessages → 不 push，回 chat_text（免額度）
+    if bool(body.get('client_can_send')):
+        resp['chat_text'] = _customer_chat_text(result.data, '新增')
+    else:
+        # 決定 push 目標：群組觸發 → 群組；私聊 → 個人
+        # source 也傳進去 — bubble 上的「編輯」按鈕才會帶 gid 讓編輯後 push 回群組
+        from rewrite.utils.liff_url import resolve_push_target
+        source = body.get('source')
+        target = resolve_push_target(source, request.line_user_id)
+        _push_customer(target, result.data, '新增', source=source)
+    return jsonify(resp), 201
 
 
 def _customer_create_batch(items: list[dict], body: dict):
@@ -371,22 +404,32 @@ def _customer_create_batch(items: list[dict], body: dict):
         f"created={n_created} failed={len(failures)}"
     )
 
-    from rewrite.utils.liff_url import resolve_push_target
-    source = body.get('source')
-    target = resolve_push_target(source, request.line_user_id)
-    if n_created == 1 and not failures:
-        # 一位全成功 → 沿用單筆推播（text + 客戶詳情 Flex，含編輯按鈕）
-        _push_customer(target, created_views[0], '新增', source=source)
-    else:
-        _push_customer_batch(target, created_views, failures)
-
-    status = 201 if n_created and not failures else 200
-    return jsonify({
+    resp = {
         'ok': True,
         'results': results,
         'created': n_created,
         'failed': len(failures),
-    }), status
+    }
+    # chat_text 協議：前端可 sendMessages → 不 push，回 chat_text（免額度）
+    if bool(body.get('client_can_send')):
+        if n_created == 1 and not failures:
+            resp['chat_text'] = _customer_chat_text(created_views[0], '新增')
+        else:
+            chat_text = _customer_batch_chat_text(created_views, failures)
+            if chat_text:
+                resp['chat_text'] = chat_text
+    else:
+        from rewrite.utils.liff_url import resolve_push_target
+        source = body.get('source')
+        target = resolve_push_target(source, request.line_user_id)
+        if n_created == 1 and not failures:
+            # 一位全成功 → 沿用單筆推播（text + 客戶詳情 Flex，含編輯按鈕）
+            _push_customer(target, created_views[0], '新增', source=source)
+        else:
+            _push_customer_batch(target, created_views, failures)
+
+    status = 201 if n_created and not failures else 200
+    return jsonify(resp), status
 
 
 @liff_bp.route('/customer/<int:customer_id>', methods=['POST'])
@@ -416,8 +459,13 @@ def customer_update(customer_id):
 
     customer_data = _customer_to_jsonable(result.data)
     logger.info(f"[LIFF] customer #{customer_id} updated by {request.line_user_id}")
-    from rewrite.utils.liff_url import resolve_push_target
-    source = body.get('source')
-    target = resolve_push_target(source, request.line_user_id)
-    _push_customer(target, result.data, '更新', source=source)
-    return jsonify({'ok': True, 'customer': customer_data})
+    resp = {'ok': True, 'customer': customer_data}
+    # chat_text 協議：前端可 sendMessages → 不 push，回 chat_text（免額度）
+    if bool(body.get('client_can_send')):
+        resp['chat_text'] = _customer_chat_text(result.data, '更新')
+    else:
+        from rewrite.utils.liff_url import resolve_push_target
+        source = body.get('source')
+        target = resolve_push_target(source, request.line_user_id)
+        _push_customer(target, result.data, '更新', source=source)
+    return jsonify(resp)

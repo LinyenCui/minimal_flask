@@ -25,6 +25,11 @@
     .alert.err { background: #fdecea; color: #c0392b; border: 1px solid #f5c2bf; }
     .alert.ok { background: #e8f5e9; color: #1a7a1a; border: 1px solid #b8e0bb; }
     .alert.warn { background: #fff8e1; color: #b85c00; border: 1px solid #ffd180; }
+    /* chat_text 協議：sendMessages 失敗時的「複製結果」fallback 區塊 */
+    .chat-fallback { margin: 12px 0; padding: 10px 12px; border: 1px solid #ffd180; background: #fff8e1; border-radius: 6px; font-size: 14px; color: #5f4300; }
+    .chat-fallback[hidden] { display: none; }
+    .chat-fallback pre { white-space: pre-wrap; word-break: break-word; background: #fff; border: 1px solid #eee; border-radius: 4px; padding: 8px; font-size: 13px; margin: 8px 0; }
+    .chat-fallback button { width: 100%; padding: 10px; font-size: 15px; border: 0; border-radius: 6px; background: #06c755; color: #fff; font-weight: 600; cursor: pointer; }
     .loading { text-align: center; color: #666; padding: 40px 0; }
     .preview-card {
       margin: 16px 0; padding: 14px; border: 1px solid #e0e0e0;
@@ -43,6 +48,11 @@
   <div id="content" hidden>
     <h2>📥 匯入固定班次</h2>
     <div id="alert"></div>
+    <div id="chat-fallback" class="chat-fallback" hidden>
+      <div>⚠️ 無法自動發送，請複製後貼到聊天室留存</div>
+      <pre id="chat-fallback-text"></pre>
+      <button type="button" id="btn-copy-chat" onclick="copyFallbackText()">📋 複製結果</button>
+    </div>
 
     <form id="import-form" novalidate>
       <div class="field">
@@ -145,6 +155,55 @@
         );
       }
       return cleaned;
+    }
+
+    // ===== chat_text 協議：以用戶身分把結果發進聊天室（免 push 額度）=====
+    // 可發送條件：LINE app 內、且從聊天室（1對1/群組/多人）打開（liff.init 後有效）
+    function _canSend() {
+      try {
+        const ctx = (liff.getContext && liff.getContext()) || {};
+        return !!(liff.isInClient && liff.isInClient()) &&
+          ['utou', 'room', 'group'].includes(ctx.type || '');
+      } catch (e) { return false; }
+    }
+
+    function showCopyFallback(text) {
+      const box = document.getElementById('chat-fallback');
+      if (!box) return;
+      document.getElementById('chat-fallback-text').textContent = text;
+      box.hidden = false;
+    }
+
+    async function copyFallbackText() {
+      const btn = document.getElementById('btn-copy-chat');
+      const text = document.getElementById('chat-fallback-text').textContent;
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch (e) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try { copied = document.execCommand('copy'); } catch (e2) { copied = false; }
+        document.body.removeChild(ta);
+      }
+      if (btn) btn.textContent = copied ? '✅ 已複製' : '❌ 複製失敗，請長按文字複製';
+    }
+
+    // 成功回應含 chat_text → liff.sendMessages 發進聊天室（不吃 push 額度）
+    // 回傳：true=已發送 / false=發送失敗(已顯示複製 fallback) / null=沒 chat_text 或不可發送
+    async function deliverChatText(chatText) {
+      if (!chatText || !_canSend()) return null;
+      try {
+        await liff.sendMessages([{ type: 'text', text: chatText }]);
+        return true;
+      } catch (e) {
+        console.warn('[chat_text] sendMessages failed', e);
+        showCopyFallback(chatText);
+        return false;
+      }
     }
     function setLoading(t) { loadingEl.textContent = t; loadingEl.hidden = false; contentEl.hidden = true; }
     function showContent() { loadingEl.hidden = true; contentEl.hidden = false; }
@@ -296,6 +355,8 @@
           overwrite: cbOverwrite.checked,
           purge_past: cbPurge.checked,
           source: source,
+          // chat_text 協議：可 sendMessages 就告訴後端別 push（免額度）
+          client_can_send: _canSend(),
         };
         const resp = await fetch('/liff/import', {
           method: 'POST',
@@ -316,9 +377,13 @@
         if (r.leave_count > 0) msg += `\n🏷️ 含請假 ${r.leave_count} 筆`;
         if (r.skipped_dup > 0) msg += `\n⏭️ 跳過重複 ${r.skipped_dup} 筆`;
 
+        // chat_text 協議：先以用戶身分把結果發進聊天室，失敗顯示複製 fallback（不自動關窗）
+        const sent = await deliverChatText(data.chat_text);
         const inClient = liff.isInClient && liff.isInClient();
-        if (inClient) {
-          showAlert('ok', msg + '\n（2 秒後關閉）');
+        if (sent === false) {
+          showAlert('ok', msg + '（無法自動發送結果，請複製下方內容貼到聊天室後再關閉）');
+        } else if (inClient) {
+          showAlert('ok', msg + (sent ? '（結果已發送到聊天室）' : '') + '（2 秒後關閉）');
           setTimeout(() => liff.closeWindow(), 2000);
         } else {
           showAlert('ok', msg + '\n（可關閉視窗）');

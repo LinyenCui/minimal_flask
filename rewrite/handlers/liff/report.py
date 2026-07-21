@@ -73,34 +73,20 @@ def _parse_payload(body: dict) -> tuple[dict, str | None]:
     }, None
 
 
-def _push_report_result(target_id, result_data) -> None:
-    """產完 push 到指定目標（群組 / 聊天室 / 個人，含 Drive URL）"""
-    if not target_id:
-        return
-    try:
-        from linebot.v3.messaging import PushMessageRequest, TextMessage
-        from modules.utils.line_bot import get_line_bot_api, push_notify_enabled
-        if not push_notify_enabled():
-            logger.info("[LIFF] push skipped (PUSH_NOTIFY off)")
-            return
-        api = get_line_bot_api()
-        type_map = {'daily': '日', 'weekly': '週', 'monthly': '月'}
-        rt = type_map.get(result_data.get('report_type'), '?')
-        cat = result_data.get('category') or '全部'
-        msg = f"📊 {cat} {rt}報表已產生"
-        # result_text 已含帶標籤的連結行（📊 Excel：… / 📄 PDF：…），直接沿用
-        url_lines = [ln for ln in (result_data.get('result_text') or '').split('\n')
-                     if 'http' in ln]
-        if url_lines:
-            msg += '\n' + '\n'.join(url_lines)
-        elif result_data.get('drive_url'):
-            msg += f"\n📂 {result_data['drive_url']}"
-        api.push_message(PushMessageRequest(
-            to=target_id, messages=[TextMessage(text=msg)],
-        ))
-    except Exception as e:
-        body_attr = getattr(e, 'body', None)
-        logger.warning(f"[LIFF] push report result failed: {e} body={body_attr!r}")
+def _report_chat_text(result_data) -> str:
+    """報表結果 + Drive 連結併成一則文字（chat_text 協議；push fallback 同文案）"""
+    type_map = {'daily': '日', 'weekly': '週', 'monthly': '月'}
+    rt = type_map.get(result_data.get('report_type'), '?')
+    cat = result_data.get('category') or '全部'
+    msg = f"📊 {cat} {rt}報表已產生"
+    # result_text 已含帶標籤的連結行（📊 Excel：… / 📄 PDF：…），直接沿用
+    url_lines = [ln for ln in (result_data.get('result_text') or '').split('\n')
+                 if 'http' in ln]
+    if url_lines:
+        msg += '\n' + '\n'.join(url_lines)
+    elif result_data.get('drive_url'):
+        msg += f"\n📂 {result_data['drive_url']}"
+    return msg
 
 
 # ---------- HTML 殼 ----------
@@ -144,15 +130,24 @@ def report_generate():
         f"[LIFF] report {data.get('report_type')}/{data.get('category')} "
         f"by {request.line_user_id}, drive_url={data.get('drive_url')}"
     )
-    # 順手 push（群組觸發 → push 群組；私聊 → push 個人）
+    # 通知（群組觸發 → 群組；私聊 → 個人）；sendMessages 是為了群組留紀錄
+    from rewrite.handlers.liff.chat_notify import notify_or_chat_text
     from rewrite.utils.liff_url import resolve_push_target
     target = resolve_push_target(body.get('source'), request.line_user_id)
-    _push_report_result(target, data)
-    return jsonify({
+    resp = {
         'ok': True,
         'result_text': data.get('result_text', ''),
         'drive_url': data.get('drive_url'),
         'drive_urls': data.get('drive_urls') or [],
         'report_type': data.get('report_type'),
         'category': data.get('category'),
-    })
+    }
+    chat_text = notify_or_chat_text(
+        client_can_send=bool(body.get('client_can_send')),
+        target_id=target,
+        text=_report_chat_text(data),
+        label='report result',
+    )
+    if chat_text:
+        resp['chat_text'] = chat_text
+    return jsonify(resp)

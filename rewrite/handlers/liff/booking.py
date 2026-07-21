@@ -107,6 +107,36 @@ def _parse_payload(body: dict) -> tuple[dict, str | None]:
     return fields, None
 
 
+def _booking_chat_text(view) -> str:
+    """單筆預約成功的聊天室文字（chat_text 協議 — push text+Flex 的純文字等價版）"""
+    sp, _, ep = view.display_route()
+    route = f"{sp or '?'} → {ep or '?'}"
+    lines = [
+        f"✅ 已建立預約 #{view.trip_id}",
+        f"📅 {view.date} {str(view.time)[:5]}",
+        f"📍 {route}",
+    ]
+    if view.category:
+        lines.append(f"類別：{view.category}")
+    if view.driver_id:
+        lines.append(f"🚕 司機 {view.driver_id}")
+    return '\n'.join(lines)
+
+
+def _booking_batch_text(bookings: list[dict]) -> str:
+    """連續預約收尾的彙總文字（chat_text 協議；push fallback 同文案）"""
+    lines = [f"✅ 已建立 {len(bookings)} 筆預約"]
+    for b in bookings:
+        tid = b.get('trip_id')
+        md = _fmt_md(b.get('date'))
+        hm = str(b.get('time') or '')[:5]
+        sp = (str(b.get('start_point') or '').strip()) or '?'
+        ep = str(b.get('end_point') or '').strip()
+        route = f"{sp}→{ep}" if ep else sp
+        lines.append(f"　#{tid}　{md} {hm} {route}".rstrip())
+    return '\n'.join(lines)
+
+
 def _push_booking(target_id: str | None, view) -> None:
     """建好 push 一則 text + 班次詳情 Flex 到指定目標（群組 / 聊天室 / 個人）。"""
     if not target_id:
@@ -206,11 +236,16 @@ def booking_create():
     # 連續預約：前端逐筆帶 suppress_push=true → 各筆不推,全部做完由
     # /liff/booking/batch_notify 收尾推「一則彙總」,把「N 筆 = N 則 push」
     # 降為「N 筆 = 1 則」,省 LINE 免費月額度（200 則/月）。
+    resp = {'ok': True, 'trip': trip_data, 'warnings': warnings}
     if not bool(body.get('suppress_push')):
-        from rewrite.utils.liff_url import resolve_push_target
-        target = resolve_push_target(body.get('source'), request.line_user_id)
-        _push_booking(target, result.data)
-    return jsonify({'ok': True, 'trip': trip_data, 'warnings': warnings}), 201
+        # chat_text 協議：前端可 sendMessages → 不 push，回 chat_text（免額度）
+        if bool(body.get('client_can_send')):
+            resp['chat_text'] = _booking_chat_text(result.data)
+        else:
+            from rewrite.utils.liff_url import resolve_push_target
+            target = resolve_push_target(body.get('source'), request.line_user_id)
+            _push_booking(target, result.data)
+    return jsonify(resp), 201
 
 
 @liff_bp.route('/booking/batch_notify', methods=['POST'])
@@ -239,6 +274,15 @@ def booking_batch_notify():
     if not target:
         return jsonify({'ok': True, 'skipped': 'no target'})
 
+    text = _booking_batch_text(bookings)
+    # chat_text 協議：正常收尾（按「完成關閉」）前端可 sendMessages → 不 push；
+    # 收尾保險（pagehide flush）不帶 client_can_send → 照舊 push（保推播成功）
+    if bool(body.get('client_can_send')):
+        logger.info(
+            f"[LIFF] booking batch notify n={len(bookings)} → chat_text (0 push)"
+        )
+        return jsonify({'ok': True, 'chat_text': text})
+
     try:
         from linebot.v3.messaging import PushMessageRequest, TextMessage
         from modules.utils.line_bot import get_line_bot_api, push_notify_enabled
@@ -247,19 +291,9 @@ def booking_batch_notify():
             logger.info("[LIFF] booking batch notify skipped (PUSH_NOTIFY off)")
             return jsonify({'ok': True, 'skipped': 'push off'})
 
-        lines = [f"✅ 已建立 {len(bookings)} 筆預約"]
-        for b in bookings:
-            tid = b.get('trip_id')
-            md = _fmt_md(b.get('date'))
-            hm = str(b.get('time') or '')[:5]
-            sp = (str(b.get('start_point') or '').strip()) or '?'
-            ep = str(b.get('end_point') or '').strip()
-            route = f"{sp}→{ep}" if ep else sp
-            lines.append(f"　#{tid}　{md} {hm} {route}".rstrip())
-
         api = get_line_bot_api()
         api.push_message(PushMessageRequest(
-            to=target, messages=[TextMessage(text='\n'.join(lines))],
+            to=target, messages=[TextMessage(text=text)],
         ))
         logger.info(
             f"[LIFF] booking batch notify n={len(bookings)} → {target[:8]} (1 push)"

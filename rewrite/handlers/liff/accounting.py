@@ -99,10 +99,19 @@ def accounting_deposit():
         f"[LIFF] deposit #{data['payment_id']} amount={data['amount']} "
         f"by {request.line_user_id}"
     )
+    from rewrite.handlers.liff.chat_notify import notify_or_chat_text
     from rewrite.utils.liff_url import resolve_push_target
     target = resolve_push_target(body.get('source'), request.line_user_id)
-    _push_deposit(target, data)
-    return jsonify({'ok': True, **data}), 201
+    resp = {'ok': True, **data}
+    chat_text = notify_or_chat_text(
+        client_can_send=bool(body.get('client_can_send')),
+        target_id=target,
+        text=_deposit_chat_text(data),
+        label=f"deposit #{data['payment_id']}",
+    )
+    if chat_text:
+        resp['chat_text'] = chat_text
+    return jsonify(resp), 201
 
 
 # ---------- JSON API: 週扣款表單預填 ----------
@@ -161,52 +170,33 @@ def accounting_weekly_payment():
         f"[LIFF] weekly_charge amount={data['amount']} "
         f"week_end={data['week_end_date']} by {request.line_user_id}"
     )
+    from rewrite.handlers.liff.chat_notify import notify_or_chat_text
     from rewrite.utils.liff_url import resolve_push_target
     target = resolve_push_target(body.get('source'), request.line_user_id)
-    _push_weekly_charge(target, data)
-    return jsonify({'ok': True, **data}), 201
+    resp = {'ok': True, **data}
+    chat_text = notify_or_chat_text(
+        client_can_send=bool(body.get('client_can_send')),
+        target_id=target,
+        text=_weekly_charge_chat_text(data),
+        label='weekly_charge',
+    )
+    if chat_text:
+        resp['chat_text'] = chat_text
+    return jsonify(resp), 201
 
 
-def _push_deposit(target_id, data) -> None:
-    if not target_id:
-        return
-    try:
-        from linebot.v3.messaging import PushMessageRequest, TextMessage
-        from modules.utils.line_bot import get_line_bot_api, push_notify_enabled
-        if not push_notify_enabled():
-            logger.info("[LIFF] push skipped (PUSH_NOTIFY off)")
-            return
-        api = get_line_bot_api()
-        msg = (
-            f"➕ 已記錄入金 NT$ {data['amount']:,}\n"
-            f"日期：{data['deposit_date']}\n"
-            f"銀行：{data['bank_name']} {data['last4']}"
-        )
-        api.push_message(PushMessageRequest(
-            to=target_id, messages=[TextMessage(text=msg)],
-        ))
-    except Exception as e:
-        body_attr = getattr(e, 'body', None)
-        logger.warning(f"[LIFF] push deposit failed: {e} body={body_attr!r}")
+def _deposit_chat_text(data) -> str:
+    """入金結果的聊天室文字（chat_text 協議；push fallback 同文案）"""
+    return (
+        f"➕ 已記錄入金 NT$ {data['amount']:,}\n"
+        f"日期：{data['deposit_date']}\n"
+        f"銀行：{data['bank_name']} {data['last4']}"
+    )
 
 
-def _push_weekly_charge(target_id, data) -> None:
-    if not target_id:
-        return
-    try:
-        from linebot.v3.messaging import PushMessageRequest, TextMessage
-        from modules.utils.line_bot import get_line_bot_api, push_notify_enabled
-        if not push_notify_enabled():
-            logger.info("[LIFF] push skipped (PUSH_NOTIFY off)")
-            return
-        api = get_line_bot_api()
-        msg = (
-            f"💵 已記錄週扣款 NT$ {data['amount']:,}\n"
-            f"鎖定時間：{data['occurred_at']}（上週六 23:59）"
-        )
-        api.push_message(PushMessageRequest(
-            to=target_id, messages=[TextMessage(text=msg)],
-        ))
-    except Exception as e:
-        body_attr = getattr(e, 'body', None)
-        logger.warning(f"[LIFF] push weekly_charge failed: {e} body={body_attr!r}")
+def _weekly_charge_chat_text(data) -> str:
+    """週扣款結果的聊天室文字（chat_text 協議；push fallback 同文案）"""
+    return (
+        f"💵 已記錄週扣款 NT$ {data['amount']:,}\n"
+        f"鎖定時間：{data['occurred_at']}（上週六 23:59）"
+    )

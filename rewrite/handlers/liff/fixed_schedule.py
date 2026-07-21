@@ -86,35 +86,34 @@ def _parse_payload(body: dict) -> tuple[dict, str | None]:
     return fields, None
 
 
-def _push_schedule(target_id: str | None, view) -> None:
-    """建好 push 一則 text 到指定目標（群組 / 聊天室 / 個人）"""
-    if not target_id:
-        return
-    try:
-        from linebot.v3.messaging import PushMessageRequest, TextMessage
-        from modules.utils.line_bot import get_line_bot_api, push_notify_enabled
+_WD_MAP = {'1': '一', '2': '二', '3': '三', '4': '四',
+           '5': '五', '6': '六', '7': '日'}
 
-        if not push_notify_enabled():
-            logger.info("[LIFF] push skipped (PUSH_NOTIFY off)")
-            return
-        api = get_line_bot_api()
-        wd_map = {'1': '一', '2': '二', '3': '三', '4': '四',
-                  '5': '五', '6': '六', '7': '日'}
-        wd_str = ''.join(wd_map.get(c, c) for c in view.route_number or '')
-        msg = (
-            f"✅ 已建立固定班次 #{view.id}\n"
-            f"每週{wd_str} {str(view.departure_time)[:5] if view.departure_time else '?'}\n"
-            f"{view.start_point or '?'} → {view.end_point or '?'}\n"
-            f"類別：{view.category or '?'}"
-        )
-        api.push_message(PushMessageRequest(
-            to=target_id,
-            messages=[TextMessage(text=msg)],
-        ))
-        logger.info(f"[LIFF] pushed schedule #{view.id} to {target_id[:8]}")
-    except Exception as e:
-        body_attr = getattr(e, 'body', None)
-        logger.warning(f"[LIFF] push schedule detail failed: {e} body={body_attr!r}")
+
+def _wd_str(route_number) -> str:
+    return ''.join(_WD_MAP.get(c, c) for c in route_number or '')
+
+
+def _schedule_chat_text(view, action_label: str) -> str:
+    """建立/更新成功的聊天室文字（chat_text 協議；push fallback 同文案）"""
+    return (
+        f"✅ 已{action_label}固定班次 #{view.id}\n"
+        f"每週{_wd_str(view.route_number)} "
+        f"{str(view.departure_time)[:5] if view.departure_time else '?'}\n"
+        f"{view.start_point or '?'} → {view.end_point or '?'}\n"
+        f"類別：{view.category or '?'}"
+    )
+
+
+def _schedule_leave_chat_text(view, reason: str, surcharge: int) -> str:
+    """請假成功的聊天室文字（chat_text 協議；push fallback 同文案）"""
+    return (
+        f"🏷️ 已將固定班次 #{view.id} 設為請假\n"
+        f"每週{_wd_str(view.route_number)} "
+        f"{str(view.departure_time)[:5] if view.departure_time else '?'}\n"
+        f"原因：{reason}\n"
+        f"加成：{surcharge:+d} 元"
+    )
 
 
 # ---------- HTML 殼 ----------
@@ -199,37 +198,19 @@ def fixed_schedule_leave(schedule_id):
         f"[LIFF] fixed_schedule #{schedule_id} 請假 ({reason}, {surcharge}) "
         f"by {request.line_user_id}"
     )
+    from rewrite.handlers.liff.chat_notify import notify_or_chat_text
     from rewrite.utils.liff_url import resolve_push_target
     target = resolve_push_target(body.get('source'), request.line_user_id)
-    _push_schedule_leave(target, result.data, reason, surcharge)
-    return jsonify({'ok': True, 'schedule': schedule_data})
-
-
-def _push_schedule_leave(target_id, view, reason, surcharge):
-    if not target_id:
-        return
-    try:
-        from linebot.v3.messaging import PushMessageRequest, TextMessage
-        from modules.utils.line_bot import get_line_bot_api, push_notify_enabled
-        if not push_notify_enabled():
-            logger.info("[LIFF] push skipped (PUSH_NOTIFY off)")
-            return
-        api = get_line_bot_api()
-        wd_map = {'1': '一', '2': '二', '3': '三', '4': '四',
-                  '5': '五', '6': '六', '7': '日'}
-        wd_str = ''.join(wd_map.get(c, c) for c in view.route_number or '')
-        msg = (
-            f"🏷️ 已將固定班次 #{view.id} 設為請假\n"
-            f"每週{wd_str} {str(view.departure_time)[:5] if view.departure_time else '?'}\n"
-            f"原因：{reason}\n"
-            f"加成：{surcharge:+d} 元"
-        )
-        api.push_message(PushMessageRequest(
-            to=target_id, messages=[TextMessage(text=msg)],
-        ))
-    except Exception as e:
-        body_attr = getattr(e, 'body', None)
-        logger.warning(f"[LIFF] push schedule leave failed: {e} body={body_attr!r}")
+    resp = {'ok': True, 'schedule': schedule_data}
+    chat_text = notify_or_chat_text(
+        client_can_send=bool(body.get('client_can_send')),
+        target_id=target,
+        text=_schedule_leave_chat_text(result.data, reason, surcharge),
+        label=f'schedule leave #{schedule_id}',
+    )
+    if chat_text:
+        resp['chat_text'] = chat_text
+    return jsonify(resp)
 
 
 # ---------- JSON API ----------
@@ -267,10 +248,19 @@ def fixed_schedule_update(schedule_id):
     logger.info(
         f"[LIFF] fixed_schedule #{schedule_id} updated by {request.line_user_id}"
     )
+    from rewrite.handlers.liff.chat_notify import notify_or_chat_text
     from rewrite.utils.liff_url import resolve_push_target
     target = resolve_push_target(body.get('source'), request.line_user_id)
-    _push_schedule_update(target, result.data)
-    return jsonify({'ok': True, 'schedule': schedule_data})
+    resp = {'ok': True, 'schedule': schedule_data}
+    chat_text = notify_or_chat_text(
+        client_can_send=bool(body.get('client_can_send')),
+        target_id=target,
+        text=_schedule_chat_text(result.data, '更新'),
+        label=f'schedule update #{schedule_id}',
+    )
+    if chat_text:
+        resp['chat_text'] = chat_text
+    return jsonify(resp)
 
 
 def _parse_payload_for_update(body: dict) -> tuple[dict, str | None]:
@@ -316,34 +306,6 @@ def _parse_payload_for_update(body: dict) -> tuple[dict, str | None]:
     return fields, None
 
 
-def _push_schedule_update(target_id: str | None, view) -> None:
-    """更新後 push text 到指定目標"""
-    if not target_id:
-        return
-    try:
-        from linebot.v3.messaging import PushMessageRequest, TextMessage
-        from modules.utils.line_bot import get_line_bot_api, push_notify_enabled
-        if not push_notify_enabled():
-            logger.info("[LIFF] push skipped (PUSH_NOTIFY off)")
-            return
-        api = get_line_bot_api()
-        wd_map = {'1': '一', '2': '二', '3': '三', '4': '四',
-                  '5': '五', '6': '六', '7': '日'}
-        wd_str = ''.join(wd_map.get(c, c) for c in view.route_number or '')
-        msg = (
-            f"✅ 已更新固定班次 #{view.id}\n"
-            f"每週{wd_str} {str(view.departure_time)[:5] if view.departure_time else '?'}\n"
-            f"{view.start_point or '?'} → {view.end_point or '?'}\n"
-            f"類別：{view.category or '?'}"
-        )
-        api.push_message(PushMessageRequest(
-            to=target_id, messages=[TextMessage(text=msg)],
-        ))
-    except Exception as e:
-        body_attr = getattr(e, 'body', None)
-        logger.warning(f"[LIFF] push schedule update failed: {e} body={body_attr!r}")
-
-
 @liff_bp.route('/fixed_schedule', methods=['POST'])
 @liff_auth_required
 def fixed_schedule_create():
@@ -374,7 +336,16 @@ def fixed_schedule_create():
     logger.info(
         f"[LIFF] fixed_schedule #{schedule_data.get('id')} created by {request.line_user_id}"
     )
+    from rewrite.handlers.liff.chat_notify import notify_or_chat_text
     from rewrite.utils.liff_url import resolve_push_target
     target = resolve_push_target(body.get('source'), request.line_user_id)
-    _push_schedule(target, result.data)
-    return jsonify({'ok': True, 'schedule': schedule_data}), 201
+    resp = {'ok': True, 'schedule': schedule_data}
+    chat_text = notify_or_chat_text(
+        client_can_send=bool(body.get('client_can_send')),
+        target_id=target,
+        text=_schedule_chat_text(result.data, '建立'),
+        label=f"schedule create #{schedule_data.get('id')}",
+    )
+    if chat_text:
+        resp['chat_text'] = chat_text
+    return jsonify(resp), 201

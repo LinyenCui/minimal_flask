@@ -33,6 +33,11 @@
     .alert { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 14px; }
     .alert.err { background: #fdecea; color: #c0392b; border: 1px solid #f5c2bf; }
     .alert.ok { background: #e8f5e9; color: #1a7a1a; border: 1px solid #b8e0bb; }
+    /* chat_text 協議：sendMessages 失敗時的「複製結果」fallback 區塊 */
+    .chat-fallback { margin: 12px 0; padding: 10px 12px; border: 1px solid #ffd180; background: #fff8e1; border-radius: 6px; font-size: 14px; color: #5f4300; }
+    .chat-fallback[hidden] { display: none; }
+    .chat-fallback pre { white-space: pre-wrap; word-break: break-word; background: #fff; border: 1px solid #eee; border-radius: 4px; padding: 8px; font-size: 13px; margin: 8px 0; }
+    .chat-fallback button { width: 100%; padding: 10px; font-size: 15px; border: 0; border-radius: 6px; background: #06c755; color: #fff; font-weight: 600; cursor: pointer; }
     .loading { text-align: center; color: #666; padding: 40px 0; }
     fieldset { border: 0; padding: 0; margin: 0; }
     details { margin-bottom: 14px; border: 1px solid #eee; border-radius: 6px; padding: 8px 12px; }
@@ -51,6 +56,26 @@
     .result-line { padding: 4px 0; font-size: 15px; }
     .result-line.ok { color: #1a7a1a; }
     .result-line.err { color: #c0392b; }
+    .ocr-prefill-notice {
+      border: 1px solid #f0c36d;
+      background: #fff8e6;
+      color: #5f4300;
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 14px;
+      font-size: 14px;
+    }
+    .ocr-prefill-notice[hidden] { display: none; }
+    .ocr-prefill-notice strong { display: block; margin-bottom: 6px; color: #4d3600; }
+    .ocr-prefill-notice ul { margin: 8px 0 0 18px; padding: 0; }
+    .ocr-prefill-notice li { margin: 3px 0; }
+    .ocr-prefill-meta { color: #6b5a2a; font-size: 13px; margin-top: 8px; word-break: break-word; }
+    .dev-skip-liff-notice {
+      border-color: #9bb7d8;
+      background: #eef6ff;
+      color: #244563;
+    }
+    .dev-skip-liff-notice strong { color: #1f3b55; }
   </style>
 </head>
 <body>
@@ -58,6 +83,25 @@
   <div id="content" hidden>
     <h2 id="form-title">客戶資料</h2>
     <div id="alert"></div>
+    <div id="chat-fallback" class="chat-fallback" hidden>
+      <div>⚠️ 無法自動發送，請複製後貼到聊天室留存</div>
+      <pre id="chat-fallback-text"></pre>
+      <button type="button" id="btn-copy-chat" onclick="copyFallbackText()">📋 複製結果</button>
+    </div>
+    <div id="ocr-prefill-notice" class="ocr-prefill-notice" hidden>
+      <strong>OCR 預填資料</strong>
+      <div>這是 OCR 預填資料，請人工確認姓名、簡稱、地址與類別後再送出。</div>
+      <ul>
+        <li>short_name 是排班關聯鍵，必須人工確認唯一性與拼字。</li>
+        <li>address / category 必須人工補齊。</li>
+        <li>OCR 不會自動新增客戶。</li>
+      </ul>
+      <div id="ocr-prefill-meta" class="ocr-prefill-meta"></div>
+    </div>
+    <div id="dev-skip-liff-notice" class="ocr-prefill-notice dev-skip-liff-notice" hidden>
+      <strong>開發測試模式</strong>
+      <div>開發測試模式：已跳過 LIFF init，請勿直接送出正式資料。</div>
+    </div>
     <div id="results" hidden></div>
     <form id="customer-form" novalidate>
       <div id="cards"></div>
@@ -161,6 +205,40 @@
     const CUSTOMER_ID = SERVER_CUSTOMER_ID || _readQueryCustomerId();
     const MODE = CUSTOMER_ID ? 'edit' : 'create';
 
+    function _mergedQueryParams() {
+      const merged = new URLSearchParams();
+      function addParams(qs) {
+        const raw = (qs || '').startsWith('?') ? qs.slice(1) : (qs || '');
+        const params = new URLSearchParams(raw);
+        params.forEach((value, key) => merged.set(key, value));
+      }
+      addParams(window.location.search);
+      const ls = new URLSearchParams(window.location.search).get('liff.state');
+      if (ls) addParams(ls);
+      return merged;
+    }
+
+    const QUERY_PARAMS = _mergedQueryParams();
+
+    const OCR_PREFILL = (() => {
+      if ((QUERY_PARAMS.get('source') || '').toLowerCase() !== 'ocr') return null;
+      return {
+        source: 'ocr',
+        mode: QUERY_PARAMS.get('mode') || '',
+        runId: QUERY_PARAMS.get('ocr_run_id') || QUERY_PARAMS.get('run_id') || '',
+        imageFilename: QUERY_PARAMS.get('source_image_filename') || QUERY_PARAMS.get('image_filename') || '',
+        prefillName: QUERY_PARAMS.get('prefill_name') || '',
+        prefillShortName: QUERY_PARAMS.get('prefill_short_name') || '',
+        prefillAddress: QUERY_PARAMS.get('prefill_address') || '門診',
+        prefillCategory: QUERY_PARAMS.get('prefill_category') || '診所',
+        prefillBirthday: QUERY_PARAMS.get('prefill_birthday') || '',
+        birthdayNeedsReview: QUERY_PARAMS.get('birthday_needs_review') === '1',
+        chartLayerCandidate: QUERY_PARAMS.get('chart_layer_candidate') || QUERY_PARAMS.get('birthday_day') || '',
+        prefillNote: QUERY_PARAMS.get('prefill_note') || '',
+      };
+    })();
+    const DEV_SKIP_LIFF = Boolean(OCR_PREFILL && MODE === 'create' && QUERY_PARAMS.get('dev_skip_liff') === '1');
+
     // 讀 webhook 給的 group/room ID（包進 ?gid= / ?rid=，可能在 liff.state 裡也可能展開後）
     // LIFF SDK 的 liff.getContext().groupId 是 UUID（≠ LINE 平台 ID），不能拿來 push，
     // 所以 bot 在 webhook 階段塞進 LIFF URL，這裡讀回來
@@ -186,6 +264,9 @@
     const contentEl = document.getElementById('content');
     const titleEl = document.getElementById('form-title');
     const alertEl = document.getElementById('alert');
+    const ocrNoticeEl = document.getElementById('ocr-prefill-notice');
+    const devSkipLiffNoticeEl = document.getElementById('dev-skip-liff-notice');
+    const ocrMetaEl = document.getElementById('ocr-prefill-meta');
     const resultsEl = document.getElementById('results');
     const form = document.getElementById('customer-form');
     const cardsEl = document.getElementById('cards');
@@ -231,6 +312,55 @@
         );
       }
       return cleaned;
+    }
+
+    // ===== chat_text 協議：以用戶身分把結果發進聊天室（免 push 額度）=====
+    // 可發送條件：LINE app 內、且從聊天室（1對1/群組/多人）打開（liff.init 後有效）
+    function _canSend() {
+      try {
+        const ctx = (liff.getContext && liff.getContext()) || {};
+        return !!(liff.isInClient && liff.isInClient()) &&
+          ['utou', 'room', 'group'].includes(ctx.type || '');
+      } catch (e) { return false; }
+    }
+
+    function showCopyFallback(text) {
+      const box = document.getElementById('chat-fallback');
+      if (!box) return;
+      document.getElementById('chat-fallback-text').textContent = text;
+      box.hidden = false;
+    }
+
+    async function copyFallbackText() {
+      const btn = document.getElementById('btn-copy-chat');
+      const text = document.getElementById('chat-fallback-text').textContent;
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch (e) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try { copied = document.execCommand('copy'); } catch (e2) { copied = false; }
+        document.body.removeChild(ta);
+      }
+      if (btn) btn.textContent = copied ? '✅ 已複製' : '❌ 複製失敗，請長按文字複製';
+    }
+
+    // 成功回應含 chat_text → liff.sendMessages 發進聊天室（不吃 push 額度）
+    // 回傳：true=已發送 / false=發送失敗(已顯示複製 fallback) / null=沒 chat_text 或不可發送
+    async function deliverChatText(chatText) {
+      if (!chatText || !_canSend()) return null;
+      try {
+        await liff.sendMessages([{ type: 'text', text: chatText }]);
+        return true;
+      } catch (e) {
+        console.warn('[chat_text] sendMessages failed', e);
+        showCopyFallback(chatText);
+        return false;
+      }
     }
 
     function setLoading(text) { loadingEl.textContent = text; loadingEl.hidden = false; contentEl.hidden = true; }
@@ -302,6 +432,78 @@
       }
     }
 
+    function setInputValue(el, value) {
+      el.value = value || '';
+      if (value) el.setAttribute('value', value);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    function setSelectValueByValueOrText(el, value) {
+      const desired = String(value || '').trim();
+      el.value = desired;
+      if (desired && el.value !== desired) {
+        const match = Array.from(el.options).find(option =>
+          option.value === desired || option.textContent.trim() === desired
+        );
+        if (match) {
+          match.selected = true;
+          el.value = match.value;
+        }
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    function applyOcrPrefill(card) {
+      if (!OCR_PREFILL || MODE !== 'create') return;
+      const values = {
+        name: OCR_PREFILL.prefillName,
+        short_name: OCR_PREFILL.prefillShortName || OCR_PREFILL.prefillName,
+        birthday: OCR_PREFILL.prefillBirthday,
+        address: OCR_PREFILL.prefillAddress,
+        category: OCR_PREFILL.prefillCategory,
+      };
+      card.querySelectorAll('[data-field]').forEach(el => {
+        const k = el.dataset.field;
+        if (k === 'name' || k === 'short_name') {
+          setInputValue(el, values[k]);
+        } else if (k === 'address') {
+          setInputValue(el, values.address);
+        } else if (k === 'category') {
+          setSelectValueByValueOrText(el, values.category);
+        } else if (k === 'birthday') {
+          setInputValue(el, values.birthday);
+        } else if (k === 'remarks') {
+          const sourceParts = [];
+          if (OCR_PREFILL.runId) sourceParts.push(OCR_PREFILL.runId);
+          if (OCR_PREFILL.imageFilename) sourceParts.push(OCR_PREFILL.imageFilename);
+          const sourceText = sourceParts.length ? sourceParts.join(' / ') : 'OCR';
+          const noteParts = [`OCR candidate from ${sourceText}`];
+          if (OCR_PREFILL.prefillNote) noteParts.push(OCR_PREFILL.prefillNote);
+          el.value = noteParts.join('\n');
+        }
+      });
+      if (OCR_PREFILL.prefillBirthday) {
+        const det = card.querySelector('details');
+        if (det) det.open = true;
+      }
+
+      if (ocrNoticeEl) ocrNoticeEl.hidden = false;
+      if (ocrMetaEl) {
+        const meta = [];
+        if (OCR_PREFILL.runId) meta.push(`run: ${esc(OCR_PREFILL.runId)}`);
+        if (OCR_PREFILL.imageFilename) meta.push(`image: ${esc(OCR_PREFILL.imageFilename)}`);
+        if (OCR_PREFILL.prefillAddress) meta.push(`地址預填：${esc(OCR_PREFILL.prefillAddress)}`);
+        if (OCR_PREFILL.prefillCategory) meta.push(`類別預填：${esc(OCR_PREFILL.prefillCategory)}`);
+        if (OCR_PREFILL.prefillBirthday) meta.push(`生日預填：${esc(OCR_PREFILL.prefillBirthday)}`);
+        if (OCR_PREFILL.birthdayNeedsReview) meta.push('生日需人工確認');
+        if (OCR_PREFILL.chartLayerCandidate) meta.push(`病歷層參考：${esc(OCR_PREFILL.chartLayerCandidate)}`);
+        if (OCR_PREFILL.prefillNote) meta.push(esc(OCR_PREFILL.prefillNote));
+        ocrMetaEl.innerHTML = meta.join('<br>');
+      }
+    }
+
     async function loadCustomer(id) {
       const idToken = _safeIdToken();
       const resp = await fetch(`/liff/customer/${id}`, {
@@ -313,6 +515,15 @@
     }
 
     async function init() {
+      if (DEV_SKIP_LIFF) {
+        titleEl.textContent = '新增客戶';
+        const firstCard = addCard();
+        applyOcrPrefill(firstCard);
+        if (devSkipLiffNoticeEl) devSkipLiffNoticeEl.hidden = false;
+        addActions.hidden = false;
+        showContent();
+        return;
+      }
       if (!LIFF_ID) { setLoading('LIFF_ID 未設定'); return; }
       try {
         await liff.init({ liffId: LIFF_ID });
@@ -339,6 +550,7 @@
         }
       } else {
         // 新增模式才有「＋ 再新增一位」；編輯維持單筆
+        applyOcrPrefill(firstCard);
         addActions.hidden = false;
       }
       showContent();
@@ -362,6 +574,8 @@
     // 完成後「再新增一位」：清結果、重開一張空白卡
     againBtn.addEventListener('click', () => {
       clearAlert();
+      const fb = document.getElementById('chat-fallback');
+      if (fb) fb.hidden = true;
       resultsEl.hidden = true;
       resultsEl.innerHTML = '';
       cards().forEach(c => c.remove());
@@ -450,6 +664,8 @@
         _stage = 'readSource';
         const src = _readSource();
         if (src) payload.source = src;
+        // chat_text 協議：可 sendMessages 就告訴後端別 push（免額度）
+        payload.client_can_send = _canSend();
         console.log('[submit] payload.source=', payload.source);
 
         _stage = 'fetch';
@@ -468,15 +684,24 @@
 
         _stage = 'success';
         if (MODE === 'edit') {
+          // chat_text 協議：先以用戶身分把結果發進聊天室，失敗顯示複製 fallback（不自動關窗）
+          const sent = await deliverChatText(data.chat_text);
           const inClient = liff.isInClient && liff.isInClient();
-          if (inClient) {
-            showAlert('ok', `✅ 已更新客戶 #${data.customer.id}（1.5 秒後關閉）`);
+          if (sent === false) {
+            showAlert('ok', `✅ 已更新客戶 #${data.customer.id} — 無法自動發送結果，請複製下方內容貼到聊天室後再關閉`);
+          } else if (inClient) {
+            showAlert('ok', `✅ 已更新客戶 #${data.customer.id}${sent ? '，結果已發送到聊天室' : ''}（1.5 秒後關閉）`);
             setTimeout(() => liff.closeWindow(), 1500);
           } else {
             showAlert('ok', `✅ 已更新客戶 #${data.customer.id}（可關閉視窗）`);
           }
         } else {
           handleBatchResults(data.results || [], submittedCards);
+          // chat_text 協議：彙總結果以用戶身分發進聊天室（免 push 額度）
+          const sent = await deliverChatText(data.chat_text);
+          if (sent === true) {
+            alertEl.innerHTML += '<div class="alert ok">✅ 結果已發送到聊天室</div>';
+          }
         }
       } catch (err) {
         console.error(`[submit] failed at stage=${_stage}`, err);

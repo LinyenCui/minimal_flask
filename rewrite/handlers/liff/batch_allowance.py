@@ -115,35 +115,31 @@ def batch_allowance_execute():
         f"[LIFF] batch_allowance updated={data['updated_count']} "
         f"({df}~{dt} {cat} {amount:+d} {reason!r}) by {request.line_user_id}"
     )
+    from rewrite.handlers.liff.chat_notify import notify_or_chat_text
     from rewrite.utils.liff_url import resolve_push_target
     target = resolve_push_target(body.get('source'), request.line_user_id)
-    _push_batch_allowance(target, data)
-    return jsonify({'ok': True, **data}), 201
+    resp = {'ok': True, **data}
+    chat_text = notify_or_chat_text(
+        client_can_send=bool(body.get('client_can_send')),
+        target_id=target,
+        text=_batch_allowance_chat_text(data),
+        label='batch_allowance',
+    )
+    if chat_text:
+        resp['chat_text'] = chat_text
+    return jsonify(resp), 201
 
 
-def _push_batch_allowance(target_id, data) -> None:
-    if not target_id:
-        return
-    try:
-        from linebot.v3.messaging import PushMessageRequest, TextMessage
-        from modules.utils.line_bot import get_line_bot_api, push_notify_enabled
-        if not push_notify_enabled():
-            logger.info("[LIFF] push skipped (PUSH_NOTIFY off)")
-            return
-        api = get_line_bot_api()
-        amt = data['amount']
-        msg = (
-            f"💰 已批量加成 {data['updated_count']} 筆\n"
-            f"範圍：{data['date_from']} ~ {data['date_to']}（{data['category']}）\n"
-            f"加成：{amt:+d} 元\n"
-            f"原因：{data['reason']}"
-        )
-        warnings = data.get('weekly_charge_warnings') or []
-        if warnings:
-            msg += '\n' + '\n'.join(warnings)
-        api.push_message(PushMessageRequest(
-            to=target_id, messages=[TextMessage(text=msg)],
-        ))
-    except Exception as e:
-        body_attr = getattr(e, 'body', None)
-        logger.warning(f"[LIFF] push batch_allowance failed: {e} body={body_attr!r}")
+def _batch_allowance_chat_text(data) -> str:
+    """批量加成結果的聊天室文字（chat_text 協議；push fallback 同文案）"""
+    amt = data['amount']
+    msg = (
+        f"💰 已批量加成 {data['updated_count']} 筆\n"
+        f"範圍：{data['date_from']} ~ {data['date_to']}（{data['category']}）\n"
+        f"加成：{amt:+d} 元\n"
+        f"原因：{data['reason']}"
+    )
+    warnings = data.get('weekly_charge_warnings') or []
+    if warnings:
+        msg += '\n' + '\n'.join(warnings)
+    return msg

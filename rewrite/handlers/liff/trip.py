@@ -215,66 +215,55 @@ def trip_status_change(trip_id):
         f"[LIFF] trip #{trip_id} action={action} "
         f"reason={reason!r} surcharge={surcharge} by {request.line_user_id}"
     )
+    resp = {'ok': True, 'trip': trip_data}
     if not suppress_push:
+        from rewrite.handlers.liff.chat_notify import notify_or_chat_text
         from rewrite.utils.liff_url import resolve_push_target
         target = resolve_push_target(body.get('source'), request.line_user_id)
-        _push_trip_status(target, result.data, action, reason, surcharge)
-    return jsonify({'ok': True, 'trip': trip_data})
+        chat_text = notify_or_chat_text(
+            client_can_send=bool(body.get('client_can_send')),
+            target_id=target,
+            text=_trip_status_chat_text(result.data, action, reason, surcharge),
+            label=f'trip status #{trip_id} ({action})',
+        )
+        if chat_text:
+            resp['chat_text'] = chat_text
+    return jsonify(resp)
 
 
-# ---------- push 結果回 chat ----------
+# ---------- 結果通知文字（chat_text 協議；push fallback 同文案） ----------
 
-def _push_trip_status(target_id, view, action, reason, surcharge):
-    """執行後 push 一則精簡 text 到指定目標。
+def _trip_status_chat_text(view, action, reason, surcharge) -> str:
+    """執行後回聊天室的精簡 text。
 
-    刻意不再附 Flex 詳情卡——使用者剛在 LIFF 內看過該班次資訊,結果再丟一張
+    刻意不附 Flex 詳情卡——使用者剛在 LIFF 內看過該班次資訊,結果再丟一張
     一模一樣的 Flex 出來只會洗版。簡潔通知 + emoji 前綴即可。
     若使用者要查最新狀態,自己打 /dx N 或點 quick reply。
     """
-    if not target_id:
-        return
-    try:
-        from linebot.v3.messaging import PushMessageRequest, TextMessage
-        from modules.utils.line_bot import get_line_bot_api, push_notify_enabled
+    verb = _ACTION_VERB.get(action, action)
+    sp, _, ep = view.display_route()
+    route = f"{sp or '?'} → {ep or '?'}"
+    if view.date:
+        wd = _WEEKDAY_TC[view.date.weekday()]
+        date_str = f"{view.date.month}/{view.date.day}({wd})"
+    else:
+        date_str = '?'
+    time_str = str(view.time)[:5] if view.time else '?'
 
-        if not push_notify_enabled():
-            logger.info(f"[LIFF] push trip status #{view.trip_id} skipped (PUSH_NOTIFY off)")
-            return
-        api = get_line_bot_api()
-        verb = _ACTION_VERB.get(action, action)
-        sp, _, ep = view.display_route()
-        route = f"{sp or '?'} → {ep or '?'}"
-        if view.date:
-            wd = _WEEKDAY_TC[view.date.weekday()]
-            date_str = f"{view.date.month}/{view.date.day}({wd})"
-        else:
-            date_str = '?'
-        time_str = str(view.time)[:5] if view.time else '?'
-
-        lines = [
-            f"{verb} 班次 #{view.trip_id}",
-            f"📅 {date_str} {time_str}",
-            f"📍 {route}",
-        ]
-        if action == 'leave':
-            lines.append(f"📝 {reason}")
-            if surcharge:
-                lines.append(f"💰 {surcharge:+d} 元")
-        elif action in ('cancel', 'conflict') and reason:
-            lines.append(f"📝 {reason}")
-        if action in ('cancel', 'conflict'):
-            lines.append("↩️ 可用「改回準備」還原")
-
-        api.push_message(PushMessageRequest(
-            to=target_id,
-            messages=[TextMessage(text='\n'.join(lines))],
-        ))
-        logger.info(
-            f"[LIFF] pushed trip status #{view.trip_id} ({action}) to {target_id[:8]}"
-        )
-    except Exception as e:
-        body_attr = getattr(e, 'body', None)
-        logger.warning(f"[LIFF] push trip status failed: {e} body={body_attr!r}")
+    lines = [
+        f"{verb} 班次 #{view.trip_id}",
+        f"📅 {date_str} {time_str}",
+        f"📍 {route}",
+    ]
+    if action == 'leave':
+        lines.append(f"📝 {reason}")
+        if surcharge:
+            lines.append(f"💰 {surcharge:+d} 元")
+    elif action in ('cancel', 'conflict') and reason:
+        lines.append(f"📝 {reason}")
+    if action in ('cancel', 'conflict'):
+        lines.append("↩️ 可用「改回準備」還原")
+    return '\n'.join(lines)
 
 
 # ---------- POST: 批次收尾彙總 push（措施 1:N 筆 → 1 則） ----------
@@ -307,6 +296,18 @@ def trips_batch_status_notify():
     if not target:
         return jsonify({'ok': True, 'skipped': 'no target'})
 
+    reason = (body.get('reason') or '').strip()
+    surcharge = _to_int_or_none(body.get('surcharge'))
+    text = _batch_status_text(action, ok_ids, fail_n, reason, surcharge)
+
+    # chat_text 協議：前端可 sendMessages → 不 push，回 chat_text（免額度）
+    if bool(body.get('client_can_send')):
+        logger.info(
+            f"[LIFF] batch status notify ({action}) ok={len(ok_ids)} "
+            f"fail={fail_n} → chat_text (0 push)"
+        )
+        return jsonify({'ok': True, 'chat_text': text})
+
     try:
         from linebot.v3.messaging import PushMessageRequest, TextMessage
         from modules.utils.line_bot import get_line_bot_api, push_notify_enabled
@@ -315,23 +316,9 @@ def trips_batch_status_notify():
             logger.info("[LIFF] batch status notify skipped (PUSH_NOTIFY off)")
             return jsonify({'ok': True, 'skipped': 'push off'})
 
-        verb = _ACTION_VERB.get(action, action)
-        reason = (body.get('reason') or '').strip()
-        surcharge = _to_int_or_none(body.get('surcharge'))
-        lines = [f"{verb} 共 {len(ok_ids)} 筆"]
-        lines.append("　" + "、".join(f"#{i}" for i in ok_ids))
-        if action == 'leave' and reason:
-            lines.append(f"📝 {reason}" + (f"　💰 {surcharge:+d} 元" if surcharge else ""))
-        elif action in ('cancel', 'conflict') and reason:
-            lines.append(f"📝 {reason}")
-        if action in ('cancel', 'conflict'):
-            lines.append("↩️ 可用「改回準備」還原")
-        if fail_n:
-            lines.append(f"⚠️ {fail_n} 筆未成功(詳見表單)")
-
         api = get_line_bot_api()
         api.push_message(PushMessageRequest(
-            to=target, messages=[TextMessage(text='\n'.join(lines))],
+            to=target, messages=[TextMessage(text=text)],
         ))
         logger.info(
             f"[LIFF] batch status notify ({action}) ok={len(ok_ids)} "
@@ -341,3 +328,19 @@ def trips_batch_status_notify():
         body_attr = getattr(e, 'body', None)
         logger.warning(f"[LIFF] batch status notify failed: {e} body={body_attr!r}")
     return jsonify({'ok': True})
+
+
+def _batch_status_text(action, ok_ids, fail_n, reason, surcharge) -> str:
+    """批次狀態變更收尾的彙總文字（chat_text 協議；push fallback 同文案）"""
+    verb = _ACTION_VERB.get(action, action)
+    lines = [f"{verb} 共 {len(ok_ids)} 筆"]
+    lines.append("　" + "、".join(f"#{i}" for i in ok_ids))
+    if action == 'leave' and reason:
+        lines.append(f"📝 {reason}" + (f"　💰 {surcharge:+d} 元" if surcharge else ""))
+    elif action in ('cancel', 'conflict') and reason:
+        lines.append(f"📝 {reason}")
+    if action in ('cancel', 'conflict'):
+        lines.append("↩️ 可用「改回準備」還原")
+    if fail_n:
+        lines.append(f"⚠️ {fail_n} 筆未成功(詳見表單)")
+    return '\n'.join(lines)

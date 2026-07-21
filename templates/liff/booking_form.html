@@ -32,6 +32,11 @@
     .alert.err { background: #fdecea; color: #c0392b; border: 1px solid #f5c2bf; }
     .alert.ok { background: #e8f5e9; color: #1a7a1a; border: 1px solid #b8e0bb; }
     .alert.warn { background: #fff8e1; color: #b85c00; border: 1px solid #ffd180; }
+    /* chat_text 協議：sendMessages 失敗時的「複製結果」fallback 區塊 */
+    .chat-fallback { margin: 12px 0; padding: 10px 12px; border: 1px solid #ffd180; background: #fff8e1; border-radius: 6px; font-size: 14px; color: #5f4300; }
+    .chat-fallback[hidden] { display: none; }
+    .chat-fallback pre { white-space: pre-wrap; word-break: break-word; background: #fff; border: 1px solid #eee; border-radius: 4px; padding: 8px; font-size: 13px; margin: 8px 0; }
+    .chat-fallback button { width: 100%; padding: 10px; font-size: 15px; border: 0; border-radius: 6px; background: #06c755; color: #fff; font-weight: 600; cursor: pointer; }
     .loading { text-align: center; color: #666; padding: 40px 0; }
     details { margin-bottom: 14px; border: 1px solid #eee; border-radius: 6px; padding: 8px 12px; }
     details summary { font-weight: 600; cursor: pointer; padding: 4px 0; color: #555; }
@@ -43,6 +48,11 @@
   <div id="content" hidden>
     <h2>📅 預約叫車</h2>
     <div id="alert"></div>
+    <div id="chat-fallback" class="chat-fallback" hidden>
+      <div>⚠️ 無法自動發送，請複製後貼到聊天室留存</div>
+      <pre id="chat-fallback-text"></pre>
+      <button type="button" id="btn-copy-chat" onclick="copyFallbackText()">📋 複製結果</button>
+    </div>
     <form id="booking-form" novalidate>
       <div class="field row">
         <div>
@@ -125,9 +135,10 @@
     function showAlert(type, msg) { alertEl.innerHTML = `<div class="alert ${type}">${msg}</div>`; }
     function clearAlert() { alertEl.innerHTML = ''; }
 
-    // 連續預約 push 彙總：逐筆建立先不推,完成/關窗時把 N 筆合成「一則」push
+    // 連續預約彙總：逐筆建立先不通知,完成/關窗時把 N 筆合成「一則」
     const pending = [];      // 累積本次連續預約成功建立的班次（給彙總用）
     let flushed = false;     // 防「完成關閉」與 pagehide 收尾保險雙推
+    let flushInFlightCanSend = false;  // 「完成關閉」的 chat_text 收尾請求在途中
 
     function _getSource() {
       const p = new URLSearchParams(window.location.search);
@@ -138,16 +149,24 @@
       return null;
     }
 
-    // 把累積的 pending 班次彙總成一則 push（成功才清空；失敗放回旗標讓收尾保險重試）
+    // 把累積的 pending 班次彙總成一則通知（成功才清空；失敗放回旗標讓收尾保險重試）
+    // useSendMessages=true（正常收尾「完成關閉」）：帶 client_can_send，後端回 chat_text
+    //   由 liff.sendMessages 以用戶身分發進聊天室（免 push 額度）；
+    //   sendMessages 失敗 → 顯示複製 fallback 並回 false（別急著關窗）
+    // useSendMessages=false（收尾保險 pagehide）：不帶 client_can_send，後端照舊 push
+    //   — 那個時機 sendMessages 可能失敗，寧可花 1 則保推播成功
     // keepalive：即使緊接著關窗,請求仍能送達（mobile WebView 關窗瞬間不被砍）
-    async function flushPending() {
-      if (flushed || pending.length === 0) return;
+    async function flushPending(useSendMessages) {
+      if (flushed || pending.length === 0) return true;
       flushed = true;
       const sent = pending.slice();        // 本批快照（只送這幾筆）
       const payload = { bookings: sent };
       const src = _getSource();
       if (src) payload.source = src;
+      const viaChat = !!(useSendMessages && _canSend());
+      if (viaChat) payload.client_can_send = true;
       try {
+        flushInFlightCanSend = viaChat;
         const resp = await fetch('/liff/booking/batch_notify', {
           method: 'POST',
           headers: {
@@ -161,17 +180,29 @@
         // 只移除「已送出的這批」,不清空整個陣列 —— 避免 flush 在途時又新增的
         // 班次(pending 只 append,按 count splice 安全)被一起清掉而漏推
         pending.splice(0, sent.length);
+        const data = await resp.json().catch(() => ({}));
+        const delivered = await deliverChatText(data.chat_text);
+        return delivered !== false;
       } catch (e) {
         console.warn('[booking] batch_notify failed', e);
         flushed = false;   // 失敗：放回旗標，讓收尾保險還能再試
+        return true;       // 網路失敗照舊不擋關窗（收尾保險會照舊 push）
+      } finally {
+        flushInFlightCanSend = false;
       }
     }
 
-    // flushPending 在第一個 await 前已同步發出 fetch（keepalive 保命）,故不 await 即可關窗,
-    // 避免網路卡住時「按了完成卻關不掉」
-    function closeWithFlush() {
-      flushPending();
-      _closeOrBack();
+    // 正常收尾：先把連續預約的 N 筆彙總以 sendMessages 發進聊天室，成功才關窗；
+    // sendMessages 失敗 → 留在頁面顯示複製 fallback（不關窗）
+    async function closeWithFlush() {
+      let ok = true;
+      try { ok = await flushPending(true); } catch (e) { ok = true; }
+      if (ok) {
+        _closeOrBack();
+      } else {
+        doneBtn.disabled = false;
+        showAlert('warn', '⚠️ 無法自動發送彙總，請複製下方結果貼到聊天室留存，再手動關閉');
+      }
     }
 
     // 防 LIFF SDK 偶爾回傳含 \r \n \0 的 idToken 導致 Headers.set 炸
@@ -196,6 +227,55 @@
         );
       }
       return cleaned;
+    }
+
+    // ===== chat_text 協議：以用戶身分把結果發進聊天室（免 push 額度）=====
+    // 可發送條件：LINE app 內、且從聊天室（1對1/群組/多人）打開（liff.init 後有效）
+    function _canSend() {
+      try {
+        const ctx = (liff.getContext && liff.getContext()) || {};
+        return !!(liff.isInClient && liff.isInClient()) &&
+          ['utou', 'room', 'group'].includes(ctx.type || '');
+      } catch (e) { return false; }
+    }
+
+    function showCopyFallback(text) {
+      const box = document.getElementById('chat-fallback');
+      if (!box) return;
+      document.getElementById('chat-fallback-text').textContent = text;
+      box.hidden = false;
+    }
+
+    async function copyFallbackText() {
+      const btn = document.getElementById('btn-copy-chat');
+      const text = document.getElementById('chat-fallback-text').textContent;
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch (e) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try { copied = document.execCommand('copy'); } catch (e2) { copied = false; }
+        document.body.removeChild(ta);
+      }
+      if (btn) btn.textContent = copied ? '✅ 已複製' : '❌ 複製失敗，請長按文字複製';
+    }
+
+    // 成功回應含 chat_text → liff.sendMessages 發進聊天室（不吃 push 額度）
+    // 回傳：true=已發送 / false=發送失敗(已顯示複製 fallback) / null=沒 chat_text 或不可發送
+    async function deliverChatText(chatText) {
+      if (!chatText || !_canSend()) return null;
+      try {
+        await liff.sendMessages([{ type: 'text', text: chatText }]);
+        return true;
+      } catch (e) {
+        console.warn('[chat_text] sendMessages failed', e);
+        showCopyFallback(chatText);
+        return false;
+      }
     }
     function setLoading(text) { loadingEl.textContent = text; loadingEl.hidden = false; contentEl.hidden = true; }
     function showContent() { loadingEl.hidden = true; contentEl.hidden = false; }
@@ -249,6 +329,8 @@
       dateEl.value = previousDate || _today();
       dateEl.min = _today();
       clearAlert();
+      const fb = document.getElementById('chat-fallback');
+      if (fb) fb.hidden = true;
       submitBtn.disabled = false;
       submitBtn.textContent = '建立預約';
       postActions.hidden = true;
@@ -330,11 +412,35 @@
 
     // 收尾保險：使用者直接滑掉/關窗（沒按「完成關閉」）時,仍把已建立的連續預約
     // 彙總推一則（keepalive 讓關窗瞬間的請求仍送得出去）。
+    // 刻意「不帶 client_can_send」讓後端照舊 push —— 這個時機 sendMessages 可能
+    // 失敗,寧可花 1 則額度保推播成功。
     // 只用 pagehide(真正卸載) —— 刻意不用 visibilitychange,因為它在切 App /
     // 下拉通知 / 鎖屏都會觸發,會在使用者只是暫時切背景(訂一筆→切出查地址→
     // 回來訂下一筆,是派班高頻動作)時提早 flush,把同一次連續預約拆成多則 push,
     // 破壞 N→1 省額度目標。
-    window.addEventListener('pagehide', () => flushPending());
+    window.addEventListener('pagehide', () => {
+      if (flushInFlightCanSend) {
+        // 「完成關閉」的 chat_text 收尾還在途,頁面卻要卸載（sendMessages 已無法
+        // 執行）→ 補一發不帶 client_can_send 的保險,後端照舊 push（keepalive 保命）。
+        // pending 已清空時 bookings 為空,後端會 skip,不會重複推。
+        const payload = { bookings: pending.slice() };
+        const src = _getSource();
+        if (src) payload.source = src;
+        try {
+          fetch('/liff/booking/batch_notify', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + _safeIdToken(),
+            },
+            body: JSON.stringify(payload),
+            keepalive: true,
+          });
+        } catch (e) { /* 已盡力 */ }
+        return;
+      }
+      flushPending(false);
+    });
 
     init();
   </script>

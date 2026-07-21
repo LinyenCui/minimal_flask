@@ -175,14 +175,16 @@ try:
         # 找一個跟原本不同的 category
         new_cat = '診所' if orig_cat != '診所' else '東洋'
 
-        # M3a: reason 空 → fail
+        # M3a: reason 空 → 現在態不強制原因（2026-07-15 政策：不進報表，
+        # 防改錯靠機制層確認卡），空值記通用「修改」→ 應成功
         r = update_trip_category(
             session=s, trip_id=trip_id,
             new_category=new_cat, reason='',
             auto_commit=False,
         )
-        print(f'  reason 空 → ok={r.ok}')
-        assert not r.ok
+        print(f'  reason 空 → ok={r.ok}（現在態不強制原因）')
+        assert r.ok, r.error
+        s.rollback()
 
         # M3b: 同類別 → fail
         r = update_trip_category(

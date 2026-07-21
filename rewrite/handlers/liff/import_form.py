@@ -143,7 +143,10 @@ def import_execute():
         f"by {request.line_user_id}"
     )
 
-    # === 群組廣播：若 source 是 group/room，push 結果讓所有成員看到 ===
+    # === 群組廣播：若 source 是 group/room，通知結果讓所有成員看到 ===
+    # chat_text 協議：前端可 sendMessages → 不 push，回 chat_text（免額度）；
+    # 否則照舊 push（外部瀏覽器 / 舊快取頁 fallback）。私聊（無 gid/rid）維持不通知。
+    resp = {'ok': True, 'result': data}
     source = body.get('source') or {}
     logger.info(f"[LIFF] import source={source!r}")
     if isinstance(source, dict) and source.get('type') in ('group', 'room'):
@@ -155,46 +158,53 @@ def import_execute():
             f"len={len(target_id) if target_id else 0}"
         )
         if target_id:
-            _push_import_broadcast(target_id, data, operator_user_id=request.line_user_id)
+            text = _import_broadcast_text(data, operator_user_id=request.line_user_id)
+            if bool(body.get('client_can_send')):
+                resp['chat_text'] = text
+            else:
+                _push_import_broadcast(target_id, text)
         else:
             logger.warning(f"[LIFF] skip broadcast: target_id 為空（source={source!r}）")
 
-    return jsonify({'ok': True, 'result': data}), 201
+    return jsonify(resp), 201
 
 
-def _push_import_broadcast(target_id: str, data: dict, operator_user_id: str | None) -> None:
+def _import_broadcast_text(data: dict, operator_user_id: str | None) -> str:
+    """匯入結果的群組廣播文字（chat_text 協議；push fallback 同文案）"""
+    operator = '某位成員'
+    if operator_user_id:
+        try:
+            from modules.utils.line_bot import get_user_display_name
+            operator = get_user_display_name(operator_user_id) or operator
+        except Exception:
+            pass
+
+    wn = data.get('sun_week_number')
+    wn_str = f"W{wn} " if wn is not None else ''
+    lines = [
+        f"✅ {operator} 已匯入固定班次",
+        f"📅 {wn_str}{data.get('week_label', '')} {data.get('week_range', '')}",
+        f"📁 類別：{data.get('category', '')}",
+        f"📥 匯入：{data.get('inserted', 0)} 筆",
+    ]
+    if data.get('leave_count', 0) > 0:
+        lines.append(f"🏷️ 含請假：{data['leave_count']} 筆")
+    if data.get('overwritten', 0) > 0:
+        lines.append(f"🔄 覆蓋：{data['overwritten']} 筆")
+    if data.get('purged_past', 0) > 0:
+        lines.append(f"🗑️ 清過去週：{data['purged_past']} 筆")
+    if data.get('skipped_dup', 0) > 0:
+        lines.append(f"⏭️ 跳過重複：{data['skipped_dup']} 筆")
+    if data.get('seq_reset_from'):
+        lines.append(f"🔁 班次序號已自動歸位（原 #{data['seq_reset_from']} → 本週從小號重編）")
+    return '\n'.join(lines)
+
+
+def _push_import_broadcast(target_id: str, msg_text: str) -> None:
     """匯入成功後 push 群組／聊天室通知（失敗只 log，不擋 LIFF 回應）"""
     try:
         from linebot.v3.messaging import PushMessageRequest, TextMessage
         from modules.utils.line_bot import get_line_bot_api
-
-        operator = '某位成員'
-        if operator_user_id:
-            try:
-                from modules.utils.line_bot import get_user_display_name
-                operator = get_user_display_name(operator_user_id) or operator
-            except Exception:
-                pass
-
-        wn = data.get('sun_week_number')
-        wn_str = f"W{wn} " if wn is not None else ''
-        lines = [
-            f"✅ {operator} 已匯入固定班次",
-            f"📅 {wn_str}{data.get('week_label', '')} {data.get('week_range', '')}",
-            f"📁 類別：{data.get('category', '')}",
-            f"📥 匯入：{data.get('inserted', 0)} 筆",
-        ]
-        if data.get('leave_count', 0) > 0:
-            lines.append(f"🏷️ 含請假：{data['leave_count']} 筆")
-        if data.get('overwritten', 0) > 0:
-            lines.append(f"🔄 覆蓋：{data['overwritten']} 筆")
-        if data.get('purged_past', 0) > 0:
-            lines.append(f"🗑️ 清過去週：{data['purged_past']} 筆")
-        if data.get('skipped_dup', 0) > 0:
-            lines.append(f"⏭️ 跳過重複：{data['skipped_dup']} 筆")
-        if data.get('seq_reset_from'):
-            lines.append(f"🔁 班次序號已自動歸位（原 #{data['seq_reset_from']} → 本週從小號重編）")
-        msg_text = '\n'.join(lines)
 
         api = get_line_bot_api()
         # 注意：LINE API 對 to 格式很嚴 — 必須是 33 字元（'C'/'R'/'U' + 32 hex）
