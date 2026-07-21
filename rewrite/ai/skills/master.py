@@ -31,6 +31,7 @@ from rewrite.ai.skills.customer import build_customer_skill
 from rewrite.ai.skills.fixed_schedule import build_fixed_schedule_skill
 from rewrite.tools.accounting import query_ledger_entry, void_ledger_entry
 from rewrite.tools.completed_trip import query_reconciliation_text
+from rewrite.help_registry import get_command_help, GET_COMMAND_HELP_SCHEMA
 
 
 def _system_prompt() -> str:
@@ -196,6 +197,16 @@ def _system_prompt() -> str:
   可用 restore_to_ready 改回準備）。執行前講清楚是「註銷（保留紀錄、可還原）」,
   並先釐清用戶是否其實只想改時間/內容（那就用對應 mutation，不需註銷）
 
+[問句式幫助]（用戶在「問怎麼用」而不是「要求執行」時）
+- 「怎麼做」「如何⋯」「有什麼指令」「⋯怎麼用/怎麼查/怎麼改」這類**使用方式問題**
+  → call get_command_help 拿指令目錄，只回**最相關的 1-3 條**，每條附一個可直接照打的例句
+- ⚠️ **鐵則：在說「做不到/沒有這功能」之前，必須先 call get_command_help 查過目錄**。
+  系統有大量「指令型功能」不在你的工具清單裡（到院通知接送群、位置提醒、藥名/診斷碼
+  查詢、LIFF 表單、資料庫同步、序號重置⋯），你的工具清單不等於系統能力全集
+- 禁止貼整份清單或分類標題；答案要短到手機一眼看完
+- 判別：句子帶「嗎/怎麼/如何/有沒有辦法」且沒有具體 ID/日期 → 偏向問用法；
+  有具體 ID + 動作（「改 2674 金額 700」）→ 是要求執行，照常執行
+
 [規則]
 - ⚠️ reason（修改原因）業務規則：
   * **現在態 trips 的任何修改一律不問原因** — 改時間/起終點/車資/類別/乘客名/
@@ -307,11 +318,12 @@ def build_master_skill() -> Skill:
             seen.add(fn.__name__)
             tools.append((fn, schema))
 
-    # 帳務 + 對帳 tools（沒有獨立 sub-skill，直接掛 master）
+    # 帳務 + 對帳 + 幫助 tools（沒有獨立 sub-skill，直接掛 master）
     for fn, schema in (
         (query_ledger_entry, QUERY_LEDGER_ENTRY_SCHEMA),
         (void_ledger_entry, VOID_LEDGER_ENTRY_SCHEMA),
         (query_reconciliation_text, QUERY_RECONCILIATION_TEXT_SCHEMA),
+        (get_command_help, GET_COMMAND_HELP_SCHEMA),
     ):
         if fn.__name__ not in seen:
             seen.add(fn.__name__)

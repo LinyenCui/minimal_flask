@@ -647,6 +647,15 @@ class Agent:
                 rendered['text'] = ai_text + '\n\n' + rendered['text']
             return rendered
 
+        # 幫助問答特例：get_command_help 的資料是給 AI 挑選用的，
+        # 回覆一律用 AI 整理出的文字（不渲染目錄本體）
+        if last_tool_name == 'get_command_help':
+            ai_text = self._extract_text(response)
+            if ai_text:
+                return {'type': 'text', 'text': ai_text}
+            from rewrite.help_registry import render_overview
+            return {'type': 'text', 'text': render_overview()}
+
         # 優先：最後執行的 tool 結果（如果有）渲染 → LINE flex/text
         if last_tool_result is not None:
             rendered = self._render_result(last_tool_result, last_tool_name, last_tool_args or {}, event_source=event_source)
