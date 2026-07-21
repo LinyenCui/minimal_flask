@@ -129,7 +129,7 @@ def callback():
                     _silence_chat = _get_chat_id(event)
                     if _silence_chat and find_work_by_relay(_silence_chat):
                         if not handle_ack(event.reply_token, _silence_chat,
-                                          original_message_text):
+                                          original_message_text, user_id=user_id):
                             logger.info(
                                 f"Skip relay-group message: {original_message_text!r}"
                             )

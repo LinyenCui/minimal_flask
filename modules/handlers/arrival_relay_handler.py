@@ -216,7 +216,34 @@ def notify_relay_by_push(relay_chat_id: str, text: str,
 # 接送群白名單文字（「收到」確認）
 # ============================================================
 
-def _ack_received(reply_token: str, relay_chat_id: str) -> None:
+def _resolve_member_name(chat_id: str, user_id: Optional[str]) -> Optional[str]:
+    """查按「收到」的人的顯示名稱。
+
+    群組/聊天室用 member profile API（成員不用加 bot 好友也查得到）；
+    失敗退 get_user_display_name；再失敗回 None（文案退回無名版）。
+    """
+    if not user_id:
+        return None
+    try:
+        from modules.utils.line_bot import get_line_bot_api
+        api = get_line_bot_api()
+        if chat_id and chat_id.startswith('C'):
+            prof = api.get_group_member_profile(chat_id, user_id)
+            return getattr(prof, 'display_name', None)
+        if chat_id and chat_id.startswith('R'):
+            prof = api.get_room_member_profile(chat_id, user_id)
+            return getattr(prof, 'display_name', None)
+    except Exception:
+        logger.info("member profile 查詢失敗，退 get_user_display_name", exc_info=True)
+    try:
+        from modules.utils.line_bot import get_user_display_name
+        return get_user_display_name(user_id)
+    except Exception:
+        return None
+
+
+def _ack_received(reply_token: str, relay_chat_id: str,
+                  user_id: Optional[str] = None) -> None:
     """[✅ 收到] — 確認該接送群「全部」進行中事件、停止所有催促。
 
     多車接連到達時各有各的事件，一個「收到」視為人員已注意到通知，全數確認。
@@ -234,24 +261,27 @@ def _ack_received(reply_token: str, relay_chat_id: str) -> None:
             t.cancel()
         except Exception:
             pass
-    reply_text(reply_token, "👌 已確認")
+    name = _resolve_member_name(relay_chat_id, user_id)
+    reply_text(reply_token, f"👌 {name} 已確認" if name else "👌 已確認")
 
 
 # 關鍵字 → 處理器（接送群靜默閘的白名單，加 entry 即自動放行）。
 # 🔧 延伸鉤子：未來「已接到乘客」等回報要加在這裡，例如：
 #   '已接到乘客': _ack_picked_up,   # ← 只留結構，尚未實作
+#   （處理器簽名：fn(reply_token, relay_chat_id, user_id)）
 ACK_HANDLERS = {
     '收到': _ack_received,
 }
 
 
-def handle_ack(reply_token: str, relay_chat_id: str, text: str) -> bool:
+def handle_ack(reply_token: str, relay_chat_id: str, text: str,
+               user_id: Optional[str] = None) -> bool:
     """接送群文字入口。認得關鍵字 → 處理並回 True；不認得 → False（呼叫端靜默跳過）。"""
     key = (text or '').strip().lstrip('/').strip()
     handler = ACK_HANDLERS.get(key)
     if not handler:
         return False
-    handler(reply_token, relay_chat_id)
+    handler(reply_token, relay_chat_id, user_id)
     return True
 
 

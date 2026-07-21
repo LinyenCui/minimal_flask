@@ -130,6 +130,20 @@ arh._nag(('R_ACK', 'D1'))
 arh._nag(('R_ACK', 'D2'))
 check('ack 後兩台車的催促都不 push', push_count() == 0)
 
+# T4b: 「誰按的」— mock 名字解析，驗證帶名文案
+SENT.clear()
+arh._EVENTS.clear()
+arh.start_arrival_event('R_WHO', 'D1')
+_orig_resolve = arh._resolve_member_name
+arh._resolve_member_name = lambda chat_id, uid: '春妃' if uid == 'U_TEST' else None
+check('帶 user_id 的收到 → True', arh.handle_ack('tok', 'R_WHO', '收到', user_id='U_TEST') is True)
+check('回覆帶名字「👌 春妃 已確認」', any(s[0] == 'reply' and '春妃 已確認' in s[2] for s in SENT))
+SENT.clear()
+arh.start_arrival_event('R_WHO2', 'D1')
+check('名字查不到 → 仍確認', arh.handle_ack('tok', 'R_WHO2', '收到', user_id='U_UNKNOWN') is True)
+check('文案退回無名版', any(s[0] == 'reply' and s[2] == '👌 已確認' for s in SENT))
+arh._resolve_member_name = _orig_resolve
+
 # ============================================================
 # T5: 靜默白名單判定
 # ============================================================
