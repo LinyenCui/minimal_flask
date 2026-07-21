@@ -739,39 +739,9 @@ def _handle_date_calc(reply_token, text: str) -> bool:
 
 
 def _send_help(reply_token):
-    help_text = """🛠️ Rewrite v0.1 測試命令
+    """幫助總覽（單一來源 rewrite/help_registry.py）＋分類 Quick Reply 按鈕
 
-🔍 客戶查詢
-  查客戶 <關鍵字>
-    例：查客戶 龍埔街
-    例：查客戶 D200615801（自動辨識身分證）
-    例：查客戶 001026（自動辨識病歷號）
-  客戶詳情 <ID>
-    例：客戶詳情 54
-
-📋 病歷層
-  病歷層 <日>
-    例：病歷層 23
-  病歷層分布
-
-🚖 班次查詢
-  查班次 [日期] [司機X]
-    例：查班次（= 今天）
-    例：查班次 5/2
-    例：查班次 4/27 司機533
-  診所班次 [日期]
-  東洋班次 [日期]
-  班次詳情 <trip_id>
-    例：班次詳情 1043
-  待派班次
-
-🚕 車資試算（純算，不寫 DB）
-  車資試算 <公里> [停等分鐘] [日間|夜間]
-    例：車資試算 8.5
-    例：車資試算 10 5 夜間
-
-📅 回診日期計算（純算，不寫 DB）
-  !日期 或 ！日期 — 半全形驚嘆號皆可
-    例：!5/14、!05-20、!2026-5-14、!五月二十日
-    回該日期 / +7 天 / 第11週（抽血）/ 第12週（回診）"""
-    reply_message(reply_token, {"type": "text", "text": help_text})
+    快速命令格式打錯時的提示也走這裡 — 跟「幫助」指令同源，不再各養一份文案。
+    """
+    from rewrite.help_registry import overview_message
+    reply_message(reply_token, overview_message())

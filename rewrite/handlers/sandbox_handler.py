@@ -114,8 +114,12 @@ _DB_SYNC_TRIGGERS = {
 }
 
 # 幫助命令（取代 legacy help_router）
+# 單一來源：rewrite/help_registry.py（觸發詞 + 全部文案都在那，新功能記得去加一行）
 # 註：不要放 '?' / '？' —— 群聊極常用,會被當 help 誤觸（同「藥」裸字教訓）。
-_HELP_TRIGGERS = {'幫助', 'help', 'Help', '指令', '說明'}
+from rewrite.help_registry import (
+    HELP_TRIGGERS as _HELP_TRIGGERS,
+    try_handle_help as _try_handle_help,
+)
 
 # 群聊閘門 / sandbox-active 共用：所有「exact-match 即視為指令」的觸發詞聯集。
 # 單一來源,避免和上面各 *_LIFF_TRIGGERS 漂移。
@@ -138,38 +142,6 @@ _ALL_EXACT_COMMAND_TRIGGERS = (
 # 註：_DRUG_DX_LINK_LIFF_TRIGGERS 刻意不納入聯集 —— 藥診關聯在群組有自己的前綴
 # 政策（_is_drug_dx_link_liff_trigger 群組只收 / ! ！ 前綴）。若把裸字「藥診關聯」
 # 放進群聊放行,閘門會放行但 dispatch 不接,白白多燒一次 AI call。
-
-_HELP_TEXT = """🤖 派班小幫手指令清單
-（群組需 / 開頭，私聊不用）
-
-📋 查詢
-  查太子龍 / 客戶詳情 5
-  病歷層 15
-  今天診所班次 / 今天東洋班次
-  班次詳情 1234 / 待派班次
-  查已完成 昨天 司機5386
-
-🎯 狀態管理（最常用）
-  今天X的狀態  / 5/9 X的狀態
-   → 列班次 + 批次按鈕：請假 / 註銷 / 衝突 / 改回準備
-
-✏️ 修改（自然語言）
-  1234 化療 -30          請假
-  1234 註銷 / 衝突        改狀態
-  派司機 5386 給 #1234    指派
-  記錄車資 1234 380       車資
-
-📝 LIFF 表單
-  新增客戶 / 預約叫車 / 匯入固定班次
-  生成週報表 / 月報表
-  帳務處理 / 批量加成
-  新增固定班次 / 編輯固定班次
-
-⚙️ 系統
-  資料庫同步 / 同步結果
-
-💡 多輪對話 90 秒內可不加 / 前綴回覆"""
-
 
 # ====== 「[date][location]的狀態」狀態管理流程 ======
 # 用戶常用：「!今天二井家的狀態」「!5/9馬鎮宮的狀態」
@@ -387,6 +359,7 @@ _QUICK_COMMAND_PREFIXES = (
     '匯入固定班次',
     '修改狀態', '指派司機', '撤銷指派',
     '記錄車資',
+    # 幫助系統：startswith 讓「幫助 查詢」「幫助 全部」等分類按鈕文字在群聊過閘門
     '幫助', 'help',
 )
 
@@ -578,10 +551,13 @@ def try_handle_sandbox(event) -> bool:
         logger.info(f"[rewrite sandbox] {short_uid} → LIFF batch_allowance entry")
         return True
 
-    # 0b'''. 幫助命令（取代 legacy help_router）
-    if text in _HELP_TRIGGERS:
-        reply_message(event.reply_token, {'type': 'text', 'text': _HELP_TEXT})
-        logger.info(f"[rewrite sandbox] {short_uid} → help")
+    # 0b'''. 幫助命令（單一來源 rewrite/help_registry.py）
+    #        「幫助」→ 總覽＋分類 Quick Reply；「幫助 查詢」→ 分類清單；
+    #        「幫助 全部」→ 全清單。「幫助 <不認得>」回 None 留給 AI（不劫持）。
+    _help_msg = _try_handle_help(text)
+    if _help_msg is not None:
+        reply_message(event.reply_token, _help_msg)
+        logger.info(f"[rewrite sandbox] {short_uid} → help ({text[:20]!r})")
         return True
 
     # 0b''''. 手動重置班次序號（維護指令；trips 非空會被工具拒絕，防誤用）
