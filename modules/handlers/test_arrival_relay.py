@@ -46,7 +46,7 @@ def _fake_reply_message(token, messages):
 arh._push_to_relay = _fake_push
 arh.reply_text = _fake_reply_text
 arh.reply_message = _fake_reply_message
-arh._schedule_nag = lambda chat_id: None  # 不開真 Timer；催促用 _nag 直呼驗證
+arh._schedule_nag = lambda key: None  # 不開真 Timer；催促用 _nag 直呼驗證
 
 
 # ============================================================
@@ -88,11 +88,15 @@ check('亂碼 → None', arh._pop_valid_code('zzzz') is None)
 # ============================================================
 banner('T2: 事件節流（20 分鐘窗）')
 arh._EVENTS.clear()
-check('第一次建立 → True', arh.start_arrival_event('R_TEST') is True)
-check('窗內再建 → False（節流）', arh.start_arrival_event('R_TEST') is False)
-arh._EVENTS['R_TEST']['started_at'] -= (arh.EVENT_THROTTLE_SEC + 1)  # 模擬窗過
-check('窗過後可重建 → True', arh.start_arrival_event('R_TEST') is True)
-check('不同接送群互不影響', arh.start_arrival_event('R_TEST2') is True)
+check('第一次建立 → True', arh.start_arrival_event('R_TEST', 'D1') is True)
+check('同司機窗內再建 → False（節流）', arh.start_arrival_event('R_TEST', 'D1') is False)
+check('不同司機 → True（多車各自通知）', arh.start_arrival_event('R_TEST', 'D2') is True)
+check('第三位司機 → True', arh.start_arrival_event('R_TEST', 'D3') is True)
+arh._EVENTS[('R_TEST', 'D1')]['started_at'] -= (arh.EVENT_THROTTLE_SEC + 1)  # 模擬窗過
+check('同司機窗過後可重建 → True', arh.start_arrival_event('R_TEST', 'D1') is True)
+check('不同接送群互不影響', arh.start_arrival_event('R_TEST2', 'D1') is True)
+check('未帶司機 → unknown bucket', arh.start_arrival_event('R_TEST3') is True)
+check('unknown bucket 同窗節流', arh.start_arrival_event('R_TEST3') is False)
 
 # ============================================================
 # T3: 催促狀態機（最多 2 次）
@@ -100,15 +104,15 @@ check('不同接送群互不影響', arh.start_arrival_event('R_TEST2') is True)
 banner('T3: 催促狀態機（最多 2 次）')
 arh._EVENTS.clear()
 SENT.clear()
-arh.start_arrival_event('R_NAG')
-arh._nag('R_NAG')
+arh.start_arrival_event('R_NAG', 'D1')
+arh._nag(('R_NAG', 'D1'))
 check('第 1 催有 push', push_count() == 1)
 check('催促文案', arh.NAG_TEXT in SENT[-1][2])
-arh._nag('R_NAG')
+arh._nag(('R_NAG', 'D1'))
 check('第 2 催有 push', push_count() == 2)
-arh._nag('R_NAG')
+arh._nag(('R_NAG', 'D1'))
 check('第 3 次不催（上限 2）', push_count() == 2)
-check('nag_count == 2', arh._EVENTS['R_NAG']['nag_count'] == 2)
+check('nag_count == 2', arh._EVENTS[('R_NAG', 'D1')]['nag_count'] == 2)
 
 # ============================================================
 # T4: ack 停催
@@ -116,12 +120,15 @@ check('nag_count == 2', arh._EVENTS['R_NAG']['nag_count'] == 2)
 banner('T4: ack 停催')
 arh._EVENTS.clear()
 SENT.clear()
-arh.start_arrival_event('R_ACK')
+arh.start_arrival_event('R_ACK', 'D1')
+arh.start_arrival_event('R_ACK', 'D2')   # 第二台車進行中
 check('「收到」被認得 → True', arh.handle_ack('tok', 'R_ACK', '收到') is True)
 check('回覆「👌 已確認」', any(s[0] == 'reply' and '已確認' in s[2] for s in SENT))
-check('acked=True', arh._EVENTS['R_ACK']['acked'] is True)
-arh._nag('R_ACK')
-check('ack 後催促不 push', push_count() == 0)
+check('D1 acked', arh._EVENTS[('R_ACK', 'D1')]['acked'] is True)
+check('D2 也一鍵全確認', arh._EVENTS[('R_ACK', 'D2')]['acked'] is True)
+arh._nag(('R_ACK', 'D1'))
+arh._nag(('R_ACK', 'D2'))
+check('ack 後兩台車的催促都不 push', push_count() == 0)
 
 # ============================================================
 # T5: 靜默白名單判定
@@ -139,18 +146,22 @@ check('無事件時「收到」也回確認不炸',
 banner('T6: notify 觸發點 + 節流')
 arh._EVENTS.clear()
 SENT.clear()
-arh.notify_relay_by_reply('tok1', 'R_N', '🚗 注意：來程車輛接近「診所」')
+arh.notify_relay_by_reply('tok1', 'R_N', '🚗 注意：來程車輛接近「診所」', driver_key='D1')
 check('(a) 接送群位置釘 → reply 通知', any(s[0] == 'reply_msg' for s in SENT))
 SENT.clear()
-arh.notify_relay_by_reply('tok2', 'R_N', '🚗 注意：來程車輛接近「診所」')
-check('(a) 節流中 → 不重發通知', len(SENT) == 0)
+arh.notify_relay_by_reply('tok2', 'R_N', '🚗 注意：來程車輛接近「診所」', driver_key='D1')
+check('(a) 同司機節流中 → 不重發通知', len(SENT) == 0)
+arh.notify_relay_by_reply('tok3', 'R_N', '🚗 注意：來程車輛接近「診所」', driver_key='D2')
+check('(a) 不同司機 → 照發（多車各自通知）', any(s[0] == 'reply_msg' for s in SENT))
 arh._EVENTS.clear()
 SENT.clear()
-arh.notify_relay_by_push('R_P', '🚗 注意：來程車輛接近「診所」')
+arh.notify_relay_by_push('R_P', '🚗 注意：來程車輛接近「診所」', driver_key='D1')
 check('(b) 工作群位置釘 → push 到接送群', push_count() == 1)
 SENT.clear()
-arh.notify_relay_by_push('R_P', '🚗 注意：來程車輛接近「診所」')
-check('(b) 節流中 → 不重 push', push_count() == 0)
+arh.notify_relay_by_push('R_P', '🚗 注意：來程車輛接近「診所」', driver_key='D1')
+check('(b) 同司機節流中 → 不重 push', push_count() == 0)
+arh.notify_relay_by_push('R_P', '🚗 注意：來程車輛接近「診所」', driver_key='D2')
+check('(b) 不同司機 → 照 push', push_count() == 1)
 
 # ============================================================
 # T7 / T8: DB 往返（本地 DB + 測試 chat_id，跑完清理）
