@@ -70,12 +70,12 @@ def _pop_valid_code(code: str) -> Optional[str]:
 # ============================================================
 # 到院事件狀態（模組級 dict + Lock）
 # key = (接送群 chat_id, 司機 user_id) → {started_at, acked, nag_count, timer}
-# 節流按「司機」分開（2026-07-21 用戶需求）：尖峰時段多車接連到達，
+# 節流按「司機」分開（2026-07-21 用戶需求；窗長 5 分鐘）：尖峰時段多車接連到達，
 # 每台車都要各自通知；同一司機一趟連傳多次位置才被同窗吃掉。
 # ============================================================
 _EVENTS: Dict[tuple, dict] = {}
 _EVENTS_LOCK = threading.Lock()
-EVENT_THROTTLE_SEC = 20 * 60   # 同一（接送群×司機）20 分鐘內只建一個事件
+EVENT_THROTTLE_SEC = 5 * 60    # 同一（接送群×司機）5 分鐘內只建一個事件
 NAG_INTERVAL_SEC = 60          # 催促間隔
 MAX_NAGS = 2                   # 最多催 2 次
 NAG_TEXT = "⏰ 提醒：來程車輛接近，尚未有人確認"
@@ -143,7 +143,8 @@ def _nag(key: tuple) -> None:
 def _ack_quick_reply():
     from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
     return QuickReply(items=[
-        QuickReplyItem(action=MessageAction(label="✅ 收到", text="收到")),
+        # label 加長讓圓片變大（顯示字）；text 維持「收到」（送出字/比對 key 不變）
+        QuickReplyItem(action=MessageAction(label="✅ 收到，我去接", text="收到")),
     ])
 
 
