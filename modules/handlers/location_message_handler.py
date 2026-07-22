@@ -35,20 +35,20 @@ def handle_location_message(event):
             reply_text(event.reply_token, f"✅ 已設定診所座標：({lat}, {lng})")
             return
 
+        # 本 chat 若是「到院通知接送群」→ 綁定的工作群 chat_id。
+        # ⚠️ 身分判定必須獨立於「自己有沒有座標」（2026-07-22 實測：接送群
+        # 自己設過座標 → 舊邏輯誤走一般路徑，沒有收到鈕/催促、群又被靜默）
+        relay_work_id = None
+        try:
+            from modules.services.group_location_meta_service import find_work_by_relay
+            relay_work_id = find_work_by_relay(chat_id)
+        except Exception:
+            logger.warning("接送群身分判定失敗", exc_info=True)
+
         clinic = get_for_chat(chat_id)
-        relay_work_id = None  # 本 chat 若是「到院通知接送群」→ 綁定的工作群 chat_id
-        if not clinic:
-            # 接送群 fallback：自己查無座標時，用綁定工作群的座標與地點名稱
-            #（顯示行為與工作群一致）
-            try:
-                from modules.services.group_location_meta_service import find_work_by_relay
-                _work = find_work_by_relay(chat_id)
-                if _work:
-                    clinic = get_for_chat(_work)
-                    if clinic:
-                        relay_work_id = _work
-            except Exception:
-                logger.warning("接送群座標 fallback 失敗", exc_info=True)
+        if not clinic and relay_work_id:
+            # 接送群自己沒座標 → 沿用綁定工作群的座標
+            clinic = get_for_chat(relay_work_id)
         if not clinic:
             # 尚未設定診所：提供引導與 Quick Reply
             try:
@@ -134,7 +134,9 @@ def handle_location_message(event):
 
         # 文字為主，Flex 可選
         try:
-            from linebot.v3.messaging import FlexMessage, FlexContainer, URIAction, ButtonComponent, BoxComponent, TextComponent
+            # dict 版 flex 由 reply_message 統一處理，不需 SDK class
+            #（歷史教訓：曾 import v2 時代的 ButtonComponent → v3 ImportError
+            #  讓這張卡默默退化成文字 fallback 好幾週）
             flex = {
                 "type": "bubble",
                 "body": {
