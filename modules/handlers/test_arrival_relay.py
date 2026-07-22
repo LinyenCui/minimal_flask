@@ -73,15 +73,27 @@ def push_count():
 # ============================================================
 # T1: 配對碼 生成 / 驗證 / 一次性 / TTL
 # ============================================================
-banner('T1: 配對碼生成 / 驗證 / TTL')
-code = arh._gen_pair_code('W_TEST')
-check('4 位數字碼', len(code) == 4 and code.isdigit())
-check('驗碼取回工作群', arh._pop_valid_code(code) == 'W_TEST')
-check('一次性（取走即失效）', arh._pop_valid_code(code) is None)
-code2 = arh._gen_pair_code('W_TEST')
-arh._PAIR_CODES[code2]['expires_at'] = time.time() - 1  # 模擬過期
-check('TTL 過期 → None', arh._pop_valid_code(code2) is None)
-check('亂碼 → None', arh._pop_valid_code('zzzz') is None)
+banner('T1: 配對碼生成 / 驗證 / TTL（DB 版 — database_maintenance）')
+from app import app as _app_t1
+from modules.models.base import db as _db_t1
+from sqlalchemy import text as _sql_t1
+with _app_t1.app_context():
+    code = arh._gen_pair_code('W_TEST')
+    check('4 位數字碼', len(code) == 4 and code.isdigit())
+    check('驗碼取回工作群', arh._pop_valid_code(code) == 'W_TEST')
+    check('一次性（取走即失效）', arh._pop_valid_code(code) is None)
+    code2 = arh._gen_pair_code('W_TEST')
+    # 模擬過期：把 DB 時間戳往回撥 11 分鐘
+    _db_t1.session.execute(_sql_t1(
+        "UPDATE database_maintenance SET timestamp = NOW() - INTERVAL '11 minutes' "
+        "WHERE key = :k"), {'k': f'relay_pair_{code2}'})
+    _db_t1.session.commit()
+    check('TTL 過期 → None', arh._pop_valid_code(code2) is None)
+    check('亂碼 → None', arh._pop_valid_code('zzzz') is None)
+    # 清理測試殘留
+    _db_t1.session.execute(_sql_t1(
+        "DELETE FROM database_maintenance WHERE key LIKE 'relay_pair_%'"))
+    _db_t1.session.commit()
 
 # ============================================================
 # T2: 事件節流（20 分鐘窗）

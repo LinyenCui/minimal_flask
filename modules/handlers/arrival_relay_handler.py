@@ -30,41 +30,57 @@ from modules.utils.line_bot import reply_text, reply_message
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 配對碼（模組級 dict，TTL 10 分鐘，一次性使用）
+# 配對碼（DB 版：存 database_maintenance key-value 表，TTL 10 分鐘、一次性）
+#
+# ⚠️ 為什麼不用記憶體 dict：prod 走 gunicorn/Docker，發碼與驗碼的請求可能
+# 落在不同 worker/實例（2026-07-22 實測：接送群連換 4 組新碼全部「錯誤或
+# 已過期」）。DB 版程序無關、重啟也不掉碼。key='relay_pair_<code>'、
+# value=工作群 chat_id、timestamp=生成時間（TTL 用 SQL 比對，時鐘自洽）。
 # ============================================================
-_PAIR_CODES: Dict[str, dict] = {}  # code -> {work_chat_id, expires_at}
-PAIR_CODE_TTL_SEC = 10 * 60
+PAIR_CODE_TTL_SEC = 10 * 60  # 文案顯示用；SQL 端同步寫死 INTERVAL '10 minutes'
 
 
 def _prune_expired_codes() -> None:
-    now = time.time()
-    for code in [c for c, rec in _PAIR_CODES.items() if rec['expires_at'] < now]:
-        _PAIR_CODES.pop(code, None)
+    from modules.models.base import db
+    from sqlalchemy import text as _sql
+    db.session.execute(_sql(
+        "DELETE FROM database_maintenance "
+        "WHERE key LIKE 'relay_pair_%' "
+        "  AND timestamp < NOW() - INTERVAL '10 minutes'"))
+    db.session.commit()
 
 
 def _gen_pair_code(work_chat_id: str) -> str:
     """生成 4 位數配對碼並登記（同工作群重打會生新碼，舊碼仍在 TTL 內有效）。"""
+    from modules.models.base import db
+    from sqlalchemy import text as _sql
     _prune_expired_codes()
     code = f"{random.randint(0, 9999):04d}"
-    for _ in range(20):  # 避免撞到現存碼
-        if code not in _PAIR_CODES:
-            break
+    for _ in range(20):  # ON CONFLICT DO NOTHING → rowcount=0 表示撞碼，重生
+        r = db.session.execute(_sql(
+            "INSERT INTO database_maintenance (key, value, timestamp, description) "
+            "VALUES (:k, :v, NOW(), '到院轉發配對碼（10 分鐘 TTL、一次性）') "
+            "ON CONFLICT (key) DO NOTHING"),
+            {'k': f'relay_pair_{code}', 'v': work_chat_id})
+        if r.rowcount:
+            db.session.commit()
+            return code
         code = f"{random.randint(0, 9999):04d}"
-    _PAIR_CODES[code] = {
-        'work_chat_id': work_chat_id,
-        'expires_at': time.time() + PAIR_CODE_TTL_SEC,
-    }
-    return code
+    db.session.commit()
+    raise RuntimeError('配對碼生成連撞 20 次（理論上不可能）')
 
 
 def _pop_valid_code(code: str) -> Optional[str]:
-    """驗碼（一次性：取走即失效）。合法 → 回工作群 chat_id；錯誤/過期 → None。"""
-    rec = _PAIR_CODES.pop((code or '').strip(), None)
-    if not rec:
-        return None
-    if rec['expires_at'] < time.time():
-        return None
-    return rec['work_chat_id']
+    """驗碼（一次性：DELETE..RETURNING 原子取走）。合法 → 工作群 chat_id；錯誤/過期 → None。"""
+    from modules.models.base import db
+    from sqlalchemy import text as _sql
+    row = db.session.execute(_sql(
+        "DELETE FROM database_maintenance "
+        "WHERE key = :k AND timestamp >= NOW() - INTERVAL '10 minutes' "
+        "RETURNING value"),
+        {'k': f"relay_pair_{(code or '').strip()}"}).fetchone()
+    db.session.commit()
+    return row[0] if row else None
 
 
 # ============================================================

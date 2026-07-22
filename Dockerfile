@@ -28,4 +28,8 @@ EXPOSE 3000
 # 運行應用的命令
 # Gunicorn 會從環境變數 $PORT 獲取端口
 # 使用 sh -c 來確保環境變數能被正確解析
-CMD ["sh", "-c", "gunicorn app:app --bind \"0.0.0.0:${PORT:-3000}\""] 
+# ⚠️ 必須單 worker（-w 1）：系統大量 in-memory 狀態（mutation 確認卡、
+# 對話狀態、到院催促計時、節流窗）都是單程序假設，多 worker 會各存一份互看不見
+# （2026-07-22 實測：配對碼跨 worker 對不上）。併發靠 --threads；
+# --timeout 拉長給 AI 呼叫（單次最長 ~40s）留餘裕。
+CMD ["sh", "-c", "gunicorn app:app -w 1 --threads 8 --timeout 120 --bind \"0.0.0.0:${PORT:-3000}\""] 
