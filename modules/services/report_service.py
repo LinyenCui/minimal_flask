@@ -745,6 +745,18 @@ def generate_weekly_report(category=None, file_format='xlsx', target_date=None):
         logger.error(f"生成報表失敗: {str(e)}", exc_info=True)
         return f"生成報表失敗: {str(e)}", None
 
+
+# ============================================================
+# Drive 目錄分流（2026-07-22 用戶定調）：
+#   診所 → 診所目錄；其他所有類別（東洋 / 臨時 / 全部 / 未來新類別）→ 東洋目錄
+# ============================================================
+_CLINIC_FOLDER_ID = "1Wwp1xIxnn9m9qlvX_BwpE30K0AgLVdYe"   # 診所文件夾
+_TOYO_FOLDER_ID = "1dctU8QPRWNPn57LxpcYTeKKcsGn_dLOU"     # 東洋文件夾（其他類別共用）
+
+
+def _folder_id_for_category(category):
+    return _CLINIC_FOLDER_ID if category == "診所" else _TOYO_FOLDER_ID
+
 def upload_to_google_drive(file_path, folder_id=None):
     """
     將文件上傳到Google Drive並設置分享權限
@@ -809,18 +821,8 @@ def handle_generate_weekly_report(text, file_format='xlsx', target_date=None):
     if len(parts) > 1:
         category = parts[1]
     
-    # 類別與文件夾 ID 的映射
-    CATEGORY_FOLDER_MAPPING = {
-        "診所": "1Wwp1xIxnn9m9qlvX_BwpE30K0AgLVdYe",  # 診所文件夾 ID
-        "東洋": "1dctU8QPRWNPn57LxpcYTeKKcsGn_dLOU",   # 東洋文件夾 ID
-        "全部": None  # 全部類別不指定特定文件夾
-    }
-    
-    # 根據類別獲取對應的文件夾ID
-    folder_id = None
-    if category and category in CATEGORY_FOLDER_MAPPING:
-        folder_id = CATEGORY_FOLDER_MAPPING[category]
-        logger.info(f"使用類別: {category}, 對應文件夾ID: {folder_id}")
+    folder_id = _folder_id_for_category(category)
+    logger.info(f"類別: {category} → Drive 目錄: {'診所' if folder_id == _CLINIC_FOLDER_ID else '東洋'}")
     
     try:
         logger.info(f"開始生成週報表，類別: {category}, 格式: {file_format}, "
@@ -1005,16 +1007,8 @@ def handle_generate_daily_report(text_input, file_format='xlsx'):
     if target_date is None:
         target_date = get_taiwan_date() - timedelta(days=1)
     
-    CATEGORY_FOLDER_MAPPING = {
-        "診所": "1Wwp1xIxnn9m9qlvX_BwpE30K0AgLVdYe",
-        "東洋": "1dctU8QPRWNPn57LxpcYTeKKcsGn_dLOU",
-        "全部": None
-    }
-    
-    folder_id = None
-    if category and category in CATEGORY_FOLDER_MAPPING:
-        folder_id = CATEGORY_FOLDER_MAPPING[category]
-        logger.info(f"使用類別: {category}, 對應文件夾ID: {folder_id}")
+    folder_id = _folder_id_for_category(category)
+    logger.info(f"類別: {category} → Drive 目錄: {'診所' if folder_id == _CLINIC_FOLDER_ID else '東洋'}")
     
     try:
         logger.info(f"開始生成日報表，日期: {target_date}, 類別: {category}, 格式: {file_format}")
@@ -1047,18 +1041,8 @@ def handle_generate_monthly_report(text, file_format='xlsx', year=None, month=No
     if len(parts) > 1:
         category = parts[1]
     
-    # 類別與文件夾 ID 的映射（與週報表相同）
-    CATEGORY_FOLDER_MAPPING = {
-        "診所": "1Wwp1xIxnn9m9qlvX_BwpE30K0AgLVdYe",  # 診所文件夾 ID
-        "東洋": "1dctU8QPRWNPn57LxpcYTeKKcsGn_dLOU",   # 東洋文件夾 ID
-        "全部": None  # 全部類別不指定特定文件夾
-    }
-    
-    # 根據類別獲取對應的文件夾ID
-    folder_id = None
-    if category and category in CATEGORY_FOLDER_MAPPING:
-        folder_id = CATEGORY_FOLDER_MAPPING[category]
-        logger.info(f"使用類別: {category}, 對應文件夾ID: {folder_id}")
+    folder_id = _folder_id_for_category(category)
+    logger.info(f"類別: {category} → Drive 目錄: {'診所' if folder_id == _CLINIC_FOLDER_ID else '東洋'}")
     
     try:
         logger.info(f"開始生成月報表，類別: {category}, 格式: {file_format}, "

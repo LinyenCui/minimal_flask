@@ -21,7 +21,7 @@ from rewrite.tools.base import ToolResult
 logger = logging.getLogger(__name__)
 
 
-VALID_REPORT_CATEGORIES = ('全部', '診所', '東洋')
+VALID_REPORT_CATEGORIES = ('全部', '診所', '東洋', '臨時')
 VALID_REPORT_TYPES = ('daily', 'weekly', 'monthly')
 VALID_FILE_FORMATS = ('xlsx', 'pdf', 'both')
 
@@ -53,7 +53,7 @@ def generate_report(
         target_date: daily = 指定日期；weekly = 指定「該日所在太陽週」
                      （可選；不給用 legacy 預設「昨天」/「上週」）
         year / month: 只 monthly 用（可選；兩者都給才生效，不給預設「上月」）
-        category: '全部' / '診所' / '東洋'（預設全部）
+        category: '全部' / '診所' / '東洋' / '臨時'（預設全部）
         file_format: 'xlsx'（預設）/ 'pdf' / 'both'
 
     Returns:
