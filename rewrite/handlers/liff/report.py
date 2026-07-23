@@ -93,9 +93,27 @@ def _report_chat_text(result_data) -> str:
 
 @liff_bp.route('/report/form', methods=['GET'])
 def report_form():
+    # 類別選單動態撈（completed_trips ∪ trips 實際存在的類別）—
+    # 未來上游開放新類別（如「西洋」），報表端零改動自動出現
+    categories = ['全部']
+    try:
+        from database import Session
+        from sqlalchemy import text as _sql
+        s = Session()
+        try:
+            rows = s.execute(_sql(
+                "SELECT DISTINCT category FROM completed_trips WHERE category IS NOT NULL AND category <> '' "
+                "UNION SELECT DISTINCT category FROM trips WHERE category IS NOT NULL AND category <> '' "
+                "ORDER BY 1")).fetchall()
+            categories += [r[0] for r in rows]
+        finally:
+            s.close()
+    except Exception:
+        categories = ['全部', '診所', '東洋', '臨時']  # DB 失敗退靜態清單
     return render_template(
         'liff/report_form.html',
         liff_id=os.environ.get('LIFF_ID', ''),
+        categories=categories,
     )
 
 

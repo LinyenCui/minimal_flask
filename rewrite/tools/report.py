@@ -68,10 +68,9 @@ def generate_report(
         return ToolResult.fail(
             f"報表類型必須是 {VALID_REPORT_TYPES} 之一（給的是 {report_type!r}）"
         )
-    if category and category not in VALID_REPORT_CATEGORIES:
-        return ToolResult.fail(
-            f"類別必須是 {VALID_REPORT_CATEGORIES} 之一（給的是 {category!r}）"
-        )
+    # 類別不做白名單驗證（2026-07-22 動態類別化）：VALID_REPORT_CATEGORIES
+    # 只當文件提示；未知類別照樣放行 — SQL 參數化無注入風險，
+    # 查無資料會自然回「沒有已完成的班次」
     if file_format not in VALID_FILE_FORMATS:
         return ToolResult.fail(
             f"檔案格式必須是 {VALID_FILE_FORMATS} 之一（給的是 {file_format!r}）"
