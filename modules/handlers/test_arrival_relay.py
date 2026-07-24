@@ -28,8 +28,8 @@ import modules.handlers.arrival_relay_handler as arh
 SENT = []  # (kind, target_or_token, text)
 
 
-def _fake_push(chat_id, text):
-    SENT.append(('push', chat_id, text))
+def _fake_push(chat_id, text, warn=None):
+    SENT.append(('push', chat_id, f'{text}|{warn}' if warn else text))
 
 
 def _fake_reply_text(token, text):
@@ -197,7 +197,7 @@ check('第 1 台：無多車註記', first and '在途共' not in str(first[-1][
 SENT.clear()
 arh.notify_relay_by_reply('t2', 'R_M', '🚗 通知B', driver_key='DB')
 second = [s for s in SENT if s[0] == 'reply_msg']
-check('第 2 台：帶「在途共 2 趟」註記', second and '在途共 2 趟' in str(second[-1][2]))
+check('第 2 台：帶「在途共 2 趟」紅字警示（Flex）', second and '在途共 2 趟' in str(second[-1][2]) and '#D32F2F' in str(second[-1][2]))
 SENT.clear()
 arh.handle_ack('t3', 'R_M', '收到')          # 全確認
 arh.notify_relay_by_reply('t4', 'R_M', '🚗 通知C', driver_key='DC')

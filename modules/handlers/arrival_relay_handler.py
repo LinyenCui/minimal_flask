@@ -164,13 +164,33 @@ def _ack_quick_reply():
     ])
 
 
-def _build_ack_text_message(text: str):
-    """純文字 + [✅ 收到] Quick Reply。"""
-    from linebot.v3.messaging import TextMessage
-    return TextMessage(text=text, quick_reply=_ack_quick_reply())
+def _build_ack_text_message(text: str, warn: Optional[str] = None):
+    """到院通知訊息 + [✅ 收到] Quick Reply。
+
+    無 warn → 純文字；有 warn（多車在途）→ Flex 泡泡讓警示行走紅字
+    （按鈕維持 Quick Reply — Flex 訊息一樣能掛，不產生常駐假按鈕）。
+    """
+    if not warn:
+        from linebot.v3.messaging import TextMessage
+        return TextMessage(text=text, quick_reply=_ack_quick_reply())
+    from linebot.v3.messaging import FlexMessage, FlexContainer
+    bubble = {
+        "type": "bubble",
+        "body": {"type": "box", "layout": "vertical", "contents": [
+            {"type": "text", "text": text, "wrap": True, "size": "md"},
+            {"type": "text", "text": warn, "wrap": True, "size": "md",
+             "weight": "bold", "color": "#D32F2F", "margin": "md"},
+        ]},
+    }
+    return FlexMessage(
+        alt_text=f"{text[:40]}｜{warn[:18]}",
+        contents=FlexContainer.from_dict(bubble),
+        quick_reply=_ack_quick_reply(),
+    )
 
 
-def _push_to_relay(relay_chat_id: str, text: str) -> None:
+def _push_to_relay(relay_chat_id: str, text: str,
+                   warn: Optional[str] = None) -> None:
     """push 帶 [✅ 收到] 按鈕的文字到接送群。失敗只 log 不 raise。
 
     threading.Timer 的執行緒沒有 Flask app context（get_line_bot_api 讀
@@ -194,7 +214,7 @@ def _push_to_relay(relay_chat_id: str, text: str) -> None:
         from linebot.v3.messaging import PushMessageRequest
         api.push_message(PushMessageRequest(
             to=relay_chat_id,
-            messages=[_build_ack_text_message(text)],
+            messages=[_build_ack_text_message(text, warn=warn)],
         ))
         logger.info(f"[relay] pushed to {relay_chat_id[:8]}…")
     except Exception as e:
@@ -216,13 +236,12 @@ def _open_event_count(relay_chat_id: str) -> int:
         )
 
 
-def _decorate_multi_car(text: str, relay_chat_id: str) -> str:
-    """多車在途時在通知文字註明總數 — 按「收到」是一鍵全確認，要講明白"""
+def _multi_car_warn(relay_chat_id: str) -> Optional[str]:
+    """多車在途時的警示行（紅字用）— 按「收到」是一鍵全確認，要講明白"""
     n = _open_event_count(relay_chat_id)
     if n > 1:
-        return (f"{text}\n⚠️ 目前在途共 {n} 趟（含先前未確認），"
-                f"按「收到」視為全部確認")
-    return text
+        return f"⚠️ 目前在途共 {n} 趟（含先前未確認），按「收到」視為全部確認"
+    return None
 
 
 def notify_relay_by_reply(reply_token: str, relay_chat_id: str, text: str,
@@ -234,7 +253,7 @@ def notify_relay_by_reply(reply_token: str, relay_chat_id: str, text: str,
     if not start_arrival_event(relay_chat_id, driver_key):
         logger.info(f"[relay] 節流中，接送群位置釘不重發通知: {relay_chat_id[:8]}…")
         return
-    reply_message(reply_token, [_build_ack_text_message(_decorate_multi_car(text, relay_chat_id))])
+    reply_message(reply_token, [_build_ack_text_message(text, warn=_multi_car_warn(relay_chat_id))])
 
 
 def notify_relay_by_push(relay_chat_id: str, text: str,
@@ -246,7 +265,7 @@ def notify_relay_by_push(relay_chat_id: str, text: str,
     if not start_arrival_event(relay_chat_id, driver_key):
         logger.info(f"[relay] 節流中，不重 push 到接送群: {relay_chat_id[:8]}…")
         return
-    _push_to_relay(relay_chat_id, _decorate_multi_car(text, relay_chat_id))
+    _push_to_relay(relay_chat_id, text, warn=_multi_car_warn(relay_chat_id))
 
 
 # ============================================================
