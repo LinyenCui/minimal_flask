@@ -165,25 +165,23 @@ def _ack_quick_reply():
 
 
 def _build_ack_text_message(text: str, warn: Optional[str] = None):
-    """到院通知訊息 + [✅ 收到] Quick Reply。
+    """到院通知 Flex 泡泡 + [✅ 收到] Quick Reply（一律泡泡 — 用戶定調求一致性）。
 
-    無 warn → 純文字；有 warn（多車在途）→ Flex 泡泡讓警示行走紅字
-    （按鈕維持 Quick Reply — Flex 訊息一樣能掛，不產生常駐假按鈕）。
+    warn（多車在途）→ 加一行紅色粗體警示；按鈕維持 Quick Reply
+    （Flex 訊息一樣能掛，不產生常駐假按鈕）。
     """
-    if not warn:
-        from linebot.v3.messaging import TextMessage
-        return TextMessage(text=text, quick_reply=_ack_quick_reply())
     from linebot.v3.messaging import FlexMessage, FlexContainer
+    contents = [{"type": "text", "text": text, "wrap": True, "size": "md"}]
+    if warn:
+        contents.append({"type": "text", "text": warn, "wrap": True, "size": "md",
+                         "weight": "bold", "color": "#D32F2F", "margin": "md"})
     bubble = {
         "type": "bubble",
-        "body": {"type": "box", "layout": "vertical", "contents": [
-            {"type": "text", "text": text, "wrap": True, "size": "md"},
-            {"type": "text", "text": warn, "wrap": True, "size": "md",
-             "weight": "bold", "color": "#D32F2F", "margin": "md"},
-        ]},
+        "body": {"type": "box", "layout": "vertical", "contents": contents},
     }
+    alt = f"{text[:40]}｜{warn[:18]}" if warn else text
     return FlexMessage(
-        alt_text=f"{text[:40]}｜{warn[:18]}",
+        alt_text=alt[:400],
         contents=FlexContainer.from_dict(bubble),
         quick_reply=_ack_quick_reply(),
     )
