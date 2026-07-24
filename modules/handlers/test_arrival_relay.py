@@ -163,6 +163,7 @@ banner('T5: 靜默白名單判定')
 check('其他文字 → False（靜默跳過）', arh.handle_ack('tok', 'R_ACK', '大家好') is False)
 check('空字串 → False', arh.handle_ack('tok', 'R_ACK', '') is False)
 check('「/收到」（斜線前綴）也認', arh.handle_ack('tok', 'R_ACK', '/收到') is True)
+check('「確定」也是確認詞（手錶罐頭回覆）', arh.handle_ack('tok', 'R_ACK', '確定') is True)
 check('無事件時「收到」也回確認不炸',
       arh.handle_ack('tok', 'R_NOEVENT', '收到') is True)
 

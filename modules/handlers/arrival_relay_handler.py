@@ -325,6 +325,7 @@ def _ack_received(reply_token: str, relay_chat_id: str,
 #   （處理器簽名：fn(reply_token, relay_chat_id, user_id)）
 ACK_HANDLERS = {
     '收到': _ack_received,
+    '確定': _ack_received,   # 手錶罐頭回覆常見詞（僅接送群靜默閘內生效，別處不受影響）
 }
 
 
