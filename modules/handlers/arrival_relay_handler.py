@@ -205,6 +205,26 @@ def _push_to_relay(relay_chat_id: str, text: str) -> None:
 # 位置釘 → 到院通知（location_message_handler 掛鉤點）
 # ============================================================
 
+def _open_event_count(relay_chat_id: str) -> int:
+    """該接送群「在途」事件數 = 未確認且仍在節流窗內的事件（含剛建立的）"""
+    now = time.time()
+    with _EVENTS_LOCK:
+        return sum(
+            1 for key, ev in _EVENTS.items()
+            if key[0] == relay_chat_id and not ev['acked']
+            and (now - ev['started_at']) < EVENT_THROTTLE_SEC
+        )
+
+
+def _decorate_multi_car(text: str, relay_chat_id: str) -> str:
+    """多車在途時在通知文字註明總數 — 按「收到」是一鍵全確認，要講明白"""
+    n = _open_event_count(relay_chat_id)
+    if n > 1:
+        return (f"{text}\n⚠️ 目前在途共 {n} 趟（含先前未確認），"
+                f"按「收到」視為全部確認")
+    return text
+
+
 def notify_relay_by_reply(reply_token: str, relay_chat_id: str, text: str,
                           driver_key: str = 'unknown') -> None:
     """(a) 司機把位置釘直接發在接送群 → reply 到院通知（免費）+ 建事件。
@@ -214,7 +234,7 @@ def notify_relay_by_reply(reply_token: str, relay_chat_id: str, text: str,
     if not start_arrival_event(relay_chat_id, driver_key):
         logger.info(f"[relay] 節流中，接送群位置釘不重發通知: {relay_chat_id[:8]}…")
         return
-    reply_message(reply_token, [_build_ack_text_message(text)])
+    reply_message(reply_token, [_build_ack_text_message(_decorate_multi_car(text, relay_chat_id))])
 
 
 def notify_relay_by_push(relay_chat_id: str, text: str,
@@ -226,7 +246,7 @@ def notify_relay_by_push(relay_chat_id: str, text: str,
     if not start_arrival_event(relay_chat_id, driver_key):
         logger.info(f"[relay] 節流中，不重 push 到接送群: {relay_chat_id[:8]}…")
         return
-    _push_to_relay(relay_chat_id, text)
+    _push_to_relay(relay_chat_id, _decorate_multi_car(text, relay_chat_id))
 
 
 # ============================================================

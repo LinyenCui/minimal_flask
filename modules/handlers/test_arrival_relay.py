@@ -189,6 +189,21 @@ check('(b) 同司機節流中 → 不重 push', push_count() == 0)
 arh.notify_relay_by_push('R_P', '🚗 注意：來程車輛接近「診所」', driver_key='D2')
 check('(b) 不同司機 → 照 push', push_count() == 1)
 
+# T6b: 多車在途註記
+arh._EVENTS.clear(); SENT.clear()
+arh.notify_relay_by_reply('t1', 'R_M', '🚗 通知A', driver_key='DA')
+first = [s for s in SENT if s[0] == 'reply_msg']
+check('第 1 台：無多車註記', first and '在途共' not in str(first[-1][2]))
+SENT.clear()
+arh.notify_relay_by_reply('t2', 'R_M', '🚗 通知B', driver_key='DB')
+second = [s for s in SENT if s[0] == 'reply_msg']
+check('第 2 台：帶「在途共 2 趟」註記', second and '在途共 2 趟' in str(second[-1][2]))
+SENT.clear()
+arh.handle_ack('t3', 'R_M', '收到')          # 全確認
+arh.notify_relay_by_reply('t4', 'R_M', '🚗 通知C', driver_key='DC')
+third = [s for s in SENT if s[0] == 'reply_msg']
+check('確認後新來一台：回到無註記', third and '在途共' not in str(third[-1][2]))
+
 # ============================================================
 # T7 / T8: DB 往返（本地 DB + 測試 chat_id，跑完清理）
 # ============================================================
