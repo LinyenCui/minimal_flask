@@ -127,11 +127,20 @@ def upsert_patients(conn):
     inserted, updated = 0, 0
     with conn.cursor() as cur:
         for p in SEED_PATIENTS:
+            # 先用病歷號找；找不到再用 short_name 找（short_name 有 UNIQUE 約束，
+            # Render 端同名客戶可能沒帶病歷號 → 舊邏輯直接 INSERT 會撞唯一鍵，
+            # 讓補種子每次同步都失敗（2026-07-27 實測「黃陳玉盆」）
             cur.execute(
                 "SELECT id FROM customers WHERE medical_record_no = %s",
                 (p['medical_record_no'],)
             )
             existing = cur.fetchone()
+            if not existing:
+                cur.execute(
+                    "SELECT id FROM customers WHERE short_name = %s",
+                    (p['short_name'],)
+                )
+                existing = cur.fetchone()
             if existing:
                 # UPDATE（保留 id，刷新欄位）
                 cur.execute(
@@ -139,14 +148,16 @@ def upsert_patients(conn):
                     UPDATE customers SET
                         name = %s, short_name = %s, address = %s,
                         category = %s, remarks = %s,
-                        birthday = %s, gender = %s
-                    WHERE medical_record_no = %s
+                        birthday = %s, gender = %s,
+                        medical_record_no = %s
+                    WHERE id = %s
                     """,
                     (
                         p['name'], p['short_name'], p['address'],
                         p['category'], p['remarks'],
                         p['birthday'], p['gender'],
                         p['medical_record_no'],
+                        existing[0],
                     )
                 )
                 updated += 1

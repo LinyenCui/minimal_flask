@@ -235,6 +235,44 @@ def detect_sequence_conflicts(local_conn, render_conn):
     
     return conflicts
 
+def purge_local_only_completed(local_conn, render_conn):
+    """清除本地 completed_trips 中「Render 不存在」的列（本地排程測試產物）。
+
+    用戶定調：Render 是唯一真相，本地跑 Flask 排程會自己把班次掉進
+    completed_trips 產生更大的 id，那些都是測試垃圾。
+    安全網：只刪 unique_code 在 Render 已存在（同一趟重複）或 unique_code 為
+    NULL 的列 — 若某列的 unique_code 是 Render 完全沒見過的，保留並警告
+    （可能是真實資料，寧可留著讓人判斷）。
+    """
+    with render_conn.cursor() as rcur, local_conn.cursor() as lcur:
+        rcur.execute("SELECT id FROM completed_trips")
+        render_ids = {r[0] for r in rcur.fetchall()}
+        rcur.execute(
+            "SELECT unique_code FROM completed_trips WHERE unique_code IS NOT NULL")
+        render_codes = {r[0] for r in rcur.fetchall()}
+        if not render_ids:
+            print("   - ⚠️ Render completed_trips 為空，跳過清理（防誤刪）")
+            return 0
+        # 本地獨有 = unique_code 不在 Render（有 code 時）或 id 不在 Render（無 code）
+        lcur.execute("SELECT id, unique_code FROM completed_trips")
+        to_delete, keep = [], []
+        for rid, code in lcur.fetchall():
+            if code:
+                if code in render_codes:
+                    continue          # 同一趟，兩邊 id 不同也算已同步 → 保留
+                keep.append((rid, code))   # Render 沒見過的 code → 人工確認
+            elif rid not in render_ids:
+                to_delete.append(rid)      # 無 code 且 Render 沒此 id → 測試殘留
+        for rid, code in keep:
+            print(f"   - ⚠️ 保留本地 #{rid}（unique_code={code} Render 沒見過，"
+                  f"疑似真實資料，請人工確認）")
+        if to_delete:
+            lcur.execute(
+                "DELETE FROM completed_trips WHERE id = ANY(%s)", (to_delete,))
+            local_conn.commit()
+        return len(to_delete)
+
+
 def calibrate_sequence(conn, table_name, id_column='id'):
     """
     校準指定資料表的序列計數器
@@ -372,21 +410,26 @@ def incremental_sync_completed_trips(local_conn, render_conn):
 
             # ----- 路徑 2: 補本地沒的 NULL row -----
             # Render 上 NULL row 是 schema 升級遺留，數量固定（不會新增）
-            # 本地已有的 id 一律不抓 → 維持「不洗本地修改、只增不減」。
-            # 原版只補 created_at IS NULL 的漏（schema 升級遺留），有個夾縫：
-            # 本地清空重同步時，「有 created_at 但早於錨點」的舊資料
-            # （實測 473 筆 id 205-678）時間過濾撈不到、NULL 補漏也不管，
-            # 永遠補不回來 → 2026-07-15 擴成全 id 比對，任何本地缺口都自癒。
-            print("   - [路徑2] 比對 id 集合，補 Render 有、本地沒有的紀錄...")
-            render_cur.execute(f"SELECT id FROM {table_name} ORDER BY id;")
-            render_ids = [r['id'] for r in render_cur.fetchall()]
-            local_cur.execute(f"SELECT id FROM {table_name}")
-            local_ids = {r[0] for r in local_cur.fetchall()}
+            # 本地已有的一律不抓 → 維持「不洗本地修改、只增不減」。
+            # ⚠️ 比對鍵用 unique_code（業務唯一鍵）而非 id：本地 Flask 排程也會
+            # 把班次掉進 completed_trips，同一趟在兩邊拿到不同流水號
+            # （2026-07-27 實測：20_196_29 本地 #2795 / Render #2791）→
+            # 用 id 比對會誤判成「缺 24 筆」而重複插入同一批班次。
+            # unique_code 為 NULL 的舊資料退回 id 比對。
+            print("   - [路徑2] 比對 unique_code，補 Render 有、本地沒有的紀錄...")
+            render_cur.execute(f"SELECT id, unique_code FROM {table_name} ORDER BY id;")
+            render_rows = [(r['id'], r['unique_code']) for r in render_cur.fetchall()]
+            local_cur.execute(f"SELECT id, unique_code FROM {table_name}")
+            local_rows = local_cur.fetchall()
+            local_ids = {r[0] for r in local_rows}
+            local_codes = {r[1] for r in local_rows if r[1]}
             time_ids = {r['id'] for r in records_by_time}  # 路徑1 已抓的不重複抓
             missing_ids = [
-                i for i in render_ids if i not in local_ids and i not in time_ids
+                rid for rid, code in render_rows
+                if rid not in time_ids
+                and (code not in local_codes if code else rid not in local_ids)
             ]
-            print(f"   - [路徑2] Render {len(render_ids)} 筆, 本地 {len(local_ids)} 筆, "
+            print(f"   - [路徑2] Render {len(render_rows)} 筆, 本地 {len(local_rows)} 筆, "
                   f"待補 {len(missing_ids)} 筆")
 
             if missing_ids:
@@ -448,17 +491,31 @@ def incremental_sync_completed_trips(local_conn, render_conn):
             else:
                 print("   - ⚠️ 找不到 unique_code 欄位，無法自動處理重複序號")
 
+            # 3.2 補漏不沿用 Render 的 id — id 只是流水號，unique_code 才是身份。
+            # 本地 Flask 排程也會產生 completed_trips，同一趟兩邊 id 不同；沿用
+            # Render id 會撞本地既有紀錄的主鍵，同批內還會連鎖佔位互踩
+            # （2026-07-27 實測：21 筆只進 7 筆、殘留 4 筆怎麼補都補不進）。
+            # 讓本地序列自己編號，衝突只可能發生在 unique_code（上面已預刪）。
+            if 'id' in filtered_cols:
+                _id_pos = filtered_cols.index('id')
+                filtered_cols = [c for c in filtered_cols if c != 'id']
+                filtered_records = [
+                    tuple(v for i, v in enumerate(rec) if i != _id_pos)
+                    for rec in filtered_records
+                ]
+                print("   - 🆔 補漏改用本地新 id（unique_code 為身份鍵，避免主鍵連鎖衝突）")
+
             # 4. 使用 ON CONFLICT DO UPDATE 覆蓋本地資料
             print(f"   - 正在將新紀錄寫入本地，覆蓋已存在的記錄...")
             placeholders = "%s, " * len(filtered_cols)
             
-            # 構建 UPDATE SET 子句（排除 id 欄位）
-            update_cols = [col for col in filtered_cols if col != 'id']
+            # 構建 UPDATE SET 子句（排除衝突鍵 unique_code）
+            update_cols = [col for col in filtered_cols if col != 'unique_code']
             update_set = ', '.join([f"{col} = EXCLUDED.{col}" for col in update_cols])
-            
+
             insert_sql = f"""INSERT INTO {table_name} ({', '.join(filtered_cols)}) 
                             VALUES ({placeholders.strip(', ')}) 
-                            ON CONFLICT (id) DO UPDATE SET {update_set}"""
+                            ON CONFLICT (unique_code) DO UPDATE SET {update_set}"""
             
             print(f"   - 調試：SQL語句前50字符: {insert_sql[:50]}...")
             print(f"   - 調試：準備插入 {len(filtered_records)} 筆記錄")
@@ -636,12 +693,15 @@ def main(check_only=False, force_sync=False):
                 print("\n🔍 檢查完成，發現序號衝突。")
                 return {"status": "conflicts", "conflicts": conflicts}
             
+            # 用戶定調（2026-07-27）：Render 是唯一真相，本地 completed_trips
+            # 的「多出來的 id」都是本地排程測試產物 → 自動清掉、不中止同步。
+            # （舊行為：直接 return 中止，連 completed_trips 補漏都沒跑到，
+            #   造成本地缺 24 筆卻回報「同步成功」的假象）
+            purged = purge_local_only_completed(local_conn, render_conn)
+            if purged:
+                print(f"   - 🧹 已清除本地獨有的測試資料 {purged} 筆（Render 為準）")
             if not force_sync:
-                print("\n❌ 由於序號衝突，同步已停止。")
-                print("💡 解決方案:")
-                print("   1. 在 LINE Bot 中輸入「確認序號覆蓋」來強制以遠端序號為主")
-                print("   2. 或手動解決衝突後再重新同步")
-                return {"status": "conflicts", "conflicts": conflicts}
+                print("\n⚡ 序號衝突已自動處理（清本地測試資料 + 稍後校準序號），繼續同步")
             else:
                 print("\n⚡ 強制同步模式: 將以遠端序號為主覆蓋本地序號")
         else:
