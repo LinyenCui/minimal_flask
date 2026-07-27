@@ -137,7 +137,7 @@ _ALL_EXACT_COMMAND_TRIGGERS = (
     | _BATCH_ALLOWANCE_LIFF_TRIGGERS
     | _DB_SYNC_TRIGGERS
     | _HELP_TRIGGERS
-    | {'重置班次序號'}
+    | {'重置班次序號', '歸檔檢查', '備份檢查', '歸檔狀態'}
 )
 # 註：_DRUG_DX_LINK_LIFF_TRIGGERS 刻意不納入聯集 —— 藥診關聯在群組有自己的前綴
 # 政策（_is_drug_dx_link_liff_trigger 群組只收 / ! ！ 前綴）。若把裸字「藥診關聯」
@@ -561,6 +561,23 @@ def try_handle_sandbox(event) -> bool:
         return True
 
     # 0b''''. 手動重置班次序號（維護指令；trips 非空會被工具拒絕，防誤用）
+    # 歸檔檢查：刪 Render 舊班次前確認本地備份完整（純唯讀、reply 零 push）
+    if text in ('歸檔檢查', '備份檢查', '歸檔狀態'):
+        try:
+            import os as _os
+            import sys as _sys
+            from datetime import date as _d, timedelta as _td
+            if _os.getcwd() not in _sys.path:
+                _sys.path.insert(0, _os.getcwd())
+            from scripts.archive_check import build_report
+            _report, _ok = build_report((_d.today() - _td(days=60)).isoformat())
+        except Exception as _arc_err:
+            logger.error(f"歸檔檢查失敗: {_arc_err}", exc_info=True)
+            _report = f"❌ 歸檔檢查失敗：{str(_arc_err)[:150]}"
+        reply_message(event.reply_token, {'type': 'text', 'text': _report})
+        logger.info(f"[rewrite sandbox] {short_uid} → archive_check")
+        return True
+
     if text == '重置班次序號':
         from database import Session
         from rewrite.tools.import_fixed import reset_trips_sequence

@@ -36,13 +36,9 @@ def _render_conn(read_only=True):
         options=opts)
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument('--before', help='刪除界線 YYYY-MM-DD（預設：今天往前 60 天）')
-    args = ap.parse_args()
-
-    cutoff = args.before or (date.today() - timedelta(days=60)).isoformat()
-
+def build_report(cutoff: str) -> tuple:
+    """回傳 (報告文字, 是否可安全刪除)。給 CLI 與 LINE 指令共用。"""
+    lines = []
     with _local_conn() as lconn, _render_conn() as rconn:
         lcur, rcur = lconn.cursor(), rconn.cursor()
         # 比對鍵：unique_code（業務唯一鍵）— 本地排程也會產生 completed_trips，
@@ -61,30 +57,38 @@ def main():
         lcur.execute("SELECT MIN(date), MAX(date) FROM completed_trips")
         l_range = lcur.fetchone()
 
-        print("=" * 56)
-        print("📦 歸檔檢查（Render → 本地備份完整性）")
-        print("=" * 56)
-        print(f"Render : {len(render_ids):>5} 筆  {r_range[0]} ~ {r_range[1]}")
-        print(f"本地   : {len(local_ids):>5} 筆  {l_range[0]} ~ {l_range[1]}")
-        print(f"本地獨有（已歸檔的歷史）: {len(local_ids - render_ids)} 筆")
-        print()
+        lines.append("📦 歸檔檢查（Render → 本地備份完整性）")
+        lines.append(f"Render：{len(render_ids)} 筆　{r_range[0]} ~ {r_range[1]}")
+        lines.append(f"本地　：{len(local_ids)} 筆　{l_range[0]} ~ {l_range[1]}")
+        lines.append(f"本地獨有（已歸檔歷史）：{len(local_ids - render_ids)} 筆")
+        lines.append("")
 
         if missing:
-            print(f"❌ 本地還缺 {len(missing)} 筆 — 請先在 LINE 打「資料庫同步」再刪！")
-            print(f"   缺漏 unique_code 範例: {sorted(missing)[:10]}")
-            return 1
+            lines.append(f"❌ 本地還缺 {len(missing)} 筆 — 請先打「資料庫同步」再刪！")
+            lines.append(f"缺漏範例：{', '.join(sorted(missing)[:5])}")
+            return '\n'.join(lines), False
 
-        print("✅ Render 的資料本地都有備份，可安全刪除舊資料")
-        print()
-        print(f"📅 界線 {cutoff} 之前的 Render 資料：{deletable} 筆")
+        lines.append("✅ Render 的資料本地都有備份，可安全刪除舊資料")
+        lines.append("")
+        lines.append(f"📅 {cutoff} 之前的 Render 資料：{deletable} 筆")
         if deletable:
-            print()
-            print("── 貼進 Render Adminer 執行（刪除前建議先跑一次上面的同步）──")
-            print(f"DELETE FROM completed_trips WHERE date < '{cutoff}';")
-            print("── 刪完後本地資料不受影響（同步只增不減）──")
+            lines.append("")
+            lines.append("── 貼進 Render Adminer 執行 ──")
+            lines.append(f"DELETE FROM completed_trips WHERE date < '{cutoff}';")
+            lines.append("（刪完本地不受影響，同步只增不減）")
         else:
-            print("（該界線前無資料可刪）")
-        return 0
+            lines.append("（該界線前無資料可刪）")
+        return '\n'.join(lines), True
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--before', help='刪除界線 YYYY-MM-DD（預設：今天往前 60 天）')
+    args = ap.parse_args()
+    cutoff = args.before or (date.today() - timedelta(days=60)).isoformat()
+    report, ok = build_report(cutoff)
+    print(report)
+    return 0 if ok else 1
 
 
 if __name__ == '__main__':
