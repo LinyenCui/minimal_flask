@@ -137,7 +137,8 @@ _ALL_EXACT_COMMAND_TRIGGERS = (
     | _BATCH_ALLOWANCE_LIFF_TRIGGERS
     | _DB_SYNC_TRIGGERS
     | _HELP_TRIGGERS
-    | {'重置班次序號', '歸檔檢查', '備份檢查', '歸檔狀態'}
+    | {'重置班次序號', '歸檔檢查', '備份檢查', '歸檔狀態',
+       '歸檔清理', '確認清理', '取消清理'}
 )
 # 註：_DRUG_DX_LINK_LIFF_TRIGGERS 刻意不納入聯集 —— 藥診關聯在群組有自己的前綴
 # 政策（_is_drug_dx_link_liff_trigger 群組只收 / ! ！ 前綴）。若把裸字「藥診關聯」
@@ -148,6 +149,7 @@ _ALL_EXACT_COMMAND_TRIGGERS = (
 # 流程：parse → query trips → render picker (Flex + Quick Reply)
 #       → 用戶按 [全部請假/註銷/衝突/改回準備] → 對 trip_ids 批次操作
 #       → 「全部請假」需要再問 [原因] [加成]，其他按了直接執行
+ARCHIVE_PURGE_STATE_TYPE = 'rewrite_archive_purge'   # 歸檔清理待確認
 TRIP_STATUS_PICKER_STATE_TYPE = 'rewrite_trip_status_picker'
 TRIP_STATUS_LEAVE_INPUT_STATE_TYPE = 'rewrite_trip_status_leave_input'
 TRIP_STATUS_TTL_MINUTES = 5.0  # 5 分鐘思考時間（比 SANDBOX_ACTIVE 90 秒長）
@@ -561,6 +563,77 @@ def try_handle_sandbox(event) -> bool:
         return True
 
     # 0b''''. 手動重置班次序號（維護指令；trips 非空會被工具拒絕，防誤用）
+    # 歸檔清理：直接刪 Render 舊班次（免手貼 Adminer）。兩段式：
+    #   「歸檔清理 [YYYY-MM-DD]」→ 檢查+預覽+確認鈕 →「確認清理」→ 真正執行
+    # 安全欄杆在 scripts/archive_check.purge_render：備份不完整拒絕、
+    # 30 天保護線、寫死的參數化 SQL（非 AI 生成）
+    if text.startswith('歸檔清理'):
+        try:
+            import os as _os, sys as _sys
+            from datetime import date as _d, timedelta as _td
+            if _os.getcwd() not in _sys.path:
+                _sys.path.insert(0, _os.getcwd())
+            from scripts.archive_check import build_report, PURGE_MIN_AGE_DAYS
+            _arg = text[len('歸檔清理'):].strip()
+            _cut = _arg or (_d.today() - _td(days=60)).isoformat()
+            _report, _ok = build_report(_cut)
+            if not _ok:
+                reply_message(event.reply_token, {'type': 'text', 'text': _report})
+                return True
+            _limit = (_d.today() - _td(days=PURGE_MIN_AGE_DAYS)).isoformat()
+            if _cut > _limit:
+                reply_message(event.reply_token, {
+                    'type': 'text',
+                    'text': f"❌ 界線 {_cut} 太近 — 只准清理 {_limit} 之前"
+                            f"（保護線 {PURGE_MIN_AGE_DAYS} 天）",
+                })
+                return True
+            if user_id:
+                from rewrite.conversation_state import get_chat_id_from_event
+                _state_set(user_id, ARCHIVE_PURGE_STATE_TYPE, {'cutoff': _cut},
+                           ttl_minutes=5.0,
+                           chat_id=get_chat_id_from_event(event))
+            reply_message(event.reply_token, {
+                'type': 'quick_reply',
+                'text': f"{_report}\n\n⚠️ 確認要刪除 Render 上這些資料嗎？",
+                'items': [
+                    {'label': '🧹 確認清理', 'text': '確認清理'},
+                    {'label': '❌ 取消', 'text': '取消清理'},
+                ],
+            })
+            logger.info(f"[rewrite sandbox] {short_uid} → archive_purge preview cutoff={_cut}")
+        except Exception as _p_err:
+            logger.error(f"歸檔清理預覽失敗: {_p_err}", exc_info=True)
+            reply_message(event.reply_token,
+                          {'type': 'text', 'text': f"❌ 歸檔清理失敗：{str(_p_err)[:150]}"})
+        return True
+
+    if text in ('確認清理', '取消清理'):
+        from rewrite.conversation_state import (
+            pop_state as _pop, get_chat_id_from_event as _chat_of,
+        )
+        _st = _pop(user_id, ARCHIVE_PURGE_STATE_TYPE,
+                   chat_id=_chat_of(event)) if user_id else None
+        if not _st:
+            reply_message(event.reply_token,
+                          {'type': 'text', 'text': '沒有待確認的歸檔清理（可能已逾時）'})
+            return True
+        if text == '取消清理':
+            reply_message(event.reply_token, {'type': 'text', 'text': '🚫 已取消，Render 資料未變動'})
+            return True
+        try:
+            import os as _os, sys as _sys
+            if _os.getcwd() not in _sys.path:
+                _sys.path.insert(0, _os.getcwd())
+            from scripts.archive_check import purge_render
+            _msg, _n = purge_render((_st.get('payload') or {}).get('cutoff'))
+            logger.info(f"[rewrite sandbox] {short_uid} → archive_purge executed n={_n}")
+        except Exception as _px_err:
+            logger.error(f"歸檔清理執行失敗: {_px_err}", exc_info=True)
+            _msg = f"❌ 清理失敗：{str(_px_err)[:150]}"
+        reply_message(event.reply_token, {'type': 'text', 'text': _msg})
+        return True
+
     # 歸檔檢查：刪 Render 舊班次前確認本地備份完整（純唯讀、reply 零 push）
     if text in ('歸檔檢查', '備份檢查', '歸檔狀態'):
         try:

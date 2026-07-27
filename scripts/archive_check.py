@@ -81,6 +81,50 @@ def build_report(cutoff: str) -> tuple:
         return '\n'.join(lines), True
 
 
+# 保護線：早於今天 N 天的資料才准刪（防手滑刪到近期）
+PURGE_MIN_AGE_DAYS = 30
+
+
+def purge_render(cutoff: str) -> tuple:
+    """刪除 Render 上 date < cutoff 的 completed_trips。回 (訊息, 刪除筆數)。
+
+    ⚠️ 這是唯一會「寫」Render 的地方，故層層設防：
+      1. 先跑 build_report — 本地備份不完整一律拒絕
+      2. cutoff 必須早於今天 PURGE_MIN_AGE_DAYS 天（防刪到近期資料）
+      3. SQL 是寫死的參數化語句（非 AI 生成、非字串拼接）
+      4. 刪除筆數先查後刪，回報實際影響列數
+    """
+    # 防呆 1：日期格式與保護線
+    try:
+        cut_d = date.fromisoformat(cutoff)
+    except ValueError:
+        return f"❌ 日期格式錯誤：{cutoff}（要 YYYY-MM-DD）", 0
+    limit_d = date.today() - timedelta(days=PURGE_MIN_AGE_DAYS)
+    if cut_d > limit_d:
+        return (f"❌ 界線 {cutoff} 太近了 — 只准刪 {limit_d} 之前的資料"
+                f"（保護線：{PURGE_MIN_AGE_DAYS} 天）"), 0
+
+    # 防呆 2：本地備份必須完整
+    report, ok = build_report(cutoff)
+    if not ok:
+        return f"❌ 備份不完整，拒絕刪除\n\n{report}", 0
+
+    # 執行刪除（可寫連線；語句寫死、日期參數綁定）
+    with _render_conn(read_only=False) as rconn:
+        cur = rconn.cursor()
+        cur.execute("SELECT COUNT(*) FROM completed_trips WHERE date < %s", (cutoff,))
+        n = cur.fetchone()[0]
+        if not n:
+            return f"ℹ️ {cutoff} 之前沒有資料可刪", 0
+        cur.execute("DELETE FROM completed_trips WHERE date < %s", (cutoff,))
+        deleted = cur.rowcount
+        rconn.commit()
+
+    return (f"🧹 已清理 Render 舊資料\n"
+            f"　刪除：{deleted} 筆（{cutoff} 之前）\n"
+            f"　本地備份不受影響，歷史查詢照常"), deleted
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--before', help='刪除界線 YYYY-MM-DD（預設：今天往前 60 天）')
