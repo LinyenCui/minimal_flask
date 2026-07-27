@@ -184,24 +184,10 @@ def handle_database_sync_confirm(event, line_bot_api_passed=None):
 
     line_bot_api = line_bot_api_passed or get_line_bot_api()
     
-    # 立即回覆開始訊息，包含查詢提示
-    if force_sync:
-        start_message = f"⚡ {user_name} 開始執行強制同步 (序號覆蓋模式)...\n"
-    else:
-        start_message = f"🚀 {user_name} 開始執行資料庫同步...\n"
-    start_message += "⏱️ 預計需要 30-60 秒\n"
-    start_message += "💡 完成後輸入「同步結果」查看結果"
-    
-    try:
-        reply_request = ReplyMessageRequest(
-            reply_token=event.reply_token,
-            messages=[TextMessage(text=start_message)]
-        )
-        line_bot_api.reply_message(reply_request)
-        logger.info(f"已回覆用戶 {user_id} 同步開始訊息")
-    except Exception as reply_error:
-        logger.error(f"回覆同步開始訊息失敗: {reply_error}")
-        return start_message
+    # ⚠️ 不先回「開始同步」— reply_token 只能用一次，要留給「結果」。
+    # 同步實測約 5 秒（上限 50 秒），遠短於 reply token 的 1 分鐘有效期，
+    # 直接跑完再 reply 結果 → 用戶看得到結果且完全不吃 push 額度
+    # （2026-07-27：舊版先 reply 開始訊息，結果只寫檔案，LINE 端等於沒回應）
 
     if force_sync:
         logger.info(f"用戶 {user_name} 確認執行強制資料庫同步 (序號覆蓋模式)...")
@@ -298,7 +284,18 @@ def handle_database_sync_confirm(event, line_bot_api_passed=None):
         
     except Exception as save_error:
         logger.error(f"❌ 儲存同步結果失敗: {save_error}")
-    
+
+    # 用 reply 回結果（零 push 額度）；失敗時結果仍在檔案裡，可打「同步結果」查
+    try:
+        line_bot_api.reply_message(ReplyMessageRequest(
+            reply_token=event.reply_token,
+            messages=[TextMessage(text=final_response_text)],
+        ))
+        logger.info(f"✅ 已回覆同步結果給用戶 {user_id}")
+    except Exception as reply_error:
+        logger.error(f"❌ 回覆同步結果失敗（可打「同步結果」查看）: {reply_error}")
+        return final_response_text
+
     return None
 
 
