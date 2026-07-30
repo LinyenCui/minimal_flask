@@ -80,6 +80,10 @@ _RE_LAYER_SUMMARY = re.compile(r'^病歷層分布$')
 
 # 班次命令 regex
 _RE_TRIP_DETAIL = re.compile(r'^班次詳情\s+(\d+)$')
+# 「查看 N」/「#N」= 過去態單筆詳情（語意無歧義，且是已完成卡片按鈕送出的字）。
+# 2026-07-29 修：原本沒有 deterministic 路由，全丟給 AI 猜 → AI 有時先查現在態
+# 撲空再反問「您是要查已完成的嗎」，按鈕打自己家的資料還要反問。
+_RE_COMPLETED_DETAIL = re.compile(r'^(?:查看|查看班次)\s*#?(\d+)$|^#(\d+)$')
 _RE_TRIP_LIST = re.compile(r'^(查|診所|東洋)班次(?:\s+(.+))?$')
 _RE_PENDING = re.compile(r'^待派班次$')
 
@@ -107,6 +111,9 @@ def try_route(event) -> bool:
     """
     text = (event.message.text or '').strip()
     user_id = getattr(event.source, 'user_id', None)
+
+    # 「#3077」剝掉 # 後只剩數字，記下來供過去態單筆判定用
+    had_hash = text.startswith('#')
 
     # 處理群組 prefix：剝掉 / 或 # （但保留 ! ！ — 那是 sandbox 的）
     for p in ('/', '#'):
@@ -140,7 +147,11 @@ def try_route(event) -> bool:
                         '班次恢復', '班次撤銷指派',
                         # 車資試算（純算）
                         '車資試算')
-    if not text.startswith(rewrite_prefixes):
+    # ⚠️ 不要把「查看」加進 rewrite_prefixes —— 會攔截「查看明細」（帳務）、
+    # 「查看地點座標」等別家指令。只用精準 regex 放行「查看 <數字>」。
+    if (not text.startswith(rewrite_prefixes)
+            and not _RE_COMPLETED_DETAIL.match(text)
+            and not (had_hash and text.isdigit())):
         return False
 
     # ===== 車資試算（純算，不開 session）=====
@@ -175,6 +186,13 @@ def try_route(event) -> bool:
         if m:
             return _handle_trip_detail(reply_token, session, int(m.group(1)),
                                        event_source=event.source)
+
+        m = _RE_COMPLETED_DETAIL.match(text)
+        if m:
+            return _handle_completed_detail(
+                reply_token, session, int(m.group(1) or m.group(2)))
+        if had_hash and text.isdigit():   # 「#3077」剝完只剩數字
+            return _handle_completed_detail(reply_token, session, int(text))
 
         # ===== 班次 mutation 命令（quick reply 觸發）=====
         m = _RE_TRIP_CANCEL.match(text)
@@ -381,6 +399,22 @@ def _handle_trip_detail(reply_token, session, trip_id: int, event_source=None) -
     _send_trip_card(reply_token, r.data,
                     alt_prefix=f"班次 #{trip_id} 詳情",
                     event_source=event_source)
+    return True
+
+
+def _handle_completed_detail(reply_token, session, completed_id: int) -> bool:
+    """「查看 N」/「#N」→ 過去態單筆詳情卡（零 AI 成本、無歧義）"""
+    from rewrite.tools.completed_trip import query_completed_trip_by_id
+    from rewrite.views.completed_trip_flex import render_completed_trip_detail
+    r = query_completed_trip_by_id(completed_trip_id=completed_id, session=session)
+    if not r.ok:
+        reply_message(reply_token, {"type": "text", "text": f"❌ {r.error}"})
+        return True
+    reply_message(reply_token, {
+        "type": "flex",
+        "altText": f"已完成 #{completed_id} 詳情",
+        "contents": render_completed_trip_detail(r.data),
+    })
     return True
 
 
