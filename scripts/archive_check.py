@@ -22,6 +22,21 @@ load_dotenv()
 load_dotenv('.env.dev', override=True)
 
 
+def assert_not_on_render():
+    """確保只在本機執行 — prod 上「本地庫」就是 Render 自己，
+    備份比對會自己跟自己比而永遠通過，purge 等於無備份刪生產資料。
+    """
+    if os.environ.get('RENDER'):
+        raise RuntimeError(
+            '歸檔功能只能在本機執行（Render 上的「本地庫」就是自己，'
+            '備份檢查沒有意義）')
+    local = re.sub(r'^postgresql\+\w+://', 'postgresql://',
+                   os.environ.get('DATABASE_URL', ''))
+    rhost = os.environ.get('RENDER_DB_HOST', '')
+    if rhost and rhost in local:
+        raise RuntimeError('本地 DATABASE_URL 指向 Render — 拒絕執行歸檔功能')
+
+
 def _local_conn():
     dsn = re.sub(r'^postgresql\+\w+://', 'postgresql://', os.environ['DATABASE_URL'])
     return psycopg2.connect(dsn)
@@ -38,6 +53,7 @@ def _render_conn(read_only=True):
 
 def build_report(cutoff: str) -> tuple:
     """回傳 (報告文字, 是否可安全刪除)。給 CLI 與 LINE 指令共用。"""
+    assert_not_on_render()
     lines = []
     with _local_conn() as lconn, _render_conn() as rconn:
         lcur, rcur = lconn.cursor(), rconn.cursor()
@@ -94,6 +110,8 @@ def purge_render(cutoff: str) -> tuple:
       3. SQL 是寫死的參數化語句（非 AI 生成、非字串拼接）
       4. 刪除筆數先查後刪，回報實際影響列數
     """
+    assert_not_on_render()   # 防呆 0：prod 一律拒絕
+
     # 防呆 1：日期格式與保護線
     try:
         cut_d = date.fromisoformat(cutoff)
