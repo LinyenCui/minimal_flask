@@ -604,21 +604,19 @@ def assign_driver(
     # 待派 → 準備
     new_status = '準備' if before.get('status') == '待派' else before.get('status')
 
-    note = f"指派司機 {driver_id}" if not before.get('driver_id') else \
-           f"換司機 {before.get('driver_id')}→{driver_id}"
-    new_mod = _bump_modification_reason(before.get('modification_reason'), note)
-
+    # ⚠️ 指派/換司機不寫 modification_reason（2026-07-31 用戶定調）：
+    # 純調度動作、不影響車資，卻會被帶進請款報表的說明欄污染版面。
+    # 完整軌跡（誰、何時、前後司機）已由 write_audit 記在 audit_log。
     session.execute(text("""
         UPDATE trips SET
             driver_id = :driver_id,
             status = :status,
-            modification_reason = :mod,
             modified_by = :who,
             modification_time = CURRENT_TIMESTAMP
         WHERE trip_id = :id
     """), {
         'driver_id': driver_id, 'status': new_status,
-        'mod': new_mod, 'who': user_name or user_id, 'id': trip_id
+        'who': user_name or user_id, 'id': trip_id
     })
 
     after = fetch_trip_snapshot(session=session, trip_id=trip_id)
@@ -663,20 +661,15 @@ def unassign_driver(
         return ToolResult.fail(f"班次 #{trip_id} 本來就沒指派司機")
 
     old_driver = before.get('driver_id')
-    new_mod = _bump_modification_reason(
-        before.get('modification_reason'),
-        f"撤銷司機 {old_driver} 指派"
-    )
-
+    # 同 assign_driver：撤銷指派是調度動作，不進 modification_reason（audit_log 有記）
     session.execute(text("""
         UPDATE trips SET
             driver_id = NULL,
             status = '待派',
-            modification_reason = :mod,
             modified_by = :who,
             modification_time = CURRENT_TIMESTAMP
         WHERE trip_id = :id
-    """), {'mod': new_mod, 'who': user_name or user_id, 'id': trip_id})
+    """), {'who': user_name or user_id, 'id': trip_id})
 
     after = fetch_trip_snapshot(session=session, trip_id=trip_id)
     write_audit(
