@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>回報車資</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    /* 極簡大字版 —— 司機不擅長手機操作：字大、按鈕大、沒有下拉沒有日期選擇器 */
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang TC", "Microsoft JhengHei", sans-serif;
+      padding: 16px 14px 110px; line-height: 1.5; color: #1a1a1a;
+      max-width: 640px; margin: 0 auto; font-size: 18px; background: #fff;
+    }
+    h1 { font-size: 24px; margin: 0 0 18px; line-height: 1.35; }
+    .loading { text-align: center; color: #666; padding: 60px 0; font-size: 20px; }
+
+    /* 未綁定：一位司機一顆大按鈕 */
+    .who-btn {
+      display: block; width: 100%; min-height: 64px; margin-bottom: 12px;
+      padding: 16px; font-size: 22px; font-weight: 700; text-align: center;
+      border: 2px solid #06c755; border-radius: 12px;
+      background: #fff; color: #0a5c2b; cursor: pointer;
+    }
+    .who-btn:active { background: #e8f5e9; }
+    .who-btn:disabled { opacity: .5; }
+
+    /* 已綁定：待補車資卡片 */
+    .card {
+      border: 2px solid #ddd; border-radius: 12px; padding: 14px;
+      margin-bottom: 14px; background: #fff;
+    }
+    .card.done { border-color: #06c755; background: #f1f9f2; }
+    .card .when { font-size: 22px; font-weight: 700; margin-bottom: 4px; word-break: break-word; }
+    .card .meta { font-size: 14px; color: #777; margin-bottom: 12px; }
+    .row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+    .row label { width: 74px; flex: 0 0 74px; font-size: 19px; font-weight: 700; }
+    .row input {
+      flex: 1; min-width: 0; height: 56px; padding: 8px 12px;
+      font-size: 24px; text-align: right;
+      border: 2px solid #bbb; border-radius: 10px; background: #fff; color: #111;
+    }
+    .row input:focus { outline: none; border-color: #06c755; }
+    .row .unit { font-size: 18px; color: #666; }
+    .hint { font-size: 14px; color: #888; margin-top: 8px; }
+    .card .result { margin-top: 10px; font-size: 18px; font-weight: 700; }
+    .card .result.ok { color: #1a7a1a; }
+    .card .result.err { color: #c0392b; }
+
+    .empty { text-align: center; font-size: 22px; color: #444; padding: 40px 10px; line-height: 1.6; }
+
+    /* 底部大送出鈕 */
+    .footer {
+      position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 14px;
+      background: rgba(255,255,255,.97); border-top: 1px solid #e5e5e5;
+    }
+    .footer .inner { max-width: 640px; margin: 0 auto; }
+    #btn-submit {
+      width: 100%; min-height: 64px; font-size: 24px; font-weight: 700;
+      border: 0; border-radius: 12px; background: #06c755; color: #fff; cursor: pointer;
+    }
+    #btn-submit:disabled { background: #b5b5b5; }
+
+    .alert { padding: 12px 14px; border-radius: 10px; margin-bottom: 14px; font-size: 18px; }
+    .alert.err { background: #fdecea; color: #c0392b; border: 2px solid #f5c2bf; }
+    .alert.ok { background: #e8f5e9; color: #1a7a1a; border: 2px solid #b8e0bb; }
+
+    .more { text-align: center; margin: 6px 0 4px; }
+    .more a { font-size: 15px; color: #777; text-decoration: underline; cursor: pointer; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div id="loading" class="loading">載入中…</div>
+
+  <!-- 未綁定：請問你是哪一位？ -->
+  <div id="who" hidden>
+    <h1>請問你是哪一位？</h1>
+    <div id="who-alert"></div>
+    <div id="who-list"></div>
+  </div>
+
+  <!-- 已綁定：今天要補的車資 -->
+  <div id="main" hidden>
+    <h1 id="main-title">今天要補的車資</h1>
+    <div id="alert"></div>
+    <div id="cards"></div>
+    <div id="empty" class="empty" hidden>今天沒有需要補車資的班次 👍</div>
+    <div class="more"><a id="link-more">看前 3 天</a></div>
+  </div>
+
+  <div class="footer" id="footer" hidden>
+    <div class="inner">
+      <button type="button" id="btn-submit">✅ 送出</button>
+    </div>
+  </div>
+
+  <script>
+    const LIFF_ID = "{{ liff_id }}";
+
+    const loadingEl = document.getElementById('loading');
+    const whoEl = document.getElementById('who');
+    const whoListEl = document.getElementById('who-list');
+    const whoAlertEl = document.getElementById('who-alert');
+    const mainEl = document.getElementById('main');
+    const titleEl = document.getElementById('main-title');
+    const alertEl = document.getElementById('alert');
+    const cardsEl = document.getElementById('cards');
+    const emptyEl = document.getElementById('empty');
+    const footerEl = document.getElementById('footer');
+    const submitBtn = document.getElementById('btn-submit');
+    const moreLink = document.getElementById('link-more');
+
+    let DAYS = 1;
+
+    function setLoading(msg) {
+      loadingEl.textContent = msg;
+      loadingEl.hidden = false;
+      whoEl.hidden = true; mainEl.hidden = true; footerEl.hidden = true;
+    }
+    function showAlert(el, type, msg) { el.innerHTML = `<div class="alert ${type}">${esc(msg)}</div>`; }
+    function clearAlert(el) { el.innerHTML = ''; }
+
+    // 地點／乘客名來自 DB，插進 innerHTML 前一律轉義
+    function esc(v) {
+      return String(v == null ? '' : v)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // 防 LIFF SDK 偶爾回傳含 \r \n \0 的 idToken（iOS Safari WebView 常見）
+    function _safeIdToken() {
+      const t = liff.getIDToken();
+      if (!t) return '';
+      return t.trim().replace(/[^\x21-\x7E]/g, '');
+    }
+
+    async function api(path, options) {
+      const opt = options || {};
+      const headers = { 'Authorization': 'Bearer ' + _safeIdToken() };
+      if (opt.body) headers['Content-Type'] = 'application/json';
+      const resp = await fetch(path, {
+        method: opt.method || 'GET',
+        headers: headers,
+        body: opt.body ? JSON.stringify(opt.body) : undefined,
+      });
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      return data;
+    }
+
+    // ===== 未綁定：一位司機一顆大按鈕 =====
+    function renderWho(drivers) {
+      whoListEl.innerHTML = '';
+      if (!drivers.length) {
+        whoListEl.innerHTML = '<div class="empty">目前沒有可選的司機<br>請聯絡管理員</div>';
+      }
+      drivers.forEach(d => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'who-btn';
+        b.textContent = d.display_name;
+        b.addEventListener('click', () => bindMe(d.id, b));
+        whoListEl.appendChild(b);
+      });
+      loadingEl.hidden = true;
+      whoEl.hidden = false;
+      mainEl.hidden = true;
+      footerEl.hidden = true;
+    }
+
+    async function bindMe(driverId, btn) {
+      clearAlert(whoAlertEl);
+      whoListEl.querySelectorAll('button').forEach(b => b.disabled = true);
+      const orig = btn.textContent;
+      btn.textContent = '設定中…';
+      try {
+        const data = await api('/liff/driver/fare/bind', {
+          method: 'POST', body: { driver_id: driverId, days: DAYS },
+        });
+        applyState(data);
+      } catch (e) {
+        showAlert(whoAlertEl, 'err', '❌ ' + e.message);
+        btn.textContent = orig;
+        whoListEl.querySelectorAll('button').forEach(b => b.disabled = false);
+      }
+    }
+
+    // ===== 已綁定：待補車資卡片 =====
+    function renderCards(driver, trips) {
+      titleEl.textContent = `${driver.name || '你'} ${DAYS > 1 ? '這幾天' : '今天'}要補的車資`;
+      cardsEl.innerHTML = '';
+      trips.forEach(t => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.dataset.source = t.source;
+        card.dataset.id = t.id;
+        const head = t.time ? `${t.time}　${t.route}` : t.route;
+        const metaBits = [];
+        if (!t.time && t.date) metaBits.push(t.date.slice(5).replace('-', '/'));
+        else if (DAYS > 1 && t.date) metaBits.push(t.date.slice(5).replace('-', '/'));
+        if (t.category) metaBits.push(t.category);
+        if (t.passenger_name) metaBits.push(t.passenger_name);
+        card.innerHTML = `
+          <div class="when">${esc(head)}</div>
+          <div class="meta">${esc(metaBits.join('　'))}</div>
+          <div class="row">
+            <label>車資</label>
+            <input class="in-meter" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="0">
+            <span class="unit">元</span>
+          </div>
+          <div class="row">
+            <label>加成</label>
+            <input class="in-extra" type="text" inputmode="numeric" placeholder="免填">
+            <span class="unit">元</span>
+          </div>
+          <div class="result"></div>
+        `;
+        cardsEl.appendChild(card);
+      });
+      emptyEl.hidden = trips.length > 0;
+      footerEl.hidden = trips.length === 0;
+      moreLink.textContent = DAYS > 1 ? '只看今天' : '看前 3 天';
+      loadingEl.hidden = true;
+      whoEl.hidden = true;
+      mainEl.hidden = false;
+      submitBtn.disabled = false;
+      submitBtn.textContent = '✅ 送出';
+    }
+
+    function applyState(state) {
+      DAYS = state.days || DAYS;
+      clearAlert(alertEl);
+      if (!state.bound) renderWho(state.drivers || []);
+      else renderCards(state.driver, state.trips || []);
+    }
+
+    async function loadState(days) {
+      DAYS = days;
+      const data = await api(`/liff/driver/fare/state?days=${days}`);
+      applyState(data);
+    }
+
+    moreLink.addEventListener('click', async () => {
+      const next = DAYS > 1 ? 1 : 3;
+      setLoading('載入中…');
+      try { await loadState(next); }
+      catch (e) { setLoading('載入失敗：' + e.message); }
+    });
+
+    // ===== 送出 =====
+    function collectItems() {
+      const items = [];
+      const bad = [];
+      cardsEl.querySelectorAll('.card:not(.done)').forEach(card => {
+        const meterRaw = (card.querySelector('.in-meter').value || '').trim();
+        const extraRaw = (card.querySelector('.in-extra').value || '').trim();
+        if (!meterRaw && !extraRaw) return;   // 沒填的整張跳過
+        const item = { source: card.dataset.source, id: parseInt(card.dataset.id, 10) };
+        if (meterRaw !== '') {
+          const m = parseInt(meterRaw, 10);
+          if (Number.isNaN(m)) { bad.push(card); return; }
+          item.meter_fare = m;
+        }
+        if (extraRaw !== '') {
+          const x = parseInt(extraRaw, 10);
+          if (Number.isNaN(x)) { bad.push(card); return; }
+          item.extra_fare = x;
+        }
+        items.push(item);
+      });
+      return { items, bad };
+    }
+
+    submitBtn.addEventListener('click', async () => {
+      clearAlert(alertEl);
+      const { items, bad } = collectItems();
+      if (bad.length) { showAlert(alertEl, 'err', '❌ 車資請填數字'); return; }
+      if (!items.length) { showAlert(alertEl, 'err', '❌ 還沒填任何車資'); return; }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = '送出中…';
+      let data;
+      try {
+        data = await api('/liff/driver/fare/submit', { method: 'POST', body: { items: items } });
+      } catch (e) {
+        showAlert(alertEl, 'err', '❌ ' + e.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = '✅ 送出';
+        return;
+      }
+
+      let okN = 0, failN = 0;
+      (data.results || []).forEach(r => {
+        const card = cardsEl.querySelector(`.card[data-source="${r.source}"][data-id="${r.id}"]`);
+        if (!card) return;
+        const box = card.querySelector('.result');
+        if (r.ok) {
+          okN++;
+          card.classList.add('done');
+          box.className = 'result ok';
+          box.textContent = '✅ 已送出';
+          setTimeout(() => card.remove(), 1200);   // 成功的卡片消失
+        } else {
+          failN++;
+          box.className = 'result err';
+          box.textContent = '❌ ' + (r.error || '失敗');
+        }
+      });
+
+      setTimeout(() => {
+        const left = cardsEl.querySelectorAll('.card').length;
+        emptyEl.hidden = left > 0;
+        footerEl.hidden = left === 0;
+      }, 1300);
+
+      showAlert(alertEl, failN ? 'err' : 'ok',
+        failN ? `✅ 成功 ${okN} 筆，❌ 失敗 ${failN} 筆（失敗的請看下方紅字）`
+              : `✅ 已送出 ${okN} 筆，謝謝！`);
+      submitBtn.disabled = false;
+      submitBtn.textContent = '✅ 送出';
+    });
+
+    async function init() {
+      if (!LIFF_ID) { setLoading('LIFF_ID 未設定'); return; }
+      try {
+        await liff.init({ liffId: LIFF_ID });
+      } catch (e) {
+        setLoading('LIFF init 失敗：' + e.message);
+        return;
+      }
+      if (!liff.isLoggedIn()) {
+        // PC LIFF OAuth2 redirect_uri 必須在白名單 — 用 LIFF URL 才會通過
+        liff.login({ redirectUri: 'https://liff.line.me/' + LIFF_ID + window.location.search });
+        return;
+      }
+      try {
+        const params = new URLSearchParams(window.location.search);
+        await loadState(parseInt(params.get('days'), 10) || 1);
+      } catch (e) {
+        setLoading('載入失敗：' + e.message);
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

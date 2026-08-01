@@ -238,6 +238,8 @@ def customer_form_new():
         'weekly_payment': '/liff/accounting/weekly_payment_form',
         'batch_allowance': '/liff/batch_allowance/form',
         'drug_dx_link': '/liff/drug_diagnosis_links/form',
+        # 司機自助回報車資（群組置頂訊息的連結：?form=driver_fare）
+        'driver_fare': '/liff/driver/fare',
     }
     # 動態目標（含 ID）：edit_schedule / leave_schedule
     sched_id = request.args.get('id')

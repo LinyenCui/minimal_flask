@@ -95,6 +95,10 @@ def create_app():
 
     # LIFF blueprint（客戶 form 等）
     from rewrite.handlers.liff import liff_bp
+    # 司機自助回報車資：routes 靠 import 觸發 @liff_bp.route 註冊。
+    # 暫掛這裡而非 rewrite/handlers/liff/__init__.py 的 import 清單（該檔有
+    # 未提交的 WIP，不動它）；日後把 driver_fare 併回那一行即可刪掉這兩行。
+    from rewrite.handlers.liff import driver_fare  # noqa: F401
     app.register_blueprint(liff_bp)
 
     # 設定日誌

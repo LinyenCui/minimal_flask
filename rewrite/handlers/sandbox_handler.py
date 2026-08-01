@@ -329,6 +329,100 @@ def _is_drug_dx_link_liff_trigger(raw: str, source_type: str | None) -> bool:
     return False
 
 
+# ====== 司機管理（admin 指令，全部 reply 零 push）======
+# 司機清單一律動態撈 DB（不寫死）→ 增減司機不用改程式，
+# 這也是「司機自助回報車資」LIFF 表單「請問你是哪一位？」的資料來源。
+_DRIVER_LIST_TRIGGERS = {'司機列表', '司機清單'}
+_DRIVER_ADMIN_PREFIXES = ('新增司機', '停用司機', '啟用司機', '解綁司機')
+
+
+def _looks_like_driver_admin(text: str) -> bool:
+    s = (text or '').strip()
+    return s in _DRIVER_LIST_TRIGGERS or s.startswith(_DRIVER_ADMIN_PREFIXES)
+
+
+def _render_driver_list(drivers) -> str:
+    """司機列表純文字（ID／姓名／車號／綁定狀態／停用標記）"""
+    if not drivers:
+        return '目前沒有任何司機\n💡 用「新增司機 <編號> <姓名> [車號]」建立'
+    lines = [f"🚕 司機列表（共 {len(drivers)} 位）"]
+    for d in drivers:
+        bits = [f"#{d.id} {d.name or ''}".strip()]
+        if d.plate_number:
+            bits.append(d.plate_number)
+        bits.append('🔗 已綁定' if d.is_bound else '⚪ 未綁定')
+        if not d.is_active:
+            bits.append('⏸️ 停用')
+        lines.append('・' + '｜'.join(bits))
+    lines.append('')
+    lines.append('💡 新增司機 <編號> <姓名> [車號]')
+    lines.append('💡 停用司機 / 啟用司機 / 解綁司機 <編號>')
+    return '\n'.join(lines)
+
+
+def _handle_driver_admin(text: str, user_id: Optional[str]) -> str:
+    """司機管理指令 → 回覆文字（業務邏輯全在 rewrite/tools/driver.py）"""
+    from database import Session
+    from rewrite.tools import driver as driver_tools
+
+    s = (text or '').strip()
+    session = Session()
+    try:
+        if s in _DRIVER_LIST_TRIGGERS:
+            r = driver_tools.query_drivers(session=session, active_only=False)
+            return _render_driver_list(r.data) if r.ok else f"❌ {r.error}"
+
+        kw = next(k for k in _DRIVER_ADMIN_PREFIXES if s.startswith(k))
+        parts = s[len(kw):].strip().split()
+
+        if kw == '新增司機':
+            if len(parts) < 2 or not parts[0].isdigit():
+                return ('用法：新增司機 <編號> <姓名> [車號]\n'
+                        '例：新增司機 61888 陳大文 TDE-1888\n'
+                        '💡 編號就是你們慣用的司機車號編號')
+            r = driver_tools.create_driver(
+                session=session, driver_id=int(parts[0]), name=parts[1],
+                plate_number=parts[2] if len(parts) > 2 else None,
+                user_id=user_id, via='line_admin',
+            )
+            if not r.ok:
+                return f"❌ {r.error}"
+            d = r.data
+            plate = f"（{d.plate_number}）" if d.plate_number else ''
+            return (f"✅ 已新增司機 #{d.id} {d.name}{plate}\n"
+                    f"💡 請他開群組置頂的「回報車資」連結，點自己的名字完成綁定")
+
+        if not parts or not parts[0].isdigit():
+            return f"用法：{kw} <司機編號>\n例：{kw} 5386\n💡 打「司機列表」看編號"
+        did = int(parts[0])
+
+        if kw in ('停用司機', '啟用司機'):
+            active = (kw == '啟用司機')
+            r = driver_tools.set_driver_active(
+                session=session, driver_id=did, active=active,
+                user_id=user_id, via='line_admin',
+            )
+            if not r.ok:
+                return f"❌ {r.error}"
+            verb = '啟用' if active else '停用'
+            tail = '' if active else '\n（歷史班次不受影響，只是不再出現在司機選單）'
+            return f"✅ 已{verb}司機 #{r.data.id} {r.data.name or ''}{tail}"
+
+        # 解綁司機
+        r = driver_tools.unbind_driver(
+            session=session, driver_id=did, user_id=user_id, via='line_admin',
+        )
+        if not r.ok:
+            return f"❌ {r.error}"
+        return (f"✅ 已解除司機 #{r.data.id} {r.data.name or ''} 的 LINE 綁定\n"
+                f"💡 他下次開表單會重新出現「請問你是哪一位？」")
+    except Exception as e:  # noqa: BLE001 — admin 指令不讓例外冒到 webhook
+        logger.error(f"司機管理指令失敗 {text!r}: {e}", exc_info=True)
+        return f"❌ 司機管理失敗：{str(e)[:150]}"
+    finally:
+        session.close()
+
+
 # 已知的「快速命令」+「Flex/quickReply 按鈕 callback」前綴
 #
 # 兩個用途：
@@ -361,6 +455,8 @@ _QUICK_COMMAND_PREFIXES = (
     '匯入固定班次',
     '修改狀態', '指派司機', '撤銷指派',
     '記錄車資',
+    # 司機管理（admin）：讓「司機列表」「新增司機 61888 陳大文」在群聊免 / 也過閘門
+    '司機列表', '司機清單', '新增司機', '停用司機', '啟用司機', '解綁司機',
     # 幫助系統：startswith 讓「幫助 查詢」「幫助 全部」等分類按鈕文字在群聊過閘門
     '幫助', 'help',
 )
@@ -424,6 +520,15 @@ def try_handle_sandbox(event) -> bool:
         return False
 
     short_uid = (user_id or 'anon')[:8]
+
+    # 0⁻. 破壞性指令的管理員閘門（司機自助回報上線後，司機也能接觸 bot）。
+    #     未設 ADMIN_USER_IDS 時全部放行 — 不會因為忘了設定而把自己鎖在外面。
+    from rewrite.admin_guard import check as _admin_check
+    _deny = _admin_check(text, user_id)
+    if _deny:
+        reply_message(event.reply_token, {'type': 'text', 'text': _deny})
+        logger.info(f"[rewrite sandbox] {short_uid} → admin_guard 擋下 {text[:16]!r}")
+        return True
 
     # 0. 用戶主動結束對話模式
     if text in _END_CONVERSATION_TEXTS:
@@ -649,6 +754,14 @@ def try_handle_sandbox(event) -> bool:
             _report = f"❌ 歸檔檢查失敗：{str(_arc_err)[:150]}"
         reply_message(event.reply_token, {'type': 'text', 'text': _report})
         logger.info(f"[rewrite sandbox] {short_uid} → archive_check")
+        return True
+
+    # 司機管理：司機列表 / 新增司機 / 停用司機 / 啟用司機 / 解綁司機（reply 零 push）
+    # 「司機自助回報車資」LIFF 的後台 —— 司機清單動態撈 DB，增減司機不用改程式
+    if _looks_like_driver_admin(text):
+        reply_message(event.reply_token,
+                      {'type': 'text', 'text': _handle_driver_admin(text, user_id)})
+        logger.info(f"[rewrite sandbox] {short_uid} → driver admin: {text[:20]!r}")
         return True
 
     if text == '重置班次序號':
