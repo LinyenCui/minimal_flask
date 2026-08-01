@@ -573,6 +573,37 @@ def incremental_sync_completed_trips(local_conn, render_conn):
             print(f"❌ 增量同步 '{table_name}' 時發生錯誤: {e}", file=sys.stderr)
             raise
 
+def upsert_drivers(local_conn, render_conn):
+    """UPSERT drivers（保留本地升級欄位：line_user_id / is_active / is_manager）
+
+    Render 端可能還沒補這三個欄位；即使補了，綁定也可能只存在其中一邊。
+    做法與 upsert_customers 相同：INSERT/UPDATE 只碰「Render 實際有的欄位」，
+    本地獨有欄位自然不被 update → 綁定與管理員標記完整保留。
+    """
+    table = 'drivers'
+    print(f"--- UPSERT 資料表: {table}（保留綁定 / 管理員 / 停用欄位） ---")
+    with render_conn.cursor(cursor_factory=DictCursor) as rcur, local_conn.cursor() as lcur:
+        rcur.execute(f"SELECT * FROM {table}")
+        rows = rcur.fetchall()
+        if not rows:
+            print("   - ⚠️ Render drivers 為空，跳過")
+            return
+        cols = [d[0] for d in rcur.description]
+        col_list = ', '.join(cols)
+        placeholders = ', '.join(['%s'] * len(cols))
+        update_set = ', '.join(f"{c} = EXCLUDED.{c}" for c in cols if c != 'id')
+        sql = (f"INSERT INTO {table} ({col_list}) VALUES ({placeholders}) "
+               f"ON CONFLICT (id) DO UPDATE SET {update_set}")
+        execute_batch(lcur, sql, [tuple(r) for r in rows])
+        local_conn.commit()
+        # 本地獨有的司機（Render 沒有）不刪 — 可能是本地測試或還沒推上去的新司機
+        rids = [r['id'] for r in rows]
+        lcur.execute(f"SELECT COUNT(*) FROM {table} WHERE NOT (id = ANY(%s))", (rids,))
+        extra = lcur.fetchone()[0]
+    print(f"   ✅ {table} UPSERT 完成（Render {len(rows)} 筆；本地獨有 {extra} 筆保留）")
+    print(f"   - 本地欄位 line_user_id / is_active / is_manager 未被覆蓋")
+
+
 def upsert_customers(local_conn, render_conn):
     """UPSERT customers（保留本地升級欄位不被覆蓋）
 
@@ -732,6 +763,12 @@ def main(check_only=False, force_sync=False):
             if table != 'database_maintenance' and table not in SKIP_TABLES
         ]
         for table in sync_tables:
+            if table == 'drivers':
+                # drivers 不能 truncate：本地有 Render 沒有的升級欄位
+                # （line_user_id 綁定 / is_active / is_manager），
+                # truncate 重灌會把司機的 LINE 綁定與管理員標記整包洗掉。
+                upsert_drivers(local_conn, render_conn)
+                continue
             truncate_and_copy(local_conn, render_conn, table)
         
         # 步驟 2: 執行增量同步 completed_trips（保護歷史資料，使用時間戳錨點）

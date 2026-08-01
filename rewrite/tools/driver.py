@@ -54,7 +54,7 @@ class DriverView:
 
     # 計算欄位
     is_bound: bool = False          # 已綁 LINE 帳號
-    display_name: str = ''          # 「姓名（車號）」— LIFF 大按鈕用
+    display_name: str = ''          # 「編號　姓名」— LIFF 大按鈕用（編號為主）
 
     @classmethod
     def from_row(cls, row) -> "DriverView":
@@ -67,7 +67,13 @@ class DriverView:
         # 佔位字視同沒填 — 否則大按鈕會寫「黃清池（留空後補）」
         if plate in _PLACEHOLDER_PLATES or plate == name:
             plate = ''
-        d['display_name'] = f"{name}（{plate}）" if plate else name
+        # 用戶定調（2026-08-02）：抬頭與選單一律以**司機編號**為主
+        #（有些司機老闆也不知道姓名，但編號人人記得）
+        raw_name = (d.get('name') or '').strip()
+        if raw_name and raw_name != f"#{d.get('id')}":
+            d['display_name'] = f"{d.get('id')}　{raw_name}"
+        else:
+            d['display_name'] = str(d.get('id'))
         valid = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
         return cls(**valid)
 

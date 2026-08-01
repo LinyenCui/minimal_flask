@@ -80,15 +80,16 @@ try:
                       plate_number='TEST-0001', via='test', auto_commit=False)
     assert r.ok, r.error
     assert r.data.id == DRIVER_A and r.data.name == '測試司機甲'
-    assert r.data.display_name == '測試司機甲（TEST-0001）', r.data.display_name
+    # 2026-08-02 用戶定調：display_name 以司機編號為主（有些司機不知姓名）
+    assert r.data.display_name == f'{r.data.id}　測試司機甲', r.data.display_name
     assert r.data.is_active and not r.data.is_bound
     print(f'  ✓ 新增 #{r.data.id} {r.data.display_name}')
 
     r = create_driver(session=s, driver_id=DRIVER_B, name='測試司機乙',
                       via='test', auto_commit=False)
     assert r.ok, r.error
-    assert r.data.display_name == '測試司機乙', '沒車號時 display_name 不該有空括號'
-    print(f'  ✓ 新增 #{r.data.id} {r.data.display_name}（無車號）')
+    assert r.data.display_name == f'{r.data.id}　測試司機乙', r.data.display_name
+    print(f'  ✓ 新增 #{r.data.id} {r.data.display_name}')
 
     # 編號重複要擋
     r = create_driver(session=s, driver_id=DRIVER_A, name='撞號的',

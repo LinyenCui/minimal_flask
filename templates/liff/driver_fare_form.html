@@ -237,7 +237,8 @@
 
     // ===== 已綁定：待補車資卡片 =====
     function renderCards(driver, trips) {
-      titleEl.textContent = `${driver.name || '你'} ${DAYS > 1 ? '這幾天' : '今天'}要補的車資`;
+      // 抬頭用司機編號（用戶定調：有些司機不知道姓名，編號才是共同語言）
+      titleEl.textContent = `司機 ${driver.id} ${DAYS > 1 ? '這幾天' : '今天'}要補的車資`;
       cardsEl.innerHTML = '';
       trips.forEach(t => {
         const card = document.createElement('div');
@@ -289,7 +290,7 @@
       const toggle = document.createElement('button');
       toggle.type = 'button';
       toggle.className = 'sw-toggle';
-      toggle.textContent = `檢視：${viewing.name || ('#' + viewing.id)} ▼`;
+      toggle.textContent = `檢視：司機 ${viewing.id} ▼`;
 
       const list = document.createElement('div');
       list.className = 'sw-list';
