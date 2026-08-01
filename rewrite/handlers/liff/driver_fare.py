@@ -3,14 +3,19 @@
 Routes
 ------
 GET  /liff/driver/fare          HTML 表單殼（無 auth — 頁面殼）
-GET  /liff/driver/fare/state    目前狀態（auth）→ {bound, driver, drivers, trips}
+GET  /liff/driver/fare/state    目前狀態（auth）→ {bound, me, viewing, drivers, trips, week}
 POST /liff/driver/fare/bind     綁定「我是誰」（auth）body {driver_id} → 回同 state
 POST /liff/driver/fare/submit   逐筆送出車資（auth）→ 回逐筆結果
 
 流程（司機不擅長手機操作，全程只有「點名字」「填數字」「按送出」三步）：
   1. 群組置頂訊息的 LIFF 連結 → 開表單
   2. 第一次開 → 「請問你是哪一位？」點自己 → line_user_id 綁到 drivers
-  3. 之後開 → 直接列出「今天要補的車資」，填完按送出
+  3. 之後開 → 直接列出「今天要補的車資」＋「本週車資」，填完按送出
+
+管理司機（drivers.is_manager，如老闆 5386）多一層：
+  - state 可帶 ?driver_id=N 切換檢視任何一位司機（含已停用的 9999「其他」）
+  - submit 可帶 body.driver_id 代填，audit 的 user_name 記「{管理員}代{司機}」
+  - **只有管理司機**有這個能力；一般司機傳了 driver_id 一律忽略，用自己的
 
 ⚠️ 本 endpoint **不 push、不通知群組** —— 司機在表單內看到逐筆結果即可（省 push 額度）。
 ⚠️ 車資直接生效（用戶決策）：填錯用既有修改功能改回，audit log 記得到是誰填的。
@@ -64,11 +69,32 @@ def _driver_json(view) -> dict:
         'display_name': view.display_name,
         'is_active': view.is_active,
         'is_bound': view.is_bound,
+        'is_manager': view.is_manager,
     }
 
 
-def _build_state(session, line_user_id: str, days: int) -> dict:
-    """組 state payload：綁定了就回待補清單，沒綁就回可選司機清單"""
+def _resolve_viewing(session, me, requested_driver_id):
+    """決定「這次要看誰的車資」。
+
+    只有管理司機可以指定別人；一般司機傳了 driver_id 一律忽略（不報錯，直接用自己的）
+    —— client 端資料不可信，權限判斷全在伺服器這邊做。
+    """
+    if requested_driver_id is None or requested_driver_id == me.id:
+        return me
+    if not me.is_manager:
+        logger.info(
+            f"[LIFF] 非管理司機 #{me.id} 想看 #{requested_driver_id} 的車資 → 忽略，用自己的"
+        )
+        return me
+    got = driver_tools.get_driver_by_id(session=session, driver_id=requested_driver_id)
+    if not got.ok or got.data is None:
+        logger.info(f"[LIFF] 管理司機 #{me.id} 指定的 #{requested_driver_id} 不存在 → 用自己的")
+        return me
+    return got.data
+
+
+def _build_state(session, line_user_id: str, days: int, requested_driver_id=None) -> dict:
+    """組 state payload：綁定了就回待補清單＋本週車資，沒綁就回可選司機清單"""
     bound = driver_tools.get_driver_by_line_user(session=session, line_user_id=line_user_id)
     if not bound.ok:
         return {'ok': False, 'error': bound.error}
@@ -79,23 +105,51 @@ def _build_state(session, line_user_id: str, days: int) -> dict:
         return {
             'ok': True,
             'bound': False,
+            'me': None,
+            'viewing': None,
             'driver': None,
             'drivers': [_driver_json(d) for d in (drivers.data or [])],
+            'drivers_all': [],
             'trips': [],
+            'week': None,
             'days': days,
         }
 
+    viewing = _resolve_viewing(session, me, requested_driver_id)
+
     pending = driver_tools.query_driver_pending_fares(
-        session=session, driver_id=me.id, days=days,
+        session=session, driver_id=viewing.id, days=days,
     )
     if not pending.ok:
         return {'ok': False, 'error': pending.error}
+
+    week = driver_tools.query_driver_week_fares(session=session, driver_id=viewing.id)
+    if not week.ok:
+        return {'ok': False, 'error': week.error}
+
+    # 切換選單只有管理司機拿得到（含停用的 9999「其他」）
+    drivers_all = []
+    if me.is_manager:
+        allr = driver_tools.query_drivers(session=session, include_inactive=True)
+        drivers_all = [_driver_json(d) for d in (allr.data or [])]
+
     return {
         'ok': True,
         'bound': True,
-        'driver': _driver_json(me),
+        'me': _driver_json(me),
+        'viewing': _driver_json(viewing),
+        'driver': _driver_json(viewing),   # 向後相容（舊前端讀 driver）
         'drivers': [],
+        'drivers_all': drivers_all,
         'trips': pending.data,
+        'week': {
+            'items': week.data,
+            'start': week.meta.get('week_start'),
+            'end': week.meta.get('week_end'),
+            'count': week.meta.get('count'),
+            'filled_count': week.meta.get('filled_count'),
+            'sum_amount': week.meta.get('sum_amount'),
+        },
         'days': days,
     }
 
@@ -116,11 +170,15 @@ def driver_fare_form():
 @liff_bp.route('/driver/fare/state', methods=['GET'])
 @liff_auth_required
 def driver_fare_state():
-    """表單載入用：我是誰 + 今天要補的車資（?days=3 看前 3 天）"""
+    """表單載入用：我是誰 + 待補車資 + 本週車資（?days=3 看前 3 天）
+
+    ?driver_id=N 切換檢視對象 —— **只有管理司機有效**，一般司機傳了會被忽略。
+    """
     days = _to_int_or_none(request.args.get('days')) or 1
+    want_driver = _to_int_or_none(request.args.get('driver_id'))
     session = Session()
     try:
-        state = _build_state(session, request.line_user_id, days)
+        state = _build_state(session, request.line_user_id, days, want_driver)
     except SQLAlchemyError as e:
         session.rollback()
         logger.exception("driver_fare_state failed")
@@ -171,7 +229,8 @@ def driver_fare_bind():
 def driver_fare_submit():
     """逐筆寫車資。
 
-    payload: {items: [{source:'trip'|'completed', id, meter_fare, extra_fare}], days?}
+    payload: {items: [{source:'trip'|'completed', id, meter_fare, extra_fare}],
+              driver_id?（管理司機代填用，一般司機傳了會被忽略）, days?}
     回:      {ok: True, results: [{ok, id, source, error?}], ...}
 
     ⚠️ 不 push、不通知群組（司機在表單內看到結果即可）。
@@ -183,22 +242,14 @@ def driver_fare_submit():
         return jsonify({'ok': False, 'error': '沒有要送出的車資'}), 400
     if len(items) > _MAX_ITEMS:
         return jsonify({'ok': False, 'error': f'一次最多送 {_MAX_ITEMS} 筆'}), 400
+    want_driver = _to_int_or_none(body.get('driver_id'))
 
     from rewrite.tools.completed_trip import update_completed_trip_fare
     from rewrite.tools.trip import record_fare_current
 
     session = Session()
-    # 待補清單快照（送出當下重算，作為唯一可寫入的白名單）
-    _pending_keys = set()
-    try:
-        _pr = driver_tools.query_driver_pending_fares(
-            session=session, driver_id=me.id, days=7)
-        if _pr.ok:
-            _pending_keys = {(it['source'], it['id']) for it in _pr.data}
-    except Exception:
-        logger.warning('[driver_fare] 待補清單快照失敗', exc_info=True)
-
     results = []
+    audit_name = None
     try:
         bound = driver_tools.get_driver_by_line_user(
             session=session, line_user_id=request.line_user_id,
@@ -206,6 +257,22 @@ def driver_fare_submit():
         me = bound.data if bound.ok else None
         if me is None:
             return jsonify({'ok': False, 'error': '尚未綁定司機，請重新開啟表單選擇你的名字'}), 400
+
+        # 車資要寫到誰頭上：管理司機可代填，其他人一律自己（權限判斷在伺服器端）
+        target = _resolve_viewing(session, me, want_driver)
+        on_behalf = target.id != me.id
+        # audit 的 modified_by 看得出是代填
+        audit_name = f"{me.name}代{target.name}" if on_behalf else me.name
+
+        # 待補清單快照（送出當下重算，作為唯一可寫入的白名單）
+        _pending_keys = set()
+        try:
+            _pr = driver_tools.query_driver_pending_fares(
+                session=session, driver_id=target.id, days=7)
+            if _pr.ok:
+                _pending_keys = {(it['source'], it['id']) for it in _pr.data}
+        except Exception:
+            logger.warning('[driver_fare] 待補清單快照失敗', exc_info=True)
 
         for raw in items:
             if not isinstance(raw, dict):
@@ -225,7 +292,8 @@ def driver_fare_submit():
                 continue
 
             owns = driver_tools.check_driver_owns_record(
-                session=session, driver_id=me.id, source=source, record_id=rec_id,
+                session=session, driver_id=target.id, source=source, record_id=rec_id,
+                acting_driver=me,
             )
             if not owns.ok:
                 results.append({**base, 'ok': False, 'error': owns.error})
@@ -245,7 +313,7 @@ def driver_fare_submit():
                     r = record_fare_current(
                         session=session, trip_id=rec_id,
                         meter_fare=meter, extra_fare=extra,
-                        user_id=request.line_user_id, user_name=me.name,
+                        user_id=request.line_user_id, user_name=audit_name,
                         via=_VIA,
                     )
                 else:
@@ -253,7 +321,7 @@ def driver_fare_submit():
                         session=session, completed_trip_id=rec_id,
                         meter_fare=meter, extra_fare=extra,
                         reason=_DRIVER_REASON,
-                        user_id=request.line_user_id, user_name=me.name,
+                        user_id=request.line_user_id, user_name=audit_name,
                         via=_VIA,
                     )
             except SQLAlchemyError as e:
@@ -269,6 +337,6 @@ def driver_fare_submit():
     ok_n = sum(1 for r in results if r['ok'])
     logger.info(
         f"[LIFF] driver fare submit by {request.line_user_id[:8]} "
-        f"ok={ok_n}/{len(results)} (0 push)"
+        f"({audit_name or '?'}) ok={ok_n}/{len(results)} (0 push)"
     )
     return jsonify({'ok': True, 'results': results, 'ok_count': ok_n})

@@ -6,9 +6,13 @@
   D2  綁定 / 重複綁定被擋（兩個方向）/ 解綁 / 再綁
   D3  set_driver_active（停用不刪、停用中不可綁）
   D4  query_driver_pending_fares（現在態＋過去態混合、缺車資判定、days 視窗）
-  D5  check_driver_owns_record（別人的班次不能動）
+  D5  check_driver_owns_record（別人的班次不能動 + 管理司機代填豁免）
   D6  submit 逐筆寫入正確（呼叫既有 record_fare_current /
       update_completed_trip_fare，跟 LIFF endpoint 同一條路徑）
+  D7  query_driver_week_fares（太陽週界、現在態＋過去態混合、合計只計已填）
+  D8  管理司機清單（include_inactive 看得到停用的 9999）＋ get_driver_by_id
+  D9  handler 層：非管理司機傳 driver_id 被忽略、管理司機切得過去
+      （Flask test client + mock idToken 驗證）
 
 策略：auto_commit=False + 最後 session.rollback()，不留痕跡（比照 test_trip.py /
       test_completed_trip_mutations.py 慣例）。
@@ -32,13 +36,16 @@ from rewrite.tools.driver import (
     bind_driver_line_user,
     check_driver_owns_record,
     create_driver,
+    get_driver_by_id,
     get_driver_by_line_user,
     query_driver_pending_fares,
+    query_driver_week_fares,
     query_drivers,
     set_driver_active,
     unbind_driver,
 )
 from rewrite.tools.trip import record_fare_current
+from rewrite.utils.sun_week import sun_week_start
 
 
 def banner(label):
@@ -47,8 +54,10 @@ def banner(label):
 
 DRIVER_A = 60001        # 刻意 < 現有 MAX(drivers.id)，見檔頭說明
 DRIVER_B = 60002
+DRIVER_M = 60003        # 管理司機（模擬 5386 老闆／1117 春妃）
 LUID_A = 'Utest_driver_aaaa0000000000000001'
 LUID_B = 'Utest_driver_bbbb0000000000000002'
+LUID_M = 'Utest_driver_mmmm0000000000000003'
 
 now = get_taiwan_time()
 today = now.date()
@@ -59,7 +68,7 @@ HAS_FUTURE_SLOT = future_dt.date() == today   # 深夜跑測試時今天沒有�
 s = Session()
 try:
     # 前置：測試編號不能已存在（避免撞到真司機）
-    for did in (DRIVER_A, DRIVER_B):
+    for did in (DRIVER_A, DRIVER_B, DRIVER_M):
         n = s.execute(text("SELECT COUNT(*) FROM drivers WHERE id = :i"), {'i': did}).scalar()
         assert n == 0, f'司機編號 {did} 已被使用，請換測試編號'
 
@@ -269,6 +278,46 @@ try:
     assert not r.ok, r
     print('  ✓ 自己的班次放行；別人的／不存在／source 亂寫全部擋下')
 
+    # ---- 管理司機代填豁免 ----
+    r = create_driver(session=s, driver_id=DRIVER_M, name='測試管理司機',
+                      via='test', auto_commit=False)
+    assert r.ok, r.error
+    s.execute(text("UPDATE drivers SET is_manager = TRUE WHERE id = :i"), {'i': DRIVER_M})
+    mgr = get_driver_by_id(session=s, driver_id=DRIVER_M).data
+    assert mgr.is_manager is True, 'is_manager 應該一路透到 DriverView'
+    normal_b = get_driver_by_id(session=s, driver_id=DRIVER_B).data
+    assert normal_b.is_manager is False
+
+    # 管理司機代 A 填 A 的班次 → 放行
+    r = check_driver_owns_record(session=s, driver_id=DRIVER_A, source='trip',
+                                 record_id=t_pending, acting_driver=mgr)
+    assert r.ok, r.error
+    r = check_driver_owns_record(session=s, driver_id=DRIVER_A, source='completed',
+                                 record_id=c_pending, acting_driver=mgr)
+    assert r.ok, r.error
+    print('  ✓ 管理司機代填：檢視 A 時可寫 A 的現在態／過去態班次')
+
+    # 管理司機檢視 A，卻送 B 的班次 → 仍要擋（避免手殘寫到第三人）
+    r = check_driver_owns_record(session=s, driver_id=DRIVER_A, source='trip',
+                                 record_id=t_other, acting_driver=mgr)
+    assert not r.ok and '不是這位司機的班次' in r.error, r
+    print(f'  ✓ 管理司機不是無條件放行：{r.error}')
+
+    # 一般司機想代別人填 → 擋
+    r = check_driver_owns_record(session=s, driver_id=DRIVER_A, source='trip',
+                                 record_id=t_pending, acting_driver=normal_b)
+    assert not r.ok and '只能填自己的班次車資' in r.error, r
+    print(f'  ✓ 一般司機代填被擋：{r.error}')
+
+    # 自己填自己（acting = 本人）→ 跟不帶 acting_driver 行為一致
+    me_a = get_driver_by_id(session=s, driver_id=DRIVER_A).data
+    assert check_driver_owns_record(session=s, driver_id=DRIVER_A, source='trip',
+                                    record_id=t_pending, acting_driver=me_a).ok
+    r = check_driver_owns_record(session=s, driver_id=DRIVER_A, source='trip',
+                                 record_id=t_other, acting_driver=me_a)
+    assert not r.ok and '不是你的班次' in r.error, r
+    print('  ✓ 帶 acting_driver=本人 時行為與舊版一致')
+
     # ============================================================
     # D6: submit 逐筆寫入（走 LIFF endpoint 同一條既有工具路徑）
     # ============================================================
@@ -303,6 +352,207 @@ try:
     still = {(it['source'], it['id']) for it in r.data}
     assert ('trip', t_pending) not in still and ('completed', c_pending) not in still
     print('  ✓ 補完車資後兩筆都從待補清單消失')
+
+    # ============================================================
+    # D7: query_driver_week_fares — 太陽週界 + 混合 + 合計只計已填
+    # ============================================================
+    banner('D7: query_driver_week_fares（本太陽週 = 星期日 ~ 今天）')
+
+    week_start = sun_week_start(today)          # ← 對照組用 helper 算，不自己推
+    before_week = week_start - timedelta(days=1)
+    c_in_week = mk_completed(meter=100, d=week_start, code='TESTDRV_W1')   # 週日當天要含
+    c_before = mk_completed(meter=999, d=before_week, code='TESTDRV_W0')   # 上一週，要排除
+
+    r = query_driver_week_fares(session=s, driver_id=DRIVER_A)
+    assert r.ok, r.error
+
+    # 週界：起點必為星期日，且距今天的天數 = (weekday+1)%7（太陽週定義）
+    assert week_start.weekday() == 6, '太陽週起點必須是星期日'
+    assert r.meta['week_start'] == week_start.isoformat(), r.meta
+    assert r.meta['week_end'] == today.isoformat(), '截止到今天（這星期到目前）'
+    assert (today - week_start).days == (today.weekday() + 1) % 7
+    print(f'  ✓ 週界 {r.meta["week_start"]}（日）~ {r.meta["week_end"]}（今天）'
+          f'，與 sun_week_start 一致')
+
+    in_week_yesterday = yesterday >= week_start   # 今天是星期日的話昨天屬上一週
+    got = {(it['source'], it['id']) for it in r.data}
+    expect_in = {
+        ('trip', t_pending),        # 已填 420+50
+        ('trip', t_zero),           # 未填
+        ('trip', t_has_fare),       # 已填 380
+        ('completed', c_pending),   # 已填 300
+        ('completed', c_zero),      # 未填
+        ('completed', c_has_fare),  # 已填 250
+        ('completed', c_in_week),   # 已填 100（週日當天）
+    }
+    expect_out = {
+        ('trip', t_done), ('trip', t_cancel), ('trip', t_leave), ('trip', t_other),
+        ('completed', c_cancel), ('completed', c_leave), ('completed', c_before),
+    }
+    if t_future:
+        expect_out.add(('trip', t_future))
+    if in_week_yesterday:
+        expect_in.add(('completed', c_yesterday))   # 未填
+    else:
+        expect_out.add(('completed', c_yesterday))
+    # DRIVER_A 是全新測試司機 → 整週清單就只會有這些
+    assert got == expect_in, f'漏: {expect_in - got} / 多: {got - expect_in}'
+    assert not (expect_out & got), f'不該列入的跑進來了: {expect_out & got}'
+    print(f'  ✓ 收錄 {len(got)} 筆（現在態＋過去態混合）；'
+          f'排除：已完成／註銷／衝突／請假／別人的／上一週'
+          f'{"／未來時段" if t_future else ""}')
+
+    by_id = {(it['source'], it['id']): it for it in r.data}
+    filled = by_id[('trip', t_pending)]
+    assert filled['has_fare'] is True and filled['total'] == 470, filled
+    todo = by_id[('trip', t_zero)]
+    assert todo['has_fare'] is False and todo['total'] == 0, todo
+    assert by_id[('completed', c_in_week)]['date'] == week_start.isoformat()
+    assert by_id[('completed', c_pending)]['time'] is None, '過去態沒有 time'
+    print(f'  ✓ 每筆欄位：已填 {filled["route"]} total={filled["total"]}、'
+          f'未填 has_fare=False total=0')
+
+    # 合計只計已填：470 + 380 + 300 + 250 + 100 = 1500（未填的 0 元不進去）
+    expect_filled = 5
+    expect_sum = 470 + 380 + 300 + 250 + 100
+    assert r.meta['count'] == len(expect_in), r.meta
+    assert r.meta['filled_count'] == expect_filled, r.meta
+    assert r.meta['sum_amount'] == expect_sum, r.meta
+    assert sum(1 for it in r.data if not it['has_fare']) == len(expect_in) - expect_filled
+    print(f'  ✓ 合計 {r.meta["sum_amount"]} 元'
+          f'（已填 {r.meta["filled_count"]}／共 {r.meta["count"]} 筆），未填不計入')
+
+    keys = [(it['date'], it['time'] or '99:99', it['id']) for it in r.data]
+    assert keys == sorted(keys), '應依日期→時間排序'
+    print('  ✓ 排序：日期 → 時間')
+
+    # 沒班次的司機 → 空清單、合計 0（不是錯誤）
+    r_empty = query_driver_week_fares(session=s, driver_id=DRIVER_M)
+    assert r_empty.ok and r_empty.data == [] and r_empty.meta['sum_amount'] == 0, r_empty
+    print('  ✓ 沒班次的司機回空清單 + 合計 0')
+
+    # ============================================================
+    # D8: 管理司機看得到停用的司機（切換選單）
+    # ============================================================
+    banner('D8: query_drivers(include_inactive) + get_driver_by_id')
+    r = set_driver_active(session=s, driver_id=DRIVER_B, active=False,
+                          via='test', auto_commit=False)
+    assert r.ok, r.error
+    active_ids = [d.id for d in query_drivers(session=s).data]
+    all_ids = [d.id for d in query_drivers(session=s, include_inactive=True).data]
+    assert DRIVER_B not in active_ids, '預設清單不該有停用的'
+    assert DRIVER_B in all_ids, '管理司機的切換選單要看得到停用的'
+    assert DRIVER_A in active_ids and DRIVER_A in all_ids
+    print(f'  ✓ include_inactive=True 多撈到停用司機（{len(active_ids)} → {len(all_ids)} 位）')
+
+    # 停用的排後面（選單不會被 9999 卡在中間）
+    views = query_drivers(session=s, include_inactive=True).data
+    flags = [v.is_active for v in views]
+    assert flags == sorted(flags, key=lambda a: not a), '停用的應排在啟用的後面'
+    real_9999 = s.execute(text("SELECT id FROM drivers WHERE id = 9999")).scalar()
+    if real_9999:
+        assert 9999 in all_ids, '停用的 9999「其他」也要出現在管理司機的選單'
+        print('  ✓ 停用的 9999「其他」有出現在完整清單（舊班次還掛在它名下）')
+
+    r = get_driver_by_id(session=s, driver_id=DRIVER_B)
+    assert r.ok and r.data.is_active is False, '停用的司機 get_driver_by_id 也要撈得到'
+    assert not get_driver_by_id(session=s, driver_id=99999999).ok
+    print('  ✓ get_driver_by_id：停用的撈得到、不存在的回錯誤')
+    set_driver_active(session=s, driver_id=DRIVER_B, active=True,
+                      via='test', auto_commit=False)
+
+    # ============================================================
+    # D9: handler 層 —— 非管理司機傳 driver_id 要被忽略
+    # ============================================================
+    banner('D9: /liff/driver/fare/state 的 driver_id 權限（Flask test client）')
+
+    import rewrite.handlers.liff.auth as liff_auth
+    import rewrite.handlers.liff.driver_fare as dfare
+    from flask import Flask
+
+    from rewrite.handlers.liff import liff_bp
+
+    # 1) mock idToken 驗證：Bearer <line_user_id> 直接當成該使用者
+    _orig_verify = liff_auth.verify_line_id_token
+    liff_auth.verify_line_id_token = lambda tok: {'sub': tok, 'name': 'test'}
+
+    # 2) handler 開自己的 Session → 換成本測試這條（未 commit 的資料才看得見）；
+    #    close/commit/rollback 全部吃掉，避免把測試交易收掉
+    class _SessionProxy:
+        def __init__(self, real):
+            object.__setattr__(self, '_real', real)
+
+        def __getattr__(self, k):
+            return getattr(object.__getattribute__(self, '_real'), k)
+
+        def close(self):
+            pass
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+    _orig_session = dfare.Session
+    dfare.Session = lambda: _SessionProxy(s)
+
+    try:
+        # 管理司機也要綁 LINE 帳號才進得了表單
+        rb = bind_driver_line_user(session=s, driver_id=DRIVER_M, line_user_id=LUID_M,
+                                   via='test', auto_commit=False)
+        assert rb.ok, rb.error
+
+        app = Flask(__name__)
+        app.register_blueprint(liff_bp)
+        client = app.test_client()
+
+        def get_state(luid, driver_id=None):
+            url = '/liff/driver/fare/state?days=1'
+            if driver_id is not None:
+                url += f'&driver_id={driver_id}'
+            resp = client.get(url, headers={'Authorization': f'Bearer {luid}'})
+            assert resp.status_code == 200, (resp.status_code, resp.get_data(as_text=True))
+            return resp.get_json()
+
+        # 一般司機（DRIVER_A，綁 LUID_B）想看別人的 → 忽略，回自己的
+        st = get_state(LUID_B, DRIVER_B)
+        assert st['ok'] and st['bound']
+        assert st['me']['id'] == DRIVER_A and st['me']['is_manager'] is False
+        assert st['viewing']['id'] == DRIVER_A, f"非管理員的 driver_id 應被忽略: {st['viewing']}"
+        assert st['drivers_all'] == [], '一般司機不該拿到司機清單（前端也就 render 不出切換列）'
+        print('  ✓ 一般司機傳 driver_id → 忽略，viewing 仍是自己、drivers_all 為空')
+
+        # 一般司機的本週車資是自己的
+        assert st['week']['start'] == week_start.isoformat()
+        assert st['week']['sum_amount'] == expect_sum, st['week']
+        print(f'  ✓ state 帶本週車資：{st["week"]["start"]}~{st["week"]["end"]}'
+              f' 合計 {st["week"]["sum_amount"]} 元')
+
+        # 管理司機（DRIVER_M，綁 LUID_M）切去看 DRIVER_A
+        st = get_state(LUID_M, DRIVER_A)
+        assert st['me']['id'] == DRIVER_M and st['me']['is_manager'] is True
+        assert st['viewing']['id'] == DRIVER_A, '管理司機應該切得過去'
+        assert st['week']['sum_amount'] == expect_sum, '看到的是 A 的本週車資'
+        ids_all = [d['id'] for d in st['drivers_all']]
+        assert DRIVER_A in ids_all and DRIVER_M in ids_all
+        if real_9999:
+            assert 9999 in ids_all, '管理司機的切換選單要含停用的 9999'
+        print(f'  ✓ 管理司機切到 #{DRIVER_A}：viewing 換人、合計換成對方的、'
+              f'drivers_all {len(ids_all)} 位（含停用）')
+
+        # 管理司機不指定 → 預設看自己
+        st = get_state(LUID_M)
+        assert st['viewing']['id'] == DRIVER_M and st['week']['sum_amount'] == 0
+        print('  ✓ 管理司機不指定 driver_id → 預設看自己')
+
+        # 管理司機指定不存在的司機 → 退回自己（不當機）
+        st = get_state(LUID_M, 99999999)
+        assert st['viewing']['id'] == DRIVER_M
+        print('  ✓ 指定不存在的司機 → 安全退回自己')
+    finally:
+        liff_auth.verify_line_id_token = _orig_verify
+        dfare.Session = _orig_session
 
     print('\n' + '=' * 60)
     print('✅ 全部測試通過（即將 rollback，不留痕跡）')

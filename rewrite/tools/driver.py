@@ -9,13 +9,19 @@
   B. 司機自助回報車資（LIFF 表單 rewrite/handlers/liff/driver_fare.py）
      - line_user_id 綁定：司機第一次開表單點自己的名字，之後就認得人
      - query_driver_pending_fares 同時撈現在態 trips 與過去態 completed_trips
+     - query_driver_week_fares 本太陽週（週日～今天）的車資清單＋合計
+
+  C. 管理司機（drivers.is_manager）
+     - 可切換檢視任何一位司機（含已停用的 9999「其他」）、代填車資
+     - 一般司機維持現狀：只看得到、只改得到自己的
 
 ⚠️ 本檔**不做**車資寫入。寫車資一律呼叫既有工具：
      現在態 → rewrite.tools.trip.record_fare_current
      過去態 → rewrite.tools.completed_trip.update_completed_trip_fare
    本檔只負責「這筆是不是這位司機的」授權檢查（check_driver_owns_record）。
 
-依賴 migrations/010_drivers_line_binding.sql（drivers.line_user_id / is_active）。
+依賴 migrations/010_drivers_line_binding.sql（drivers.line_user_id / is_active）
+   ＋ migrations/011_drivers_is_manager.sql（drivers.is_manager）。
 """
 from dataclasses import dataclass, asdict
 from datetime import date as _date, timedelta
@@ -25,6 +31,7 @@ from sqlalchemy import text
 
 from modules.utils.taiwan_time import get_taiwan_time
 from rewrite.tools.base import ToolResult, diff_fields, write_audit
+from rewrite.utils.sun_week import sun_week_start
 
 
 # ============================================================
@@ -43,6 +50,7 @@ class DriverView:
     plate_number: Optional[str] = None
     line_user_id: Optional[str] = None
     is_active: bool = True
+    is_manager: bool = False        # 可代任何司機填車資／看車資（老闆、內勤）
 
     # 計算欄位
     is_bound: bool = False          # 已綁 LINE 帳號
@@ -52,6 +60,7 @@ class DriverView:
     def from_row(cls, row) -> "DriverView":
         d = dict(row._mapping)
         d['is_active'] = bool(d.get('is_active')) if d.get('is_active') is not None else True
+        d['is_manager'] = bool(d.get('is_manager'))
         d['is_bound'] = bool(d.get('line_user_id'))
         name = d.get('name') or f"#{d.get('id')}"
         plate = (d.get('plate_number') or '').strip()
@@ -67,7 +76,8 @@ class DriverView:
 
 
 _SELECT_DRIVER = """
-    SELECT id, name, plate_number, line_user_id, is_active
+    SELECT id, name, plate_number, line_user_id, is_active,
+           COALESCE(is_manager, FALSE) AS is_manager
     FROM drivers
 """
 
@@ -98,22 +108,44 @@ def _fetch_driver(*, session, driver_id: int) -> Optional[dict]:
 # 查詢
 # ============================================================
 
-def query_drivers(*, session, active_only: bool = True) -> ToolResult:
+def query_drivers(
+    *, session, active_only: bool = True, include_inactive: bool = False,
+) -> ToolResult:
     """司機清單（動態撈，增減司機不用改程式）。
 
     Args:
         active_only: True（預設）只回啟用中的；False 連停用的一起回（司機列表用）
+        include_inactive: True 一律連停用的一起回（覆蓋 active_only）。
+            管理司機的「檢視誰」切換選單要用 —— 停用的 9999「其他」也得看得到，
+            舊班次還掛在它名下。
 
     Returns:
         ToolResult.success(data=[DriverView, ...], count=n)
     """
     sql = _SELECT_DRIVER
-    if active_only:
+    if active_only and not include_inactive:
         sql += " WHERE COALESCE(is_active, TRUE) = TRUE"
-    sql += " ORDER BY id"
+    # 停用的排後面，管理員的選單才不會被 9999 卡在中間
+    sql += " ORDER BY COALESCE(is_active, TRUE) DESC, id"
     rows = session.execute(text(sql)).fetchall()
     views = [DriverView.from_row(r) for r in rows]
     return ToolResult.success(data=views, count=len(views))
+
+
+def get_driver_by_id(*, session, driver_id: int) -> ToolResult:
+    """單一司機（管理司機切換檢視對象時用）。
+
+    Returns:
+        ok=True, data=DriverView — 找得到（停用的也回，管理員要看 9999）
+        ok=False               — 找不到
+    """
+    driver_id = _coerce_int(driver_id)
+    if driver_id is None:
+        return ToolResult.fail("driver_id 必填且要是數字")
+    row = _fetch_driver(session=session, driver_id=driver_id)
+    if not row:
+        return ToolResult.fail(f"找不到司機 #{driver_id}")
+    return ToolResult.success(data=_view_from_dict(row))
 
 
 def get_driver_by_line_user(*, session, line_user_id: str) -> ToolResult:
@@ -495,11 +527,135 @@ def query_driver_pending_fares(*, session, driver_id: int, days: int = 1) -> Too
     )
 
 
+def query_driver_week_fares(*, session, driver_id: int) -> ToolResult:
+    """本太陽週（星期日 ~ 今天）該司機的車資清單 ＋ 合計。
+
+    ⚠️ 週界一律走 rewrite/utils/sun_week.sun_week_start（星期日起算），**不自己算**
+       （CLAUDE.md：ISO 週會錯一天，週結算會對不上）。
+
+    收錄範圍跟待補清單同一套判定，只是不限「缺車資」——
+    司機要看的是「這星期到目前跑了什麼、賺了多少、哪幾筆還沒填」：
+      現在態 trips           週日 ~ 今天、執行時間已過、status 不在（已完成／註銷／衝突）
+      過去態 completed_trips 週日 ~ 今天、非「已取消」
+      兩張表都排除請假班次（司機沒跑，加成由老闆處理，不是司機的車資）
+    status='已完成' 的 trips row 已複製一份到 completed_trips，只取過去態那份，
+    否則同一趟車會出現兩次。
+
+    Returns:
+        ToolResult.success(
+            data=[{source, id, date('YYYY-MM-DD'), time('HH:MM'|None), route,
+                   category, meter_fare, extra_fare, total, has_fare}, ...],
+            week_start='YYYY-MM-DD'（星期日）, week_end='YYYY-MM-DD'（今天，資料截止日）,
+            count=總筆數, filled_count=已填車資筆數, sum_amount=已填車資的錶價+加成加總,
+        )
+        has_fare=False 的筆數就是「還沒填的」，total 為 0，不計入 sum_amount。
+    """
+    driver_id = _coerce_int(driver_id)
+    if driver_id is None:
+        return ToolResult.fail("driver_id 必填且要是數字")
+
+    now = get_taiwan_time()
+    today: _date = now.date()
+    week_start = sun_week_start(today)      # ← 太陽週 helper，不自己算
+
+    trip_rows = session.execute(
+        text(f"""
+            SELECT trip_id, date, time, category, meter_fare, extra_fare,
+                   start_point, via_point, end_point,
+                   custom_start_point, custom_via_point, custom_end_point,
+                   trip_type, passenger_name
+            FROM trips
+            WHERE driver_id = :did
+              AND date BETWEEN :ws AND :today
+              AND (date < :today OR time <= :now_t)
+              AND status NOT IN ('已完成', '註銷', '衝突')
+              AND {_NOT_LEAVE}
+            ORDER BY date, time
+        """),
+        {'did': driver_id, 'ws': week_start, 'today': today, 'now_t': now.time()},
+    ).fetchall()
+
+    completed_rows = session.execute(
+        text(f"""
+            SELECT id, date, category, meter_fare, extra_fare,
+                   start_point, via_point, end_point, passenger_name
+            FROM completed_trips
+            WHERE driver_id = :did
+              AND date BETWEEN :ws AND :today
+              AND (status IS NULL OR status <> '已取消')
+              AND {_NOT_LEAVE}
+            ORDER BY date, id
+        """),
+        {'did': driver_id, 'ws': week_start, 'today': today},
+    ).fetchall()
+
+    def _pack(*, source, rid, d, tm, route, category, meter, extra) -> dict:
+        # 「已填」的判定跟待補清單一致：錶價空或 0 就是還沒填
+        has_fare = meter is not None and meter != 0
+        return {
+            'source': source,
+            'id': rid,
+            'date': d.isoformat() if d else None,
+            'time': tm,
+            'route': route,
+            'category': category,
+            'meter_fare': meter,
+            'extra_fare': extra,
+            'total': (meter or 0) + (extra or 0) if has_fare else 0,
+            'has_fare': has_fare,
+        }
+
+    items: List[dict] = []
+    for r in trip_rows:
+        d = dict(r._mapping)
+        is_temp = d.get('trip_type') == 'temp'
+        sp = (d.get('custom_start_point') or d.get('start_point')) if is_temp else d.get('start_point')
+        vp = (d.get('custom_via_point') or d.get('via_point')) if is_temp else d.get('via_point')
+        ep = (d.get('custom_end_point') or d.get('end_point')) if is_temp else d.get('end_point')
+        items.append(_pack(
+            source='trip', rid=d['trip_id'], d=d.get('date'),
+            tm=d['time'].strftime('%H:%M') if d.get('time') else None,
+            route=_route_of(sp, vp, ep), category=d.get('category'),
+            meter=d.get('meter_fare'), extra=d.get('extra_fare'),
+        ))
+    for r in completed_rows:
+        d = dict(r._mapping)
+        items.append(_pack(
+            source='completed', rid=d['id'], d=d.get('date'),
+            tm=None,   # completed_trips 沒有 time 欄位
+            route=_route_of(d.get('start_point'), d.get('via_point'), d.get('end_point')),
+            category=d.get('category'),
+            meter=d.get('meter_fare'), extra=d.get('extra_fare'),
+        ))
+
+    items.sort(key=lambda it: (it['date'] or '', it['time'] or '99:99', it['id']))
+    filled = [it for it in items if it['has_fare']]
+    return ToolResult.success(
+        data=items,
+        week_start=week_start.isoformat(),
+        week_end=today.isoformat(),
+        count=len(items),
+        filled_count=len(filled),
+        sum_amount=sum(it['total'] for it in filled),
+    )
+
+
 _VALID_SOURCES = ('trip', 'completed')
 
 
-def check_driver_owns_record(*, session, driver_id: int, source: str, record_id: int) -> ToolResult:
-    """授權檢查：這筆班次確實是這位司機的嗎？
+def check_driver_owns_record(
+    *, session, driver_id: int, source: str, record_id: int, acting_driver=None,
+) -> ToolResult:
+    """授權檢查：這筆班次確實是「目前檢視的那位司機」的嗎？
+
+    Args:
+        driver_id: 目前檢視的司機（車資要寫到誰頭上）
+        acting_driver: 實際在操作的人（DriverView，可省略 = 就是本人）。
+            管理司機（is_manager）可以代任何司機填 → 放行 driver_id ≠ 自己；
+            一般司機只能是自己（handler 本來就只傳自己的 id，這裡再擋一層）。
+
+    ⚠️ 管理司機**不是**無條件放行 —— 仍要驗這筆確實屬於「檢視中的那位」，
+       否則切到 A 司機卻手殘送出 B 司機的班次編號就寫到第三人頭上了。
 
     司機表單送上來的 (source, id) 是 client 端資料，必須回頭驗一次，
     不然改 payload 就能動到別人的班次。
@@ -510,6 +666,12 @@ def check_driver_owns_record(*, session, driver_id: int, source: str, record_id:
         return ToolResult.fail("driver_id / id 必填且要是數字")
     if source not in _VALID_SOURCES:
         return ToolResult.fail(f"source 必須是 {' / '.join(_VALID_SOURCES)}")
+
+    acting_id = _coerce_int(getattr(acting_driver, 'id', None))
+    acting_is_manager = bool(getattr(acting_driver, 'is_manager', False))
+    on_behalf = acting_id is not None and acting_id != driver_id
+    if on_behalf and not acting_is_manager:
+        return ToolResult.fail("只能填自己的班次車資")
 
     if source == 'trip':
         row = session.execute(
@@ -525,7 +687,8 @@ def check_driver_owns_record(*, session, driver_id: int, source: str, record_id:
     if not row:
         return ToolResult.fail(f"找不到{label}")
     if row[0] != driver_id:
-        return ToolResult.fail(f"{label} 不是你的班次，不能修改")
+        whose = '這位司機' if on_behalf else '你'
+        return ToolResult.fail(f"{label} 不是{whose}的班次，不能修改")
     return ToolResult.success(data=True)
 
 

@@ -69,6 +69,39 @@
     .more { text-align: center; margin: 6px 0 4px; }
     .more a { font-size: 15px; color: #777; text-decoration: underline; cursor: pointer; }
     [hidden] { display: none !important; }
+
+    /* 管理司機專用：「檢視誰的車資」切換列（一般司機這一區完全不 render） */
+    .switcher { margin-bottom: 16px; }
+    .sw-toggle {
+      width: 100%; min-height: 56px; padding: 12px 14px;
+      font-size: 20px; font-weight: 700; text-align: left;
+      border: 2px solid #06c755; border-radius: 12px;
+      background: #f1f9f2; color: #0a5c2b; cursor: pointer;
+    }
+    .sw-list { margin-top: 8px; }
+    .sw-list button {
+      display: block; width: 100%; min-height: 56px; margin-bottom: 8px;
+      padding: 12px; font-size: 20px; font-weight: 700; text-align: center;
+      border: 2px solid #ccc; border-radius: 12px;
+      background: #fff; color: #1a1a1a; cursor: pointer;
+    }
+    .sw-list button.cur { border-color: #06c755; background: #e8f5e9; color: #0a5c2b; }
+    .sw-list button.off { color: #999; border-color: #e5e5e5; font-weight: 400; }
+
+    /* 本週車資（唯讀清單，在待補清單下方） */
+    .week { margin-top: 24px; border-top: 2px solid #eee; padding-top: 16px; }
+    .week h2 { font-size: 20px; margin: 0 0 8px; }
+    .wrow {
+      display: flex; align-items: baseline; gap: 10px;
+      padding: 9px 0; border-bottom: 1px solid #f0f0f0; font-size: 17px;
+    }
+    .wrow .d { flex: 0 0 48px; color: #555; font-weight: 700; }
+    .wrow .r { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .wrow .a { flex: 0 0 auto; font-weight: 700; }
+    .wrow .a.todo { color: #999; font-weight: 400; }
+    .week .total { margin-top: 16px; font-size: 24px; font-weight: 700; }
+    .week .total .sub { font-size: 15px; color: #777; font-weight: 400; }
+    .week .none { color: #888; padding: 10px 0; font-size: 17px; }
   </style>
 </head>
 <body>
@@ -83,11 +116,14 @@
 
   <!-- 已綁定：今天要補的車資 -->
   <div id="main" hidden>
+    <!-- 管理司機才會被塞內容；一般司機這裡永遠是空的（不是隱藏，是根本沒 render） -->
+    <div id="switcher-slot"></div>
     <h1 id="main-title">今天要補的車資</h1>
     <div id="alert"></div>
     <div id="cards"></div>
     <div id="empty" class="empty" hidden>今天沒有需要補車資的班次 👍</div>
     <div class="more"><a id="link-more">看前 3 天</a></div>
+    <div id="week-slot"></div>
   </div>
 
   <div class="footer" id="footer" hidden>
@@ -111,8 +147,13 @@
     const footerEl = document.getElementById('footer');
     const submitBtn = document.getElementById('btn-submit');
     const moreLink = document.getElementById('link-more');
+    const swSlot = document.getElementById('switcher-slot');
+    const weekSlot = document.getElementById('week-slot');
 
     let DAYS = 1;
+    let ME = null;        // 登入的這個人（管理司機才有切換能力）
+    let VIEW_ID = null;   // 目前檢視的司機（管理司機可切；一般司機恆為自己）
+    let WEEK = null;
 
     function setLoading(msg) {
       loadingEl.textContent = msg;
@@ -128,6 +169,13 @@
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
     }
+
+    function fmtMD(iso) {                 // 'YYYY-MM-DD' → 'M/D'
+      if (!iso) return '';
+      const p = String(iso).split('-');
+      return p.length < 3 ? '' : `${parseInt(p[1], 10)}/${parseInt(p[2], 10)}`;
+    }
+    function fmtMoney(n) { return (Number(n) || 0).toLocaleString('en-US'); }
 
     // 防 LIFF SDK 偶爾回傳含 \r \n \0 的 idToken（iOS Safari WebView 常見）
     function _safeIdToken() {
@@ -229,17 +277,118 @@
       submitBtn.textContent = '✅ 送出';
     }
 
-    function applyState(state) {
-      DAYS = state.days || DAYS;
-      clearAlert(alertEl);
-      if (!state.bound) renderWho(state.drivers || []);
-      else renderCards(state.driver, state.trips || []);
+    // ===== 管理司機：切換「檢視誰的車資」=====
+    function renderSwitcher(state) {
+      swSlot.innerHTML = '';
+      const me = state.me, viewing = state.viewing;
+      if (!me || !me.is_manager || !viewing) return;   // 一般司機：整區不 render
+
+      const box = document.createElement('div');
+      box.className = 'switcher';
+
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'sw-toggle';
+      toggle.textContent = `檢視：${viewing.name || ('#' + viewing.id)} ▼`;
+
+      const list = document.createElement('div');
+      list.className = 'sw-list';
+      list.hidden = true;
+
+      (state.drivers_all || []).forEach(d => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = d.display_name + (d.is_active ? '' : '（停用）');
+        if (!d.is_active) b.classList.add('off');
+        if (d.id === viewing.id) b.classList.add('cur');
+        b.addEventListener('click', async () => {
+          list.hidden = true;
+          if (d.id === VIEW_ID) return;
+          setLoading('載入中…');
+          try { await loadState(DAYS, d.id); }
+          catch (e) { setLoading('載入失敗：' + e.message); }
+        });
+        list.appendChild(b);
+      });
+
+      toggle.addEventListener('click', () => { list.hidden = !list.hidden; });
+      box.appendChild(toggle);
+      box.appendChild(list);
+      swSlot.appendChild(box);
     }
 
-    async function loadState(days) {
+    // ===== 本週車資（唯讀）=====
+    function renderWeek(week) {
+      weekSlot.innerHTML = '';
+      if (!week) return;
+      const box = document.createElement('div');
+      box.className = 'week';
+
+      const h = document.createElement('h2');
+      h.textContent = `本週車資（${fmtMD(week.start)}～${fmtMD(week.end)}）`;
+      box.appendChild(h);
+
+      const items = week.items || [];
+      if (!items.length) {
+        const none = document.createElement('div');
+        none.className = 'none';
+        none.textContent = '本週目前沒有班次';
+        box.appendChild(none);
+      }
+      items.forEach(it => {
+        const row = document.createElement('div');
+        row.className = 'wrow';
+        row.innerHTML =
+          `<span class="d">${esc(fmtMD(it.date))}</span>` +
+          `<span class="r">${esc(it.route)}</span>` +
+          (it.has_fare ? `<span class="a">${fmtMoney(it.total)}</span>`
+                       : `<span class="a todo">待補</span>`);
+        box.appendChild(row);
+      });
+
+      const total = document.createElement('div');
+      total.className = 'total';
+      total.innerHTML =
+        `本週合計 ${fmtMoney(week.sum_amount)} 元 ` +
+        `<span class="sub">（已填 ${Number(week.filled_count) || 0}` +
+        `／共 ${Number(week.count) || 0} 筆）</span>`;
+      box.appendChild(total);
+
+      weekSlot.appendChild(box);
+    }
+
+    function applyState(state) {
+      DAYS = state.days || DAYS;
+      ME = state.me || null;
+      VIEW_ID = (state.viewing && state.viewing.id) || null;
+      WEEK = state.week || null;
+      clearAlert(alertEl);
+      if (!state.bound) { renderWho(state.drivers || []); return; }
+      renderSwitcher(state);
+      renderCards(state.viewing || state.driver, state.trips || []);
+      renderWeek(WEEK);
+    }
+
+    function stateUrl(days) {
+      let url = `/liff/driver/fare/state?days=${days}`;
+      if (VIEW_ID) url += `&driver_id=${VIEW_ID}`;
+      return url;
+    }
+
+    async function loadState(days, driverId) {
       DAYS = days;
-      const data = await api(`/liff/driver/fare/state?days=${days}`);
+      if (driverId !== undefined && driverId !== null) VIEW_ID = driverId;
+      const data = await api(stateUrl(days));
       applyState(data);
+    }
+
+    // 送出成功後只把「本週車資」重抓一次（不動卡片，失敗訊息才留得住）
+    async function refreshWeek() {
+      try {
+        const data = await api(stateUrl(DAYS));
+        WEEK = data.week || null;
+        renderWeek(WEEK);
+      } catch (e) { /* 合計沒更新不影響已送出的車資，安靜略過 */ }
     }
 
     moreLink.addEventListener('click', async () => {
@@ -283,7 +432,9 @@
       submitBtn.textContent = '送出中…';
       let data;
       try {
-        data = await api('/liff/driver/fare/submit', { method: 'POST', body: { items: items } });
+        const payload = { items: items };
+        if (VIEW_ID) payload.driver_id = VIEW_ID;   // 管理司機代填；一般司機後端會忽略
+        data = await api('/liff/driver/fare/submit', { method: 'POST', body: payload });
       } catch (e) {
         showAlert(alertEl, 'err', '❌ ' + e.message);
         submitBtn.disabled = false;
@@ -320,6 +471,7 @@
               : `✅ 已送出 ${okN} 筆，謝謝！`);
       submitBtn.disabled = false;
       submitBtn.textContent = '✅ 送出';
+      if (okN) refreshWeek();   // 本週合計跟著跳
     });
 
     async function init() {
