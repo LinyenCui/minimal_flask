@@ -655,8 +655,22 @@ def query_driver_week_fares(*, session, driver_id: int,
 
     items.sort(key=lambda it: (it['date'] or '', it['time'] or '99:99', it['id']))
     filled = [it for it in items if it['has_fare']]
+    # 各類別小計（診所／東洋／臨時…）— 用戶要「先分類小計再合計」
+    by_cat: dict = {}
+    for it in items:
+        cat = it.get('category') or '未分類'
+        a = by_cat.setdefault(cat, {'category': cat, 'count': 0,
+                                    'filled_count': 0, 'sum_amount': 0})
+        a['count'] += 1
+        if it['has_fare']:
+            a['filled_count'] += 1
+            a['sum_amount'] += it['total']
+    # 金額大的排前面，同額按類別名穩定排序
+    by_category = sorted(by_cat.values(),
+                         key=lambda a: (-a['sum_amount'], a['category']))
     return ToolResult.success(
         data=items,
+        by_category=by_category,
         week_start=week_start.isoformat(),
         week_end=week_end.isoformat(),
         count=len(items),

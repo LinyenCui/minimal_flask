@@ -151,6 +151,7 @@ def _build_state(session, line_user_id: str, days: int,
         'trips': pending.data,
         'week': {
             'items': week.data,
+            'by_category': week.meta.get('by_category') or [],
             'start': week.meta.get('week_start'),
             'end': week.meta.get('week_end'),
             'count': week.meta.get('count'),

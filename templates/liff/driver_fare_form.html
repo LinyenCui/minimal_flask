@@ -99,7 +99,13 @@
     .wrow .r { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .wrow .a { flex: 0 0 auto; font-weight: 700; }
     .wrow .a.todo { color: #999; font-weight: 400; }
-    .week .total { margin-top: 16px; font-size: 24px; font-weight: 700; }
+    .week .subtot { display: flex; justify-content: space-between; align-items: baseline;
+                    margin-top: 8px; padding-top: 8px; border-top: 1px dashed #ddd;
+                    font-size: 19px; font-weight: 600; }
+    .week .subtot:first-of-type { margin-top: 14px; }
+    .week .subtot .n { font-size: 14px; color: #888; font-weight: 400; margin-left: 6px; }
+    .week .total { margin-top: 14px; padding-top: 10px; border-top: 2px solid #333;
+                   font-size: 24px; font-weight: 700; }
     .week .total .sub { font-size: 15px; color: #777; font-weight: 400; }
     .week .none { color: #888; padding: 10px 0; font-size: 17px; }
   </style>
@@ -348,6 +354,16 @@
           (it.has_fare ? `<span class="a">${fmtMoney(it.total)}</span>`
                        : `<span class="a todo">待補</span>`);
         box.appendChild(row);
+      });
+
+      // 各類別小計（診所／東洋／臨時…）— 先分類再合計
+      (week.by_category || []).forEach(a => {
+        const s = document.createElement('div');
+        s.className = 'subtot';
+        s.innerHTML =
+          `<span>${esc(a.category)}<span class="n">${a.filled_count}/${a.count} 筆</span></span>` +
+          `<span>${fmtMoney(a.sum_amount)} 元</span>`;
+        box.appendChild(s);
       });
 
       const total = document.createElement('div');
