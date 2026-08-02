@@ -38,6 +38,12 @@ from rewrite.utils.sun_week import sun_week_start
 # View 結構
 # ============================================================
 
+# 不是「人」的司機列 —— 派車照用（叫外車資源），但不該出現在
+# 「請問你是哪一位？」的身分選單裡，也不接受綁定 LINE 帳號。
+# 管理司機（老闆/春妃）的切換選單仍看得到，可代填車資。
+NON_BINDABLE_DRIVER_IDS = {9999}   # 9999 = 其他（外車）
+
+
 # 車號的佔位字（歷史資料留下的），顯示時視同空值
 _PLACEHOLDER_PLATES = {'留空後補', '待補', '未填', '無', '-', '其他'}
 
@@ -194,6 +200,10 @@ def bind_driver_line_user(
       - 已停用的司機 → fail
       - 綁的是同一組（重複點）→ success，不重寫、不寫 audit
     """
+    if driver_id in NON_BINDABLE_DRIVER_IDS:
+        return ToolResult.fail(
+            f"司機 {driver_id} 是外車代碼，不能綁定 LINE 帳號；"
+            f"這類班次的車資由公司代填")
     driver_id = _coerce_int(driver_id)
     if driver_id is None:
         return ToolResult.fail("driver_id 必填且要是數字")

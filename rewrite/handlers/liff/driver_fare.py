@@ -102,13 +102,15 @@ def _build_state(session, line_user_id: str, days: int, requested_driver_id=None
     me = bound.data
     if me is None:
         drivers = driver_tools.query_drivers(session=session, active_only=True)
+        # 身分選單排除外車代碼（9999「其他」不是人，不該被誰認領）
         return {
             'ok': True,
             'bound': False,
             'me': None,
             'viewing': None,
             'driver': None,
-            'drivers': [_driver_json(d) for d in (drivers.data or [])],
+            'drivers': [_driver_json(d) for d in (drivers.data or [])
+                        if d.id not in driver_tools.NON_BINDABLE_DRIVER_IDS],
             'drivers_all': [],
             'trips': [],
             'week': None,
