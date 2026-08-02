@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 # 司機回報的過去態車資，reason 是必填（合規）→ 這裡固定帶司機來源標記，
 # 不去問不擅長打字的司機（對齊「過去態才要原因，且問一次為限」的政策）
 _DRIVER_REASON = '司機自助回報'
+_MAX_DAYS = 14   # 待補清單/白名單的最大回溯天數（測試與補登舊帳都夠用）
 _VIA = 'liff_driver'
 
 # 一次送出的上限（單一司機每天 0-3 筆，20 已經很寬鬆；防惡意大 payload）
@@ -93,7 +94,8 @@ def _resolve_viewing(session, me, requested_driver_id):
     return got.data
 
 
-def _build_state(session, line_user_id: str, days: int, requested_driver_id=None) -> dict:
+def _build_state(session, line_user_id: str, days: int,
+                 requested_driver_id=None, week_offset: int = 0) -> dict:
     """組 state payload：綁定了就回待補清單＋本週車資，沒綁就回可選司機清單"""
     bound = driver_tools.get_driver_by_line_user(session=session, line_user_id=line_user_id)
     if not bound.ok:
@@ -115,6 +117,7 @@ def _build_state(session, line_user_id: str, days: int, requested_driver_id=None
             'trips': [],
             'week': None,
             'days': days,
+            'week_offset': week_offset,
         }
 
     viewing = _resolve_viewing(session, me, requested_driver_id)
@@ -125,7 +128,8 @@ def _build_state(session, line_user_id: str, days: int, requested_driver_id=None
     if not pending.ok:
         return {'ok': False, 'error': pending.error}
 
-    week = driver_tools.query_driver_week_fares(session=session, driver_id=viewing.id)
+    week = driver_tools.query_driver_week_fares(
+        session=session, driver_id=viewing.id, week_offset=week_offset)
     if not week.ok:
         return {'ok': False, 'error': week.error}
 
@@ -143,6 +147,7 @@ def _build_state(session, line_user_id: str, days: int, requested_driver_id=None
         'driver': _driver_json(viewing),   # 向後相容（舊前端讀 driver）
         'drivers': [],
         'drivers_all': drivers_all,
+        'week_offset': week_offset,
         'trips': pending.data,
         'week': {
             'items': week.data,
@@ -177,10 +182,14 @@ def driver_fare_state():
     ?driver_id=N 切換檢視對象 —— **只有管理司機有效**，一般司機傳了會被忽略。
     """
     days = _to_int_or_none(request.args.get('days')) or 1
+    days = max(1, min(days, _MAX_DAYS))
+    week_offset = _to_int_or_none(request.args.get('week')) or 0
+    week_offset = 0 if week_offset > 0 else max(week_offset, -4)  # 只往回看，最多 4 週
     want_driver = _to_int_or_none(request.args.get('driver_id'))
     session = Session()
     try:
-        state = _build_state(session, request.line_user_id, days, want_driver)
+        state = _build_state(session, request.line_user_id, days, want_driver,
+                             week_offset=week_offset)
     except SQLAlchemyError as e:
         session.rollback()
         logger.exception("driver_fare_state failed")
@@ -201,6 +210,7 @@ def driver_fare_bind():
     if driver_id is None:
         return jsonify({'ok': False, 'error': '請選一位司機'}), 400
     days = _to_int_or_none(body.get('days')) or 1
+    days = max(1, min(days, _MAX_DAYS))
 
     session = Session()
     try:
@@ -270,7 +280,7 @@ def driver_fare_submit():
         _pending_keys = set()
         try:
             _pr = driver_tools.query_driver_pending_fares(
-                session=session, driver_id=target.id, days=7)
+                session=session, driver_id=target.id, days=_MAX_DAYS)
             if _pr.ok:
                 _pending_keys = {(it['source'], it['id']) for it in _pr.data}
         except Exception:

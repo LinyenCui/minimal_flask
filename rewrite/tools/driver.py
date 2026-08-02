@@ -543,8 +543,12 @@ def query_driver_pending_fares(*, session, driver_id: int, days: int = 1) -> Too
     )
 
 
-def query_driver_week_fares(*, session, driver_id: int) -> ToolResult:
-    """本太陽週（星期日 ~ 今天）該司機的車資清單 ＋ 合計。
+def query_driver_week_fares(*, session, driver_id: int,
+                            week_offset: int = 0) -> ToolResult:
+    """太陽週（星期日 ~ 週末／今天）該司機的車資清單 ＋ 合計。
+
+    week_offset：0=本週（截止到今天）、-1=上週（完整週日~週六）。
+    上週用完整週界，因為那一週已經過完了。
 
     ⚠️ 週界一律走 rewrite/utils/sun_week.sun_week_start（星期日起算），**不自己算**
        （CLAUDE.md：ISO 週會錯一天，週結算會對不上）。
@@ -572,7 +576,11 @@ def query_driver_week_fares(*, session, driver_id: int) -> ToolResult:
 
     now = get_taiwan_time()
     today: _date = now.date()
-    week_start = sun_week_start(today)      # ← 太陽週 helper，不自己算
+    week_offset = _coerce_int(week_offset) or 0
+    # 太陽週 helper，不自己算；往前推 N 週用 timedelta 移日期再取週起點
+    week_start = sun_week_start(today + timedelta(weeks=week_offset))
+    # 本週看到今天為止；過去週看完整一週（週日~週六）
+    week_end = today if week_offset >= 0 else week_start + timedelta(days=6)
 
     trip_rows = session.execute(
         text(f"""
@@ -582,13 +590,14 @@ def query_driver_week_fares(*, session, driver_id: int) -> ToolResult:
                    trip_type, passenger_name
             FROM trips
             WHERE driver_id = :did
-              AND date BETWEEN :ws AND :today
+              AND date BETWEEN :ws AND :we
               AND (date < :today OR time <= :now_t)
               AND status NOT IN ('已完成', '註銷', '衝突')
               AND {_NOT_LEAVE}
             ORDER BY date, time
         """),
-        {'did': driver_id, 'ws': week_start, 'today': today, 'now_t': now.time()},
+        {'did': driver_id, 'ws': week_start, 'we': week_end,
+         'today': today, 'now_t': now.time()},
     ).fetchall()
 
     completed_rows = session.execute(
@@ -597,12 +606,12 @@ def query_driver_week_fares(*, session, driver_id: int) -> ToolResult:
                    start_point, via_point, end_point, passenger_name
             FROM completed_trips
             WHERE driver_id = :did
-              AND date BETWEEN :ws AND :today
+              AND date BETWEEN :ws AND :we
               AND (status IS NULL OR status <> '已取消')
               AND {_NOT_LEAVE}
             ORDER BY date, id
         """),
-        {'did': driver_id, 'ws': week_start, 'today': today},
+        {'did': driver_id, 'ws': week_start, 'we': week_end},
     ).fetchall()
 
     def _pack(*, source, rid, d, tm, route, category, meter, extra) -> dict:
@@ -649,7 +658,7 @@ def query_driver_week_fares(*, session, driver_id: int) -> ToolResult:
     return ToolResult.success(
         data=items,
         week_start=week_start.isoformat(),
-        week_end=today.isoformat(),
+        week_end=week_end.isoformat(),
         count=len(items),
         filled_count=len(filled),
         sum_amount=sum(it['total'] for it in filled),

@@ -122,7 +122,7 @@
     <div id="alert"></div>
     <div id="cards"></div>
     <div id="empty" class="empty" hidden>今天沒有需要補車資的班次 👍</div>
-    <div class="more"><a id="link-more">看前 3 天</a></div>
+    <div class="more"><a id="link-more">看前 14 天</a></div>
     <div id="week-slot"></div>
   </div>
 
@@ -151,6 +151,7 @@
     const weekSlot = document.getElementById('week-slot');
 
     let DAYS = 1;
+    let WEEK_OFFSET = 0;   // 0=本週, -1=上週…
     let ME = null;        // 登入的這個人（管理司機才有切換能力）
     let VIEW_ID = null;   // 目前檢視的司機（管理司機可切；一般司機恆為自己）
     let WEEK = null;
@@ -270,7 +271,7 @@
       });
       emptyEl.hidden = trips.length > 0;
       footerEl.hidden = trips.length === 0;
-      moreLink.textContent = DAYS > 1 ? '只看今天' : '看前 3 天';
+      moreLink.textContent = DAYS > 1 ? '只看今天' : '看前 14 天';
       loadingEl.hidden = true;
       whoEl.hidden = true;
       mainEl.hidden = false;
@@ -326,14 +327,16 @@
       box.className = 'week';
 
       const h = document.createElement('h2');
-      h.textContent = `本週車資（${fmtMD(week.start)}～${fmtMD(week.end)}）`;
+      const wname = WEEK_OFFSET === 0 ? '本週'
+                  : WEEK_OFFSET === -1 ? '上週' : `前 ${-WEEK_OFFSET} 週`;
+      h.textContent = `${wname}車資（${fmtMD(week.start)}～${fmtMD(week.end)}）`;
       box.appendChild(h);
 
       const items = week.items || [];
       if (!items.length) {
         const none = document.createElement('div');
         none.className = 'none';
-        none.textContent = '本週目前沒有班次';
+        none.textContent = (WEEK_OFFSET === 0 ? '本週' : '該週') + '目前沒有班次';
         box.appendChild(none);
       }
       items.forEach(it => {
@@ -355,6 +358,20 @@
         `／共 ${Number(week.count) || 0} 筆）</span>`;
       box.appendChild(total);
 
+      const nav = document.createElement('div');
+      nav.className = 'more';
+      const a = document.createElement('a');
+      a.textContent = WEEK_OFFSET === 0 ? '看上週' : '回到本週';
+      a.addEventListener('click', async () => {
+        WEEK_OFFSET = WEEK_OFFSET === 0 ? -1 : 0;
+        try {
+          const data = await api(stateUrl(DAYS));
+          WEEK = data.week || null;
+          renderWeek(WEEK);
+        } catch (e) { alert('載入失敗：' + e.message); }
+      });
+      nav.appendChild(a);
+      box.appendChild(nav);
       weekSlot.appendChild(box);
     }
 
@@ -373,6 +390,7 @@
     function stateUrl(days) {
       let url = `/liff/driver/fare/state?days=${days}`;
       if (VIEW_ID) url += `&driver_id=${VIEW_ID}`;
+      if (WEEK_OFFSET) url += `&week=${WEEK_OFFSET}`;
       return url;
     }
 
@@ -393,7 +411,7 @@
     }
 
     moreLink.addEventListener('click', async () => {
-      const next = DAYS > 1 ? 1 : 3;
+      const next = DAYS > 1 ? 1 : 14;
       setLoading('載入中…');
       try { await loadState(next); }
       catch (e) { setLoading('載入失敗：' + e.message); }
