@@ -423,7 +423,17 @@ def set_driver_active(
 # ============================================================
 
 # 「缺車資」：錶價空或 0（加成不算 —— 加成常態就是 0）
-_MISSING_FARE = "(meter_fare IS NULL OR meter_fare = 0)"
+# 「還沒填車資」的判定（2026-08-03 依真實資料校正）：
+#   錶價空或 0 **且** 加成空或 0 **且** 沒被明確改過車資。
+# 為什麼不只看錶價：衝帳／夜間加成這類是「錶價 0、加成非 0」，
+# 錢已經處理過了，舊規則會把它們當「0 元待補」丟給司機重填（實測 #3102 -55、
+# #3101 -45、#1745 +2250）。加成非 0 一律代表有人動過這筆的錢。
+# 「改車資」關鍵字則涵蓋「刻意填 0」的免費車，否則它會永遠賴在待補清單。
+_MISSING_FARE = (
+    "(meter_fare IS NULL OR meter_fare = 0)"
+    " AND (extra_fare IS NULL OR extra_fare = 0)"
+    " AND (modification_reason IS NULL OR modification_reason NOT LIKE '%%改車資%%')"
+)
 # 請假班次的車資由老闆用加成處理，司機沒跑不用回報 → 不列入待補
 _NOT_LEAVE = "(passenger_leave_reason IS NULL OR passenger_leave_reason = '')"
 

@@ -11,9 +11,13 @@
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang TC", "Microsoft JhengHei", sans-serif;
       padding: 16px 14px 110px; line-height: 1.5; color: #1a1a1a;
-      max-width: 640px; margin: 0 auto; font-size: 18px; background: #fff;
+      max-width: 640px; margin: 0 auto; font-size: 18px;
+      background: #eef1f5;   /* 淺灰底襯白卡，畫面才不會一片死白 */
     }
-    h1 { font-size: 24px; margin: 0 0 18px; line-height: 1.35; }
+    h1 {
+      font-size: 24px; margin: 0 0 16px; line-height: 1.35;
+      padding-left: 12px; border-left: 6px solid #06c755;   /* 綠色標題條 */
+    }
     .loading { text-align: center; color: #666; padding: 60px 0; font-size: 20px; }
 
     /* 未綁定：一位司機一顆大按鈕 */
@@ -22,26 +26,42 @@
       padding: 16px; font-size: 22px; font-weight: 700; text-align: center;
       border: 2px solid #06c755; border-radius: 12px;
       background: #fff; color: #0a5c2b; cursor: pointer;
+      box-shadow: 0 2px 8px rgba(20,30,50,.08);
     }
     .who-btn:active { background: #e8f5e9; }
     .who-btn:disabled { opacity: .5; }
 
     /* 已綁定：待補車資卡片 */
     .card {
-      border: 2px solid #ddd; border-radius: 12px; padding: 14px;
+      border: 1px solid #e2e6ea; border-radius: 14px; padding: 16px 14px;
       margin-bottom: 14px; background: #fff;
+      box-shadow: 0 2px 6px rgba(20,30,50,.07);
     }
-    .card.done { border-color: #06c755; background: #f1f9f2; }
+    .card.done {
+      border-color: #06c755; background: #f3fbf5;
+      box-shadow: 0 2px 8px rgba(6,199,85,.18);
+    }
     .card .when { font-size: 22px; font-weight: 700; margin-bottom: 4px; word-break: break-word; }
-    .card .meta { font-size: 14px; color: #777; margin-bottom: 12px; }
+    .card .meta { font-size: 14px; color: #6b7280; margin-bottom: 12px; }
+    .tag {
+      display: inline-block; padding: 2px 9px; border-radius: 999px;
+      font-size: 13px; font-weight: 700; margin-right: 6px; vertical-align: middle;
+      background: #eceff3; color: #55606e;
+    }
+    .tag.c-診所 { background: #e3f0ff; color: #14539a; }
+    .tag.c-東洋 { background: #fff0dd; color: #9a5a12; }
+    .tag.c-臨時 { background: #f0e7ff; color: #5b3a9e; }
     .row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
     .row label { width: 74px; flex: 0 0 74px; font-size: 19px; font-weight: 700; }
     .row input {
       flex: 1; min-width: 0; height: 56px; padding: 8px 12px;
       font-size: 24px; text-align: right;
-      border: 2px solid #bbb; border-radius: 10px; background: #fff; color: #111;
+      border: 2px solid #cfd5dc; border-radius: 10px; background: #fbfcfd; color: #111;
     }
-    .row input:focus { outline: none; border-color: #06c755; }
+    .row input:focus {
+      outline: none; border-color: #06c755; background: #fff;
+      box-shadow: 0 0 0 3px rgba(6,199,85,.15);
+    }
     .row .unit { font-size: 18px; color: #666; }
     .hint { font-size: 14px; color: #888; margin-top: 8px; }
     .card .result { margin-top: 10px; font-size: 18px; font-weight: 700; }
@@ -59,6 +79,7 @@
     #btn-submit {
       width: 100%; min-height: 64px; font-size: 24px; font-weight: 700;
       border: 0; border-radius: 12px; background: #06c755; color: #fff; cursor: pointer;
+      box-shadow: 0 3px 10px rgba(6,199,85,.35);
     }
     #btn-submit:disabled { background: #b5b5b5; }
 
@@ -77,6 +98,7 @@
       font-size: 20px; font-weight: 700; text-align: left;
       border: 2px solid #06c755; border-radius: 12px;
       background: #f1f9f2; color: #0a5c2b; cursor: pointer;
+      box-shadow: 0 2px 6px rgba(20,30,50,.07);
     }
     .sw-list { margin-top: 8px; }
     .sw-list button {
@@ -89,8 +111,15 @@
     .sw-list button.off { color: #999; border-color: #e5e5e5; font-weight: 400; }
 
     /* 本週車資（唯讀清單，在待補清單下方） */
-    .week { margin-top: 24px; border-top: 2px solid #eee; padding-top: 16px; }
-    .week h2 { font-size: 20px; margin: 0 0 8px; }
+    .week {
+      margin-top: 24px; padding: 16px 14px; background: #fff;
+      border: 1px solid #e2e6ea; border-radius: 14px;
+      box-shadow: 0 2px 6px rgba(20,30,50,.07);
+    }
+    .week h2 {
+      font-size: 20px; margin: 0 0 10px; padding-bottom: 8px;
+      border-bottom: 2px solid #eef1f5; color: #14539a;
+    }
     .wrow {
       display: flex; align-items: baseline; gap: 10px;
       padding: 9px 0; border-bottom: 1px solid #f0f0f0; font-size: 17px;
@@ -103,9 +132,12 @@
                     margin-top: 8px; padding-top: 8px; border-top: 1px dashed #ddd;
                     font-size: 19px; font-weight: 600; }
     .week .subtot:first-of-type { margin-top: 14px; }
-    .week .subtot .n { font-size: 14px; color: #888; font-weight: 400; margin-left: 6px; }
-    .week .total { margin-top: 14px; padding-top: 10px; border-top: 2px solid #333;
-                   font-size: 24px; font-weight: 700; }
+    .week .subtot .n { font-size: 14px; color: #8a94a0; font-weight: 400; margin-left: 6px; }
+    .week .total {
+      margin-top: 14px; padding: 12px 14px; border-radius: 10px;
+      background: #f3fbf5; border: 1px solid #cdecd7; color: #0a5c2b;
+      font-size: 24px; font-weight: 700;
+    }
     .week .total .sub { font-size: 15px; color: #777; font-weight: 400; }
     .week .none { color: #888; padding: 10px 0; font-size: 17px; }
   </style>
@@ -256,11 +288,11 @@
         const metaBits = [];
         if (!t.time && t.date) metaBits.push(t.date.slice(5).replace('-', '/'));
         else if (DAYS > 1 && t.date) metaBits.push(t.date.slice(5).replace('-', '/'));
-        if (t.category) metaBits.push(t.category);
+
         if (t.passenger_name) metaBits.push(t.passenger_name);
         card.innerHTML = `
           <div class="when">${esc(head)}</div>
-          <div class="meta">${esc(metaBits.join('　'))}</div>
+          <div class="meta">${t.category ? `<span class="tag c-${esc(t.category)}">${esc(t.category)}</span>` : ''}${esc(metaBits.join('　'))}</div>
           <div class="row">
             <label>車資</label>
             <input class="in-meter" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="0">
