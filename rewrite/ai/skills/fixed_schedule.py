@@ -36,6 +36,9 @@ _SYSTEM_PROMPT = """\
 
 🛠️ 工具選擇：
 - 用戶說「查太子龍的固定班次」「龍埔街的固定班表」→ query_fixed_schedule(customer_short_name=...)
+- 用戶說「固定班表 安北05」→ query_fixed_schedule(customer_short_name='安北05')
+  （簡稱常帶數字：安北05、東寧12…… 一律當 customer_short_name，
+   route_number 只放 1-7 的週幾組合）
 - 用戶給「固定班次 #21」「固定班次21」→ get_fixed_schedule_by_id(21)
 - 用戶說「修改」「改時間」「改地點」「改車資」→ update_fixed_schedule
 - 用戶說「請假」「長期請假」「出國」「住院」→ apply_fixed_schedule_leave
@@ -76,12 +79,16 @@ QUERY_FIXED_SCHEDULE_SCHEMA = {
     'parameters': {
         'type': 'object',
         'properties': {
-            'customer_short_name': {'type': 'string', 'description': "客戶簡稱，如「龍埔街」「太子龍」"},
+            'customer_short_name': {'type': 'string', 'description': "客戶簡稱，如「龍埔街」「太子龍」「安北05」（簡稱可能含數字，"
+                                "帶數字仍是簡稱，不要改放 route_number）"},
             'category': {'type': 'string', 'description': "診所/東洋"},
             'driver_id': {'type': 'string', 'description': "司機 ID（varchar，如 '533')"},
             'direction': {'type': 'string', 'description': "來/回"},
             'status': {'type': 'string', 'description': "準備/請假/註銷"},
-            'route_number': {'type': 'string'},
+            'route_number': {
+                'type': 'string',
+                'description': "週幾組合，只能是 1-7 數字（'147' = 週一週四週日、'1234567' = 每天）。**不是**路線編號、不是客戶簡稱 — 客戶簡稱就算長得像編號（如「安北05」）也要放 customer_short_name",
+            },
             'limit': {'type': 'integer'},
         },
     },
@@ -115,7 +122,10 @@ UPDATE_FIXED_SCHEDULE_SCHEMA = {
             'direction': {'type': 'string', 'description': "來/回"},
             'note': {'type': 'string', 'description': "備註（請假原因等；乘客資料勿放這，會進報表）"},
             'passenger_name': {'type': 'string', 'description': "乘客／接送順序（顯示在班次詳情，不進請款報表）"},
-            'route_number': {'type': 'string'},
+            'route_number': {
+                'type': 'string',
+                'description': "週幾組合，只能是 1-7 數字（'147' = 週一週四週日、'1234567' = 每天）。**不是**路線編號、不是客戶簡稱 — 客戶簡稱就算長得像編號（如「安北05」）也要放 customer_short_name",
+            },
         },
         'required': ['schedule_id'],
     },
