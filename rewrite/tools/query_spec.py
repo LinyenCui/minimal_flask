@@ -134,7 +134,7 @@ def _compile_filter(f: dict, bag: _ParamBag) -> str:
     if cspec.predicate == 'customer':
         p = bag.add(_coerce_value(col, cspec, value))
         return (f"(start_point = {p} OR end_point = {p} "
-                f"OR {p} = ANY(string_to_array(COALESCE(via_point, ''), '+')))")
+                f"OR {p} = ANY(regexp_split_to_array(COALESCE(via_point, ''), '\\s*[+→]\\s*')))")
     if cspec.predicate == 'location':
         p = bag.add(f"%{_coerce_value(col, cspec, value)}%")
         return f"(start_point ILIKE {p} OR via_point ILIKE {p} OR end_point ILIKE {p})"

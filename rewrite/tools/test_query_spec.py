@@ -70,7 +70,9 @@ def test_range_string():
 def test_customer_predicate():
     c = compile_query_spec({"filters": [{"col": "customer", "op": "=", "value": "二井家"}]},
                            detail_columns=DETAIL)
-    ok("string_to_array" in c.sql and "via_point" in c.sql, "customer 謂語拆 via")
+    # via_point 多段用 '+' 或 '→' 分隔（兩種歷史寫法並存）→ 兩者都要當分隔符拆
+    ok("regexp_split_to_array" in c.sql and "via_point" in c.sql, "customer 謂語拆 via")
+    ok("+" in c.sql and "→" in c.sql, "customer 謂語兩種分隔符都認")
 
 
 def test_rejections():

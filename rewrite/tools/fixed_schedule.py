@@ -120,10 +120,10 @@ def query_fixed_schedule(
     params: dict = {}
 
     if customer_short_name:
-        # via_point 可能是 '+'-joined 多段（例如 '中華南路+新建路'），用 string_to_array 拆
+        # via_point 多段可能用 '+' 或 '→' 分隔（'中華南路+新建路'、'中華南路→新建路' 都有），用 string_to_array 拆
         where.append(
             "(start_point = :sn OR end_point = :sn "
-            "OR :sn = ANY(string_to_array(COALESCE(via_point, ''), '+')))"
+            "OR :sn = ANY(regexp_split_to_array(COALESCE(via_point, ''), '\\s*[+→]\\s*')))"
         )
         params['sn'] = customer_short_name
     if category:
