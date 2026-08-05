@@ -158,8 +158,16 @@
     }
     .wrow {
       display: flex; align-items: baseline; gap: 10px;
-      padding: 9px 0; border-bottom: 1px solid #f0f0f0; font-size: 17px;
+      padding: 9px 0 9px 9px; border-bottom: 1px solid #f0f0f0; font-size: 17px;
+      /* 透明色條佔位：診所（無色）跟其他類別的文字才會對齊在同一條線上 */
+      border-left: 5px solid transparent;
     }
+    /* 診所量最大 → 維持原樣不上色；其他類別才跳出來 */
+    .wrow.cat-a { border-left-color: #e08a1e; background: #fffaf2; }
+    .wrow.cat-b { border-left-color: #7c4dd4; background: #faf7ff; }
+    .wrow.cat-c { border-left-color: #0d9488; background: #f2fbfa; }
+    .wrow.cat-d { border-left-color: #d9457f; background: #fff5f9; }
+    .wrow.cat-e { border-left-color: #4a6fb5; background: #f5f8fd; }
     .wrow .d { flex: 0 0 48px; color: #555; font-weight: 700; }
     .wrow .r { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .wrow .a { flex: 0 0 auto; font-weight: 700; }
@@ -432,7 +440,8 @@
       }
       items.forEach(it => {
         const row = document.createElement('div');
-        row.className = 'wrow';
+        const slot = catSlot(it.category);
+        row.className = 'wrow' + (slot && slot !== 'diag' ? ` cat-${slot}` : '');
         row.innerHTML =
           `<span class="d">${esc(fmtMD(it.date))}</span>` +
           `<span class="r">${esc(it.route)}</span>` +
