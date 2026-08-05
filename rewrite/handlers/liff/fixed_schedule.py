@@ -18,6 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from database import Session
 from rewrite.handlers.liff import liff_bp
+from rewrite.tools.leave_guard import NEEDS_CONFIRM_KEY
 from rewrite.handlers.liff.auth import liff_auth_required
 from rewrite.tools import fixed_schedule as fs_tools
 
@@ -169,9 +170,8 @@ def fixed_schedule_leave(schedule_id):
     reason = (body.get('reason') or '').strip()
     if not reason:
         return jsonify({'ok': False, 'error': '請填請假原因'}), 400
+    # surcharge 保持 None（不再靜默補 0）——閘門要分得出「未填」與「填 0」
     surcharge = _to_int_or_none(body.get('surcharge'))
-    if surcharge is None:
-        surcharge = 0
 
     session = Session()
     try:
@@ -182,6 +182,7 @@ def fixed_schedule_leave(schedule_id):
             surcharge=surcharge,
             user_id=request.line_user_id,
             via='liff',
+            confirm_zero_surcharge=bool(body.get('confirm_zero_surcharge')),
         )
     except SQLAlchemyError as e:
         session.rollback()
@@ -191,7 +192,13 @@ def fixed_schedule_leave(schedule_id):
         session.close()
 
     if not result.ok:
-        return jsonify({'ok': False, 'error': result.error}), 400
+        # 「請假但 0 元」不是錯誤，是要用戶再確認一次 —— 前端靠這個旗標
+        # 跳確認框，按確定後帶 confirm_zero_surcharge 重送
+        return jsonify({
+            'ok': False,
+            'error': result.error,
+            NEEDS_CONFIRM_KEY: bool(result.meta.get(NEEDS_CONFIRM_KEY)),
+        }), 400
 
     schedule_data = _schedule_to_jsonable(result.data)
     logger.info(

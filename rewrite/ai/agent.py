@@ -30,6 +30,7 @@ from rewrite.conversation_state import (
     MUTATION_CANCEL_TEXT,
 )
 from rewrite.tools.base import ToolResult
+from rewrite.tools.leave_guard import is_zero_surcharge
 from rewrite.tools.trip import TripView
 from rewrite.tools.customer import CustomerView
 from rewrite.tools.fixed_schedule import FixedScheduleView
@@ -186,7 +187,7 @@ _ARG_LABELS = {
     'birthday': '生日',
     'note': '備註',
     'memo': '備註',
-    'route_number': '路線編號',
+    'route_number': '週幾組合',
     'departure_time': '出發時間',
     'start_point': '起點',
     'via_point': '途經',
@@ -208,6 +209,9 @@ _PENDING_TARGET_KEYS = (
 
 # 預覽不顯示的 context / 技術參數
 _PENDING_HIDDEN_KEYS = {'session', 'user_id', 'user_name', 'via', 'auto_commit'}
+
+# 請假類工具 —— 確認卡要額外把「不扣款」講明白，確認後放行閘門
+_LEAVE_TOOLS = ('passenger_leave', 'apply_fixed_schedule_leave')
 
 
 def _chat_id_from_source(event_source: Any, user_id: Optional[str]) -> Optional[str]:
@@ -297,6 +301,7 @@ def build_mutation_preview(calls: list) -> str:
     每筆：動作名（_TOOL_ACTION_LABELS）+ 目標資料（DB 撈）+ 參數（key 轉中文）。
     """
     lines = [f"📋 即將執行 {len(calls)} 筆修改，請確認："]
+    zero_leave = 0          # 「請假但不扣款」的筆數
     session = Session()
     try:
         for i, (name, args) in enumerate(calls):
@@ -309,15 +314,32 @@ def build_mutation_preview(calls: list) -> str:
             if target is None and target_key:
                 target = f"#{args[target_key]}"
             lines.append(f"{no} {label}" + (f" — {target}" if target else ""))
+            is_leave = name in _LEAVE_TOOLS
             parts = []
             for k, v in args.items():
-                if k in _PENDING_HIDDEN_KEYS or k == target_key or v is None:
+                if k in _PENDING_HIDDEN_KEYS or k == target_key:
+                    continue
+                if v is None:
+                    # 請假的加成沒傳 → 一定要顯示。原本 None 直接 skip，
+                    # 等於把「AI 漏填金額」這件事藏起來（用戶回報的根因之一）
+                    if is_leave and k == 'surcharge':
+                        parts.append(f"{_ARG_LABELS.get(k, k)}：未填")
                     continue
                 parts.append(f"{_ARG_LABELS.get(k, k)}：{_fmt_preview_value(v)}")
+            if is_leave and args.get('surcharge') is None and 'surcharge' not in args:
+                parts.append("加成：未填")
             if parts:
                 lines.append("　 " + "｜".join(parts))
+            if is_leave and is_zero_surcharge(args.get('surcharge')):
+                zero_leave += 1
+                lines.append("　 ⚠️ 這筆不會扣款")
     finally:
         session.close()
+    if zero_leave:
+        lines.append("")
+        lines.append(f"⚠️ 其中 {zero_leave} 筆是「請假但加成 0 元」，不會扣到任何錢。")
+        lines.append("　 請假通常要扣款（例：-30、-220）。")
+        lines.append("　 確定不扣 → 按確認執行；要改金額 → 取消後重講一次。")
     lines.append("確認後才會寫入。")
     return '\n'.join(lines)
 
@@ -386,6 +408,9 @@ def execute_confirmed_calls(calls: list, user_id: Optional[str]) -> list:
             continue
         # audit（R-6）記得到誰確認執行的
         args = _inject_context_args(fn, dict(stored_args), user_id=user_id)
+        # 用戶是看過確認卡（含「⚠️ 不會扣款」）才按下確認執行的 → 放行 0 元閘門
+        if name in _LEAVE_TOOLS:
+            args['confirm_zero_surcharge'] = True
         session = Session()
         try:
             r = fn(session=session, **args)

@@ -188,7 +188,11 @@ def _import_broadcast_text(data: dict, operator_user_id: str | None) -> str:
         f"📥 匯入：{data.get('inserted', 0)} 筆",
     ]
     if data.get('leave_count', 0) > 0:
+        _z = data.get('zero_surcharge_leave', 0)
         lines.append(f"🏷️ 含請假：{data['leave_count']} 筆")
+        if _z:
+            # 匯入不經過 passenger_leave 的 0 元閘門，只能在這裡出聲
+            lines.append(f"⚠️ 其中 {_z} 筆加成 0 元，匯進來不會扣款")
     if data.get('overwritten', 0) > 0:
         lines.append(f"🔄 覆蓋：{data['overwritten']} 筆")
     if data.get('purged_past', 0) > 0:

@@ -27,6 +27,11 @@ from rewrite.tools.base import (
     write_audit,
     diff_fields,
 )
+from rewrite.tools.leave_guard import (
+    NEEDS_CONFIRM_KEY,
+    is_zero_surcharge,
+    warning_text as zero_surcharge_warning,
+)
 
 
 # ============================================================
@@ -276,11 +281,12 @@ def apply_fixed_schedule_leave(
     session,
     schedule_id: int,
     reason: str,
-    surcharge: int = 0,
+    surcharge: Optional[int] = None,
     user_id: Optional[str] = None,
     user_name: Optional[str] = None,
     via: str = 'unknown',
     auto_commit: bool = True,
+    confirm_zero_surcharge: bool = False,
 ) -> ToolResult:
     """
     固定班次長期請假。
@@ -291,10 +297,16 @@ def apply_fixed_schedule_leave(
       - surcharge = 給的值
 
     用戶情境：客戶長期出國/住院，固定班次模板暫停產出 trip rows。
+
+    ⚠️ 加成沒填 / 0 / -0 → 擋下要確認（同 trip.passenger_leave）。
+       模板這層特別嚴重：錯一張，之後**每週匯入都會複製**成 N 筆 0 元請假班次。
+       註：不像 trips 有 modification_reason 可以留痕，這裡唯一的文字欄是 note，
+       而 note 會被匯入原封複製成 trip 的 passenger_leave_reason，
+       所以確認標記不寫進 note（避免污染每一筆匯出的班次），只靠 audit log 記錄。
     """
     if not reason or not reason.strip():
         return ToolResult.fail("請假原因不可空")
-    if not isinstance(surcharge, int):
+    if surcharge is not None and not isinstance(surcharge, int):
         return ToolResult.fail("加成必須是整數（通常負，如 -50）")
 
     before = _fetch_schedule_snapshot(session=session, schedule_id=schedule_id)
@@ -305,6 +317,20 @@ def apply_fixed_schedule_leave(
         return ToolResult.fail(
             f"固定班次 #{schedule_id} 已是請假狀態，原因：{before.get('note') or '無'}"
         )
+
+    # 🚧 沒扣款的請假要先確認（擺在存在性/狀態檢查之後）
+    if is_zero_surcharge(surcharge) and not confirm_zero_surcharge:
+        return ToolResult.fail(
+            zero_surcharge_warning(
+                target=f"固定班次 #{schedule_id}",
+                reason=reason.strip(),
+                surcharge=surcharge,
+                how_to_confirm='打「確認執行」',
+            ) + '\n\n※ 模板請假會在每週匯入時複製成該週所有班次，錯了會一直複製下去。',
+            **{NEEDS_CONFIRM_KEY: True}, schedule_id=schedule_id,
+            reason=reason.strip(), surcharge=surcharge,
+        )
+    final_surcharge = 0 if surcharge is None else surcharge
 
     session.execute(
         text("""

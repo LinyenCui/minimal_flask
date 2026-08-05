@@ -100,6 +100,12 @@ _RE_TRIP_UNASSIGN = re.compile(r'^班次撤銷指派\s+(\d+)$')
 # 請假輸入模式的退出命令（跟原系統一致）
 _LEAVE_ABORT_TEXTS = {'放棄操作', '放棄', '取消'}
 
+from rewrite.conversation_state import MUTATION_CONFIRM_TEXT
+from rewrite.tools.leave_guard import (
+    is_zero_surcharge,
+    warning_text as zero_surcharge_warning,
+)
+
 # Postback data regex
 _RE_PB_TRIP_DETAIL = re.compile(r'^trip_detail:(\d+)$')
 _RE_PB_CUSTOMER_EDIT = re.compile(r'^customer_edit:(\d+)$')
@@ -552,6 +558,10 @@ def _handle_leave_input(reply_token, user_id, text: str, payload: dict) -> bool:
         })
         return True
 
+    # 已警示過，用戶按「確認執行」→ 沿用剛才暫存的原因/加成
+    if payload.get('zero_confirmed') and text == MUTATION_CONFIRM_TEXT:
+        text = f"{payload['pending_reason']} {payload['pending_surcharge']}"
+
     # 解析 [原因] [整數]
     parts = text.rsplit(maxsplit=1)
     surcharge = None
@@ -576,14 +586,38 @@ def _handle_leave_input(reply_token, user_id, text: str, payload: dict) -> bool:
         })
         return True
 
-    # 成功路徑
+    # 🚧 沒扣款 → 先警示，同一個 state 等「確認執行」
     trip_id = payload['trip_id']
+    if is_zero_surcharge(surcharge) and not payload.get('zero_confirmed'):
+        chat_id = payload.get('chat_id')
+        _state_set(user_id, 'leave_input',
+                   {**payload, 'zero_confirmed': True,
+                    'pending_reason': reason, 'pending_surcharge': surcharge},
+                   chat_id=chat_id)
+        reply_message(reply_token, {
+            "type": "text",
+            "text": zero_surcharge_warning(
+                target=f"班次 #{trip_id}", reason=reason, surcharge=surcharge,
+                how_to_confirm=f"按下方「{MUTATION_CONFIRM_TEXT}」",
+            ),
+            "quickReply": {"items": [
+                {"type": "action", "action": {
+                    "type": "message", "label": f"✅ {MUTATION_CONFIRM_TEXT}",
+                    "text": MUTATION_CONFIRM_TEXT}},
+                {"type": "action", "action": {
+                    "type": "message", "label": "❌ 放棄操作", "text": "放棄操作"}},
+            ]},
+        })
+        return True
+
+    # 成功路徑
     session = Session()
     try:
         r = passenger_leave(
             session=session, trip_id=trip_id,
             reason=reason, surcharge=surcharge,
             user_id=user_id, via='line_input_mode',
+            confirm_zero_surcharge=bool(payload.get('zero_confirmed')),
         )
         _state_clear(user_id)
         return _reply_mutation_result(

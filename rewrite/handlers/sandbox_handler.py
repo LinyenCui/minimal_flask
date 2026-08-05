@@ -152,6 +152,12 @@ _ALL_EXACT_COMMAND_TRIGGERS = (
 ARCHIVE_PURGE_STATE_TYPE = 'rewrite_archive_purge'   # 歸檔清理待確認
 TRIP_STATUS_PICKER_STATE_TYPE = 'rewrite_trip_status_picker'
 TRIP_STATUS_LEAVE_INPUT_STATE_TYPE = 'rewrite_trip_status_leave_input'
+
+from rewrite.conversation_state import MUTATION_CONFIRM_TEXT
+from rewrite.tools.leave_guard import (
+    is_zero_surcharge,
+    warning_text as zero_surcharge_warning,
+)
 TRIP_STATUS_TTL_MINUTES = 5.0  # 5 分鐘思考時間（比 SANDBOX_ACTIVE 90 秒長）
 
 # 批次操作觸發詞 → action label
@@ -1131,7 +1137,13 @@ def _try_handle_trip_status_actions(event, user_id: Optional[str], text: str,
 
     # ---- (2) Leave-input 階段：用戶輸入 [原因] [加成] ----
     if state_type == TRIP_STATUS_LEAVE_INPUT_STATE_TYPE:
-        parsed = _parse_leave_input(text)
+        payload = state.get('payload') or {}
+        # 已警示過 0 元 → 按「確認執行」沿用剛才暫存的原因/加成
+        # （要擺在 _parse_leave_input 之前，否則「確認執行」會被當成格式錯誤）
+        if payload.get('zero_confirmed') and text.strip() == MUTATION_CONFIRM_TEXT:
+            parsed = (payload['pending_reason'], payload['pending_surcharge'])
+        else:
+            parsed = _parse_leave_input(text)
         if parsed is None:
             # 格式不符 → 提醒，但不清 state（讓用戶重試）
             reply_message(event.reply_token, {
@@ -1152,10 +1164,42 @@ def _try_handle_trip_status_actions(event, user_id: Optional[str], text: str,
             return True
 
         reason, surcharge = parsed
-        payload = state.get('payload') or {}
         trip_ids = payload.get('trip_ids') or []
+
+        # 🚧 批次 0 元請假 → 先警示。批次比單筆嚴重：一次 N 筆全部沒扣款
+        if is_zero_surcharge(surcharge) and not payload.get('zero_confirmed'):
+            from rewrite.conversation_state import get_chat_id_from_event
+            _state_set(
+                user_id, TRIP_STATUS_LEAVE_INPUT_STATE_TYPE,
+                {**payload, 'zero_confirmed': True,
+                 'pending_reason': reason, 'pending_surcharge': surcharge},
+                ttl_minutes=TRIP_STATUS_TTL_MINUTES,
+                chat_id=get_chat_id_from_event(event),
+            )
+            reply_message(event.reply_token, {
+                'type': 'quick_reply',
+                'text': zero_surcharge_warning(
+                    target=f"{', '.join(f'#{i}' for i in trip_ids[:5])}"
+                           + (f" 等 {len(trip_ids)} 筆" if len(trip_ids) > 5 else ""),
+                    reason=reason, surcharge=surcharge,
+                    how_to_confirm=f"按下方「{MUTATION_CONFIRM_TEXT}」",
+                    count=len(trip_ids),
+                ),
+                'quick_reply': {'items': [
+                    {'type': 'action', 'action': {
+                        'type': 'message', 'label': f'✅ {MUTATION_CONFIRM_TEXT}',
+                        'text': MUTATION_CONFIRM_TEXT}},
+                    {'type': 'action', 'action': {
+                        'type': 'message', 'label': '❌ 取消', 'text': '結束對話'}},
+                ]},
+            })
+            logger.info(f"[rewrite sandbox] {short_uid} batch-leave 0 元警示 "
+                        f"({len(trip_ids)} 筆, reason={reason})")
+            return True
+
         _execute_batch_passenger_leave(
             event, user_id, short_uid, trip_ids, reason, surcharge,
+            confirm_zero=bool(payload.get('zero_confirmed')),
         )
         return True
 
@@ -1314,6 +1358,7 @@ def _execute_batch_status_action(
 def _execute_batch_passenger_leave(
     event, user_id: str, short_uid: str,
     trip_ids: list, reason: str, surcharge: int,
+    confirm_zero: bool = False,
 ) -> None:
     """執行批次 passenger_leave（leave_input 階段執行）"""
     from database import Session
@@ -1329,6 +1374,7 @@ def _execute_batch_passenger_leave(
                 session=sess, trip_id=tid,
                 reason=reason, surcharge=surcharge,
                 user_id=user_id, via='sandbox_status_picker',
+                confirm_zero_surcharge=confirm_zero,
             )
             if r.ok:
                 success_ids.append(tid)

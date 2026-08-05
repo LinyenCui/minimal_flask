@@ -28,6 +28,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from database import Session
 from rewrite.handlers.liff import liff_bp
+from rewrite.tools.leave_guard import NEEDS_CONFIRM_KEY
 from rewrite.handlers.liff.auth import liff_auth_required
 from rewrite.tools import trip as trip_tools
 
@@ -176,12 +177,12 @@ def trip_status_change(trip_id):
         if action == 'leave':
             if not reason:
                 return jsonify({'ok': False, 'error': '請假必須填原因'}), 400
-            if surcharge is None:
-                surcharge = 0
+            # surcharge 保持 None（不再靜默補 0）——閘門要分得出「未填」與「填 0」
             result = trip_tools.passenger_leave(
                 session=session, trip_id=trip_id,
                 reason=reason, surcharge=surcharge,
                 user_id=request.line_user_id, via='liff',
+                confirm_zero_surcharge=bool(body.get('confirm_zero_surcharge')),
             )
         elif action == 'cancel':
             result = trip_tools.cancel_trip(
@@ -208,7 +209,13 @@ def trip_status_change(trip_id):
         session.close()
 
     if not result.ok:
-        return jsonify({'ok': False, 'error': result.error}), 400
+        # 「請假但 0 元」不是錯誤，是要用戶再確認一次 —— 前端靠這個旗標
+        # 跳確認框，按確定後帶 confirm_zero_surcharge 重送
+        return jsonify({
+            'ok': False,
+            'error': result.error,
+            NEEDS_CONFIRM_KEY: bool(result.meta.get(NEEDS_CONFIRM_KEY)),
+        }), 400
 
     trip_data = _trip_to_jsonable(result.data)
     logger.info(
@@ -257,7 +264,11 @@ def _trip_status_chat_text(view, action, reason, surcharge) -> str:
     ]
     if action == 'leave':
         lines.append(f"📝 {reason}")
-        if surcharge:
+        # ⚠️ 曾經寫 `if surcharge:` —— 0 是 falsy，害「請假 0 元」的通知連金額
+        #    那行都不出現，操作者收到一則看起來完全正常的訊息（用戶回報的根因）
+        if surcharge is None or surcharge == 0:
+            lines.append("💰 0 元（未扣款）")
+        else:
             lines.append(f"💰 {surcharge:+d} 元")
     elif action in ('cancel', 'conflict') and reason:
         lines.append(f"📝 {reason}")

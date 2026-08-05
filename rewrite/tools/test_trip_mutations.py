@@ -334,8 +334,12 @@ try:
     )
     assert r.ok
     assert r.data.driver_id == 5386
-    assert '換司機' in (r.data.modification_reason or '')
-    print(f'  ✅ driver={r.data.driver_id} mod={r.data.modification_reason!r}')
+    # 2026-07-31 用戶定調：指派/換司機是純調度動作、不影響車資，
+    # 不可寫進 modification_reason（會污染請款報表的說明欄）。
+    # 完整軌跡由 audit_log 保存。這個斷言原本反過來寫，是改行為時漏更新的過期測試。
+    assert '換司機' not in (r.data.modification_reason or ''), (
+        f'換司機不該進 modification_reason，實際：{r.data.modification_reason!r}')
+    print(f'  ✅ driver={r.data.driver_id}（modification_reason 乾淨，軌跡在 audit_log）')
 
     # T19：司機不存在 → 拒
     banner('T19: assign_driver 司機不存在（id=88888）→ 應拒')

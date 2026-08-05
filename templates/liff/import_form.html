@@ -240,7 +240,15 @@
         pvInsert.textContent = `${p.will_insert} 筆`;
 
         if (p.leave_count > 0) {
-          pvLeave.textContent = `${p.leave_count} 筆`;
+          // 模板請假但加成 0 元 → 匯進來就是 N 筆不會扣款的請假班次。
+          // 匯入這條路不經過 passenger_leave 的閘門（自己 INSERT），
+          // 所以只能在預覽講明白，讓人在按下匯入前看見。
+          const z = p.zero_surcharge_leave || 0;
+          pvLeave.textContent = z > 0
+            ? `${p.leave_count} 筆（⚠️ 其中 ${z} 筆加成 0 元，不會扣款）`
+            : `${p.leave_count} 筆`;
+          pvLeave.style.color = z > 0 ? '#b0392f' : '';
+          pvLeave.style.fontWeight = z > 0 ? '700' : '';
           rowLeave.hidden = false;
         } else {
           rowLeave.hidden = true;

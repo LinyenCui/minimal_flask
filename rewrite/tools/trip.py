@@ -20,6 +20,12 @@ from typing import Optional, List, Any
 from sqlalchemy import text
 
 from rewrite.tools.base import ToolResult
+from rewrite.tools.leave_guard import (
+    NEEDS_CONFIRM_KEY,
+    is_zero_surcharge,
+    mark_confirmed,
+    warning_text as zero_surcharge_warning,
+)
 
 
 # ============================================================
@@ -91,7 +97,6 @@ class TripView:
     @classmethod
     def from_row(cls, row) -> "TripView":
         d = dict(row._mapping)
-
         # 三層障眼法：status='準備' + passenger_leave_reason 視為「請假」
         raw_status = d.get('status')
         leave = d.get('passenger_leave_reason')
@@ -327,11 +332,12 @@ def passenger_leave(
     session,
     trip_id: int,
     reason: str,
-    surcharge: int = 0,
+    surcharge: Optional[int] = None,
     user_id: Optional[str] = None,
     user_name: Optional[str] = None,
     via: str = 'unknown',
     auto_commit: bool = True,
+    confirm_zero_surcharge: bool = False,
 ) -> ToolResult:
     """
     乘客請假（三層障眼法）
@@ -343,10 +349,16 @@ def passenger_leave(
 
     R-5：30 分鐘鎖內拒絕（decorator）
     R-6：寫 audit log
+
+    ⚠️ 加成沒填 / 0 / -0（皆等於沒扣款）→ 回 fail 並在 data 帶
+       leave_guard.NEEDS_CONFIRM_KEY，要呼叫端拿到用戶確認後再帶
+       confirm_zero_surcharge=True 重送。理由見 rewrite/tools/leave_guard.py。
+       surcharge 預設改成 None（原本是 0）——「沒傳」跟「明確填 0」都會被擋，
+       但訊息分得出來，AI 漏傳參數不再靜默寫成 0。
     """
     if not reason or not reason.strip():
         return ToolResult.fail("請假原因不可空")
-    if not isinstance(surcharge, int):
+    if surcharge is not None and not isinstance(surcharge, int):
         return ToolResult.fail("加成必須是整數（通常負，如 -100）")
 
     # 確認 trip 存在 + 取 before
@@ -360,10 +372,29 @@ def passenger_leave(
             f"班次 #{trip_id} 狀態為「{before.get('status')}」，無法請假"
         )
 
+    # 🚧 沒扣款的請假要先確認（擺在存在性/狀態檢查之後，錯誤訊息才不會蓋掉更該講的事）
+    if is_zero_surcharge(surcharge) and not confirm_zero_surcharge:
+        return ToolResult.fail(
+            zero_surcharge_warning(
+                target=f"班次 #{trip_id}",
+                reason=reason.strip(),
+                surcharge=surcharge,
+                how_to_confirm='打「確認執行」',
+            ),
+            **{NEEDS_CONFIRM_KEY: True}, trip_id=trip_id,
+            reason=reason.strip(), surcharge=surcharge,
+        )
+
+    # 沒填就是 0（已經過閘門，代表確認過了）
+    final_surcharge = 0 if surcharge is None else surcharge
+
     # 計算新的 modification_reason（疊加）
     old_mod = before.get('modification_reason') or ''
     next_idx = 1 + old_mod.count('[')
     suffix = f"[{next_idx}] 乘客請假: {reason.strip()}"
+    # 確認放行的 0 元請假留痕 —— 事後對帳才分得出「確認過的 0」與「漏填的 0」
+    if is_zero_surcharge(final_surcharge):
+        suffix = mark_confirmed(suffix)
     new_mod = (old_mod + '; ' + suffix) if old_mod else suffix
 
     # UPDATE
@@ -380,7 +411,7 @@ def passenger_leave(
         """),
         {
             'reason': reason.strip(),
-            'surcharge': surcharge,
+            'surcharge': final_surcharge,
             'mod_reason': new_mod,
             'user_name': user_name or user_id,
             'trip_id': trip_id,

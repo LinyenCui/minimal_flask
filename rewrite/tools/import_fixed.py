@@ -21,6 +21,7 @@ from typing import Optional
 from sqlalchemy import text
 
 from rewrite.tools.base import ToolResult, write_audit
+from rewrite.tools.leave_guard import is_zero_surcharge
 # 重用 legacy 太陽週純函數（無 Flask 耦合）
 from modules.utils.week_utils import calculate_target_week, is_week_in_past
 
@@ -136,6 +137,7 @@ def preview_import_fixed(
             will_insert: int,    # 將會嘗試 INSERT 的總筆數
             existing: int,       # 該週該類別現有 fixed-typed trips（衝突來源）
             leave_count: int,    # 將匯入中標記為「請假」的筆數
+            zero_surcharge_leave: int,  # 其中加成 0 元（不會扣款）的筆數
             normal_count: int,   # 將匯入中正常的筆數
             need_overwrite: bool,# 有衝突需要 overwrite=True 才能匯
         })
@@ -158,6 +160,7 @@ def preview_import_fixed(
     # 算將匯入筆數（按星期幾撈 fixed_schedules）
     will_insert = 0
     leave_count = 0
+    zero_surcharge_leave = 0
     for import_date in dates:
         weekday = import_date.isoweekday()  # 1=Mon..7=Sun
         rows = _fetch_fixed_for_day(
@@ -165,6 +168,12 @@ def preview_import_fixed(
         )
         will_insert += len(rows)
         leave_count += sum(1 for r in rows if r.status == '請假')
+        # 模板請假但沒扣款 → 匯進來就是 N 筆 0 元請假班次。
+        # 這條路完全不經過 passenger_leave 的閘門（自己 INSERT），
+        # 而且量最大（實測占現有請假班次七成以上），所以在預覽就要講明白。
+        zero_surcharge_leave += sum(
+            1 for r in rows if r.status == '請假' and is_zero_surcharge(r.surcharge)
+        )
 
     purge_count = _count_purgeable_past(
         session=session, week_start=dates[0], category=category,
@@ -172,6 +181,7 @@ def preview_import_fixed(
 
     return ToolResult.success(
         data={
+            'zero_surcharge_leave': zero_surcharge_leave,
             'week_label': '本週' if week_offset == 0
                           else f'+{week_offset}週' if week_offset > 0
                           else f'{week_offset}週',
