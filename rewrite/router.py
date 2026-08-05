@@ -588,8 +588,16 @@ def _handle_leave_input(reply_token, user_id, text: str, payload: dict) -> bool:
 
     # 🚧 沒扣款 → 先警示，同一個 state 等「確認執行」
     trip_id = payload['trip_id']
-    if is_zero_surcharge(surcharge) and not payload.get('zero_confirmed'):
-        chat_id = payload.get('chat_id')
+    # 「確認過」綁定在被警示的那一組 (原因, 加成)：否則警示一次之後，
+    # 同一輪裡任何 0 元輸入都會被直接放行（黏著的旗標）
+    zero_ok = (
+        bool(payload.get('zero_confirmed'))
+        and reason == payload.get('pending_reason')
+        and surcharge == payload.get('pending_surcharge')
+    )
+    if is_zero_surcharge(surcharge) and not zero_ok:
+        # chat_id 是 set_state 的具名參數，存在 state 頂層而非 payload 裡
+        chat_id = (_state_get(user_id) or {}).get('chat_id')
         _state_set(user_id, 'leave_input',
                    {**payload, 'zero_confirmed': True,
                     'pending_reason': reason, 'pending_surcharge': surcharge},
@@ -603,7 +611,12 @@ def _handle_leave_input(reply_token, user_id, text: str, payload: dict) -> bool:
             "quickReply": {"items": [
                 {"type": "action", "action": {
                     "type": "message", "label": f"✅ {MUTATION_CONFIRM_TEXT}",
-                    "text": MUTATION_CONFIRM_TEXT}},
+                    # ⚠️ 群組的 webhook 閘門只放行 / 開頭的訊息，而 router 自己的
+                    #    'leave_input' state 不在放行白名單裡 → 送裸文字會被靜默丟棄，
+                    #    同仁按幾次都沒反應。try_route 在 state 判斷前就剝掉 /，
+                    #    所以私聊不受影響。（「放棄操作」按得動是因為它在
+                    #    sandbox_handler 的 _QUICK_COMMAND_PREFIXES 白名單裡。）
+                    "text": f"/{MUTATION_CONFIRM_TEXT}"}},
                 {"type": "action", "action": {
                     "type": "message", "label": "❌ 放棄操作", "text": "放棄操作"}},
             ]},
@@ -617,7 +630,7 @@ def _handle_leave_input(reply_token, user_id, text: str, payload: dict) -> bool:
             session=session, trip_id=trip_id,
             reason=reason, surcharge=surcharge,
             user_id=user_id, via='line_input_mode',
-            confirm_zero_surcharge=bool(payload.get('zero_confirmed')),
+            confirm_zero_surcharge=zero_ok,
         )
         _state_clear(user_id)
         return _reply_mutation_result(

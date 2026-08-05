@@ -311,11 +311,14 @@
     // 加成 0 / -0 / 未填在 DB 完全等價（JSON.stringify(-0) === "0"），
     // 只能靠 0 這個值判定。後端也有同一道閘門，這裡是給操作者的第一層提醒。
     function confirmZeroSurcharge(sc, n) {
-      if (sc !== 0) return true;          // 有扣款，直接放行
+      if (sc < 0) return true;            // 有扣款（負數）才直接放行
+      // 後端閘門判定是 >= 0（請假不該有正加成），前端門檻要一致，
+      // 否則填正數會繞過這裡、直接撞後端，而錯誤訊息叫人「打確認執行」——
+      // LIFF 表單裡根本沒有那個東西。
       const many = n && n > 1 ? ('這 ' + n + ' 筆') : '這筆';
       return window.confirm(
         '⚠️ 請假，但沒有扣款\n\n' +
-        many + '請假的加成是 0 元，不會扣到任何錢。\n' +
+        many + '請假的加成是 ' + (sc > 0 ? '+' + sc : '0') + ' 元，不會扣到任何錢。\n' +
         '請假通常要扣款（例：-30、-220）。\n\n' +
         '確定不扣款就送出嗎？'
       );
@@ -336,7 +339,7 @@
           return;
         }
         if (!confirmZeroSurcharge(payload.surcharge)) return;
-        if (payload.surcharge === 0) payload.confirm_zero_surcharge = true;
+        if (payload.surcharge >= 0) payload.confirm_zero_surcharge = true;
       } else if (currentAction === 'cancel' || currentAction === 'conflict') {
         const reason = (document.getElementById('reason-other').value || '').trim();
         if (reason) payload.reason = reason;

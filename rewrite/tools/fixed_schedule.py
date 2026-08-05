@@ -344,7 +344,7 @@ def apply_fixed_schedule_leave(
         """),
         {
             'reason': reason.strip(),
-            'surcharge': surcharge,
+            'surcharge': final_surcharge,
             'modified_by': user_name or user_id,
             'id': schedule_id,
         },

@@ -347,7 +347,11 @@ def _batch_status_text(action, ok_ids, fail_n, reason, surcharge) -> str:
     lines = [f"{verb} 共 {len(ok_ids)} 筆"]
     lines.append("　" + "、".join(f"#{i}" for i in ok_ids))
     if action == 'leave' and reason:
-        lines.append(f"📝 {reason}" + (f"　💰 {surcharge:+d} 元" if surcharge else ""))
+        # 跟單筆版同一個根因：`if surcharge` 的 0 是 falsy，
+        # 會讓 0 元批次請假的彙總看起來跟正常扣款一模一樣
+        amt = ("　💰 0 元（未扣款）" if (surcharge is None or surcharge == 0)
+               else f"　💰 {surcharge:+d} 元")
+        lines.append(f"📝 {reason}{amt}")
     elif action in ('cancel', 'conflict') and reason:
         lines.append(f"📝 {reason}")
     if action in ('cancel', 'conflict'):

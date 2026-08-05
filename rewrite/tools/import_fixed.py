@@ -303,6 +303,7 @@ def import_fixed_to_trips(
 
     inserted = 0
     leave_count = 0
+    zero_surcharge_leave = 0   # 請假但加成 0 元（匯進來不會扣款）
     normal_count = 0
     skipped_dup = 0
 
@@ -338,6 +339,8 @@ def import_fixed_to_trips(
             if is_leave:
                 leave_reason = r.note
                 leave_count += 1
+                if is_zero_surcharge(r.surcharge):
+                    zero_surcharge_leave += 1
             else:
                 leave_reason = None
                 normal_count += 1
@@ -348,6 +351,8 @@ def import_fixed_to_trips(
                 skipped_dup += 1
                 if is_leave:
                     leave_count -= 1
+                    if is_zero_surcharge(r.surcharge):
+                        zero_surcharge_leave -= 1
                 else:
                     normal_count -= 1
                 continue
@@ -399,6 +404,7 @@ def import_fixed_to_trips(
             'overwrite': overwrite,
             'purge_past': purge_past,
             'leave_count': leave_count,
+            'zero_surcharge_leave': zero_surcharge_leave,
             'normal_count': normal_count,
             'skipped_dup': skipped_dup,
         },
@@ -420,6 +426,7 @@ def import_fixed_to_trips(
             'overwritten': deleted_count,
             'purged_past': purged_count,
             'leave_count': leave_count,
+            'zero_surcharge_leave': zero_surcharge_leave,
             'normal_count': normal_count,
             'skipped_dup': skipped_dup,
             'seq_reset_from': seq_reset_from,

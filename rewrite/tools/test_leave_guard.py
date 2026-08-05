@@ -150,6 +150,16 @@ try:
     ok(r.ok, '填 0 + 已確認 → 放行')
     session.rollback()
 
+    # 未填 + 已確認 → DB 要寫 0，不是 NULL
+    # （final_surcharge 算了卻沒綁進 UPDATE 的話，這裡會抓到）
+    r = apply_fixed_schedule_leave(session=session, schedule_id=sid, reason='測',
+                                   confirm_zero_surcharge=True, auto_commit=False)
+    ok(r.ok, '未填 + 已確認 → 放行')
+    db_sc = session.execute(text('SELECT surcharge FROM fixed_schedules WHERE id=:i'),
+                            {'i': sid}).scalar()
+    ok(db_sc == 0, f'未填確認放行後 DB 寫 0 而非 NULL（實際 {db_sc!r}）')
+    session.rollback()
+
     # ============================================================
     banner('T4: AI 確認卡')
     # ============================================================
@@ -202,6 +212,62 @@ ok('未扣款' in t_zero, '0 元請假 → 通知講明沒扣款')
 ok('0 元' in t_none, '未填加成 → 通知有講金額')
 ok('-30' in t_neg, '正常扣款 → 金額照舊顯示')
 
+# ============================================================
+banner('T7: 對抗性審查抓到的缺陷（回歸保護）')
+# ============================================================
+import inspect
+import re as _re
+
+from rewrite.handlers.liff.trip import _batch_status_text
+import rewrite.router as _router
+import rewrite.tools.leave as _leave_mod
+import rewrite.tools.import_fixed as _imp
+
+# (1) 群組裡「確認執行」按鈕不能是死鍵：webhook 群組閘門只放行 / 開頭，
+#     而 router 自己的 'leave_input' state 不在放行白名單裡
+_src = inspect.getsource(_router._handle_leave_input)
+ok('f"/{MUTATION_CONFIRM_TEXT}"' in _src,
+   'router 的確認 Quick Reply 帶 / 前綴（否則群組裡按了沒反應）')
+
+# (2) chat_id 要從 state 頂層拿，不是 payload
+ok("payload.get('chat_id')" not in _src,
+   'chat_id 不從 payload 拿（payload 裡根本沒有這個 key）')
+
+# (3) 「已確認」要綁在被警示的那組 (原因, 加成)，不能黏在 state 上
+ok("pending_reason" in _src and "pending_surcharge" in _src and 'zero_ok' in _src,
+   '確認旗標綁定在被警示的原因+加成上（避免同一輪之後全部放行）')
+
+# (4) 批次彙總通知不能再被 falsy 0 吃掉金額
+ok('0 元（未扣款）' in _batch_status_text('leave', [1, 2], 0, '化療', 0),
+   '批次彙總：0 元有講明')
+ok('0 元（未扣款）' in _batch_status_text('leave', [1], 0, '化療', None),
+   '批次彙總：未填也有講明')
+ok('-30' in _batch_status_text('leave', [1], 0, '化療', -30),
+   '批次彙總：正常扣款照舊')
+
+# (5) 匯入「執行」也要回 zero_surcharge_leave（否則廣播警示是死碼）
+_esrc = inspect.getsource(_imp.import_fixed_to_trips)
+ok("'zero_surcharge_leave': zero_surcharge_leave" in _esrc,
+   '匯入執行的回傳含 zero_surcharge_leave')
+ok('zero_surcharge_leave -= 1' in _esrc,
+   '重複跳過時 zero_surcharge_leave 一起扣回（數字不虛高）')
+
+# (6) 三個 LIFF 表單的前端門檻要對齊後端的 >= 0
+for _f in ('trip_status_form', 'trip_batch_status_form', 'fixed_schedule_leave_form'):
+    _h = open(f'/Users/linyancui/minimal_flask/templates/liff/{_f}.html').read()
+    ok('if (sc < 0) return true;' in _h, f'{_f}：前端門檻對齊後端 >= 0')
+    ok(_re.search(r'(>= 0\) (payload|basePayload)\.confirm_zero_surcharge|_sc >= 0\) payload)', _h)
+       is not None, f'{_f}：>= 0 才帶確認旗標')
+
+# (7) 第 10 條入口 apply_leave 要能透傳閘門參數
+_sig = inspect.signature(_leave_mod.apply_leave)
+ok('confirm_zero_surcharge' in _sig.parameters,
+   'apply_leave 有 confirm_zero_surcharge 參數')
+ok(_sig.parameters['surcharge'].default is None,
+   'apply_leave 的 surcharge 預設對齊 passenger_leave（None 而非 0）')
+ok('confirm_zero_surcharge=confirm_zero_surcharge' in inspect.getsource(_leave_mod.apply_leave),
+   'apply_leave 真的把參數透傳下去')
+
 print('\n' + '=' * 60)
-print('✅ 全部通過 — 9 條請假入口的 0 元閘門')
+print('✅ 全部通過 — 9 條請假入口的 0 元閘門 + 8 個審查缺陷')
 print('=' * 60)

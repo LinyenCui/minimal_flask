@@ -24,11 +24,12 @@ def apply_leave(
     session,
     target_id: int,
     reason: str,
-    surcharge: int = 0,
+    surcharge: Optional[int] = None,
     user_id: Optional[str] = None,
     user_name: Optional[str] = None,
     via: str = 'unknown',
     auto_commit: bool = True,
+    confirm_zero_surcharge: bool = False,
 ) -> ToolResult:
     """
     統一請假介面（R-3）
@@ -36,6 +37,8 @@ def apply_leave(
     Args:
         target_id: 不指定是 trip_id 或 fixed_schedule_id，由 wrapper 判斷
         reason / surcharge / user_*: 跟 passenger_leave 一致
+        confirm_zero_surcharge: 透傳給 passenger_leave 的 0 元閘門
+            （沒透傳的話，這條路一旦掛回線上就完全無法放行）
 
     Returns:
         ToolResult — meta 含 routed_to 標明走哪條路徑：
@@ -63,6 +66,7 @@ def apply_leave(
             user_name=user_name,
             via=via,
             auto_commit=auto_commit,
+            confirm_zero_surcharge=confirm_zero_surcharge,
         )
         # 在 meta 加註 routed_to，方便 caller 知道走哪條路
         result.meta['routed_to'] = 'trips'
