@@ -33,10 +33,32 @@
 
     /* 已綁定：待補車資卡片 */
     .card {
+      position: relative; overflow: hidden;
       border: 1px solid #e2e6ea; border-radius: 14px; padding: 16px 14px;
       margin-bottom: 14px; background: #fff;
       box-shadow: 0 2px 6px rgba(20,30,50,.07);
     }
+    /* 類別色條：用 ::before 而不是 border-left / box-shadow —— 那兩個會被
+       填完變綠的 .card.done 覆蓋掉，色條必須在填完之後仍看得見 */
+    .card::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+      background: transparent;
+    }
+    .card.cat-on::before { width: 7px; }
+    /* 診所（量最大）維持原樣：不上色條、不染底，其他類別才跳出來 */
+    .card.cat-a::before { background: #e08a1e; }   /* 東洋 */
+    .card.cat-a          { background: #fffaf2; }
+    .card.cat-b::before { background: #7c4dd4; }   /* 臨時 */
+    .card.cat-b          { background: #faf7ff; }
+    .card.cat-c::before { background: #0d9488; }   /* 之後新增的類別自動輪用 */
+    .card.cat-c          { background: #f2fbfa; }
+    .card.cat-d::before { background: #d9457f; }
+    .card.cat-d          { background: #fff5f9; }
+    .card.cat-e::before { background: #4a6fb5; }
+    .card.cat-e          { background: #f5f8fd; }
+    /* 填完變綠時，底色讓給 .done，但色條保留（仍看得出是哪個類別） */
+    .card.done.cat-a, .card.done.cat-b, .card.done.cat-c,
+    .card.done.cat-d, .card.done.cat-e { background: #f3fbf5; }
     .card.done {
       border-color: #06c755; background: #f3fbf5;
       box-shadow: 0 2px 8px rgba(6,199,85,.18);
@@ -48,9 +70,23 @@
       font-size: 13px; font-weight: 700; margin-right: 6px; vertical-align: middle;
       background: #eceff3; color: #55606e;
     }
-    .tag.c-診所 { background: #e3f0ff; color: #14539a; }
-    .tag.c-東洋 { background: #fff0dd; color: #9a5a12; }
-    .tag.c-臨時 { background: #f0e7ff; color: #5b3a9e; }
+    .tag.cat-diag { background: #e3f0ff; color: #14539a; }   /* 診所 */
+    .tag.cat-a    { background: #fff0dd; color: #9a5a12; }
+    .tag.cat-b    { background: #f0e7ff; color: #5b3a9e; }
+    .tag.cat-c    { background: #dff5f2; color: #0b6b62; }
+    .tag.cat-d    { background: #ffe6f0; color: #a32a5e; }
+    .tag.cat-e    { background: #e8eefb; color: #2f4e8f; }
+    /* 週統計的類別小計：左側同色小方塊，跟班次列表對得起來 */
+    .subtot .swatch {
+      display: inline-block; width: 10px; height: 10px; border-radius: 3px;
+      margin-right: 7px; vertical-align: middle; background: #b9c2cc;
+    }
+    .subtot .swatch.cat-a { background: #e08a1e; }
+    .subtot .swatch.cat-b { background: #7c4dd4; }
+    .subtot .swatch.cat-c { background: #0d9488; }
+    .subtot .swatch.cat-d { background: #d9457f; }
+    .subtot .swatch.cat-e { background: #4a6fb5; }
+    .subtot .swatch.cat-diag { background: #4f8fd6; }
     .row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
     .row label { width: 74px; flex: 0 0 74px; font-size: 19px; font-weight: 700; }
     .row input {
@@ -275,13 +311,30 @@
     }
 
     // ===== 已綁定：待補車資卡片 =====
+    // 類別 → 色票代號。診所（量最大）維持原樣不上色條；
+    // 東洋／臨時固定色；日後新增的類別用字串雜湊自動輪用剩下的色票，
+    // 不必改程式，而且同一個類別永遠拿到同一個顏色。
+    const CAT_FIXED = { '診所': 'diag', '東洋': 'a', '臨時': 'b' };
+    const CAT_POOL = ['c', 'd', 'e'];
+    function catSlot(category) {
+      const c = (category || '').trim();
+      if (!c) return '';
+      if (CAT_FIXED[c]) return CAT_FIXED[c];
+      let h = 0;
+      for (let i = 0; i < c.length; i++) h = (h * 31 + c.charCodeAt(i)) >>> 0;
+      return CAT_POOL[h % CAT_POOL.length];
+    }
+
     function renderCards(driver, trips) {
       // 抬頭用司機編號（用戶定調：有些司機不知道姓名，編號才是共同語言）
       titleEl.textContent = `司機 ${driver.id} ${DAYS > 1 ? '這幾天' : '今天'}要補的車資`;
       cardsEl.innerHTML = '';
       trips.forEach(t => {
         const card = document.createElement('div');
-        card.className = 'card';
+        const slot = catSlot(t.category);
+        // 診所不上色條（維持原樣）；其他類別才 cat-on + 顏色
+        card.className = 'card'
+          + (slot && slot !== 'diag' ? ` cat-on cat-${slot}` : '');
         card.dataset.source = t.source;
         card.dataset.id = t.id;
         const head = t.time ? `${t.time}　${t.route}` : t.route;
@@ -292,7 +345,7 @@
         if (t.passenger_name) metaBits.push(t.passenger_name);
         card.innerHTML = `
           <div class="when">${esc(head)}</div>
-          <div class="meta">${t.category ? `<span class="tag c-${esc(t.category)}">${esc(t.category)}</span>` : ''}${esc(metaBits.join('　'))}</div>
+          <div class="meta">${t.category ? `<span class="tag cat-${slot}">${esc(t.category)}</span>` : ''}${esc(metaBits.join('　'))}</div>
           <div class="row">
             <label>車資</label>
             <input class="in-meter" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="0">
@@ -393,7 +446,8 @@
         const s = document.createElement('div');
         s.className = 'subtot';
         s.innerHTML =
-          `<span>${esc(a.category)}<span class="n">${a.filled_count}/${a.count} 筆</span></span>` +
+          `<span><i class="swatch cat-${catSlot(a.category)}"></i>` +
+          `${esc(a.category)}<span class="n">${a.filled_count}/${a.count} 筆</span></span>` +
           `<span>${fmtMoney(a.sum_amount)} 元</span>`;
         box.appendChild(s);
       });
