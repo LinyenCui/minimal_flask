@@ -23,7 +23,9 @@ import sys
 from datetime import time as _time, timedelta
 
 from dotenv import load_dotenv
-load_dotenv()
+# 跟其他測試一致：.env 打底、.env.dev 覆蓋（只載 .env 會拿到不同的 DATABASE_URL）
+load_dotenv('/Users/linyancui/minimal_flask/.env')
+load_dotenv('/Users/linyancui/minimal_flask/.env.dev', override=True)
 
 sys.path.insert(0, '/Users/linyancui/minimal_flask')
 
@@ -185,26 +187,28 @@ try:
     # ============================================================
     banner('D4: query_driver_pending_fares（現在態＋過去態混合）')
 
-    def mk_trip(*, tm, status='待派', meter=None, leave=None, driver=DRIVER_A, d=None):
+    def mk_trip(*, tm, status='待派', meter=None, leave=None, driver=DRIVER_A, d=None,
+                extra=0):
         return s.execute(text("""
             INSERT INTO trips (date, time, start_point, end_point, category,
                                driver_id, status, meter_fare, extra_fare,
                                passenger_leave_reason, trip_type)
-            VALUES (:d, :t, :sp, :ep, '臨時', :drv, :st, :mf, 0, :lv, 'fixed')
+            VALUES (:d, :t, :sp, :ep, '臨時', :drv, :st, :mf, :ex, :lv, 'fixed')
             RETURNING trip_id
         """), {'d': d or today, 't': tm, 'sp': '測試起點', 'ep': '測試終點',
-               'drv': driver, 'st': status, 'mf': meter, 'lv': leave}).scalar()
+               'drv': driver, 'st': status, 'mf': meter, 'lv': leave,
+               'ex': extra}).scalar()
 
     def mk_completed(*, meter=None, status=None, leave=None, driver=DRIVER_A,
-                     d=None, code=None):
+                     d=None, code=None, extra=0):
         return s.execute(text("""
             INSERT INTO completed_trips (date, start_point, end_point, category,
                                          driver_id, meter_fare, extra_fare,
                                          status, passenger_leave_reason, unique_code)
-            VALUES (:d, :sp, :ep, '東洋', :drv, :mf, 0, :st, :lv, :code)
+            VALUES (:d, :sp, :ep, '東洋', :drv, :mf, :ex, :st, :lv, :code)
             RETURNING id
         """), {'d': d or today, 'sp': '測試起點C', 'ep': '測試終點C',
-               'drv': driver, 'mf': meter, 'st': status, 'lv': leave,
+               'drv': driver, 'mf': meter, 'st': status, 'lv': leave, 'ex': extra,
                'code': code}).scalar()
 
     t_pending = mk_trip(tm=_time(0, 0), meter=None)             # ✅ 應列入（NULL）
@@ -212,7 +216,12 @@ try:
     t_has_fare = mk_trip(tm=_time(0, 0), meter=380)             # ❌ 已有車資
     t_done = mk_trip(tm=_time(0, 0), status='已完成', meter=0)   # ❌ 已入庫過去態，避免重複
     t_cancel = mk_trip(tm=_time(0, 0), status='註銷', meter=0)   # ❌ 註銷
-    t_leave = mk_trip(tm=_time(0, 0), meter=0, leave='化療')      # ❌ 請假（老闆用加成處理）
+    # 請假的兩種樣態：
+    #   t_leave      錶價 0 —— 待補清單要排除（不叫司機補）
+    #   t_leave_paid 錶價 200 / 加成 −95 —— PROD 真實長相（同車某位乘客沒來、
+    #                車照跑），司機實拿 105，週車資列表必須收，待補清單仍排除
+    t_leave = mk_trip(tm=_time(0, 0), meter=0, leave='化療')
+    t_leave_paid = mk_trip(tm=_time(0, 0), meter=200, extra=-95, leave='中華北路住院')
     t_other = mk_trip(tm=_time(0, 0), meter=0, driver=DRIVER_B)  # ❌ 別人的班次
     t_future = mk_trip(tm=future_dt.time(), meter=0) if HAS_FUTURE_SLOT else None
 
@@ -220,7 +229,9 @@ try:
     c_zero = mk_completed(meter=0, code='TESTDRV_C2')           # ✅ 應列入
     c_has_fare = mk_completed(meter=250, code='TESTDRV_C3')     # ❌ 已有車資
     c_cancel = mk_completed(meter=0, status='已取消', code='TESTDRV_C4')  # ❌ 已取消
-    c_leave = mk_completed(meter=0, leave='住院', code='TESTDRV_C5')      # ❌ 請假
+    c_leave = mk_completed(meter=0, leave='住院', code='TESTDRV_C5')
+    c_leave_paid = mk_completed(meter=200, extra=-95, leave='住院',
+                                code='TESTDRV_C5B')
     c_yesterday = mk_completed(meter=0, d=yesterday, code='TESTDRV_C6')  # days=3 才看得到
 
     r = query_driver_pending_fares(session=s, driver_id=DRIVER_A, days=1)
@@ -229,9 +240,10 @@ try:
     expect_in = {('trip', t_pending), ('trip', t_zero),
                  ('completed', c_pending), ('completed', c_zero)}
     expect_out = {('trip', t_has_fare), ('trip', t_done), ('trip', t_cancel),
-                  ('trip', t_leave), ('trip', t_other),
+                  ('trip', t_leave), ('trip', t_leave_paid), ('trip', t_other),
                   ('completed', c_has_fare), ('completed', c_cancel),
-                  ('completed', c_leave), ('completed', c_yesterday)}
+                  ('completed', c_leave), ('completed', c_leave_paid),
+                  ('completed', c_yesterday)}
     if t_future:
         expect_out.add(('trip', t_future))
     assert expect_in <= got, f'該列入的漏了: {expect_in - got}'
@@ -385,10 +397,15 @@ try:
         ('completed', c_zero),      # 未填
         ('completed', c_has_fare),  # 已填 250
         ('completed', c_in_week),   # 已填 100（週日當天）
+        # 請假班次要收 —— 車照跑，司機賺的錢不能漏算（2026-08-05 修正）
+        ('trip', t_leave),          # 錶價 0 → 收進來但算未填
+        ('trip', t_leave_paid),     # 錶價 200 / 加成 −95 → 已填，計 105
+        ('completed', c_leave),     # 錶價 0 → 收進來但算未填
+        ('completed', c_leave_paid),  # 已填，計 105
     }
     expect_out = {
-        ('trip', t_done), ('trip', t_cancel), ('trip', t_leave), ('trip', t_other),
-        ('completed', c_cancel), ('completed', c_leave), ('completed', c_before),
+        ('trip', t_done), ('trip', t_cancel), ('trip', t_other),
+        ('completed', c_cancel), ('completed', c_before),
     }
     if t_future:
         expect_out.add(('trip', t_future))
@@ -400,7 +417,7 @@ try:
     assert got == expect_in, f'漏: {expect_in - got} / 多: {got - expect_in}'
     assert not (expect_out & got), f'不該列入的跑進來了: {expect_out & got}'
     print(f'  ✓ 收錄 {len(got)} 筆（現在態＋過去態混合）；'
-          f'排除：已完成／註銷／衝突／請假／別人的／上一週'
+          f'含請假（車照跑）；排除：已完成／註銷／衝突／別人的／上一週'
           f'{"／未來時段" if t_future else ""}')
 
     by_id = {(it['source'], it['id']): it for it in r.data}
@@ -413,9 +430,10 @@ try:
     print(f'  ✓ 每筆欄位：已填 {filled["route"]} total={filled["total"]}、'
           f'未填 has_fare=False total=0')
 
-    # 合計只計已填：470 + 380 + 300 + 250 + 100 = 1500（未填的 0 元不進去）
-    expect_filled = 5
-    expect_sum = 470 + 380 + 300 + 250 + 100
+    # 合計只計已填。請假但錶價照跳的兩筆（200−95=105）必須計入 ——
+    # 以前被整批排除，導致司機的車資被少算（用戶回報的 470 元差額主因）
+    expect_filled = 7
+    expect_sum = 470 + 380 + 300 + 250 + 100 + 105 + 105
     assert r.meta['count'] == len(expect_in), r.meta
     assert r.meta['filled_count'] == expect_filled, r.meta
     assert r.meta['sum_amount'] == expect_sum, r.meta
