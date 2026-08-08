@@ -438,6 +438,24 @@ _MISSING_FARE = (
 _NOT_LEAVE = "(passenger_leave_reason IS NULL OR passenger_leave_reason = '')"
 
 
+def is_fare_filled(meter, extra, mod_reason=None) -> bool:
+    """這筆車資算不算「已填」——必須跟待補清單的 _MISSING_FARE 同一套語意。
+
+    未填 = 錶價和加成都空/0 **而且** 沒有「改車資」紀錄。
+    反過來說：
+      · 加成非 0（例：衝帳把錶價改成 0、只留 -55 的加成）→ 已填
+      · 有「改車資」紀錄（人工動過）→ 已填，不該再叫司機補
+
+    以前週列表只寫 `meter != 0`，導致同一筆「不在待補清單、卻在週列表被
+    當成待補」，而且它的金額被靜默排除在合計外（用戶回報的 470 元差額之一）。
+    """
+    return (
+        (meter or 0) != 0
+        or (extra or 0) != 0
+        or '改車資' in (mod_reason or '')
+    )
+
+
 def _route_of(start, via, end) -> str:
     parts = [start or '?']
     if via:
@@ -485,7 +503,7 @@ def query_driver_pending_fares(*, session, driver_id: int, days: int = 1) -> Too
             SELECT trip_id, date, time, category, meter_fare, extra_fare,
                    start_point, via_point, end_point,
                    custom_start_point, custom_via_point, custom_end_point,
-                   trip_type, passenger_name
+                   trip_type, passenger_name, modification_reason
             FROM trips
             WHERE driver_id = :did
               AND date BETWEEN :d_from AND :today
@@ -501,7 +519,8 @@ def query_driver_pending_fares(*, session, driver_id: int, days: int = 1) -> Too
     completed_rows = session.execute(
         text(f"""
             SELECT id, date, category, meter_fare, extra_fare,
-                   start_point, via_point, end_point, passenger_name
+                   start_point, via_point, end_point, passenger_name,
+                   modification_reason
             FROM completed_trips
             WHERE driver_id = :did
               AND date BETWEEN :d_from AND :today
@@ -567,7 +586,14 @@ def query_driver_week_fares(*, session, driver_id: int,
     司機要看的是「這星期到目前跑了什麼、賺了多少、哪幾筆還沒填」：
       現在態 trips           週日 ~ 今天、執行時間已過、status 不在（已完成／註銷／衝突）
       過去態 completed_trips 週日 ~ 今天、非「已取消」
-      兩張表都排除請假班次（司機沒跑，加成由老闆處理，不是司機的車資）
+      ⚠️ **請假班次要收**（2026-08-05 修正）：以前這裡排除請假，理由寫「司機沒跑」，
+         但那是誤解——三層障眼法的「請假」是「同車某位乘客沒來，車照跑」，
+         例：乘客欄「（廖貴7:30）→寶珠7:40 →診所7:45」廖貴住院，寶珠照載，
+         所以錶價 200 照跳、加成 −95 只扣廖貴那份，司機實拿 105。
+         PROD 全部 151 筆請假班次錶價都 > 0（85~450），沒有任何一筆是 0，
+         也就是「請假 = 沒跑」在資料上完全不成立。排除等於少算司機的錢
+         （單是司機 533 上週就少 525 元，全歷史 12,315 元），
+         而且會讓司機看到的數字跟老闆用 AI 加總的帳面數字永遠對不起來。
     status='已完成' 的 trips row 已複製一份到 completed_trips，只取過去態那份，
     否則同一趟車會出現兩次。
 
@@ -603,7 +629,6 @@ def query_driver_week_fares(*, session, driver_id: int,
               AND date BETWEEN :ws AND :we
               AND (date < :today OR time <= :now_t)
               AND status NOT IN ('已完成', '註銷', '衝突')
-              AND {_NOT_LEAVE}
             ORDER BY date, time
         """),
         {'did': driver_id, 'ws': week_start, 'we': week_end,
@@ -618,15 +643,18 @@ def query_driver_week_fares(*, session, driver_id: int,
             WHERE driver_id = :did
               AND date BETWEEN :ws AND :we
               AND (status IS NULL OR status <> '已取消')
-              AND {_NOT_LEAVE}
             ORDER BY date, id
         """),
         {'did': driver_id, 'ws': week_start, 'we': week_end},
     ).fetchall()
 
-    def _pack(*, source, rid, d, tm, route, category, meter, extra) -> dict:
-        # 「已填」的判定跟待補清單一致：錶價空或 0 就是還沒填
-        has_fare = meter is not None and meter != 0
+    def _pack(*, source, rid, d, tm, route, category, meter, extra,
+              mod_reason=None) -> dict:
+        # 「已填」必須跟待補清單（_MISSING_FARE）同一套判定，否則同一筆會
+        # 「不在待補清單、卻在週列表被當成待補」，而且金額被靜默漏掉。
+        # 未填 = 錶價和加成都空/0 **而且** 沒有「改車資」紀錄；
+        # 反過來說有動過車資的（例：人工把錶價改成 0 的衝帳）就算已填。
+        has_fare = is_fare_filled(meter, extra, mod_reason)
         return {
             'source': source,
             'id': rid,
@@ -652,6 +680,7 @@ def query_driver_week_fares(*, session, driver_id: int,
             tm=d['time'].strftime('%H:%M') if d.get('time') else None,
             route=_route_of(sp, vp, ep), category=d.get('category'),
             meter=d.get('meter_fare'), extra=d.get('extra_fare'),
+            mod_reason=d.get('modification_reason'),
         ))
     for r in completed_rows:
         d = dict(r._mapping)
@@ -661,6 +690,7 @@ def query_driver_week_fares(*, session, driver_id: int,
             route=_route_of(d.get('start_point'), d.get('via_point'), d.get('end_point')),
             category=d.get('category'),
             meter=d.get('meter_fare'), extra=d.get('extra_fare'),
+            mod_reason=d.get('modification_reason'),
         ))
 
     items.sort(key=lambda it: (it['date'] or '', it['time'] or '99:99', it['id']))

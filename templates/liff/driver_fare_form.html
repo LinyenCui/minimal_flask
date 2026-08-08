@@ -464,7 +464,9 @@
       const total = document.createElement('div');
       total.className = 'total';
       total.innerHTML =
-        `本週合計 ${fmtMoney(week.sum_amount)} 元 ` +
+        // 文案要跟著週次走 —— 寫死「本週合計」的話，看上週時標題寫「上週車資」
+        // 底下卻寫「本週合計」，對帳時會誤讀
+        `${wname}合計 ${fmtMoney(week.sum_amount)} 元 ` +
         `<span class="sub">（已填 ${Number(week.filled_count) || 0}` +
         `／共 ${Number(week.count) || 0} 筆）</span>`;
       box.appendChild(total);
