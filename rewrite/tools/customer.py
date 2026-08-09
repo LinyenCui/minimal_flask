@@ -316,6 +316,62 @@ _UPDATABLE_FIELDS = {
 }
 
 
+def prepare_create_customer(
+    *,
+    session,
+    name: str,
+    short_name: str,
+    address: str,
+    category: Optional[str] = None,
+    contact_phone: Optional[str] = None,
+    remarks: Optional[str] = None,
+    birthday: Optional[date] = None,
+    gender: Optional[str] = None,
+    medical_record_no: Optional[str] = None,
+    dm_care_no: Optional[str] = None,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
+) -> ToolResult:
+    """Validate and prepare a customer create payload without writing.
+
+    This is the SELECT-only half of :func:`create_customer`.  Keeping the
+    validation and exact ``short_name`` duplicate check here gives import
+    previews the same contract as the formal mutation path without issuing an
+    INSERT (``auto_commit=False`` is not a dry-run because it still inserts).
+    """
+    if not name or not name.strip():
+        return ToolResult.fail("name 不可空")
+    if not short_name or not short_name.strip():
+        return ToolResult.fail("short_name 不可空")
+    if not address or not address.strip():
+        return ToolResult.fail("address 不可空")
+
+    if gender and gender not in ('M', 'F'):
+        return ToolResult.fail(f"gender 必須是 M 或 F，收到: {gender!r}")
+
+    dup = session.execute(
+        text("SELECT id FROM customers WHERE short_name = :v"),
+        {'v': short_name}
+    ).fetchone()
+    if dup:
+        return ToolResult.fail(f"短名「{short_name}」已存在 (customer #{dup[0]})")
+
+    return ToolResult.success(data={
+        'name': name,
+        'short_name': short_name,
+        'address': address,
+        'category': category,
+        'contact_phone': contact_phone,
+        'remarks': remarks,
+        'birthday': birthday,
+        'gender': gender,
+        'medical_record_no': medical_record_no,
+        'dm_care_no': dm_care_no,
+        'latitude': latitude,
+        'longitude': longitude,
+    })
+
+
 def create_customer(
     *,
     session,
@@ -348,25 +404,23 @@ def create_customer(
     ⚠️ 2026-05-08：drop national_id / insurance_type；舊 payload 從 **_deprecated
        吞掉不報錯（漸進過渡）
     """
-    # --- 必填驗證 ---
-    if not name or not name.strip():
-        return ToolResult.fail("name 不可空")
-    if not short_name or not short_name.strip():
-        return ToolResult.fail("short_name 不可空")
-    if not address or not address.strip():
-        return ToolResult.fail("address 不可空")
-
-    # --- gender 驗證 ---
-    if gender and gender not in ('M', 'F'):
-        return ToolResult.fail(f"gender 必須是 M 或 F，收到: {gender!r}")
-
-    # --- short_name 唯一性 ---
-    dup = session.execute(
-        text("SELECT id FROM customers WHERE short_name = :v"),
-        {'v': short_name}
-    ).fetchone()
-    if dup:
-        return ToolResult.fail(f"短名「{short_name}」已存在 (customer #{dup[0]})")
+    prepared = prepare_create_customer(
+        session=session,
+        name=name,
+        short_name=short_name,
+        address=address,
+        category=category,
+        contact_phone=contact_phone,
+        remarks=remarks,
+        birthday=birthday,
+        gender=gender,
+        medical_record_no=medical_record_no,
+        dm_care_no=dm_care_no,
+        latitude=latitude,
+        longitude=longitude,
+    )
+    if not prepared:
+        return prepared
 
     # --- INSERT ---
     result = session.execute(text("""
