@@ -283,7 +283,10 @@ def _ct_row(ct: CompletedTripView) -> dict:
     route_text = _short_route(ct)
     # 金額恆顯示（請假列可能是負數加成，如 -30，照顯示）；None/0 才顯佔位
     if ct.computed_total:
-        fare_text = f"{ct.computed_total}元"
+        # 列表不帶「元」——carousel 一行要塞 編號/路線/司機/金額 四欄，
+        # 路線常被截成「土城→經湖美街46巷…」，省下的字寬還給路線。
+        # （詳情卡與統計卡仍保留「元」，那邊空間夠。）
+        fare_text = f"{ct.computed_total}"
         fare_color = LEAVE if ct.is_leave else ACCENT_DARK
     else:
         fare_text = "—" if ct.is_leave else "未記錄"
