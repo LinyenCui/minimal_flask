@@ -56,6 +56,14 @@
     .trip-row .meta { flex: 1; min-width: 0; }
     .trip-row .meta .top { font-weight: 600; }
     .trip-row .meta .sub { font-size: 12px; color: #666; }
+    select.drv-pick {
+      flex: 0 0 100%; margin: 6px 0 2px 28px; max-width: calc(100% - 28px);
+      height: 40px; font-size: 16px; padding: 4px 8px;
+      border: 2px solid #cfd5dc; border-radius: 8px; background: #fff;
+    }
+    #bulk-driver { width: 100%; height: 46px; font-size: 17px; padding: 6px 10px;
+      border: 2px solid #06c755; border-radius: 10px; background: #fff; }
+    .trip-row { flex-wrap: wrap; }
     .trip-row .result { font-size: 12px; min-width: 60px; text-align: right; }
     .trip-row .result.ok { color: #2E7D32; }
     .trip-row .result.err { color: #c0392b; }
@@ -99,6 +107,14 @@
           <!-- 由 JS 依目前狀態動態插入合法動作 -->
         </div>
         <div id="action-helper" class="helper"></div>
+      </div>
+
+      <!-- 指派專屬：一次填滿（下面每列還能個別調） -->
+      <div id="bulk-driver-wrap" class="field" hidden>
+        <label>全部指派給</label>
+        <select id="bulk-driver"></select>
+        <div class="helper">選了會把下面每一列都填成這位；之後可以再個別調整。
+          沒動過的班次（司機沒變）會自動跳過，不會誤改已經派好的。</div>
       </div>
 
       <!-- 請假專屬 -->
@@ -156,6 +172,8 @@
     const pickerEl = document.getElementById('action-picker');
     const actionHelperEl = document.getElementById('action-helper');
     const leaveFieldsEl = document.getElementById('leave-fields');
+    const bulkWrapEl = document.getElementById('bulk-driver-wrap');
+    const bulkDrvEl = document.getElementById('bulk-driver');
     const reasonFieldsEl = document.getElementById('reason-fields');
     const submitBtn = document.getElementById('btn-submit');
     const cancelBtn = document.getElementById('btn-cancel');
@@ -225,15 +243,20 @@
       cancel:  '🚫 註銷',
       conflict:'⚠️ 衝突',
       restore: '🔄 改回準備',
+      assign:  '🚕 指派司機',
+      unassign:'↩️ 撤銷指派',
     };
     const SUBMIT_LABEL = {
       leave:   '確認請假（套到勾選班次）',
       cancel:  '確認註銷（套到勾選班次）',
       conflict:'確認標記衝突（套到勾選班次）',
       restore: '確認改回準備（套到勾選班次）',
+      assign:  '確認指派（套到勾選班次）',
+      unassign:'確認撤銷指派（套到勾選班次）',
     };
 
     let trips = [];                // 已 fetch 的 trip 詳情
+    let drivers = [];              // 司機清單（跟班次同一支 GET，不另外 fetch）
     let currentAction = '';
 
     // Alternative A：一次 fetch 拿全部,避開 iOS LIFF WebView 對同頁多次 fetch()
@@ -248,12 +271,60 @@
         if (!data.ok) {
           return ids.map(id => ({ id, error: data.error || `HTTP ${resp.status}` }));
         }
+        drivers = data.drivers || [];
         return (data.trips || []).map(item => item.ok
           ? { id: item.id, trip: item.trip }
           : { id: item.id, error: item.error });
       } catch (e) {
         return ids.map(id => ({ id, error: e.message }));
       }
+    }
+
+
+    // 司機姓名來自 DB，插進 innerHTML 前一律轉義
+    function esc(v) {
+      return String(v == null ? '' : v).replace(/[&<>"']/g,
+        c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    // ── 司機下拉 ────────────────────────────────────────────
+    function driverOptionsHtml(selectedId) {
+      const cur = selectedId == null ? '' : String(selectedId);
+      let html = '<option value="">— 未指派 —</option>';
+      for (const d of drivers) {
+        const sel = String(d.id) === cur ? ' selected' : '';
+        html += `<option value="${d.id}"${sel}>${esc(d.display_name || d.id)}</option>`;
+      }
+      // 目前的司機若已停用、不在清單裡，也要看得到（否則會被靜默改掉）
+      if (cur && !drivers.some(d => String(d.id) === cur)) {
+        html += `<option value="${esc(cur)}" selected>${esc(cur)}（已停用）</option>`;
+      }
+      return html;
+    }
+
+    function fillDriverPicks() {
+      tripListEl.querySelectorAll('select.drv-pick').forEach(sel => {
+        sel.innerHTML = driverOptionsHtml(sel.dataset.orig || null);
+      });
+      if (bulkDrvEl) {
+        bulkDrvEl.innerHTML = '<option value="">— 選司機一次填滿 —</option>'
+          + drivers.map(d => `<option value="${d.id}">${esc(d.display_name || d.id)}</option>`).join('');
+      }
+    }
+
+    const ASSIGNABLE = ['待派', '準備', '請假', '衝突'];
+
+    function showDriverPicks(show) {
+      tripListEl.querySelectorAll('select.drv-pick').forEach(sel => {
+        const cb = sel.parentElement.querySelector('input[type=checkbox]');
+        // 只在「這筆真的派得了」時才顯示下拉——註銷/已完成的班次給它一個
+        // 可編輯的下拉會誤導（送出時本來就會跳過，但不該讓人以為填得進去）
+        const item = trips.find(x => String(x.id) === sel.dataset.id);
+        const ds = item && item.trip ? (item.trip.display_status || item.trip.status) : null;
+        const assignable = ASSIGNABLE.includes(ds);
+        sel.hidden = !show || !assignable || !(cb && cb.checked);
+      });
+      if (bulkWrapEl) bulkWrapEl.hidden = !show;
     }
 
     function renderTripList() {
@@ -279,7 +350,11 @@
           const ds = t.display_status || t.status || '?';
           const lr = t.passenger_leave_reason ? `（${t.passenger_leave_reason}）` : '';
           const lockMark = t.is_locked ? '⏰' : '';
-          const cb = (t.is_locked || ds === '已完成') ? 'disabled' : 'checked';
+          // 鎖內的班次「可以勾但預設不勾」——指派/撤銷指派本來就允許鎖內執行
+          // （assign_driver 是 allow_in_lock=True，快到點了才更需要派車），
+          // 以前直接 disabled 等於讓那個能力在批次表單裡用不到。
+          // 其他動作的鎖仍由 atomic tool 把關，勾了也只會顯示「跳過」。
+          const cb = ds === '已完成' ? 'disabled' : (t.is_locked ? '' : 'checked');
           row.innerHTML = `
             <input type="checkbox" data-id="${item.id}" ${cb}>
             <div class="meta">
@@ -288,12 +363,24 @@
             </div>
             <div class="result" data-id="${item.id}"></div>
           `;
+          // 逐筆司機下拉：預設帶該班次「目前的司機」，沒動過的送出時會跳過，
+          // 才不會批次操作時誤改到已經派好的班次
+          const pick = document.createElement('select');
+          pick.className = 'drv-pick';
+          pick.dataset.id = String(item.id);
+          pick.dataset.orig = t.driver_id == null ? '' : String(t.driver_id);
+          pick.hidden = true;
+          row.appendChild(pick);
         }
         tripListEl.appendChild(row);
       }
+      fillDriverPicks();
       // checkbox change → 重算合法動作
       tripListEl.querySelectorAll('input[type=checkbox]').forEach(cb => {
-        cb.addEventListener('change', refreshActionPicker);
+        cb.addEventListener('change', () => {
+          refreshActionPicker();
+          showDriverPicks(currentAction === 'assign');
+        });
       });
     }
 
@@ -315,9 +402,16 @@
         } else if (t.display_status === '請假' || t.display_status === '衝突' || t.display_status === '註銷') {
           valid.add('restore');
         }
+        // 指派：待派/準備/請假/衝突 都能派（已完成/註銷 由 atomic tool 擋）。
+        // 不看 is_locked —— assign_driver 是 allow_in_lock=True，鎖內可以派車。
+        if (['待派', '準備', '請假', '衝突'].includes(t.display_status)) {
+          valid.add('assign');
+          if (t.driver_id) valid.add('unassign');
+        }
       }
       // 維持固定順序顯示
-      return ['leave', 'cancel', 'conflict', 'restore'].filter(a => valid.has(a));
+      return ['assign', 'unassign', 'leave', 'cancel', 'conflict', 'restore']
+        .filter(a => valid.has(a));
     }
 
     function refreshActionPicker() {
@@ -349,6 +443,11 @@
         cancel: selected.filter(t => t.display_status === '準備' && !t.is_locked).length,
         conflict: selected.filter(t => t.display_status === '準備' && !t.is_locked).length,
         restore: selected.filter(t => ['請假','衝突','註銷'].includes(t.display_status) && !t.is_locked).length,
+        // ⚠️ 指派/撤銷指派刻意不看 is_locked —— assign_driver 與 unassign_driver
+        //    都是 @require_modifiable_window(allow_in_lock=True)，鎖內可以派車
+        //    （快到點了才更需要）。照抄上面的 !is_locked 會顯示錯的筆數。
+        assign: selected.filter(t => ['待派','準備','請假','衝突'].includes(t.display_status)).length,
+        unassign: selected.filter(t => ['準備','請假','衝突'].includes(t.display_status) && t.driver_id).length,
       };
       for (const a of actions) {
         const lbl = document.createElement('label');
@@ -388,8 +487,19 @@
       e.target.closest('label').classList.add('checked');
       leaveFieldsEl.hidden = (a !== 'leave');
       reasonFieldsEl.hidden = !(a === 'cancel' || a === 'conflict');
+      showDriverPicks(a === 'assign');
       submitBtn.disabled = false;
       submitBtn.textContent = SUBMIT_LABEL[a] || '確認';
+    }
+
+    if (bulkDrvEl) {
+      bulkDrvEl.addEventListener('change', () => {
+        const v = bulkDrvEl.value;
+        if (!v) return;
+        tripListEl.querySelectorAll('select.drv-pick').forEach(sel => {
+          if (!sel.hidden) sel.value = v;
+        });
+      });
     }
 
     leaveFieldsEl.querySelectorAll('button[data-reason]').forEach(btn => {
@@ -473,6 +583,13 @@
         basePayload.surcharge = scn;
         if (!confirmZeroSurcharge(scn, selected.length)) return;
         if (scn >= 0) basePayload.confirm_zero_surcharge = true;
+      } else if (currentAction === 'assign') {
+        const picked = [...tripListEl.querySelectorAll('select.drv-pick')]
+          .filter(sel => !sel.hidden && sel.value && sel.value !== (sel.dataset.orig || ''));
+        if (!picked.length) {
+          showAlert('err', '❌ 沒有任何班次選了新的司機（用上面「全部指派給」可以一次填滿）');
+          return;
+        }
       } else if (currentAction === 'cancel' || currentAction === 'conflict') {
         const reason = (document.getElementById('reason-other').value || '').trim();
         if (reason) basePayload.reason = reason;
@@ -499,18 +616,38 @@
         // 該動作合不合用此 trip(前端先檢、避免無謂打到後端,但後端仍有 ground truth 把關)
         const ds = t.display_status;
         const locked = t.is_locked;
-        if (ds === '已完成' || locked) {
+        // 指派/撤銷指派不受 30 分鐘鎖限制（atomic tool allow_in_lock=True），
+        // 其他動作照舊在鎖內跳過
+        const lockBlocks = !['assign', 'unassign'].includes(currentAction);
+        if (ds === '已完成' || (locked && lockBlocks)) {
           setRowResult(t.trip_id, 'skip', '跳過'); skipCnt++; continue;
         }
         const okForAction =
           (currentAction === 'leave'    && ds === '準備') ||
           (currentAction === 'cancel'   && ds === '準備') ||
           (currentAction === 'conflict' && ds === '準備') ||
-          (currentAction === 'restore'  && ['請假','衝突','註銷'].includes(ds));
+          (currentAction === 'restore'  && ['請假','衝突','註銷'].includes(ds)) ||
+          (currentAction === 'assign'   && ['待派','準備','請假','衝突'].includes(ds)) ||
+          (currentAction === 'unassign' && ['準備','請假','衝突'].includes(ds) && t.driver_id);
         if (!okForAction) {
           setRowResult(t.trip_id, 'skip', '不適用'); skipCnt++; continue;
         }
-        const result = await submitOne(t.trip_id, basePayload, idToken);
+
+        // 逐筆指派：每列讀自己的下拉；沒動過的（司機沒變）直接跳過，
+        // 免得對已經派好的班次產生一堆無意義的 audit 紀錄
+        let payload = basePayload;
+        if (currentAction === 'assign') {
+          const sel = tripListEl.querySelector(`select.drv-pick[data-id="${t.trip_id}"]`);
+          const chosen = sel ? sel.value : '';
+          if (!chosen) {
+            setRowResult(t.trip_id, 'skip', '未選司機'); skipCnt++; continue;
+          }
+          if (chosen === (sel.dataset.orig || '')) {
+            setRowResult(t.trip_id, 'skip', '未變更'); skipCnt++; continue;
+          }
+          payload = { ...basePayload, driver_id: parseInt(chosen, 10) };
+        }
+        const result = await submitOne(t.trip_id, payload, idToken);
         if (result.ok) {
           setRowResult(t.trip_id, 'ok', '✅');
           okCnt++;
@@ -533,6 +670,12 @@
             reason: basePayload.reason,
             surcharge: basePayload.surcharge,
           };
+          if (currentAction === 'assign') {
+            // 全部派給同一位才在彙總裡點名，逐筆不同司機就只報筆數（避免誤導）
+            const used = [...new Set([...tripListEl.querySelectorAll('select.drv-pick')]
+              .filter(sel => !sel.hidden && sel.value).map(sel => sel.value))];
+            if (used.length === 1) notifyPayload.driver_id = parseInt(used[0], 10);
+          }
           if (basePayload.source) notifyPayload.source = basePayload.source;
           if (_canSend()) notifyPayload.client_can_send = true;
           const nResp = await fetch('/liff/trips/batch_status_notify', {

@@ -35,13 +35,16 @@ from rewrite.tools import trip as trip_tools
 logger = logging.getLogger(__name__)
 
 
-VALID_ACTIONS = ('leave', 'cancel', 'conflict', 'restore')
+VALID_ACTIONS = ('leave', 'cancel', 'conflict', 'restore',
+                 'assign', 'unassign')
 
 _ACTION_VERB = {
     'leave':    '🏷️ 已請假',
     'cancel':   '🚫 已註銷',
     'conflict': '⚠️ 已標記衝突',
     'restore':  '🔄 已改回準備',
+    'assign':   '🚕 已指派司機',
+    'unassign': '↩️ 已撤銷指派',
 }
 
 _WEEKDAY_TC = ['一', '二', '三', '四', '五', '六', '日']
@@ -130,8 +133,20 @@ def trips_batch_get():
         return jsonify({'ok': False, 'error': 'ids 為空或格式錯'}), 400
 
     results = []
+    drivers = []
     session = Session()
     try:
+        # 司機清單搭這支一起回 —— 不能另外開一次 fetch（同頁多次 fetch 在
+        # iOS LIFF WebView 會掉，就是本 endpoint 存在的原因）
+        try:
+            from rewrite.tools import driver as driver_tools
+            dr = driver_tools.query_drivers(session=session, active_only=True)
+            drivers = [{'id': d.id, 'name': d.name or '',
+                        'display_name': getattr(d, 'display_name', None) or str(d.id)}
+                       for d in (dr.data or [])]
+        except Exception:
+            logger.exception('trips_batch_get: 撈司機清單失敗（不影響班次載入）')
+
         for tid in ids:
             r = trip_tools.query_trip_by_id(tid, session=session)
             if r.ok:
@@ -140,7 +155,7 @@ def trips_batch_get():
                 results.append({'id': tid, 'ok': False, 'error': r.error})
     finally:
         session.close()
-    return jsonify({'ok': True, 'trips': results})
+    return jsonify({'ok': True, 'trips': results, 'drivers': drivers})
 
 
 # ---------- POST: dispatch action ----------
@@ -183,6 +198,21 @@ def trip_status_change(trip_id):
                 reason=reason, surcharge=surcharge,
                 user_id=request.line_user_id, via='liff',
                 confirm_zero_surcharge=bool(body.get('confirm_zero_surcharge')),
+            )
+        elif action == 'assign':
+            # 指派不受 30 分鐘鎖限制（atomic tool 是 allow_in_lock=True）——
+            # 快到點了才更需要能派車
+            did = _to_int_or_none(body.get('driver_id'))
+            if did is None:
+                return jsonify({'ok': False, 'error': '請選司機'}), 400
+            result = trip_tools.assign_driver(
+                session=session, trip_id=trip_id, driver_id=did,
+                user_id=request.line_user_id, via='liff',
+            )
+        elif action == 'unassign':
+            result = trip_tools.unassign_driver(
+                session=session, trip_id=trip_id,
+                user_id=request.line_user_id, via='liff',
             )
         elif action == 'cancel':
             result = trip_tools.cancel_trip(
@@ -262,6 +292,10 @@ def _trip_status_chat_text(view, action, reason, surcharge) -> str:
         f"📅 {date_str} {time_str}",
         f"📍 {route}",
     ]
+    if action in ('assign', 'unassign'):
+        # 指派類不影響金額，不印車資行；派給誰由 view 的 driver_id 顯示
+        if view.driver_id:
+            lines.append(f"🚕 司機 #{view.driver_id}")
     if action == 'leave':
         lines.append(f"📝 {reason}")
         # ⚠️ 曾經寫 `if surcharge:` —— 0 是 falsy，害「請假 0 元」的通知連金額
@@ -309,7 +343,8 @@ def trips_batch_status_notify():
 
     reason = (body.get('reason') or '').strip()
     surcharge = _to_int_or_none(body.get('surcharge'))
-    text = _batch_status_text(action, ok_ids, fail_n, reason, surcharge)
+    text = _batch_status_text(action, ok_ids, fail_n, reason, surcharge,
+                              driver_id=_to_int_or_none(body.get('driver_id')))
 
     # chat_text 協議：前端可 sendMessages → 不 push，回 chat_text（免額度）
     if bool(body.get('client_can_send')):
@@ -341,11 +376,14 @@ def trips_batch_status_notify():
     return jsonify({'ok': True})
 
 
-def _batch_status_text(action, ok_ids, fail_n, reason, surcharge) -> str:
+def _batch_status_text(action, ok_ids, fail_n, reason, surcharge,
+                       driver_id=None) -> str:
     """批次狀態變更收尾的彙總文字（chat_text 協議；push fallback 同文案）"""
     verb = _ACTION_VERB.get(action, action)
     lines = [f"{verb} 共 {len(ok_ids)} 筆"]
     lines.append("　" + "、".join(f"#{i}" for i in ok_ids))
+    if action == 'assign' and driver_id:
+        lines.append(f"🚕 指派給司機 #{driver_id}")
     if action == 'leave' and reason:
         # 跟單筆版同一個根因：`if surcharge` 的 0 是 falsy，
         # 會讓 0 元批次請假的彙總看起來跟正常扣款一模一樣
