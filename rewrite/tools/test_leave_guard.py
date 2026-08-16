@@ -74,14 +74,47 @@ ok(mark_confirmed(mark_confirmed('x')).count(CONFIRMED_SUFFIX) == 1, 'mark_confi
 
 session = Session()
 try:
+    # 自建 fixture，不依賴現成資料 —— 本地庫的班次會隨時間全部變成「已完成」，
+    # 靠 SELECT 撈現成的「準備」班次會在某天突然找不到測資而整支紅掉
+    # （2026-08-16 就發生過），跟程式對不對無關。
+    from datetime import date as _d, time as _t, timedelta as _td
+    _far = _d.today() + _td(days=30)
     tid = session.execute(text(
         "SELECT trip_id FROM trips WHERE status='準備' "
         "AND passenger_leave_reason IS NULL ORDER BY trip_id DESC LIMIT 1"
     )).scalar()
+    _synthetic = not tid
+    if _synthetic:
+        tid = 99901
+        _drv = session.execute(text('SELECT id FROM drivers ORDER BY id LIMIT 1')).scalar()
+
+        def _ensure_fixture():
+            exists = session.execute(text('SELECT 1 FROM trips WHERE trip_id=:i'),
+                                     {'i': tid}).scalar()
+            if not exists:
+                session.execute(text("""
+                    INSERT INTO trips (trip_id, date, time, start_point, end_point,
+                                       category, driver_id, status, meter_fare,
+                                       extra_fare, trip_type)
+                    VALUES (:id, :d, :t, '測試起點', '測試終點', '臨時', :drv,
+                            '準備', 0, 0, 'temp')
+                """), {'id': tid, 'd': _far, 't': _t(9, 0), 'drv': _drv})
+        _ensure_fixture()
+    else:
+        def _ensure_fixture():
+            pass
+
+    def _undo():
+        """回滾這個 case。rollback 會連自建的 fixture 一起清掉，所以要補回來
+        （fixture 跟測試案例在同一個交易裡，這是零污染測試的代價）。"""
+        session.rollback()
+        _ensure_fixture()
+
     sid = session.execute(text(
         "SELECT id FROM fixed_schedules WHERE status='準備' LIMIT 1"
     )).scalar()
-    assert tid and sid, '找不到測試用的班次/模板'
+    assert sid, '找不到「準備」狀態的固定班次模板'
+    assert tid, '建不出測試班次'
 
     # ============================================================
     banner(f'T2: 現在態 passenger_leave 閘門（#{tid}）')
@@ -99,24 +132,24 @@ try:
            f'{label} → 擋下且帶 {NEEDS_CONFIRM_KEY} 旗標')
         ok('不會扣款' in (r.error or '') or '沒有扣款' in (r.error or ''),
            f'{label} → 訊息講清楚沒扣款')
-        session.rollback()
+        _undo()
 
     r = leave(reason='測', surcharge=-30)
     ok(r.ok, '填 -30 → 正常放行（不該被閘門誤傷）')
-    session.rollback()
+    _undo()
 
     r = leave(reason='測', surcharge=0, confirm_zero_surcharge=True)
     ok(r.ok, '填 0 + 已確認 → 放行')
     mod = session.execute(text('SELECT modification_reason FROM trips WHERE trip_id=:t'),
                           {'t': tid}).scalar()
     ok(CONFIRMED_SUFFIX in (mod or ''), '放行的 0 元請假有留痕（事後對帳分得出來）')
-    session.rollback()
+    _undo()
 
     r = leave(reason='測', surcharge=-30, confirm_zero_surcharge=True)
     mod = session.execute(text('SELECT modification_reason FROM trips WHERE trip_id=:t'),
                           {'t': tid}).scalar()
     ok(CONFIRMED_SUFFIX not in (mod or ''), '正常扣款不該被加上「已確認」標記')
-    session.rollback()
+    _undo()
 
     # 閘門不可蓋掉更該講的錯
     ok(not passenger_leave(session=session, trip_id=999999, reason='測',
@@ -124,11 +157,11 @@ try:
     ok('找不到' in (passenger_leave(session=session, trip_id=999999, reason='測',
                                     auto_commit=False).error or ''),
        '班次不存在的訊息不被 0 元警示蓋掉')
-    session.rollback()
+    _undo()
     r = passenger_leave(session=session, trip_id=tid, reason='  ',
                         surcharge=0, auto_commit=False)
     ok('原因' in (r.error or ''), '原因空白 → 仍先報原因錯（不是 0 元警示）')
-    session.rollback()
+    _undo()
 
     # ============================================================
     banner(f'T3: 未來態 apply_fixed_schedule_leave 閘門（#{sid}）')
@@ -138,17 +171,17 @@ try:
                                        auto_commit=False, **kw)
         ok(not r.ok and r.meta.get(NEEDS_CONFIRM_KEY) is True, f'{label} → 擋下')
         ok('每週匯入' in (r.error or ''), f'{label} → 有提醒「模板錯了會一直複製」')
-        session.rollback()
+        _undo()
 
     r = apply_fixed_schedule_leave(session=session, schedule_id=sid, reason='測',
                                    surcharge=-95, auto_commit=False)
     ok(r.ok, '填 -95 → 正常放行')
-    session.rollback()
+    _undo()
     r = apply_fixed_schedule_leave(session=session, schedule_id=sid, reason='測',
                                    surcharge=0, confirm_zero_surcharge=True,
                                    auto_commit=False)
     ok(r.ok, '填 0 + 已確認 → 放行')
-    session.rollback()
+    _undo()
 
     # 未填 + 已確認 → DB 要寫 0，不是 NULL
     # （final_surcharge 算了卻沒綁進 UPDATE 的話，這裡會抓到）
@@ -158,7 +191,7 @@ try:
     db_sc = session.execute(text('SELECT surcharge FROM fixed_schedules WHERE id=:i'),
                             {'i': sid}).scalar()
     ok(db_sc == 0, f'未填確認放行後 DB 寫 0 而非 NULL（實際 {db_sc!r}）')
-    session.rollback()
+    _undo()
 
     # ============================================================
     banner('T4: AI 確認卡')

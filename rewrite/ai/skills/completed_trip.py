@@ -19,6 +19,7 @@ from rewrite.tools.completed_trip import (
     query_completed_trip_by_id,
     aggregate_completed_trips,
     update_completed_trip_fare,
+    update_completed_trip_date,
     update_completed_trip_category,
     update_completed_trip_driver,
 )
@@ -56,6 +57,7 @@ def _system_prompt() -> str:
 - 用戶問「加總/統計金額/總計多少」 → aggregate_completed_trips
 - 其他條件查詢（日期/司機/類別/客戶/地點）→ query_completed_trips
 - 「修改 #N 金額/加成」「記錄車資 N」 → update_completed_trip_fare
+- 「已完成 N 的日期改成 X」「這筆記錯日期」 → update_completed_trip_date（不用問原因）
 - 「修改類別 #N」「#N 改類別」 → update_completed_trip_category
 - 「#N 司機改成 M」「換 #N 司機 M」 → update_completed_trip_driver
 
@@ -207,6 +209,36 @@ AGGREGATE_COMPLETED_TRIPS_SCHEMA = {
     },
 }
 
+
+UPDATE_COMPLETED_TRIP_DATE_SCHEMA = {
+    'description': (
+        "Modify a PAST (completed) trip's DATE. "
+        "Triggers: 「把已完成 N 的日期改成 8/11」「過去態 N 日期改成…」「這筆記錯日期了」. "
+        "Also recomputes unique_code — it encodes the date and is the Render↔local sync key "
+        "(completed_trips has a unique index on it), so a bare date change would be "
+        "overwritten back by the next sync. "
+        "改日期不影響金額 → **不要主動問原因**，確認卡就是防呆。"
+        "用戶有講原因就帶（會記進 remarks，不進報表欄位）。"
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'completed_trip_id': {
+                'type': 'integer',
+                'description': "已完成班次 ID（completed_trips.id，不是 trips.trip_id）",
+            },
+            'new_date': {
+                'type': 'string',
+                'description': "新日期，可用 8/11、2026-08-11（走 unified_date_parser）",
+            },
+            'reason': {
+                'type': 'string',
+                'description': "修改原因（選填；用戶有講才帶，不要主動問）",
+            },
+        },
+        'required': ['completed_trip_id', 'new_date'],
+    },
+}
 
 UPDATE_COMPLETED_TRIP_FARE_SCHEMA = {
     'description': (
@@ -388,6 +420,7 @@ def build_completed_trip_skill() -> Skill:
             (query_completed_trip_by_id, QUERY_COMPLETED_TRIP_BY_ID_SCHEMA),
             (aggregate_completed_trips, AGGREGATE_COMPLETED_TRIPS_SCHEMA),
             (update_completed_trip_fare, UPDATE_COMPLETED_TRIP_FARE_SCHEMA),
+            (update_completed_trip_date, UPDATE_COMPLETED_TRIP_DATE_SCHEMA),
             (update_completed_trip_category, UPDATE_COMPLETED_TRIP_CATEGORY_SCHEMA),
             (update_completed_trip_driver, UPDATE_COMPLETED_TRIP_DRIVER_SCHEMA),
         ],

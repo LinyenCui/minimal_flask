@@ -60,7 +60,7 @@ def _system_prompt() -> str:
     unassign_driver / record_fare_current / update_passenger_name / update_trip_category
   - completed_trips 領域：query_completed_trips / query_completed_trips_advanced /
     query_completed_trip_by_id / aggregate_completed_trips / query_reconciliation_text /
-    update_completed_trip_fare / update_completed_trip_category / update_completed_trip_driver
+    update_completed_trip_fare / update_completed_trip_category / update_completed_trip_driver / update_completed_trip_date
   - customer 領域：query_customer_by_term / get_customer_by_id /
     query_customers_by_birthday_day / query_birthday_day_summary /
     create_customer / update_customer / delete_customer
@@ -187,6 +187,8 @@ def _system_prompt() -> str:
 
 [改時間 / 改起終點 / 刪除 的判別]（重要）
 - 「#N 改成 HH:MM」「把 N 時間改成 11:45」現在態班次 → update_trip_time
+- 「#N 的日期改成 8/11」「把 N 延到明天」現在態班次 → update_trip_date
+  （會連動週次與識別碼；已完成的班次要用 update_completed_trip_date，原因必填）
   （同日改時段、不改日期；reason 不用問；註銷/已完成/30 分鐘鎖內會被擋）
 - 「#N 終點改南紡」「起點改X」「途經改Y」「清空途經」現在態班次起終點/途經
   → update_trip_route（new_start/new_end/new_via 任一或多個；可非客戶地點；reason 不用問）

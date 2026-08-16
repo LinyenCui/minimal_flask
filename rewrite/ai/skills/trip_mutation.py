@@ -27,6 +27,7 @@ from rewrite.tools.trip import (
     record_fare_current,
     update_trip_category,
     update_trip_time,
+    update_trip_date,
     update_trip_route,
 )
 
@@ -52,6 +53,7 @@ def _system_prompt() -> str:
 - 記錄/修改現在態車資（錶價/加成）→ record_fare_current
 - 改類別（key 錯時用，例「東洋」改「診所」）→ update_trip_category（reason 選填）
 - 改時間（同日改時段，例「#2575 改成 11:45」）→ update_trip_time
+- 改日期（換一天，例「#2575 的日期改成 8/11」「延到明天」）→ update_trip_date
   （reason 選填；註銷/已完成不可改；30 分鐘鎖內擋；不改日期）
 - 改起點/終點/途經（例「#2841 終點改南紡」「起點改X」「途經改Y」「清空途經」）
   → update_trip_route（new_start/new_end/new_via 任一或多個；reason 選填；
@@ -214,12 +216,36 @@ UPDATE_TRIP_CATEGORY_SCHEMA = {
     },
 }
 
+UPDATE_TRIP_DATE_SCHEMA = {
+    'description': (
+        "Modify a CURRENT trip's DATE (moves it to another day). "
+        "Triggers: 「把行程 N 的日期改成 8/11」「#N 改到明天」「N 延到下週一」. "
+        "Also recomputes week_number and unique_code — those encode the date and are "
+        "the dedup/sync key, so a bare date change would silently lose the record later. "
+        "Rejected if status 註銷/已完成（已完成請用 update_completed_trip_date）, "
+        "inside 30-min lock, or if the new identity code would collide. "
+        "Reason optional（現在態不用問原因）。"
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'trip_id': {'type': 'integer', 'description': "Trip ID（現在態 trips.trip_id）"},
+            'new_date': {
+                'type': 'string',
+                'description': "新日期，可用 8/11、2026-08-11、明天、下週一（走 unified_date_parser）",
+            },
+            'reason': {'type': 'string', 'description': "修改原因（選填，用戶有講才帶）"},
+        },
+        'required': ['trip_id', 'new_date'],
+    },
+}
+
 UPDATE_TRIP_TIME_SCHEMA = {
     'description': (
         "Modify a CURRENT trip's time (same-day re-time only, does NOT change date). "
         "Triggers: 「#N 改成 HH:MM」「把 N 的時間改成 11:45」「現在態 N 改時間」. "
         "Rejected if status 註銷/已完成, or inside 30-min lock. Reason optional (不用問原因). "
-        "改日期請勿用本工具（會連動週次/編號，尚未支援）。"
+        "改日期請用 update_trip_date（那支會連動週次/識別碼）。"
     ),
     'parameters': {
         'type': 'object',
@@ -304,6 +330,7 @@ def build_trip_mutation_skill() -> Skill:
             (record_fare_current, RECORD_FARE_CURRENT_SCHEMA),
             (update_trip_category, UPDATE_TRIP_CATEGORY_SCHEMA),
             (update_trip_time, UPDATE_TRIP_TIME_SCHEMA),
+            (update_trip_date, UPDATE_TRIP_DATE_SCHEMA),
             (update_trip_route, UPDATE_TRIP_ROUTE_SCHEMA),
             # 規則 3 用：mutation 前先 query 確認
             (query_trips, QUERY_TRIPS_SCHEMA),

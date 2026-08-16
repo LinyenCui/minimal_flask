@@ -20,6 +20,8 @@ from typing import Optional, List, Any
 from sqlalchemy import text
 
 from rewrite.tools.base import ToolResult
+from rewrite.tools.trip_identity import iso_week_number, recompute_unique_code
+from modules.utils.unified_date_parser import UnifiedDateParser
 from rewrite.tools.leave_guard import (
     NEEDS_CONFIRM_KEY,
     is_zero_surcharge,
@@ -930,6 +932,130 @@ def update_trip_time(
         changed_fields=diff_fields(before, after),
         reason=reason.strip(),
         extra={'old_time': old_hm, 'new_time': new_hm},
+        via=via,
+    )
+
+    if auto_commit:
+        session.commit()
+    return query_trip_by_id(trip_id, session=session)
+
+
+@require_modifiable_window(allow_in_lock=False)  # 改日期＝改執行時間，鎖內擋
+def update_trip_date(
+    *,
+    session,
+    trip_id: int,
+    new_date,
+    reason: str = '',
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """
+    修改現在態班次「日期」（連 week_number + unique_code 一起改）。
+
+    這是 update_trip_time 當初刻意不做的部分。難的不是 UPDATE date，
+    是 date 被編在 unique_code 裡，而 unique_code 是 scheduler 掉進
+    completed_trips 與 Render↔本地同步的比對主鍵。只改 date 會產生一筆
+    身分證說謊的資料，之後重匯同一週會撞號 → ON CONFLICT DO NOTHING
+    靜默丟掉一筆，車資消失。詳見 rewrite/tools/trip_identity.py。
+
+    所以這個工具一次改三個欄位，而且：
+      · unique_code 格式看不懂 → 直接拒絕（不寫半殘的身分證）
+      · 新 code 會跟別筆撞號 → 直接拒絕（連 completed_trips 也一起查，
+        因為班次遲早會掉進去）
+
+    原因政策（2026-08-16 用戶定調）：改日期不影響金額，**不問原因、也不寫
+    modification_reason** —— trips.modification_reason 會被 scheduler 原封複製進
+    completed_trips（scheduler_service.py:240-260），而請款報表讀那一欄，
+    寫進去就會污染報表說明欄（跟 2026-07-31「換司機不進報表」同一個原則）。
+    用戶有講原因就收，完整軌跡（誰、何時、前後日期/識別碼）記在 audit_log。
+    trips 沒有 remarks 欄可放，所以現在態只靠 audit_log。
+
+    R-5 鎖：allow_in_lock=False（跟 update_trip_time 一致）
+    R-6 audit：寫 'update_trip_date'
+    """
+    reason = (reason or '').strip()
+
+    # 日期解析走唯一來源（CLAUDE.md：禁自建）
+    if isinstance(new_date, date):
+        parsed = new_date
+    else:
+        raw = str(new_date or '').strip()
+        if not raw:
+            return ToolResult.fail("new_date 不可空")
+        try:
+            parsed = UnifiedDateParser.parse(raw)
+        except Exception:
+            parsed = None
+        if not parsed:
+            return ToolResult.fail(f"日期看不懂：{raw!r}（例：8/11、2026-08-11、明天）")
+
+    before = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    if not before:
+        return ToolResult.fail(f"找不到班次 #{trip_id}")
+    status = before.get('status')
+    if status == '已完成':
+        return ToolResult.fail(
+            f"班次 #{trip_id} 已完成，無法改日期（過去態請用「修改已完成班次日期」）")
+    if status == '註銷':
+        return ToolResult.fail(
+            f"班次 #{trip_id} 為註銷狀態，無法改日期（如要恢復請先『改回準備』）")
+
+    old_date = before.get('date')
+    if old_date == parsed:
+        return ToolResult.fail(f"班次 #{trip_id} 日期已是 {parsed}，無需修改")
+
+    # ---- 身分證連動 ----
+    old_code = before.get('unique_code')
+    new_code, kind = recompute_unique_code(old_code, parsed)
+    if kind is None:
+        return ToolResult.fail(
+            f"班次 #{trip_id} 的識別碼格式看不懂（{old_code!r}），"
+            f"不敢改日期——改了會讓它跟同步／掉入已完成的比對對不起來。"
+            f"請改用 Adminer 手動處理，或先確認這筆資料是怎麼來的。")
+    new_week = iso_week_number(parsed)
+
+    # ---- 撞號檢查（trips 沒有唯一索引，撞了不會報錯，要自己擋）----
+    if new_code:
+        dup_trip = session.execute(text(
+            "SELECT trip_id FROM trips WHERE unique_code = :c AND trip_id <> :id LIMIT 1"
+        ), {'c': new_code, 'id': trip_id}).scalar()
+        if dup_trip:
+            return ToolResult.fail(
+                f"改不了：班次 #{dup_trip} 已經用了識別碼 {new_code}。"
+                f"兩筆同號會在掉進已完成時被靜默丟掉一筆。")
+        dup_done = session.execute(text(
+            "SELECT id FROM completed_trips WHERE unique_code = :c LIMIT 1"
+        ), {'c': new_code}).scalar()
+        if dup_done:
+            return ToolResult.fail(
+                f"改不了：已完成班次 #{dup_done} 已經用了識別碼 {new_code}。"
+                f"這筆之後掉進已完成時會被丟掉。")
+
+    # ⚠️ 刻意不動 modification_reason（見上方原因政策）
+    session.execute(text("""
+        UPDATE trips SET
+            date = :d,
+            week_number = :wk,
+            unique_code = :code,
+            modified_by = :who,
+            modification_time = CURRENT_TIMESTAMP
+        WHERE trip_id = :id
+    """), {'d': parsed, 'wk': new_week, 'code': new_code,
+           'who': user_name or user_id, 'id': trip_id})
+
+    after = fetch_trip_snapshot(session=session, trip_id=trip_id)
+    write_audit(
+        session=session, user_id=user_id, user_name=user_name,
+        action_type='update_trip_date', target_table='trips', target_id=trip_id,
+        before_state=before, after_state=after,
+        changed_fields=diff_fields(before, after),
+        reason=reason or '改日期',
+        extra={'old_date': str(old_date), 'new_date': str(parsed),
+               'old_unique_code': old_code, 'new_unique_code': new_code,
+               'old_week_number': before.get('week_number'), 'new_week_number': new_week},
         via=via,
     )
 

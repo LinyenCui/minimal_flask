@@ -34,6 +34,7 @@ from modules.utils.taiwan_time import get_taiwan_time
 # ✅ 日期解析唯一來源（禁自建）— 對帳 tool 的 str 日期 coerce 用
 from modules.utils.unified_date_parser import UnifiedDateParser
 # 過去態唯讀受護欄查詢層編譯器（spec docs/specs/04）
+from rewrite.tools.trip_identity import recompute_unique_code
 from rewrite.tools.query_spec import compile_query_spec, QuerySpecError, MAX_LIMIT as _SPEC_MAX_LIMIT
 
 # 過去態 category 受限值（對齊 legacy handle_modify_category）
@@ -743,6 +744,121 @@ def _weekly_charge_warning(*, session, trip_date, delta: int) -> Optional[str]:
         import logging
         logging.getLogger(__name__).warning(f"weekly_charge 勾稽檢查失敗: {e}")
         return None
+
+
+
+def update_completed_trip_date(
+    *,
+    session,
+    completed_trip_id: int,
+    new_date,
+    reason: str,
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    via: str = 'unknown',
+    auto_commit: bool = True,
+) -> ToolResult:
+    """
+    修改過去態班次「日期」（連 unique_code 一起改）。
+
+    為什麼不能只 UPDATE date：unique_code 把日期編在裡面，而它是
+    Render↔本地同步的比對主鍵（ON CONFLICT (unique_code) DO UPDATE），
+    completed_trips 上還有唯一索引 uk_completed_trips_unique_code。
+    只改 date 會留下一筆身分證說謊的資料，同步時會被對方的版本蓋回去。
+    詳見 rewrite/tools/trip_identity.py。
+
+    原因政策（2026-08-16 用戶定調）：只有改金額才需要問明原因，改日期確認就好。
+    給了原因就寫進 **remarks**——請款報表的 SELECT 讀 modification_reason 與
+    passenger_leave_reason，**不讀 remarks**（report_service.py:635-650），
+    所以寫在那裡不會污染報表說明欄。完整軌跡另記 audit_log。
+
+    ⚠️ 改日期會改變這筆算在哪一週，週結算的歸屬會跟著變（金額不變）。
+
+    Args:
+        completed_trip_id: completed_trips.id（不是 trips.trip_id）
+        new_date: 走 unified_date_parser，吃「8/11」「2026-08-11」「明天」
+        reason: 修改原因（選填；有給就記進 remarks，不進報表欄位）
+
+    R-5 鎖：不適用（過去態已完成）
+    R-6 audit：寫 'update_completed_trip_date'
+    """
+    reason = (reason or '').strip()
+
+    if isinstance(new_date, date):
+        parsed = new_date
+    else:
+        raw = str(new_date or '').strip()
+        if not raw:
+            return ToolResult.fail("new_date 不可空")
+        parsed = _coerce_date(raw)
+        if not parsed:
+            return ToolResult.fail(f"日期看不懂：{raw!r}（例：8/11、2026-08-11）")
+
+    before = _fetch_completed_trip_snapshot(
+        session=session, completed_trip_id=completed_trip_id,
+    )
+    if not before:
+        return ToolResult.fail(f"找不到已完成班次 #{completed_trip_id}")
+
+    old_date = before.get('date')
+    if old_date == parsed:
+        return ToolResult.fail(
+            f"已完成班次 #{completed_trip_id} 日期已是 {parsed}，無需修改")
+
+    # ---- 身分證連動 ----
+    old_code = before.get('unique_code')
+    new_code, kind = recompute_unique_code(old_code, parsed)
+    if kind is None:
+        return ToolResult.fail(
+            f"已完成班次 #{completed_trip_id} 的識別碼格式看不懂（{old_code!r}），"
+            f"不敢改日期——改了會讓它跟 Render 同步的比對對不起來。")
+
+    # 唯一索引會擋，但先查一次才能給看得懂的訊息（而不是一串 SQL 例外）
+    if new_code:
+        dup = session.execute(text(
+            "SELECT id FROM completed_trips WHERE unique_code = :c AND id <> :id LIMIT 1"
+        ), {'c': new_code, 'id': completed_trip_id}).scalar()
+        if dup:
+            return ToolResult.fail(
+                f"改不了：已完成班次 #{dup} 已經用了識別碼 {new_code}"
+                f"（同一天同一條路線已經有一筆了）。")
+
+    # 備註疊加（報表不讀 remarks，寫這裡不會污染說明欄）
+    _note = f"改日期 {old_date}→{parsed}" + (f"：{reason}" if reason else "")
+    _old_remarks = (before.get('remarks') or '').strip()
+    new_remarks = f"{_old_remarks}; {_note}" if _old_remarks else _note
+
+    # ⚠️ 刻意不動 modification_reason（那一欄會進請款報表）
+    session.execute(text("""
+        UPDATE completed_trips SET
+            date = :d,
+            unique_code = :code,
+            remarks = :rm,
+            modified_by = :who,
+            modification_time = :mt
+        WHERE id = :id
+    """), {'d': parsed, 'code': new_code, 'rm': new_remarks,
+           'who': user_name or user_id, 'mt': get_taiwan_time(),
+           'id': completed_trip_id})
+
+    after = _fetch_completed_trip_snapshot(
+        session=session, completed_trip_id=completed_trip_id,
+    )
+    write_audit(
+        session=session, user_id=user_id, user_name=user_name,
+        action_type='update_completed_trip_date',
+        target_table='completed_trips', target_id=completed_trip_id,
+        before_state=before, after_state=after,
+        changed_fields=diff_fields(before, after),
+        reason=reason or '改日期',
+        extra={'old_date': str(old_date), 'new_date': str(parsed),
+               'old_unique_code': old_code, 'new_unique_code': new_code},
+        via=via,
+    )
+
+    if auto_commit:
+        session.commit()
+    return query_completed_trip_by_id(completed_trip_id, session=session)
 
 
 def update_completed_trip_fare(

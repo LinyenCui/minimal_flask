@@ -147,6 +147,8 @@ _TOOL_ACTION_LABELS = {
     'record_fare_current': '記錄車資',
     'update_trip_category': '改類別',
     'update_trip_time': '改時間',
+    'update_trip_date': '改日期',
+    'update_completed_trip_date': '改日期（已完成）',
     'update_trip_route': '改起終點',
     'update_completed_trip_fare': '修改車資',
     'update_completed_trip_category': '改類別',
@@ -174,6 +176,7 @@ _TOOL_ACTION_LABELS = {
 _ARG_LABELS = {
     **_FIELD_TERMS,
     'surcharge': '加成',
+    'new_date': '新日期',
     'passenger_name': '乘客名',
     'new_category': '新類別',
     'new_time': '新時間',
