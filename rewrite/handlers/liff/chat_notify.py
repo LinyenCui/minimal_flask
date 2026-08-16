@@ -37,6 +37,8 @@ def push_text(target_id, text, label: str = 'liff') -> None:
         api.push_message(PushMessageRequest(
             to=target_id, messages=[TextMessage(text=text)],
         ))
+        from modules.utils.push_stats import record_push
+        record_push(label, target_id=target_id)
         logger.info(f"[LIFF] pushed {label} to {target_id[:8]}")
     except Exception as e:
         body_attr = getattr(e, 'body', None)

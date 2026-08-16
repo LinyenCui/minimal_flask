@@ -173,6 +173,8 @@ def _push_customer(target_id: str | None, view, action_label: str, source=None) 
             to=target_id,
             messages=[text_msg, flex_msg],
         ))
+        from modules.utils.push_stats import record_push
+        record_push('customer', target_id=target_id)
         logger.info(f"[LIFF] pushed customer #{view.id} ({action_label}) to {target_id[:8]}")
     except Exception as e:
         body_attr = getattr(e, 'body', None)
@@ -208,6 +210,8 @@ def _push_customer_batch(target_id: str | None, created_views: list, failures: l
         api.push_message(PushMessageRequest(
             to=target_id, messages=[TextMessage(text=text)],
         ))
+        from modules.utils.push_stats import record_push
+        record_push('customer', target_id=target_id)
         logger.info(
             f"[LIFF] customer batch push n={len(created_views)} → {target_id[:8]} (1 push)"
         )

@@ -169,6 +169,8 @@ def _push_booking(target_id: str | None, view) -> None:
             to=target_id,
             messages=[text_msg, flex_msg],
         ))
+        from modules.utils.push_stats import record_push
+        record_push('booking', target_id=target_id)
         logger.info(f"[LIFF] pushed booking #{view.trip_id} to {target_id[:8]}")
     except Exception as e:
         body_attr = getattr(e, 'body', None)
@@ -295,6 +297,8 @@ def booking_batch_notify():
         api.push_message(PushMessageRequest(
             to=target, messages=[TextMessage(text=text)],
         ))
+        from modules.utils.push_stats import record_push
+        record_push('booking', target_id=target)
         logger.info(
             f"[LIFF] booking batch notify n={len(bookings)} → {target[:8]} (1 push)"
         )

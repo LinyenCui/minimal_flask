@@ -214,6 +214,8 @@ def _push_to_relay(relay_chat_id: str, text: str,
             to=relay_chat_id,
             messages=[_build_ack_text_message(text, warn=warn)],
         ))
+        from modules.utils.push_stats import record_push
+        record_push('relay', target_id=relay_chat_id)
         logger.info(f"[relay] pushed to {relay_chat_id[:8]}…")
     except Exception as e:
         logger.warning(f"[relay] push 失敗（只 log 不中斷）: {e}")

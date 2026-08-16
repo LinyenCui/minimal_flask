@@ -55,6 +55,8 @@ def _notify_admin(text_msg: str) -> None:
             to=admin_chat_id,
             messages=[TextMessage(text=text_msg)],
         ))
+        from modules.utils.push_stats import record_push
+        record_push('scheduler', target_id=admin_chat_id)
     except Exception as notify_err:
         try:
             current_app.logger.warning(f"排程告警發送失敗（不影響主流程）: {notify_err}")

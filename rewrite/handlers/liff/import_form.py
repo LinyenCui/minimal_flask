@@ -219,6 +219,8 @@ def _push_import_broadcast(target_id: str, msg_text: str) -> None:
         api.push_message(PushMessageRequest(
             to=target_id, messages=[TextMessage(text=msg_text)],
         ))
+        from modules.utils.push_stats import record_push
+        record_push('import', target_id=target_id)
         logger.info(f"[LIFF] pushed import broadcast to {target_id[:8]}…")
     except Exception as e:
         # 抓 LINE API 的 body — 看 LINE 給的 detailed error

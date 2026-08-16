@@ -138,6 +138,7 @@ _ALL_EXACT_COMMAND_TRIGGERS = (
     | _DB_SYNC_TRIGGERS
     | _HELP_TRIGGERS
     | {'重置班次序號', '歸檔檢查', '備份檢查', '歸檔狀態',
+       '推播用量', '推播統計', '推播額度', 'push用量',
        '歸檔清理', '確認清理', '取消清理'}
 )
 # 註：_DRUG_DX_LINK_LIFF_TRIGGERS 刻意不納入聯集 —— 藥診關聯在群組有自己的前綴
@@ -743,6 +744,18 @@ def try_handle_sandbox(event) -> bool:
             logger.error(f"歸檔清理執行失敗: {_px_err}", exc_info=True)
             _msg = f"❌ 清理失敗：{str(_px_err)[:150]}"
         reply_message(event.reply_token, {'type': 'text', 'text': _msg})
+        return True
+
+    # 推播用量：本月的 LINE push 被哪些功能吃掉（純唯讀、reply 零 push）
+    if text in ('推播用量', '推播統計', '推播額度', 'push用量'):
+        try:
+            from modules.utils.push_stats import render_summary_text
+            _txt = render_summary_text()
+        except Exception as _ps_err:
+            logger.error(f"推播用量查詢失敗: {_ps_err}", exc_info=True)
+            _txt = f"❌ 查詢失敗：{str(_ps_err)[:150]}"
+        reply_message(event.reply_token, {'type': 'text', 'text': _txt})
+        logger.info(f"[rewrite sandbox] {short_uid} → push_stats")
         return True
 
     # 歸檔檢查：刪 Render 舊班次前確認本地備份完整（純唯讀、reply 零 push）

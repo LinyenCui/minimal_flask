@@ -366,6 +366,8 @@ def trips_batch_status_notify():
         api.push_message(PushMessageRequest(
             to=target, messages=[TextMessage(text=text)],
         ))
+        from modules.utils.push_stats import record_push
+        record_push('batch_status', target_id=target)
         logger.info(
             f"[LIFF] batch status notify ({action}) ok={len(ok_ids)} "
             f"fail={fail_n} → {target[:8]} (1 push)"
