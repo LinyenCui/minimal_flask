@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from modules.utils.unified_date_parser import UnifiedDateParser
+from rewrite.tools.fare_rules import FILLED_SQL
 
 VALID_CATEGORIES = ('診所', '東洋', '臨時')
 MAX_LIMIT = 80
@@ -47,7 +48,9 @@ ALLOWED_COLUMNS: dict[str, ColSpec] = {
     'driver_id':      ColSpec('driver_id', 'int', ('=', 'in'), can_group=True, can_sort=True),
     'category':       ColSpec('category', 'enum', ('=', 'in'), can_group=True, can_sort=True, enum=VALID_CATEGORIES),
     'total_fare':     ColSpec(_TOTAL, 'int', _CMP_OPS + ('between',), can_sort=True),
-    'has_fare':       ColSpec(f"({_TOTAL} > 0)", 'bool', ('=',), can_group=True),
+    # 沖帳的 0 元算「已填」——判定與 fare_rules / View 同源，避免同一筆資料
+    # 在查詢結果與列表顯示上講不同的話
+    'has_fare':       ColSpec(FILLED_SQL, 'bool', ('=',), can_group=True),
     'is_leave':       ColSpec("(passenger_leave_reason IS NOT NULL)", 'bool', ('=',), can_group=True),
     'start_point':    ColSpec('start_point', 'text', ('=', 'ilike'), can_group=True, can_sort=True),
     'end_point':      ColSpec('end_point', 'text', ('=', 'ilike'), can_group=True, can_sort=True),

@@ -281,8 +281,11 @@ def _ct_row(ct: CompletedTripView) -> dict:
     """Carousel 內一行已完成班次（可 tap 至詳情）"""
     driver_text = f"🚗{ct.driver_id}" if ct.driver_id else "🚗?"
     route_text = _short_route(ct)
-    # 金額恆顯示（請假列可能是負數加成，如 -30，照顯示）；None/0 才顯佔位
-    if ct.computed_total:
+    # 金額恆顯示（請假列可能是負數加成，如 -30，照顯示）。
+    # ⚠️ 判斷用 has_fare 而不是 `if ct.computed_total` —— 0 是 falsy，
+    #    沖帳班次（140 / −140 → 淨額 0，備註有「改車資」）會被顯示成
+    #    「未記錄」，但它確實填過（2026-08-20 用戶回報）。
+    if ct.has_fare:
         # 列表不帶「元」——carousel 一行要塞 編號/路線/司機/金額 四欄，
         # 路線常被截成「土城→經湖美街46巷…」，省下的字寬還給路線。
         # （詳情卡與統計卡仍保留「元」，那邊空間夠。）

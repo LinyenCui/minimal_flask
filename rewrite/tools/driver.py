@@ -429,31 +429,15 @@ def set_driver_active(
 # 錢已經處理過了，舊規則會把它們當「0 元待補」丟給司機重填（實測 #3102 -55、
 # #3101 -45、#1745 +2250）。加成非 0 一律代表有人動過這筆的錢。
 # 「改車資」關鍵字則涵蓋「刻意填 0」的免費車，否則它會永遠賴在待補清單。
-_MISSING_FARE = (
-    "(meter_fare IS NULL OR meter_fare = 0)"
-    " AND (extra_fare IS NULL OR extra_fare = 0)"
-    " AND (modification_reason IS NULL OR modification_reason NOT LIKE '%%改車資%%')"
-)
+from rewrite.tools.fare_rules import MISSING_SQL as _MISSING_FARE
 # 請假班次的車資由老闆用加成處理，司機沒跑不用回報 → 不列入待補
 _NOT_LEAVE = "(passenger_leave_reason IS NULL OR passenger_leave_reason = '')"
 
 
-def is_fare_filled(meter, extra, mod_reason=None) -> bool:
-    """這筆車資算不算「已填」——必須跟待補清單的 _MISSING_FARE 同一套語意。
-
-    未填 = 錶價和加成都空/0 **而且** 沒有「改車資」紀錄。
-    反過來說：
-      · 加成非 0（例：衝帳把錶價改成 0、只留 -55 的加成）→ 已填
-      · 有「改車資」紀錄（人工動過）→ 已填，不該再叫司機補
-
-    以前週列表只寫 `meter != 0`，導致同一筆「不在待補清單、卻在週列表被
-    當成待補」，而且它的金額被靜默排除在合計外（用戶回報的 470 元差額之一）。
-    """
-    return (
-        (meter or 0) != 0
-        or (extra or 0) != 0
-        or '改車資' in (mod_reason or '')
-    )
+# 判定本體搬到 rewrite/tools/fare_rules.py —— 同一條規則還被
+# 已完成列表/統計/查詢過濾/受護欄查詢層用到，散成五份會各自漂移
+# （2026-08-20 用戶回報：沖帳的 0 元班次在已完成列表被顯示成「未記錄」）。
+from rewrite.tools.fare_rules import is_fare_filled  # noqa: F401  （re-export）
 
 
 def _route_of(start, via, end) -> str:

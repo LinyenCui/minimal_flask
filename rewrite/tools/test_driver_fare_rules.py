@@ -90,6 +90,56 @@ ok('`${wname}合計 ' in html,
 ok('`本週合計 ' not in html,
    '沒有殘留寫死的「本週合計」')
 
+print()
+print('=' * 60)
+print('# T4: 同一條規則的四個使用者必須同源（2026-08-20 沖帳被判未記錄）')
+print('=' * 60)
+import inspect as _ins
+
+from rewrite.tools import fare_rules as _fr
+from rewrite.tools import completed_trip as _ct
+from rewrite.tools import query_spec as _qs
+from rewrite.views import completed_trip_flex as _flex
+from rewrite.tools import driver as _drv
+
+# 沖帳：錶價 140 / 加成 −140 → 淨額 0，但備註有「改車資」→ 已填
+ok(is_fare_filled(140, -140, '[1] 改車資: 加成 0→-140 (遲到自己騎車回)'),
+   '沖帳（140/−140，備註有改車資）算已填')
+ok(is_fare_filled(0, 0, '[1] 改車資: 錶價 220→0'), '錶價被抵成 0 但動過 → 已填')
+ok(not is_fare_filled(0, 0, None), '真的沒填才是沒填')
+ok(not is_fare_filled(None, None, '指派司機 5386'), '備註不是「改車資」→ 仍沒填')
+
+# View 的 has_fare 要用共用判定，不能自己算「總額 > 0」
+_vsrc = _ins.getsource(_ct.CompletedTripView.from_row)
+ok('is_fare_filled(' in _vsrc, 'CompletedTripView.has_fare 用共用判定')
+ok('> 0' not in _vsrc.split('has_fare')[1][:80],
+   'has_fare 不再用「總額 > 0」')
+
+# 查詢過濾與受護欄查詢層都吃同一份 SQL
+ok('FILLED_SQL' in _ins.getsource(_ct._build_filters), '查詢過濾用 FILLED_SQL')
+ok('MISSING_SQL' in _ins.getsource(_ct._build_filters), '反向過濾用 MISSING_SQL')
+ok(_qs.ALLOWED_COLUMNS['has_fare'].sql == _fr.FILLED_SQL,
+   'query_spec 的 has_fare 欄 = FILLED_SQL')
+ok(_drv._MISSING_FARE == _fr.MISSING_SQL, '司機待補清單 = MISSING_SQL')
+
+# 顯示層：0 元不可以再落到「未記錄」
+ok('if ct.has_fare:' in _ins.getsource(_flex._ct_row),
+   '列表用 has_fare 判斷，不是 `if ct.computed_total`（0 是 falsy）')
+
+# SQL 兩份必須是嚴格反面，不可能各自漂移
+ok(_fr.MISSING_SQL == f'NOT {_fr.FILLED_SQL}', 'MISSING_SQL 是 FILLED_SQL 的反面')
+ok('%%' in _fr.FILLED_SQL, "SQL 裡的 % 有寫成 %%（text() 帶參數時 psycopg2 會炸）")
+
+# 端到端：假一筆沖帳的 View，列表那格要顯示 0
+_v = _ct.CompletedTripView.from_row(type('R', (), {'_mapping': {
+    'id': 3524, 'meter_fare': 140, 'extra_fare': -140,
+    'modification_reason': '[1] 改車資: 加成 0→-140 (遲到自己騎車回)',
+    'start_point': '診所', 'end_point': '怡平路', 'passenger_leave_reason': None,
+}})())
+ok(_v.has_fare is True and _v.computed_total == 0, '沖帳 View：has_fare=True、淨額 0')
+_cell = [c.get('text') for c in _flex._ct_row(_v)['contents']][-1]
+ok(_cell == '0', f'列表顯示 0 而不是「未記錄」（實際 {_cell!r}）')
+
 print('\n' + '=' * 60)
-print('✅ 全部通過 — 司機車資判定規則（純函數，不需 DB）')
+print('✅ 全部通過 — 車資判定規則單一來源（四個使用者同源）')
 print('=' * 60)

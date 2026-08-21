@@ -35,6 +35,7 @@ from modules.utils.taiwan_time import get_taiwan_time
 from modules.utils.unified_date_parser import UnifiedDateParser
 # 過去態唯讀受護欄查詢層編譯器（spec docs/specs/04）
 from rewrite.tools.trip_identity import recompute_unique_code
+from rewrite.tools.fare_rules import FILLED_SQL, MISSING_SQL, is_fare_filled
 from rewrite.tools.query_spec import compile_query_spec, QuerySpecError, MAX_LIMIT as _SPEC_MAX_LIMIT
 
 # 過去態 category 受限值（對齊 legacy handle_modify_category）
@@ -72,7 +73,7 @@ class CompletedTripView:
 
     # 計算欄位
     computed_total: Optional[int] = None  # meter+extra（兩者都 NULL→None）
-    has_fare: bool = False                # 車資總額(錶價+加成)>0（0/空=未記錄）
+    has_fare: bool = False                # 填過沒（見 fare_rules；沖帳的 0 元算填過）
     is_leave: bool = False                # passenger_leave_reason 非空
 
     @classmethod
@@ -85,7 +86,10 @@ class CompletedTripView:
             d['computed_total'] = None
         else:
             d['computed_total'] = (meter or 0) + (extra or 0)
-        d['has_fare'] = (d['computed_total'] or 0) > 0  # 總額>0 才算已記錄（0/空=未記錄）
+        # 沖帳（錶價 140 / 加成 −140 → 淨額 0，備註「改車資…」）算**已填**：
+        # 它是有人決定過的結果，不是漏填。用「總額>0」判會誤判成未記錄
+        # （PROD 有 64 筆這種）。判定在 fare_rules，跟 SQL 那份同源。
+        d['has_fare'] = is_fare_filled(meter, extra, d.get('modification_reason'))
         d['is_leave'] = bool(d.get('passenger_leave_reason'))
 
         valid = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
@@ -208,9 +212,9 @@ def _build_filters(
     # 「已記錄車資」= 車資總額(錶價+加成)>0。錶價 0 或 NULL 都算「未記錄」——
     # 0 是未填的預設值,不是真的免費班次(用戶回報:加總把 0 元班次算成已記錄是錯的)。
     if has_fare is True:
-        where.append("(COALESCE(meter_fare, 0) + COALESCE(extra_fare, 0)) > 0")
+        where.append(FILLED_SQL)
     elif has_fare is False:
-        where.append("(COALESCE(meter_fare, 0) + COALESCE(extra_fare, 0)) <= 0")
+        where.append(MISSING_SQL)
 
     # 車資總額 = COALESCE(錶價,0)+COALESCE(加成,0)。fare_amount 精確、fare_min/max 範圍。
     # schema 宣告 integer 但 AI 偶爾仍傳字串 → 在共用 builder 統一 coerce（list/aggregate 都受惠）
@@ -265,7 +269,7 @@ def query_completed_trips(
         location: 模糊地點（ILIKE 任一 start/via/end）— 用於「跟 X 有關」「經過 X」這類
         start_location: 模糊地點（ILIKE 僅 start_point）— 用於「從 X 出發」「X 起點」
         end_location: 模糊地點（ILIKE 僅 end_point）— 用於「到 X」「X 結束」
-        has_fare: True=已記錄車資（總額>0）/ False=未記錄（總額 0 或空）/ None=不過濾
+        has_fare: True=已填（含沖帳的 0 元）/ False=真的沒填 / None=不過濾
         fare_amount: 依車資總額（錶價+加成）精確篩選（例 1600）
         fare_min / fare_max: 車資總額範圍下/上限（含界，例 大於 1400 → fare_min=1401）
         limit: 上限筆數（預設 80，避免 LINE Flex 50KB 上限）
