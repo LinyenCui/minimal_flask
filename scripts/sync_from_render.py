@@ -363,6 +363,66 @@ def truncate_and_copy(local_conn, render_conn, table_name):
             print(f"❌ 同步資料表 '{table_name}' 時發生錯誤: {e}", file=sys.stderr)
             raise
 
+
+# 兩邊 schema 一致（2026-08-24 實測），排除 id 與生成欄後可逐欄刷新
+_REFRESH_COLS = [
+    'date', 'start_point', 'via_point', 'end_point',
+    'meter_fare', 'extra_fare', 'category', 'driver_id',
+    'remarks', 'created_at', 'status', 'modified_by',
+    'modification_reason', 'modification_time',
+    'passenger_name', 'passenger_leave_reason', 'trip_type',
+]
+
+
+def refresh_existing_completed_from_render(local_conn, render_conn):
+    """把本地已有的 completed_trips 用 Render 的內容刷新（以 unique_code 對齊）。
+
+    為什麼需要（2026-08-24 用戶回報「同步後兩邊數字不同」）：
+        原本的增量同步是**只增不改** —— 路徑 2 只挑 unique_code 不在本地的補進來，
+        本地已有的一律不碰（`code not in local_codes`），所以 3.1 那段「預先刪除
+        以便覆蓋」形同虛設：能被撈出來的本來就不存在於本地。
+        當初的理由是「本地是累積版，要保留 Render 已手動清掉的歷史」。
+
+        實測那個理由已經不成立：兩邊日期範圍完全一樣（2026-03-02 ~ 08-24），
+        本地保有、Render 已清掉的歷史 **0 筆**。代價卻是 **120 筆分岔** ——
+        在 Render 上改了司機/加成之後，本地永遠停在舊值，同一個查詢兩邊數字不同
+        （用戶因此一度以為是程式改壞了）。
+
+    用戶定調（2026-08-24，選項 A）：本地是拿來測試的，就該等於 Render。
+    Render 是唯一真相。
+
+    用 UPDATE 而不是 DELETE+INSERT：保持本地 id 穩定，也避免序列每次同步都
+    暴衝 —— 那會讓「本地 max_id > 遠端」這個假衝突越來越誇張。
+    """
+    print("--- 刷新本地既有 completed_trips（以 Render 為準）---")
+    cols = ', '.join(_REFRESH_COLS)
+    with render_conn.cursor() as rcur, local_conn.cursor() as lcur:
+        rcur.execute(
+            f"SELECT unique_code, {cols} FROM completed_trips "
+            f"WHERE unique_code IS NOT NULL")
+        remote = {r[0]: r[1:] for r in rcur.fetchall()}
+        lcur.execute(
+            f"SELECT unique_code, {cols} FROM completed_trips "
+            f"WHERE unique_code IS NOT NULL")
+        local = {r[0]: r[1:] for r in lcur.fetchall()}
+
+        stale = [(code, remote[code]) for code in (set(remote) & set(local))
+                 if remote[code] != local[code]]
+        print(f"   - Render {len(remote)} 筆 / 本地 {len(local)} 筆，"
+              f"內容不一致 {len(stale)} 筆")
+        if not stale:
+            print("   - ✅ 本地既有紀錄已與 Render 一致")
+            return 0
+
+        set_clause = ', '.join(f"{c} = %s" for c in _REFRESH_COLS)
+        lcur.executemany(
+            f"UPDATE completed_trips SET {set_clause} WHERE unique_code = %s",
+            [(*vals, code) for code, vals in stale],
+        )
+        print(f"   - ✅ 已用 Render 內容刷新 {len(stale)} 筆")
+        return len(stale)
+
+
 def incremental_sync_completed_trips(local_conn, render_conn):
     """增量同步 completed_trips（時間錨點 + NULL 補漏，不洗本地修改）
 
@@ -771,8 +831,13 @@ def main(check_only=False, force_sync=False):
                 continue
             truncate_and_copy(local_conn, render_conn, table)
         
-        # 步驟 2: 執行增量同步 completed_trips（保護歷史資料，使用時間戳錨點）
+        # 步驟 2: 增量同步 completed_trips —— 先補「Render 有、本地沒有的」
         incremental_sync_completed_trips(local_conn, render_conn)
+
+        # 步驟 2b: 再把本地既有的用 Render 內容刷新（2026-08-24 用戶定調選項 A）。
+        # 少了這一步，同步就只是「只增不改」：在 Render 上改過的班次
+        # （換司機、改加成…）永遠傳不到本地，兩邊會越積越多分岔。
+        refresh_existing_completed_from_render(local_conn, render_conn)
         
         # 步驟 3: 最後同步 database_maintenance (包含更新後的時間戳)
         truncate_and_copy(local_conn, render_conn, 'database_maintenance')

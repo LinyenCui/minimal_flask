@@ -123,41 +123,42 @@ def handle_database_sync_request(event, line_bot_api):
     
     # 顯示序號衝突檢查結果
     if conflict_result.get("has_conflicts"):
-        response_text += "⚠️ 序號衝突檢測：\n"
+        response_text += "ℹ️ 序號落差（正常，會自動校準）：\n"
         # 從輸出中提取關鍵信息
         if "發現" in conflict_result.get("output", ""):
             conflict_lines = [line for line in conflict_result["output"].split('\n') 
                             if '發現' in line or '表名:' in line or '本地序號:' in line or '遠端序號:' in line]
             response_text += "\n".join(conflict_lines[:10])  # 限制顯示行數
         else:
-            response_text += "發現序號衝突，詳情請查看日誌"
+            response_text += "本地序號跑在 Render 前面（本地排程也會產生已完成班次）"
         response_text += "\n\n"
     else:
         response_text += "✅ 序號衝突檢測：未發現衝突\n\n"
     
     response_text += "⚠️ 同步將使用混合模式進行：\n"
-    response_text += "• `completed_trips` 將只增不減。\n"
+    response_text += "• `completed_trips` 補新增 ＋ 用 Render 內容刷新既有紀錄。\n"
     response_text += "• 其他資料表將被完全覆蓋。\n"
     
     # 如果有序號衝突，增加警告信息
     if conflict_result.get("has_conflicts"):
-        response_text += "• ⚠️ 檢測到序號衝突，將以遠端序號為主覆蓋本地\n"
+        response_text += "• 序號落差會自動校準，本地獨有的測試資料會被清掉\n"
     
     response_text += "\n確定要執行同步嗎？"
     
     from modules.utils.quick_reply_manager import QuickReplyManager
     
-    # 使用新的 Quick Reply 標準格式
-    if conflict_result.get("has_conflicts"):
-        confirm_buttons = [
-            {"label": "⚡ 強制同步", "text": "確認序號覆蓋", "type": "message"},
-            {"label": "❌ 取消同步", "text": "取消同步", "type": "message"}
-        ]
-    else:
-        confirm_buttons = [
-            {"label": "✅ 確認同步", "text": "確認同步", "type": "message"},
-            {"label": "❌ 取消同步", "text": "取消同步", "type": "message"}
-        ]
+    # 一律給「確認同步」——序號落差不是需要人決定的事（2026-08-24）。
+    # 本地的 Flask 排程也會把班次掉進 completed_trips，本地序號本來就會
+    # 跑在 Render 前面；而 sync_from_render 對這種情況早就會自動清本地
+    # 測試資料 + 校準序號後繼續（`if not force_sync: 序號衝突已自動處理`）。
+    # 舊行為把按鈕換成「⚡ 強制同步」，等於每次同步都逼用戶按一個看起來
+    # 很危險的鈕去解決一個不存在的問題（用戶回報：「現在每一次用同步都是要強制」）。
+    # 「確認序號覆蓋」保留可用（見 handle_database_sync_confirm），
+    # 但不再是正常路徑的預設。
+    confirm_buttons = [
+        {"label": "✅ 確認同步", "text": "確認同步", "type": "message"},
+        {"label": "❌ 取消同步", "text": "取消同步", "type": "message"}
+    ]
     
     return QuickReplyManager.create_text_response(response_text, confirm_buttons)
 
