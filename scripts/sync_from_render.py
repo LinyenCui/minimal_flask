@@ -235,41 +235,79 @@ def detect_sequence_conflicts(local_conn, render_conn):
     
     return conflicts
 
-def purge_local_only_completed(local_conn, render_conn):
-    """清除本地 completed_trips 中「Render 不存在」的列（本地排程測試產物）。
+def classify_local_completed_row(*, row_date, unique_code, row_id,
+                                 render_min_date, render_codes, render_ids):
+    """本地這一列該怎麼處理：'archive'（保護）/ 'delete'（清掉）/ 'keep'（已同步）。
 
-    用戶定調：Render 是唯一真相，本地跑 Flask 排程會自己把班次掉進
-    completed_trips 產生更大的 id，那些都是測試垃圾。
-    安全網：只刪 unique_code 在 Render 已存在（同一趟重複）或 unique_code 為
-    NULL 的列 — 若某列的 unique_code 是 Render 完全沒見過的，保留並警告
-    （可能是真實資料，寧可留著讓人判斷）。
+    抽成純函數是因為這條規則同時要滿足兩個看似互斥的需求（見
+    purge_local_only_completed 的說明），錯一邊就是「刪掉真實歷史」或
+    「本地永遠比 Render 多」，所以要能被單獨測到。
+    """
+    # 窗口外（比 Render 現存最早日期還舊）→ 那是 Render 瘦身掉的歷史，只剩本地有
+    if row_date is not None and render_min_date is not None and row_date < render_min_date:
+        return 'archive'
+    if unique_code:
+        return 'keep' if unique_code in render_codes else 'delete'
+    return 'keep' if row_id in render_ids else 'delete'
+
+
+def purge_local_only_completed(local_conn, render_conn):
+    """清掉本地獨有的 completed_trips —— **但只在 Render 還涵蓋的日期範圍內**。
+
+    這裡要同時滿足兩件看似互斥的事（2026-08-24 用戶提出）：
+      (a) 本地是拿來測試的 → 在 Render 還有資料的那段期間，本地就該等於 Render，
+          本地排程自己產生的測試殘留要清掉，否則兩邊數字對不起來。
+      (b) 用戶打算定期把 Render 三～六個月前的資料刪掉幫 Render 瘦身
+          → 那些歷史只剩本地有，**絕對不能因為「Render 沒有」就被當成垃圾刪掉**。
+
+    解法是用「時間」把兩者切開，不需要任何設定：
+
+        鏡射窗口 = Render 現存資料的最早日期（MIN(date)）之後
+          · 窗口內：Render 是唯一真相，本地獨有的一律刪
+          · 窗口外（更舊）：本地的歷史保存庫，一律不動
+
+    好處是它會自己維護：等 Render 把 3 月前的資料清掉，MIN(date) 自動往前移，
+    本地那批舊資料就自動落到窗口外受保護，不必記得去改任何參數。
+
+    防呆：Render 的 completed_trips 空的、或算不出 MIN(date) → 整個跳過不刪。
     """
     with render_conn.cursor() as rcur, local_conn.cursor() as lcur:
+        rcur.execute("SELECT COUNT(*), MIN(date) FROM completed_trips")
+        render_n, render_min_date = rcur.fetchone()
+        if not render_n or render_min_date is None:
+            print("   - ⚠️ Render completed_trips 為空或無日期，跳過清理（防誤刪）")
+            return 0
+
         rcur.execute("SELECT id FROM completed_trips")
         render_ids = {r[0] for r in rcur.fetchall()}
         rcur.execute(
             "SELECT unique_code FROM completed_trips WHERE unique_code IS NOT NULL")
         render_codes = {r[0] for r in rcur.fetchall()}
-        if not render_ids:
-            print("   - ⚠️ Render completed_trips 為空，跳過清理（防誤刪）")
-            return 0
-        # 本地獨有 = unique_code 不在 Render（有 code 時）或 id 不在 Render（無 code）
-        lcur.execute("SELECT id, unique_code FROM completed_trips")
-        to_delete, keep = [], []
-        for rid, code in lcur.fetchall():
-            if code:
-                if code in render_codes:
-                    continue          # 同一趟，兩邊 id 不同也算已同步 → 保留
-                keep.append((rid, code))   # Render 沒見過的 code → 人工確認
-            elif rid not in render_ids:
-                to_delete.append(rid)      # 無 code 且 Render 沒此 id → 測試殘留
-        for rid, code in keep:
-            print(f"   - ⚠️ 保留本地 #{rid}（unique_code={code} Render 沒見過，"
-                  f"疑似真實資料，請人工確認）")
+
+        print(f"   - 鏡射窗口：{render_min_date} 之後（Render 現存最早日期）；"
+              f"更舊的是本地歷史保存庫，不動")
+
+        lcur.execute("SELECT id, unique_code, date FROM completed_trips")
+        to_delete, archived = [], 0
+        for rid, code, d in lcur.fetchall():
+            verdict = classify_local_completed_row(
+                row_date=d, unique_code=code, row_id=rid,
+                render_min_date=render_min_date,
+                render_codes=render_codes, render_ids=render_ids)
+            if verdict == 'archive':
+                archived += 1
+            elif verdict == 'delete':
+                to_delete.append(rid)
+
+        if archived:
+            print(f"   - 🗄️ 保護 {archived} 筆窗口外的歷史紀錄（Render 已瘦身掉的期間）")
         if to_delete:
             lcur.execute(
                 "DELETE FROM completed_trips WHERE id = ANY(%s)", (to_delete,))
             local_conn.commit()
+            print(f"   - 🧹 清掉窗口內本地獨有的 {len(to_delete)} 筆（Render 為準）")
+        else:
+            print("   - ✅ 窗口內沒有本地獨有的紀錄")
         return len(to_delete)
 
 
