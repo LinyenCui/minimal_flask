@@ -344,8 +344,8 @@ def aggregate_completed_trips(
     Return data:
         {
             'total_count': int,        # 符合 filter 的總筆數
-            'filled_count': int,       # 車資總額(錶價+加成)>0
-            'unfilled_count': int,     # 總額 0 或空（含錶價=0 的未填班次）
+            'filled_count': int,       # 填過（含沖帳的 0 元，見 fare_rules）
+            'unfilled_count': int,     # 真的沒填（錶價加成都 0/空且沒動過）
             'sum_amount': int,         # NULL → 0 累加
         }
 
@@ -364,15 +364,14 @@ def aggregate_completed_trips(
         fare_min=fare_min, fare_max=fare_max,
     )
 
-    sql = """
+    sql = f"""
         SELECT
             COUNT(*) AS total_count,
-            COUNT(CASE
-                WHEN (COALESCE(meter_fare, 0) + COALESCE(extra_fare, 0)) > 0 THEN 1
-            END) AS filled_count,
-            COUNT(CASE
-                WHEN (COALESCE(meter_fare, 0) + COALESCE(extra_fare, 0)) <= 0 THEN 1
-            END) AS unfilled_count,
+            -- 「填過沒」跟顯示層/查詢過濾/司機待補清單同源（fare_rules）。
+            -- 以前這裡自己寫「總額 > 0」，於是沖帳班次（140/−140 → 淨額 0，
+            -- 備註有「改車資」）被算進「未記錄」，跟列表顯示講不同的話。
+            COUNT(CASE WHEN {FILLED_SQL} THEN 1 END) AS filled_count,
+            COUNT(CASE WHEN {MISSING_SQL} THEN 1 END) AS unfilled_count,
             COALESCE(SUM(CASE
                 WHEN meter_fare IS NULL AND extra_fare IS NULL THEN 0
                 WHEN meter_fare IS NULL THEN extra_fare

@@ -92,7 +92,7 @@ ok('`本週合計 ' not in html,
 
 print()
 print('=' * 60)
-print('# T4: 同一條規則的四個使用者必須同源（2026-08-20 沖帳被判未記錄）')
+print('# T4: 同一條規則的五個使用者必須同源（2026-08-20/21 沖帳被判未記錄）')
 print('=' * 60)
 import inspect as _ins
 
@@ -122,6 +122,26 @@ ok(_qs.ALLOWED_COLUMNS['has_fare'].sql == _fr.FILLED_SQL,
    'query_spec 的 has_fare 欄 = FILLED_SQL')
 ok(_drv._MISSING_FARE == _fr.MISSING_SQL, '司機待補清單 = MISSING_SQL')
 
+# 統計卡的「已記錄／未記錄 N 筆」——第五個使用者，2026-08-21 才發現漏掉：
+# 它自己寫了一套「總額 > 0」，於是沖帳班次在列表顯示 0 元、在統計卡卻算未記錄
+_asrc = _ins.getsource(_ct.aggregate_completed_trips)
+ok('FILLED_SQL' in _asrc and 'MISSING_SQL' in _asrc,
+   'aggregate 的 filled/unfilled 用共用述詞')
+ok('+ COALESCE(extra_fare, 0)) > 0' not in _asrc,
+   'aggregate 不再自己寫「總額 > 0」')
+
+# 全 repo 不可以再長出第六套（掃 rewrite/ 的自訂總額判定）
+import pathlib as _pl, re as _re
+_bad = []
+for _f in _pl.Path('/Users/linyancui/minimal_flask/rewrite').rglob('*.py'):
+    if 'fare_rules' in _f.name or _f.name.startswith('test_'):
+        continue
+    _t = _f.read_text(encoding='utf-8', errors='ignore')
+    for _m in _re.finditer(r'COALESCE\(meter_fare[^\n]*?(?:> 0|<= 0)', _t):
+        _line = _t[:_m.start()].count('\n') + 1
+        _bad.append(f'{_f.name}:{_line}')
+ok(not _bad, f'沒有其他地方自訂「總額 > 0」判定（發現：{_bad}）')
+
 # 顯示層：0 元不可以再落到「未記錄」
 ok('if ct.has_fare:' in _ins.getsource(_flex._ct_row),
    '列表用 has_fare 判斷，不是 `if ct.computed_total`（0 是 falsy）')
@@ -141,5 +161,5 @@ _cell = [c.get('text') for c in _flex._ct_row(_v)['contents']][-1]
 ok(_cell == '0', f'列表顯示 0 而不是「未記錄」（實際 {_cell!r}）')
 
 print('\n' + '=' * 60)
-print('✅ 全部通過 — 車資判定規則單一來源（四個使用者同源）')
+print('✅ 全部通過 — 車資判定規則單一來源（五個使用者同源）')
 print('=' * 60)
