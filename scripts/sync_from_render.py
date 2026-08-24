@@ -462,7 +462,10 @@ def refresh_existing_completed_from_render(local_conn, render_conn):
 
 
 def incremental_sync_completed_trips(local_conn, render_conn):
-    """增量同步 completed_trips（時間錨點 + NULL 補漏，不洗本地修改）
+    """補齊 completed_trips —— 把「Render 有、本地沒有的」插進來。
+
+    （內容不同的由步驟 2b refresh_existing_completed_from_render 負責刷新，
+      本地獨有的由 purge_local_only_completed 依鏡射窗口處理。）
 
     設計理由（**保留 incremental 精神**，by design）：
       - 本地是「累積版」要保留 Render 已手動清掉的歷史
@@ -481,30 +484,23 @@ def incremental_sync_completed_trips(local_conn, render_conn):
                本地已有這個 id 的不抓，避免覆蓋本地修改）
     """
     table_name = "completed_trips"
-    print(f"--- 開始增量同步資料表: {table_name}（時間錨點 + NULL 補漏） ---")
+    print(f"--- 補齊資料表: {table_name}（比對 unique_code 補缺） ---")
 
     with local_conn.cursor() as local_cur, render_conn.cursor(cursor_factory=DictCursor) as render_cur:
         try:
-            # ----- 路徑 1: 時間錨點抓新增 -----
-            render_cur.execute(
-                "SELECT value FROM database_maintenance WHERE key = 'last_completed_trips_sync';"
-            )
-            last_sync_result = render_cur.fetchone()
-            if last_sync_result:
-                last_sync_time = last_sync_result['value']
-                print(f"   - 上次同步時間: {last_sync_time}")
-            else:
-                last_sync_time = '2000-01-01 00:00:00'
-                print("   - 沒有上次同步記錄，將同步所有有 created_at 的紀錄")
-
-            print(f"   - [路徑1] 抓 Render created_at > '{last_sync_time}' 的新紀錄...")
-            render_cur.execute(
-                f"SELECT * FROM {table_name} WHERE created_at > %s ORDER BY id;",
-                (last_sync_time,),
-            )
-            records_by_time = list(render_cur.fetchall())
-            description_full = render_cur.description  # cache（後續 SELECT id 會覆寫）
-            print(f"   - [路徑1] 找到 {len(records_by_time)} 筆")
+            # ----- 路徑 1（時間錨點）已移除 -----
+            # 2026-08-25：路徑 2（比對 unique_code 補缺）＋ 步驟 2b
+            # （refresh_existing_completed_from_render 刷新既有紀錄）合起來，
+            # 已經完全覆蓋路徑 1 能做的事：
+            #   · Render 有、本地沒有的 → 路徑 2 補
+            #   · 兩邊都有但內容不同的 → 步驟 2b 刷新
+            # 而路徑 1 還有兩個缺點：
+            #   · 靠 created_at，但 Render 上有 2896 筆 created_at 是 NULL
+            #     （schema 升級遺留），本來就抓不到
+            #   · 它要回寫 Render 的 database_maintenance 錨點 ——
+            #     同步是「從 Render 拉資料」，不該對生產庫寫東西
+            # 移除後同步對 Render 變成**唯讀**。
+            records_by_time = []
 
             # ----- 路徑 2: 補本地沒的 NULL row -----
             # Render 上 NULL row 是 schema 升級遺留，數量固定（不會新增）
@@ -545,8 +541,7 @@ def incremental_sync_completed_trips(local_conn, render_conn):
             if not new_records:
                 print("   - ✅ 沒有需要同步的新紀錄")
                 return
-            print(f"   - 總共需同步 {len(new_records)} 筆 "
-                  f"(路徑1 新增 {len(records_by_time)} + 路徑2 缺id補漏 {len(records_missing)})")
+            print(f"   - 總共需補 {len(new_records)} 筆")
 
             # 3. 過濾生成欄位（用 cached description，避免被 path 2 的 SELECT id 覆寫）
             all_cols = [desc[0] for desc in description_full]
@@ -656,15 +651,8 @@ def incremental_sync_completed_trips(local_conn, render_conn):
                 local_conn.rollback()
                 raise
             
-            # 5. 更新 Render 的同步時間戳
-            current_time = datetime.datetime.now().isoformat()
-            render_cur.execute("""
-                UPDATE database_maintenance 
-                SET value = %s, timestamp = CURRENT_TIMESTAMP 
-                WHERE key = 'last_completed_trips_sync'
-            """, (current_time,))
-            render_conn.commit()
-            print(f"   - ✅ 已更新同步時間戳: {current_time}")
+            # 5.（已移除）不再回寫 Render 的同步時間戳 ——
+            #    路徑 1 沒了就不需要錨點，同步也因此對 Render 保持唯讀。
 
         except Exception as e:
             local_conn.rollback()
