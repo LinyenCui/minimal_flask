@@ -139,6 +139,8 @@ def _batch_allowance_chat_text(data) -> str:
         f"加成：{amt:+d} 元\n"
         f"原因：{data['reason']}"
     )
+    if data.get('skipped_zero'):
+        msg += f"\n（略過 {data['skipped_zero']} 筆已結算成 0 元的班次，車沒跑不加成）"
     warnings = data.get('weekly_charge_warnings') or []
     if warnings:
         msg += '\n' + '\n'.join(warnings)

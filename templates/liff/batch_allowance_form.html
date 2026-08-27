@@ -139,6 +139,12 @@
     function showAlert(type, msg) { alertEl.innerHTML = `<div class="alert ${type}">${msg}</div>`; }
     function clearAlert() { alertEl.innerHTML = ''; }
 
+    // 路線名 / 請假原因都是 DB 來的自由文字，塞 innerHTML 前要跳脫
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g,
+        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
     // 防 LIFF SDK 偶爾回傳含 \r \n \0 的 idToken 導致 Headers.set 炸
     // (iOS Safari WebView 上常見「The string did not match the expected pattern.」)
     function _safeIdToken() {
@@ -299,8 +305,20 @@
           if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
 
           currentPreview = data;
+          // 已結算成 0 元的班次（整趟請假取消 / 沖帳）＝ 車沒跑，不加成
+          const skipped = data.skipped_zero || 0;
+          const skippedHtml = skipped ? `
+            <div style="margin-top:8px;padding:6px 8px;background:#f4f4f4;
+                        border-radius:4px;font-size:12px;color:#555;">
+              已排除 ${skipped} 筆結算成 0 元的班次（整趟沒跑，不加成）：<br>
+              ${(data.skipped_zero_preview || []).map(esc).join('<br>')}
+              ${skipped > (data.skipped_zero_preview || []).length
+                ? `<br>... 還有 ${skipped - data.skipped_zero_preview.length} 筆` : ''}
+            </div>` : '';
+
           if (data.count === 0) {
-            showAlert('err', '❌ 範圍內沒有符合條件的班次');
+            showAlert('err', '❌ 範圍內沒有符合條件的班次'
+              + (skipped ? `（${skipped} 筆已結算成 0 元，不加成）` : ''));
             previewCard.hidden = true;
             submitBtn.disabled = false;
             submitBtn.textContent = '先預覽';
@@ -311,7 +329,7 @@
           const newTotal = data.total_current_fare + amount * data.count;
           pvSummary.textContent = `📊 找到 ${data.count} 筆班次（${fd.get('category')}）`;
           pvList.innerHTML = data.preview.map(t =>
-            `<li>#${t.id} ${t.date} ${t.route} 司機${t.driver_id || '?'} 現:${t.current_total}</li>`
+            `<li>#${t.id} ${esc(t.date)} ${esc(t.route)} 司機${esc(t.driver_id || '?')} 現:${t.current_total}</li>`
           ).join('');
           if (data.count > data.preview.length) {
             pvList.innerHTML += `<li>... 還有 ${data.count - data.preview.length} 筆</li>`;
@@ -320,7 +338,7 @@
             目前合計：${data.total_current_fare.toLocaleString()} 元<br>
             加成 ${amount > 0 ? '+' : ''}${amount} × ${data.count} 筆 = ${(amount * data.count).toLocaleString()} 元<br>
             <strong>更新後合計：${newTotal.toLocaleString()} 元</strong>
-          `;
+          ` + skippedHtml;
           previewCard.hidden = false;
 
           stage = 'execute';
@@ -375,19 +393,22 @@
         const sent = await deliverChatText(data.chat_text);
         const inClient = liff.isInClient && liff.isInClient();
         const warnings = data.weekly_charge_warnings || [];
+        const skippedNote = data.skipped_zero
+          ? `（已略過 ${data.skipped_zero} 筆結算成 0 元的班次）` : '';
+        const head = `✅ 已批量加成 ${data.updated_count} 筆${skippedNote}`;
         if (sent === false) {
-          showAlert('ok', `✅ 已批量加成 ${data.updated_count} 筆<br>` +
+          showAlert('ok', head + '<br>' +
             (warnings.length ? warnings.join('<br>') + '<br>' : '') +
             '無法自動發送結果，請複製下方內容貼到聊天室後再手動關閉');
         } else if (warnings.length) {
           // 有帳務勾稽警語 → 不自動關閉，讓用戶看完警語再手動關
-          showAlert('ok', `✅ 已批量加成 ${data.updated_count} 筆<br>` +
+          showAlert('ok', head + '<br>' +
             warnings.join('<br>') + '<br>（請確認後手動關閉視窗）');
         } else if (inClient) {
-          showAlert('ok', `✅ 已批量加成 ${data.updated_count} 筆${sent ? '，結果已發送到聊天室' : ''}（1.5 秒後關閉）`);
+          showAlert('ok', head + `${sent ? '，結果已發送到聊天室' : ''}（1.5 秒後關閉）`);
           setTimeout(() => liff.closeWindow(), 1500);
         } else {
-          showAlert('ok', `✅ 已批量加成 ${data.updated_count} 筆（可關閉視窗）`);
+          showAlert('ok', head + '（可關閉視窗）');
         }
       } catch (err) {
         showAlert('err', '❌ ' + err.message);

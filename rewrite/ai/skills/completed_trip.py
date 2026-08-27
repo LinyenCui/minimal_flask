@@ -76,7 +76,8 @@ def _system_prompt() -> str:
   - 「跟診所相關」 → location（萬用比對）
 - customer_short_name：客戶簡稱完整且確定（如「龍埔街」「太子龍」），exact match 起/途/終
 - driver_id：司機編號（純整數，例 5386, 533）
-- has_fare=False：「未記錄車資的班次」「沒車資 / 金額為 0 的班次」這類查詢（錶價 0 也算未記錄）
+- has_fare=False：「未記錄車資的班次」「沒車資的班次」這類查詢
+  （沒填 = 錶價與加成都是 0/空、且沒動過；沖帳成 0 元的算「已填」，不算未記錄）
 - fare_amount=N：「金額為 N 的班次」「車資 N 元的班次」「哪幾筆是 N 元」這類精確金額查詢（依總額=錶價+加成）
 - fare_min / fare_max：金額範圍。「大於 1400」→ fare_min=1401；「1400 以上」→ fare_min=1400；「小於 X」→ fare_max=X-1；「介於 X~Y」→ fare_min=X, fare_max=Y
 - 重要：若用戶的篩選條件目前工具參數**表達不了**，要**明說「目前只能查 ⋯⋯」**，不要默默忽略條件、把全部班次回給用戶（會誤導）
@@ -136,7 +137,8 @@ QUERY_COMPLETED_TRIPS_SCHEMA = {
             },
             'has_fare': {
                 'type': 'boolean',
-                'description': "True=已記錄車資(總額>0)，False=未記錄(總額 0 或空，含錶價=0)。「未記錄車資」傳 False",
+                'description': "True=已記錄車資，False=未記錄(錶價與加成都 0/空且沒動過；"
+                               "沖帳成 0 元的算已記錄)。「未記錄車資」傳 False",
             },
             'fare_amount': {
                 'type': 'integer',
