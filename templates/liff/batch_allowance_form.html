@@ -305,12 +305,12 @@
           if (!data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
 
           currentPreview = data;
-          // 已結算成 0 元的班次（整趟請假取消 / 沖帳）＝ 車沒跑，不加成
+          // 車資 0 元的班次（整趟請假取消 / 沖帳）＝ 車沒跑，不加成
           const skipped = data.skipped_zero || 0;
           const skippedHtml = skipped ? `
             <div style="margin-top:8px;padding:6px 8px;background:#f4f4f4;
                         border-radius:4px;font-size:12px;color:#555;">
-              已排除 ${skipped} 筆結算成 0 元的班次（整趟沒跑，不加成）：<br>
+              已排除 ${skipped} 筆車資 0 元的班次（車沒跑，不加成）：<br>
               ${(data.skipped_zero_preview || []).map(esc).join('<br>')}
               ${skipped > (data.skipped_zero_preview || []).length
                 ? `<br>... 還有 ${skipped - data.skipped_zero_preview.length} 筆` : ''}
@@ -318,7 +318,7 @@
 
           if (data.count === 0) {
             showAlert('err', '❌ 範圍內沒有符合條件的班次'
-              + (skipped ? `（${skipped} 筆已結算成 0 元，不加成）` : ''));
+              + (skipped ? `（${skipped} 筆車資 0 元，不加成）` : ''));
             previewCard.hidden = true;
             submitBtn.disabled = false;
             submitBtn.textContent = '先預覽';
@@ -394,7 +394,7 @@
         const inClient = liff.isInClient && liff.isInClient();
         const warnings = data.weekly_charge_warnings || [];
         const skippedNote = data.skipped_zero
-          ? `（已略過 ${data.skipped_zero} 筆結算成 0 元的班次）` : '';
+          ? `（已略過 ${data.skipped_zero} 筆 0 元班次）` : '';
         const head = `✅ 已批量加成 ${data.updated_count} 筆${skippedNote}`;
         if (sent === false) {
           showAlert('ok', head + '<br>' +

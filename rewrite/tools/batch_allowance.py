@@ -10,20 +10,20 @@
   preview_batch_allowance — 純查詢，回符合條件的 trips list（給 LIFF 預覽用）
   execute_batch_allowance — 執行 batch UPDATE
 
-⚠️ 排除「已結算成 0 元」的班次（2026-08-27 診所回報）：
+⚠️ 遇零不加（2026-08-27 診所回報）：
     2026-08-24 豪雨 +50 打到一筆整趟取消的班次（診所→長溪路，錶 210、
     請假加成 −210 已抵成 0），變成錶 210 / 加 −160 / 淨 50 ——
     病患住院沒搭車，卻被收了 50 元的豪雨加成。
 
-    判準**不是**「有沒有請假」，因為請假不等於沒跑：
-      · 部分請假（同車還有別人）→ 淨額 > 0，車照跑 → 該加成
-        （2026-06-26 中華北路 錶200/加−95/淨105 → +50 變 155，這是對的）
-      · 整趟取消（加成把錶價抵成 0）→ 淨額 = 0，車沒跑 → **不該加成**
-    所以看的是**加成前的淨額是不是已經被結算成 0**。沖帳（140/−140）同理。
+    規則就一條：**車資 0 元的班次，批量加成不加**。
+    不是「請假就跳過」—— 請假不等於沒跑（見交接檔 3.1）：
+      · 部分請假（同車還有別人）錶200/加−95/淨105 → 車照跑 → 照加成
+        （2026-06-26 中華北路就是這樣，+50 變 155，是對的）
+      · 整趟取消 → 加成把錶價抵成 0 → 不加
+    看的是加成前的淨額，不是請假欄。沖帳（140/−140）也一樣不加。
 
-    「已結算」用 fare_rules.FILLED_SQL 判斷，是為了不誤傷「司機還沒回報錶價」
-    的班次（錶價 NULL、淨額也是 0，但那是還沒填，加成照樣要給）。
-    全庫目前有 64 筆結算成 0 元的班次，將來每次批量加成都會掃到。
+    被跳過的班次會列在預覽卡與結果訊息裡（帶請假原因），不靜默跳過，
+    操作者看得到是哪幾筆。全庫目前有 64 筆 0 元班次。
 """
 import logging
 from datetime import date as _date, timedelta
@@ -32,7 +32,6 @@ from typing import Optional
 from sqlalchemy import text
 
 from rewrite.tools.base import ToolResult, write_audit
-from rewrite.tools.fare_rules import FILLED_SQL
 from modules.utils.modification_utils import append_modification_reason
 
 logger = logging.getLogger(__name__)
@@ -40,11 +39,8 @@ logger = logging.getLogger(__name__)
 
 VALID_BATCH_CATEGORIES = ('全部', '診所', '東洋', '臨時')
 
-# 「已經結算成 0 元」＝ 有人填過車資，而且淨額被抵成 0（整趟請假取消 / 沖帳）。
-# 這種班次車沒跑，批量加成要跳過；還沒填錶價的（NULL）不算，照常加成。
-SETTLED_ZERO_SQL = (
-    f"({FILLED_SQL} AND COALESCE(meter_fare, 0) + COALESCE(extra_fare, 0) = 0)"
-)
+# 車資 0 元 → 車沒跑 → 批量加成不加
+ZERO_FARE_SQL = "COALESCE(meter_fare, 0) + COALESCE(extra_fare, 0) = 0"
 
 
 def preview_batch_allowance(
@@ -62,10 +58,10 @@ def preview_batch_allowance(
 
     Returns:
         data={
-            'count': int,            # 會被加成的筆數（已排除結算成 0 元的）
+            'count': int,            # 會被加成的筆數（已排除 0 元的）
             'preview': [{...}, ...], # 前 10 筆（id/date/route/category/current_total）
             'total_current_fare': int,  # 範圍內目前總車資（便於估後額）
-            'skipped_zero': int,     # 已結算成 0 元、被排除的筆數
+            'skipped_zero': int,     # 車資 0 元、不加成的筆數
             'skipped_zero_preview': [str, ...],  # 前 5 筆的簡述（給操作者看）
         }
     """
@@ -88,7 +84,7 @@ def preview_batch_allowance(
         SELECT id, date, start_point, end_point, category,
                COALESCE(meter_fare, 0) + COALESCE(extra_fare, 0) AS current_total,
                driver_id,
-               {SETTLED_ZERO_SQL} AS settled_zero,
+               ({ZERO_FARE_SQL}) AS zero_fare,
                passenger_leave_reason
         FROM completed_trips
         WHERE {' AND '.join(where)}
@@ -184,18 +180,18 @@ def execute_batch_allowance(
 
     all_rows = session.execute(text(f"""
         SELECT id, date, modification_reason, category,
-               {SETTLED_ZERO_SQL} AS settled_zero
+               ({ZERO_FARE_SQL}) AS zero_fare
         FROM completed_trips
         WHERE {' AND '.join(where)}
         ORDER BY id
     """), params).fetchall()
 
-    # 已結算成 0 元的（整趟請假取消 / 沖帳）＝ 車沒跑，不加成（見模組 docstring）
+    # 車資 0 元的（整趟請假取消 / 沖帳）＝ 車沒跑，不加成（見模組 docstring）
     rows = [r for r in all_rows if not r[4]]
     skipped_zero = len(all_rows) - len(rows)
 
     if not rows:
-        hint = f"（{skipped_zero} 筆已結算成 0 元，未加成）" if skipped_zero else ""
+        hint = f"（{skipped_zero} 筆車資 0 元，不加成）" if skipped_zero else ""
         return ToolResult.fail(
             f"範圍內 ({date_from} ~ {date_to} {category or '全部'}) 沒有符合的班次{hint}"
         )
@@ -258,8 +254,8 @@ def execute_batch_allowance(
 def _weekly_charge_warnings(*, session, rows, amount: int) -> list:
     """算批量加成影響到的太陽週勾稽警語清單
 
-    rows: [(id, date, modification_reason, category, settled_zero), ...]
-          （本次**實際被加成**的班次，已排除結算成 0 元的）
+    rows: [(id, date, modification_reason, category, zero_fare), ...]
+          （本次**實際被加成**的班次，已排除 0 元的）
     ⚠️ 只統計「診所」類班次 — weekly_charge 是達恩診所的車資週扣款，
     東洋/臨時班次與週扣款無關（用戶實測回報 2026-07）。
     每個受影響太陽週若已有「有效」weekly_charge 分錄，
