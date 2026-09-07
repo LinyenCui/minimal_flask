@@ -119,10 +119,18 @@ def accounting_deposit():
 @liff_bp.route('/accounting/weekly_payment/prefill', methods=['GET'])
 @liff_auth_required
 def accounting_weekly_payment_prefill():
-    """表單載入時算「上個完整太陽週」診所實收總額 + 該週是否已記扣款"""
+    """表單載入時算診所實收總額 + 該週是否已記扣款
+
+    預設「上個完整太陽週」；帶 ?week_end=YYYY-MM-DD 可看別週（補記舊週用）。
+    回傳一併帶最近 8 週的清單，表單切換週次不必再打一次 API
+    （iOS LIFF WebView 同頁多次 fetch 會掉 —— 交接檔 4.4）。
+    """
     session = Session()
     try:
-        result = acct_tools.weekly_charge_prefill(session=session)
+        result = acct_tools.weekly_charge_prefill(
+            session=session,
+            week_end=(request.args.get('week_end') or '').strip() or None,
+        )
     except SQLAlchemyError as e:
         logger.exception("weekly_charge_prefill failed")
         return jsonify({'ok': False, 'error': f'DB error: {e}'}), 500
@@ -152,6 +160,8 @@ def accounting_weekly_payment():
         result = acct_tools.record_weekly_charge(
             session=session,
             amount=amount,
+            # 不給 = 上週（原本的行為）；給了才是補記舊週
+            week_end=(body.get('week_end') or '').strip() or None,
             user_id=request.line_user_id,
             via='liff',
         )
@@ -195,8 +205,15 @@ def _deposit_chat_text(data) -> str:
 
 
 def _weekly_charge_chat_text(data) -> str:
-    """週扣款結果的聊天室文字（chat_text 協議；push fallback 同文案）"""
+    """週扣款結果的聊天室文字（chat_text 協議；push fallback 同文案）
+
+    補記舊週時要看得出是補的 —— 不然聊天室紀錄看起來像記錯週。
+    """
+    from datetime import date as _d
+    from rewrite.tools.accounting import _last_saturday
+    week_end = _d.fromisoformat(data['week_end_date'])
+    tag = '（上週六 23:59）' if week_end == _last_saturday() else '（補記）'
     return (
         f"💵 已記錄週扣款 NT$ {data['amount']:,}\n"
-        f"鎖定時間：{data['occurred_at']}（上週六 23:59）"
+        f"鎖定時間：{data['occurred_at']}{tag}"
     )

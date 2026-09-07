@@ -17,6 +17,7 @@ from typing import Optional
 from sqlalchemy import text
 
 from rewrite.tools.base import ToolResult, write_audit
+from rewrite.utils.sun_week import sun_week_number
 # 沿用 legacy taiwan_time helper 算上週六
 from modules.utils.taiwan_time import get_taiwan_time
 
@@ -173,14 +174,45 @@ def query_ledger_page(
     )
 
 
-def _last_saturday_2359() -> datetime:
-    """上週六 23:59 — 對齊 legacy last_saturday_2359"""
-    now_tw = get_taiwan_time()
-    today = now_tw.date()
+def _last_saturday() -> _date:
+    """上一個星期六（含今天若今天就是星期六）— 對齊 legacy last_saturday_2359"""
+    today = get_taiwan_time().date()
     # Python: Mon=0..Sun=6, Sat=5
-    days_since_saturday = (today.weekday() - 5) % 7
-    target = today - timedelta(days=days_since_saturday)
-    return datetime.combine(target, _time(23, 59))
+    return today - timedelta(days=(today.weekday() - 5) % 7)
+
+
+def _last_saturday_2359() -> datetime:
+    """上週六 23:59 — 週扣款的鎖定時間"""
+    return datetime.combine(_last_saturday(), _time(23, 59))
+
+
+def resolve_week_end(week_end) -> tuple[Optional[_date], Optional[str]]:
+    """把外部傳進來的「要記哪一週」正規化成該週的星期六。
+
+    補記舊週用（2026-09-07 用戶要求）：本來 occurred_at 寫死成「上週六」，
+    忘了在該週按就再也補不回去 —— 第 34 週就是這樣漏掉，只能手動改 DB。
+
+    Returns:
+        (該週星期六, None) 或 (None, 錯誤訊息)
+        week_end 給 None → 回預設的上週六
+    """
+    if week_end in (None, ''):
+        return _last_saturday(), None
+    if isinstance(week_end, str):
+        try:
+            week_end = _date.fromisoformat(week_end.strip())
+        except ValueError:
+            return None, f"週次日期格式看不懂：{week_end!r}（要 YYYY-MM-DD）"
+    if isinstance(week_end, datetime):
+        week_end = week_end.date()
+    if not isinstance(week_end, _date):
+        return None, f"週次日期型別不對：{type(week_end).__name__}"
+    if week_end.weekday() != 5:
+        return None, f"{week_end} 不是星期六（太陽週的週末必須是星期六）"
+    latest = _last_saturday()
+    if week_end > latest:
+        return None, f"{week_end} 那一週還沒過完（最新可記到 {latest}）"
+    return week_end, None
 
 
 def find_weekly_charge_for_week(*, session, week_end_date: _date) -> Optional[dict]:
@@ -330,18 +362,23 @@ def record_weekly_charge(
     *,
     session,
     amount: int,
+    week_end: Optional[_date] = None,
     allow_duplicate: bool = False,
     user_id: Optional[str] = None,
     user_name: Optional[str] = None,
     via: str = 'unknown',
     auto_commit: bool = True,
 ) -> ToolResult:
-    """記錄上週扣款（鎖定上週六 23:59）
+    """記錄週扣款（鎖定該週六 23:59）
 
     對齊 legacy handle_weekly_input：
-      - occurred_at = 上週六 23:59
+      - occurred_at = 該週六 23:59
       - type='weekly_charge', counterparty='車資扣款'
       - amount_out = amount
+
+    week_end：要記哪一週（該週的星期六）。不給就是上週六 —— 平常的用法沒變。
+        給了才是**補記舊週**：第 34 週的扣款要在第 35 週按，忘了就補不回來，
+        只能手動改 DB（2026-09-07 實際發生過）。未來的週次會被擋。
 
     防重複：同一週（同週六 23:59）已有「有效」weekly_charge 分錄 → fail。
     已被沖正的舊分錄不擋（沖正後重記是正常流程）。
@@ -353,8 +390,10 @@ def record_weekly_charge(
     if isinstance(allow_duplicate, str):
         allow_duplicate = allow_duplicate.strip().lower() in ('true', '1', 'yes')
 
-    occurred_at = _last_saturday_2359()
-    week_end = occurred_at.date()
+    week_end, err = resolve_week_end(week_end)
+    if err:
+        return ToolResult.fail(err)
+    occurred_at = datetime.combine(week_end, _time(23, 59))
     memo = f"週末 {week_end.isoformat()} 扣款"
 
     if not allow_duplicate:
@@ -631,24 +670,16 @@ def void_ledger_entry(
 # 週扣款表單預填（LIFF weekly_payment 用）
 # ============================================================
 
-def weekly_charge_prefill(*, session) -> ToolResult:
-    """算週扣款表單的預填資訊
+WEEKLY_CHARGE_HISTORY_WEEKS = 8
 
-    週界跟 record_weekly_charge 的鎖定時間一致（週末 = _last_saturday_2359 的
-    星期六），該週 = 週日 ~ 該週六。金額口徑 = 診所類別已完成班次的實收總額
-    （實收 = 錶價 + 加成，重用 aggregate_completed_trips，
-    同 report_service 週報表的實收算法）。
 
-    Returns data:
-        {
-            'week_start': 'YYYY-MM-DD',   # 週日
-            'week_end': 'YYYY-MM-DD',     # 週六（= 扣款鎖定日）
-            'trip_count': int,            # 診所已完成班次數
-            'total_amount': int,          # 實收總額
-            'existing_charge': {'id', 'amount'} | None,  # 該週已記的扣款
-        }
+def _week_detail(*, session, week_end: _date) -> dict:
+    """一週的預填明細：診所實收 + 該週是否已記扣款
+
+    金額口徑 = 診所類別已完成班次的實收總額（實收 = 錶價 + 加成），
+    **一律走 aggregate_completed_trips**，不另外寫 SQL —— 這條規則已經
+    因為「同一件事多份實作」出過兩次錯（見 fare_rules 的模組說明）。
     """
-    week_end = _last_saturday_2359().date()
     week_start = week_end - timedelta(days=6)
 
     # lazy import 避免 accounting ↔ completed_trip 循環 import
@@ -667,15 +698,50 @@ def weekly_charge_prefill(*, session) -> ToolResult:
         total_amount = 0
 
     existing = find_weekly_charge_for_week(session=session, week_end_date=week_end)
-    return ToolResult.success(
-        data={
-            'week_start': week_start.isoformat(),
-            'week_end': week_end.isoformat(),
-            'trip_count': trip_count,
-            'total_amount': total_amount,
-            'existing_charge': (
-                {'id': existing['id'], 'amount': existing['amount_out']}
-                if existing else None
-            ),
-        },
-    )
+    return {
+        'week_start': week_start.isoformat(),
+        'week_end': week_end.isoformat(),
+        'week_number': sun_week_number(week_start),
+        'trip_count': trip_count,
+        'total_amount': total_amount,
+        'existing_charge': (
+            {'id': existing['id'], 'amount': existing['amount_out']}
+            if existing else None
+        ),
+    }
+
+
+def weekly_charge_prefill(*, session, week_end: Optional[_date] = None) -> ToolResult:
+    """算週扣款表單的預填資訊（選定那一週 + 最近幾週的清單）
+
+    週界跟 record_weekly_charge 的鎖定時間一致（週末 = 星期六），
+    該週 = 週日 ~ 該週六。
+
+    week_end 不給 → 上週六（平常的用法）。給了就是看別的一週（補記舊週用）。
+
+    ⚠️ 最近幾週的清單一起在這支回傳，**不要另外開一支 API** ——
+    iOS 的 LIFF WebView 同頁多次 fetch 會靜默掉（見交接檔 4.4），
+    表單切換週次時直接用這份清單重繪即可。
+
+    Returns data:
+        {
+            'week_start' / 'week_end' / 'week_number' / 'trip_count' /
+            'total_amount' / 'existing_charge'   # 選定那一週（相容原本的欄位）
+            'weeks': [ 同樣結構 × 最近 8 週，新到舊 ],
+        }
+    """
+    week_end, err = resolve_week_end(week_end)
+    if err:
+        return ToolResult.fail(err)
+
+    latest = _last_saturday()
+    weeks = [
+        _week_detail(session=session, week_end=latest - timedelta(weeks=i))
+        for i in range(WEEKLY_CHARGE_HISTORY_WEEKS)
+    ]
+
+    selected = next((w for w in weeks if w['week_end'] == week_end.isoformat()), None)
+    if selected is None:                      # 選了更早的週次（清單外）
+        selected = _week_detail(session=session, week_end=week_end)
+
+    return ToolResult.success(data={**selected, 'weeks': weeks})
