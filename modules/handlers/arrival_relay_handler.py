@@ -186,8 +186,13 @@ def _push_to_relay(relay_chat_id: str, text: str,
                    warns: Optional[list] = None) -> None:
     """push 帶 [✅ 收到] 按鈕的文字到接送群。失敗只 log 不 raise。
 
-    threading.Timer 的執行緒沒有 Flask app context（get_line_bot_api 讀
-    current_app.config 會炸）→ 沒 context 時自己包一層。
+    ⚠️ 全系統只有「司機把位置傳在工作群」那條 fallback 會走到這裡
+    （notify_relay_by_push）。**司機直接傳在接送群走 reply，一則 push 都不發。**
+    2026-09-09 之前不是這樣：自動催促會從背景 Timer 打這裡，
+    兩條路都噴，額度就是這樣沒的。要再加 push 出口前先想清楚。
+
+    沒有 Flask app context 時自己包一層（保留：呼叫端未來若又從背景執行緒進來，
+    get_line_bot_api 讀 current_app.config 會炸）。
     尊重 PUSH_NOTIFY 總開關（測試期關 push 省 LINE 月額度）。
     """
     try:

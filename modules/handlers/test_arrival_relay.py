@@ -142,8 +142,22 @@ check('事件不再帶 nag_count',
       'nag_count' not in arh._EVENTS[('R_TEST2', 'D1')])
 _src = open('/Users/linyancui/minimal_flask/modules/handlers/'
             'arrival_relay_handler.py', encoding='utf-8').read()
-check('模組不再 import threading.Timer 之外的催促路徑（沒有 Timer( 呼叫）',
-      'Timer(' not in _src)
+check('沒有任何 Timer( 呼叫（背景不會偷發 push）', 'Timer(' not in _src)
+
+# ⚠️ 用戶最在意的一條：司機直接在接送群傳位置 = 全程 0 push。
+# 2026-09-09 之前不是這樣 —— 自動催促從背景 Timer 打 _push_to_relay，
+# 「免費」的 reply 路徑照樣每個未確認事件噴掉最多 2 則額度。
+banner('T3b: 接送群直傳 = 一則 push 都不發（就算永遠沒人按收到）')
+arh._EVENTS.clear(); SENT.clear()
+for i in range(5):
+    arh.notify_relay_by_reply(f'tk{i}', 'R_FREE', '🚗 通知', driver_key='D1')
+    if ('R_FREE', 'D1') in arh._EVENTS:       # 推進冷卻，模擬司機一直重傳
+        arh._EVENTS[('R_FREE', 'D1')]['last_at'] -= (arh.REPEAT_COOLDOWN_SEC + 1)
+check('連傳 5 次、全程沒人按 → push 數 == 0', push_count() == 0)
+check('但 reply 每次都有發', len([s for s in SENT if s[0] == 'reply_msg']) == 5)
+check('第 5 次標「第 5 次」', '第 5 次傳位置' in str(SENT[-1][2]))
+check('_push_to_relay 全檔只有一個呼叫點（工作群 fallback）',
+      _src.count('_push_to_relay(') == 2)   # 1 個 def + 1 個呼叫
 
 # ============================================================
 # T4: ack 一鍵全確認
