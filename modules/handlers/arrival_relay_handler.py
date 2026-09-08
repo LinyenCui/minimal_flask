@@ -5,18 +5,26 @@
   ・司機在接送群傳位置 → bot reply 到院通知（免費）＋建事件
   ・司機忘記、跑回工作群傳 → 工作群照常回 ETA 卡，另 push 一則到綁定的
     接送群（fallback，吃額度）
-  ・到院通知附 [✅ 收到] 按鈕；60 秒沒人按 → push 催促一次，再 60 秒沒按
-    → 最後催一次後停（最多 2 次）
+  ・到院通知附 [✅ 收到] 按鈕；沒人按時**由司機自己重傳位置**，
+    通知會標「第 N 次」（2026-09-09 用戶改的，見下）
   ・接送群對其他一切訊息靜默（不進 AI、不理指令）— webhook 靜默閘在
     modules/routes/webhook.py，白名單 = 本檔 ACK_HANDLERS 的關鍵字
+
+⚠️ 2026-09-09 拿掉「未確認自動催促」：
+    原本 60 秒沒人按 [✅ 收到] 就自動 push 催一次、再 60 秒再催一次（最多 2 次）。
+    問題是那是**自動**的 —— 每個沒人按的事件固定燒掉最多 2 則 push 額度，
+    而免費額度只有 200 則/月（2026-09-07 就被耗光）。
+    改成：司機發現沒人按就自己重傳位置，通知上標「🔁 第 N 次」。
+    主動權回到司機手上，只有真的需要時才發，額度花在有意義的地方。
+    連帶把重複傳位置的冷卻從 5 分鐘縮到 30 秒（不然重傳會被節流吃掉）。
 
 綁定流程（指令橋接照 clinic_commands 模式，webhook 群組閘門前攔）：
   工作群「設定到院轉發」→ 生成 4 位數配對碼（TTL 10 分鐘）
   接送群「綁定到院通知 XXXX」→ 驗碼 → set_relay(工作群, 本群)
   工作群「查看到院轉發」/「取消到院轉發」→ 查詢 / 解除
 
-事件節流：同一接送群 20 分鐘內只建立一個事件（新位置釘不重發通知、
-不重啟催促；工作群自己的 ETA reply 不受節流影響照常回）。
+事件節流：同一（接送群×司機）30 秒內重複傳位置不重發通知（防連點）；
+工作群自己的 ETA reply 不受節流影響照常回。
 """
 import logging
 import random
@@ -85,71 +93,57 @@ def _pop_valid_code(code: str) -> Optional[str]:
 
 # ============================================================
 # 到院事件狀態（模組級 dict + Lock）
-# key = (接送群 chat_id, 司機 user_id) → {started_at, acked, nag_count, timer}
-# 節流按「司機」分開（2026-07-21 用戶需求；窗長 5 分鐘）：尖峰時段多車接連到達，
-# 每台車都要各自通知；同一司機一趟連傳多次位置才被同窗吃掉。
+# key = (接送群 chat_id, 司機 user_id) → {started_at, last_at, acked, count}
+# 分司機（2026-07-21 用戶需求）：尖峰時段多車接連到達，每台車都要各自通知。
 # ============================================================
 _EVENTS: Dict[tuple, dict] = {}
 _EVENTS_LOCK = threading.Lock()
-EVENT_THROTTLE_SEC = 5 * 60    # 同一（接送群×司機）5 分鐘內只建一個事件
-NAG_INTERVAL_SEC = 60          # 催促間隔
-MAX_NAGS = 2                   # 最多催 2 次
-NAG_TEXT = "⏰ 提醒：來程車輛接近，尚未有人確認"
+
+# 同一（接送群×司機）30 秒內重複傳位置 → 不重發（純防連點 / 手滑）。
+# 2026-09-09 從 5 分鐘縮短：拿掉自動催促之後，「沒人按就重傳」是司機唯一的
+# 補救手段，5 分鐘會把重傳整個吃掉。
+REPEAT_COOLDOWN_SEC = 30
+
+# 未確認的事件算「在途」多久 —— 用於多車警示，以及「第 N 次」要不要延續。
+# 從最後一次傳位置起算：還在重傳的司機就一直在途；停了 5 分鐘沒下文
+# 就當上一趟結束，下次重新從第 1 次算。
+IN_FLIGHT_SEC = 5 * 60
 
 
-def start_arrival_event(relay_chat_id: str, driver_key: str = 'unknown') -> bool:
-    """建立到院事件並排第一次催促。
+def register_location_send(relay_chat_id: str,
+                           driver_key: str = 'unknown') -> Optional[int]:
+    """登記一次「司機傳位置」，回傳這是同一趟的第幾次。
 
-    節流按（接送群×司機）：同司機 20 分鐘窗內已有事件 → 回 False
-    （呼叫端不重發通知、不重啟催促）；不同司機各有各的窗，多車各自通知。
-    回 True = 新事件已建立，催促計時已啟動。
+    Returns:
+        1, 2, 3…  這是第幾次（呼叫端據此發通知）
+        None      30 秒內重複傳 → 不重發通知
+
+    「同一趟」= 還沒有人按 [✅ 收到]、且距離上次傳不到 IN_FLIGHT_SEC。
+    有人按過收到、或隔太久沒下文 → 視為新的一趟，從第 1 次重新算。
     """
     if not relay_chat_id:
-        return False
+        return None
     key = (relay_chat_id, driver_key or 'unknown')
     now = time.time()
-    old_timer = None
     with _EVENTS_LOCK:
         ev = _EVENTS.get(key)
-        if ev and (now - ev['started_at']) < EVENT_THROTTLE_SEC:
-            return False
-        old_timer = ev.get('timer') if ev else None
+        continuing = (
+            ev is not None
+            and not ev['acked']
+            and (now - ev['last_at']) < IN_FLIGHT_SEC
+        )
+        if continuing and (now - ev['last_at']) < REPEAT_COOLDOWN_SEC:
+            return None
+        count = ev['count'] + 1 if continuing else 1
         _EVENTS[key] = {
-            'started_at': now, 'acked': False, 'nag_count': 0, 'timer': None,
+            'started_at': ev['started_at'] if continuing else now,
+            'last_at': now,
+            'acked': False,
+            'count': count,
         }
-    if old_timer:
-        try:
-            old_timer.cancel()
-        except Exception:
-            pass
-    _schedule_nag(key)
-    logger.info(f"[relay] 到院事件建立: {relay_chat_id[:8]}… 司機={str(driver_key)[:8]}…")
-    return True
-
-
-def _schedule_nag(key: tuple) -> None:
-    t = threading.Timer(NAG_INTERVAL_SEC, _nag, args=(key,))
-    t.daemon = True
-    with _EVENTS_LOCK:
-        ev = _EVENTS.get(key)
-        if ev is not None:
-            ev['timer'] = t
-    t.start()
-
-
-def _nag(key: tuple) -> None:
-    """催促計時到點：未 acked 且未達上限 → push 催促 + [✅ 收到]，再排下一次。"""
-    with _EVENTS_LOCK:
-        ev = _EVENTS.get(key)
-        if not ev or ev['acked'] or ev['nag_count'] >= MAX_NAGS:
-            return
-        ev['nag_count'] += 1
-        count = ev['nag_count']
-    _push_to_relay(key[0], NAG_TEXT)  # push 失敗只 log，狀態機照走
-    if count < MAX_NAGS:
-        _schedule_nag(key)
-    else:
-        logger.info(f"[relay] 催促達上限（{MAX_NAGS} 次），停止: {key[0][:8]}…")
+    logger.info(f"[relay] 位置第 {count} 次: {relay_chat_id[:8]}… "
+                f"司機={str(driver_key)[:8]}…")
+    return count
 
 
 # ============================================================
@@ -164,22 +158,23 @@ def _ack_quick_reply():
     ])
 
 
-def _build_ack_text_message(text: str, warn: Optional[str] = None):
+def _build_ack_text_message(text: str, warns: Optional[list] = None):
     """到院通知 Flex 泡泡 + [✅ 收到] Quick Reply（一律泡泡 — 用戶定調求一致性）。
 
-    warn（多車在途）→ 加一行紅色粗體警示；按鈕維持 Quick Reply
+    warns（「第 N 次」/ 多車在途）→ 每則加一行紅色粗體警示；按鈕維持 Quick Reply
     （Flex 訊息一樣能掛，不產生常駐假按鈕）。
     """
     from linebot.v3.messaging import FlexMessage, FlexContainer
+    warns = [w for w in (warns or []) if w]
     contents = [{"type": "text", "text": text, "wrap": True, "size": "md"}]
-    if warn:
-        contents.append({"type": "text", "text": warn, "wrap": True, "size": "md",
+    for w in warns:
+        contents.append({"type": "text", "text": w, "wrap": True, "size": "md",
                          "weight": "bold", "color": "#D32F2F", "margin": "md"})
     bubble = {
         "type": "bubble",
         "body": {"type": "box", "layout": "vertical", "contents": contents},
     }
-    alt = f"{text[:40]}｜{warn[:18]}" if warn else text
+    alt = '｜'.join([text[:40]] + [w[:18] for w in warns]) if warns else text
     return FlexMessage(
         alt_text=alt[:400],
         contents=FlexContainer.from_dict(bubble),
@@ -188,7 +183,7 @@ def _build_ack_text_message(text: str, warn: Optional[str] = None):
 
 
 def _push_to_relay(relay_chat_id: str, text: str,
-                   warn: Optional[str] = None) -> None:
+                   warns: Optional[list] = None) -> None:
     """push 帶 [✅ 收到] 按鈕的文字到接送群。失敗只 log 不 raise。
 
     threading.Timer 的執行緒沒有 Flask app context（get_line_bot_api 讀
@@ -212,7 +207,7 @@ def _push_to_relay(relay_chat_id: str, text: str,
         from linebot.v3.messaging import PushMessageRequest
         api.push_message(PushMessageRequest(
             to=relay_chat_id,
-            messages=[_build_ack_text_message(text, warn=warn)],
+            messages=[_build_ack_text_message(text, warns=warns)],
         ))
         from modules.utils.push_stats import record_push
         record_push('relay', target_id=relay_chat_id)
@@ -226,13 +221,18 @@ def _push_to_relay(relay_chat_id: str, text: str,
 # ============================================================
 
 def _open_event_count(relay_chat_id: str) -> int:
-    """該接送群「在途」事件數 = 未確認且仍在節流窗內的事件（含剛建立的）"""
+    """該接送群「在途」事件數 = 未確認且仍在 IN_FLIGHT_SEC 內的事件（含剛登記的）
+
+    ⚠️ 用 IN_FLIGHT_SEC 不是 REPEAT_COOLDOWN_SEC —— 「還有幾台車沒被確認」跟
+    「多久內不重發」是兩件事。2026-09-09 把冷卻縮到 30 秒時若沿用同一個常數，
+    多車警示會只看得到 30 秒內的車，等於失效。
+    """
     now = time.time()
     with _EVENTS_LOCK:
         return sum(
             1 for key, ev in _EVENTS.items()
             if key[0] == relay_chat_id and not ev['acked']
-            and (now - ev['started_at']) < EVENT_THROTTLE_SEC
+            and (now - ev['last_at']) < IN_FLIGHT_SEC
         )
 
 
@@ -244,28 +244,46 @@ def _multi_car_warn(relay_chat_id: str) -> Optional[str]:
     return None
 
 
+def _repeat_warn(count: int) -> Optional[str]:
+    """「第 N 次」提示 —— 取代原本的自動催促。
+
+    第 1 次不標（那是正常情況，標了變雜訊）；第 2 次起才出現，
+    而且用紅字，因為它代表的正是「沒人按收到，司機又傳一次」。
+    """
+    if count and count > 1:
+        return f"🔁 同一位司機第 {count} 次傳位置（前面尚未有人按「收到」）"
+    return None
+
+
+def _warns_for(relay_chat_id: str, count: int) -> list:
+    return [_repeat_warn(count), _multi_car_warn(relay_chat_id)]
+
+
 def notify_relay_by_reply(reply_token: str, relay_chat_id: str, text: str,
                           driver_key: str = 'unknown') -> None:
-    """(a) 司機把位置釘直接發在接送群 → reply 到院通知（免費）+ 建事件。
+    """(a) 司機把位置釘直接發在接送群 → reply 到院通知（免費）+ 登記次數。
 
-    節流窗內已有「同司機」事件 → 不重發通知、不重啟催促（保持靜默）。
+    30 秒冷卻內重複傳 → 不重發（保持靜默）。
     """
-    if not start_arrival_event(relay_chat_id, driver_key):
-        logger.info(f"[relay] 節流中，接送群位置釘不重發通知: {relay_chat_id[:8]}…")
+    count = register_location_send(relay_chat_id, driver_key)
+    if count is None:
+        logger.info(f"[relay] 30 秒冷卻中，接送群位置釘不重發通知: {relay_chat_id[:8]}…")
         return
-    reply_message(reply_token, [_build_ack_text_message(text, warn=_multi_car_warn(relay_chat_id))])
+    reply_message(reply_token,
+                  [_build_ack_text_message(text, warns=_warns_for(relay_chat_id, count))])
 
 
 def notify_relay_by_push(relay_chat_id: str, text: str,
                          driver_key: str = 'unknown') -> None:
     """(b) 位置釘發在有綁定的工作群 → push 通知到接送群（fallback，吃額度）。
 
-    過「同司機」節流才推；push 失敗只 log。工作群自己的 ETA reply 由呼叫端照常回。
+    過 30 秒冷卻才推；push 失敗只 log。工作群自己的 ETA reply 由呼叫端照常回。
     """
-    if not start_arrival_event(relay_chat_id, driver_key):
-        logger.info(f"[relay] 節流中，不重 push 到接送群: {relay_chat_id[:8]}…")
+    count = register_location_send(relay_chat_id, driver_key)
+    if count is None:
+        logger.info(f"[relay] 30 秒冷卻中，不重 push 到接送群: {relay_chat_id[:8]}…")
         return
-    _push_to_relay(relay_chat_id, text, warn=_multi_car_warn(relay_chat_id))
+    _push_to_relay(relay_chat_id, text, warns=_warns_for(relay_chat_id, count))
 
 
 # ============================================================
@@ -300,23 +318,15 @@ def _resolve_member_name(chat_id: str, user_id: Optional[str]) -> Optional[str]:
 
 def _ack_received(reply_token: str, relay_chat_id: str,
                   user_id: Optional[str] = None) -> None:
-    """[✅ 收到] — 確認該接送群「全部」進行中事件、停止所有催促。
+    """[✅ 收到] — 確認該接送群「全部」進行中事件。
 
     多車接連到達時各有各的事件，一個「收到」視為人員已注意到通知，全數確認。
+    確認後該司機下次傳位置會重新從「第 1 次」算（見 register_location_send）。
     """
-    timers = []
     with _EVENTS_LOCK:
         for key, ev in _EVENTS.items():
             if key[0] == relay_chat_id and not ev['acked']:
                 ev['acked'] = True
-                if ev.get('timer'):
-                    timers.append(ev['timer'])
-                ev['timer'] = None
-    for t in timers:
-        try:
-            t.cancel()
-        except Exception:
-            pass
     name = _resolve_member_name(relay_chat_id, user_id)
     reply_text(reply_token, f"👌 {name} 已確認" if name else "👌 已確認")
 
@@ -385,7 +395,8 @@ def handle_relay_commands(message_text: str, chat_id: str) -> Optional[str]:
             "✅ 綁定完成！本群已成為到院通知接送群。\n"
             "・司機在本群傳位置 → 立即收到到院通知\n"
             "・司機在工作群傳位置 → 通知也會轉發到本群\n"
-            "・收到通知請點 [✅ 收到] 確認（60 秒未確認會提醒，最多 2 次）\n"
+            "・收到通知請點 [✅ 收到] 確認\n"
+            "・沒人按時司機會重傳位置，通知會標「🔁 第 N 次」\n"
             "・本群其他訊息機器人一律靜默"
         )
 

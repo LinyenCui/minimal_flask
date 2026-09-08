@@ -28,8 +28,9 @@ import modules.handlers.arrival_relay_handler as arh
 SENT = []  # (kind, target_or_token, text)
 
 
-def _fake_push(chat_id, text, warn=None):
-    SENT.append(('push', chat_id, f'{text}|{warn}' if warn else text))
+def _fake_push(chat_id, text, warns=None):
+    extra = '|'.join(w for w in (warns or []) if w)
+    SENT.append(('push', chat_id, f'{text}|{extra}' if extra else text))
 
 
 def _fake_reply_text(token, text):
@@ -46,7 +47,6 @@ def _fake_reply_message(token, messages):
 arh._push_to_relay = _fake_push
 arh.reply_text = _fake_reply_text
 arh.reply_message = _fake_reply_message
-arh._schedule_nag = lambda key: None  # 不開真 Timer；催促用 _nag 直呼驗證
 
 
 # ============================================================
@@ -96,62 +96,79 @@ with _app_t1.app_context():
     _db_t1.session.commit()
 
 # ============================================================
-# T2: 事件節流（20 分鐘窗）
+# T2: 30 秒冷卻 + 「第 N 次」計數
 # ============================================================
-banner('T2: 事件節流（20 分鐘窗）')
+banner('T2: 30 秒冷卻 + 第 N 次計數')
 arh._EVENTS.clear()
-check('第一次建立 → True', arh.start_arrival_event('R_TEST', 'D1') is True)
-check('同司機窗內再建 → False（節流）', arh.start_arrival_event('R_TEST', 'D1') is False)
-check('不同司機 → True（多車各自通知）', arh.start_arrival_event('R_TEST', 'D2') is True)
-check('第三位司機 → True', arh.start_arrival_event('R_TEST', 'D3') is True)
-arh._EVENTS[('R_TEST', 'D1')]['started_at'] -= (arh.EVENT_THROTTLE_SEC + 1)  # 模擬窗過
-check('同司機窗過後可重建 → True', arh.start_arrival_event('R_TEST', 'D1') is True)
-check('不同接送群互不影響', arh.start_arrival_event('R_TEST2', 'D1') is True)
-check('未帶司機 → unknown bucket', arh.start_arrival_event('R_TEST3') is True)
-check('unknown bucket 同窗節流', arh.start_arrival_event('R_TEST3') is False)
+check('冷卻是 30 秒', arh.REPEAT_COOLDOWN_SEC == 30)
+check('第一次傳 → 1', arh.register_location_send('R_TEST', 'D1') == 1)
+check('30 秒內再傳 → None（不重發）', arh.register_location_send('R_TEST', 'D1') is None)
+check('不同司機 → 各自從 1 算', arh.register_location_send('R_TEST', 'D2') == 1)
+check('第三位司機 → 1', arh.register_location_send('R_TEST', 'D3') == 1)
+
+# 冷卻過了 → 第 2 次（沒人按收到，司機重傳）
+arh._EVENTS[('R_TEST', 'D1')]['last_at'] -= (arh.REPEAT_COOLDOWN_SEC + 1)
+check('過 30 秒重傳 → 2', arh.register_location_send('R_TEST', 'D1') == 2)
+arh._EVENTS[('R_TEST', 'D1')]['last_at'] -= (arh.REPEAT_COOLDOWN_SEC + 1)
+check('再重傳 → 3（持續累加）', arh.register_location_send('R_TEST', 'D1') == 3)
+check('同一趟的 started_at 不被覆蓋',
+      arh._EVENTS[('R_TEST', 'D1')]['started_at']
+      < arh._EVENTS[('R_TEST', 'D1')]['last_at'])
+
+# 有人按收到 → 下一趟重新從 1 算
+arh.handle_ack('tok', 'R_TEST', '收到')
+arh._EVENTS[('R_TEST', 'D1')]['last_at'] -= (arh.REPEAT_COOLDOWN_SEC + 1)
+check('按過收到後再傳 → 回到 1', arh.register_location_send('R_TEST', 'D1') == 1)
+
+# 太久沒下文 → 視為新的一趟
+arh._EVENTS[('R_TEST', 'D1')]['last_at'] -= (arh.IN_FLIGHT_SEC + 1)
+check('隔超過在途窗再傳 → 回到 1（新的一趟）',
+      arh.register_location_send('R_TEST', 'D1') == 1)
+
+check('不同接送群互不影響', arh.register_location_send('R_TEST2', 'D1') == 1)
+check('未帶司機 → unknown bucket', arh.register_location_send('R_TEST3') == 1)
+check('unknown bucket 同樣吃冷卻', arh.register_location_send('R_TEST3') is None)
+check('沒有接送群 id → None', arh.register_location_send('', 'D1') is None)
 
 # ============================================================
-# T3: 催促狀態機（最多 2 次）
+# T3: 自動催促已經拿掉（2026-09-09）
 # ============================================================
-banner('T3: 催促狀態機（最多 2 次）')
-arh._EVENTS.clear()
-SENT.clear()
-arh.start_arrival_event('R_NAG', 'D1')
-arh._nag(('R_NAG', 'D1'))
-check('第 1 催有 push', push_count() == 1)
-check('催促文案', arh.NAG_TEXT in SENT[-1][2])
-arh._nag(('R_NAG', 'D1'))
-check('第 2 催有 push', push_count() == 2)
-arh._nag(('R_NAG', 'D1'))
-check('第 3 次不催（上限 2）', push_count() == 2)
-check('nag_count == 2', arh._EVENTS[('R_NAG', 'D1')]['nag_count'] == 2)
+banner('T3: 自動催促已移除 — 不可以再長回來')
+for gone in ('_nag', '_schedule_nag', 'NAG_TEXT', 'NAG_INTERVAL_SEC', 'MAX_NAGS'):
+    check(f'{gone} 已不存在', not hasattr(arh, gone))
+check('事件不再帶 timer（沒有背景 Timer 會偷 push）',
+      'timer' not in arh._EVENTS[('R_TEST2', 'D1')])
+check('事件不再帶 nag_count',
+      'nag_count' not in arh._EVENTS[('R_TEST2', 'D1')])
+_src = open('/Users/linyancui/minimal_flask/modules/handlers/'
+            'arrival_relay_handler.py', encoding='utf-8').read()
+check('模組不再 import threading.Timer 之外的催促路徑（沒有 Timer( 呼叫）',
+      'Timer(' not in _src)
 
 # ============================================================
-# T4: ack 停催
+# T4: ack 一鍵全確認
 # ============================================================
-banner('T4: ack 停催')
+banner('T4: ack 一鍵全確認')
 arh._EVENTS.clear()
 SENT.clear()
-arh.start_arrival_event('R_ACK', 'D1')
-arh.start_arrival_event('R_ACK', 'D2')   # 第二台車進行中
+arh.register_location_send('R_ACK', 'D1')
+arh.register_location_send('R_ACK', 'D2')   # 第二台車進行中
 check('「收到」被認得 → True', arh.handle_ack('tok', 'R_ACK', '收到') is True)
 check('回覆「👌 已確認」', any(s[0] == 'reply' and '已確認' in s[2] for s in SENT))
 check('D1 acked', arh._EVENTS[('R_ACK', 'D1')]['acked'] is True)
 check('D2 也一鍵全確認', arh._EVENTS[('R_ACK', 'D2')]['acked'] is True)
-arh._nag(('R_ACK', 'D1'))
-arh._nag(('R_ACK', 'D2'))
-check('ack 後兩台車的催促都不 push', push_count() == 0)
+check('確認過程完全不 push', push_count() == 0)
 
 # T4b: 「誰按的」— mock 名字解析，驗證帶名文案
 SENT.clear()
 arh._EVENTS.clear()
-arh.start_arrival_event('R_WHO', 'D1')
+arh.register_location_send('R_WHO', 'D1')
 _orig_resolve = arh._resolve_member_name
 arh._resolve_member_name = lambda chat_id, uid: '春妃' if uid == 'U_TEST' else None
 check('帶 user_id 的收到 → True', arh.handle_ack('tok', 'R_WHO', '收到', user_id='U_TEST') is True)
 check('回覆帶名字「👌 春妃 已確認」', any(s[0] == 'reply' and '春妃 已確認' in s[2] for s in SENT))
 SENT.clear()
-arh.start_arrival_event('R_WHO2', 'D1')
+arh.register_location_send('R_WHO2', 'D1')
 check('名字查不到 → 仍確認', arh.handle_ack('tok', 'R_WHO2', '收到', user_id='U_UNKNOWN') is True)
 check('文案退回無名版', any(s[0] == 'reply' and s[2] == '👌 已確認' for s in SENT))
 arh._resolve_member_name = _orig_resolve
@@ -168,16 +185,25 @@ check('無事件時「收到」也回確認不炸',
       arh.handle_ack('tok', 'R_NOEVENT', '收到') is True)
 
 # ============================================================
-# T6: notify（reply / push 兩觸發點）過節流才發
+# T6: notify（reply / push 兩觸發點）過冷卻才發
 # ============================================================
-banner('T6: notify 觸發點 + 節流')
+banner('T6: notify 觸發點 + 30 秒冷卻')
 arh._EVENTS.clear()
 SENT.clear()
 arh.notify_relay_by_reply('tok1', 'R_N', '🚗 注意：來程車輛接近「診所」', driver_key='D1')
 check('(a) 接送群位置釘 → reply 通知', any(s[0] == 'reply_msg' for s in SENT))
+check('(a) 第 1 次不標次數', '第 2 次' not in str(SENT[-1][2]))
 SENT.clear()
 arh.notify_relay_by_reply('tok2', 'R_N', '🚗 注意：來程車輛接近「診所」', driver_key='D1')
-check('(a) 同司機節流中 → 不重發通知', len(SENT) == 0)
+check('(a) 30 秒冷卻中 → 不重發通知', len(SENT) == 0)
+arh._EVENTS[('R_N', 'D1')]['last_at'] -= (arh.REPEAT_COOLDOWN_SEC + 1)
+arh.notify_relay_by_reply('tok2b', 'R_N', '🚗 注意：來程車輛接近「診所」', driver_key='D1')
+_again = [s for s in SENT if s[0] == 'reply_msg']
+check('(a) 過冷卻重傳 → 通知標「第 2 次」',
+      _again and '第 2 次傳位置' in str(_again[-1][2]))
+check('(a) 「第 N 次」是紅字（跟多車警示同樣醒目）',
+      _again and '#D32F2F' in str(_again[-1][2]))
+SENT.clear()
 arh.notify_relay_by_reply('tok3', 'R_N', '🚗 注意：來程車輛接近「診所」', driver_key='D2')
 check('(a) 不同司機 → 照發（多車各自通知）', any(s[0] == 'reply_msg' for s in SENT))
 arh._EVENTS.clear()
@@ -186,7 +212,12 @@ arh.notify_relay_by_push('R_P', '🚗 注意：來程車輛接近「診所」', 
 check('(b) 工作群位置釘 → push 到接送群', push_count() == 1)
 SENT.clear()
 arh.notify_relay_by_push('R_P', '🚗 注意：來程車輛接近「診所」', driver_key='D1')
-check('(b) 同司機節流中 → 不重 push', push_count() == 0)
+check('(b) 30 秒冷卻中 → 不重 push', push_count() == 0)
+arh._EVENTS[('R_P', 'D1')]['last_at'] -= (arh.REPEAT_COOLDOWN_SEC + 1)
+arh.notify_relay_by_push('R_P', '🚗 注意：來程車輛接近「診所」', driver_key='D1')
+check('(b) 過冷卻重傳 → push 且標「第 2 次」',
+      push_count() == 1 and '第 2 次傳位置' in SENT[-1][2])
+SENT.clear()
 arh.notify_relay_by_push('R_P', '🚗 注意：來程車輛接近「診所」', driver_key='D2')
 check('(b) 不同司機 → 照 push', push_count() == 1)
 

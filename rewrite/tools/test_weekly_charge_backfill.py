@@ -89,17 +89,17 @@ try:
             'amount_out, memo, type FROM account_ledger WHERE id = :i'),
             {'i': lid}).fetchone()
 
-    # 挑一個「目前還沒記過扣款」的舊週當標的，避免撞到真資料的防重複
-    target = None
-    for i in range(1, WEEKLY_CHARGE_HISTORY_WEEKS + 4):
-        cand = LAST_SAT - timedelta(weeks=i)
-        n = s.execute(text(
-            "SELECT COUNT(*) FROM account_ledger WHERE type='weekly_charge' "
-            "AND (occurred_at AT TIME ZONE 'UTC')::date = :d"), {'d': cand}).scalar()
-        if not n:
-            target = cand
-            break
-    assert target, '找不到還沒記過扣款的舊週可以測'
+    # 標的週：固定挑 20 週前，並在 tx 內把該週既有的扣款分錄清掉，
+    # 保證「這一週還沒記」這個前提成立。
+    # ⚠️ 不要去真資料裡「找一個還沒記過的週」—— 交接檔 4.8：靠現成資料的測試
+    #    會在某天突然紅。本機同步過 Render 之後每一週都記過了，就是這樣紅的。
+    #    整支 auto_commit=False，最後 rollback，DELETE 不會留下。
+    target = LAST_SAT - timedelta(weeks=20)
+    other = target - timedelta(weeks=1)
+    s.execute(text(
+        "DELETE FROM account_ledger WHERE type='weekly_charge' "
+        "AND (occurred_at AT TIME ZONE 'UTC')::date IN (:a, :b)"),
+        {'a': target, 'b': other})
 
     # ========================================================
     banner(f'T2: 補記舊週（{target}）')
@@ -147,14 +147,9 @@ try:
     ok(not r.ok and '已記過扣款' in (r.error or ''),
        f'同一週再記 → 擋：{(r.error or "")[:40]}')
 
-    other = target - timedelta(weeks=1)
-    n_other = s.execute(text(
-        "SELECT COUNT(*) FROM account_ledger WHERE type='weekly_charge' "
-        "AND (occurred_at AT TIME ZONE 'UTC')::date = :d"), {'d': other}).scalar()
-    if not n_other:
-        r = record_weekly_charge(session=s, amount=500, week_end=other,
-                                user_name='test', via='test', auto_commit=False)
-        ok(r.ok, f'換一週（{other}）→ 不受影響，照樣可記')
+    r = record_weekly_charge(session=s, amount=500, week_end=other,
+                            user_name='test', via='test', auto_commit=False)
+    ok(r.ok, f'換一週（{other}）→ 不受影響，照樣可記')
 
     r = record_weekly_charge(session=s, amount=0, week_end=target,
                             user_name='test', via='test', auto_commit=False)

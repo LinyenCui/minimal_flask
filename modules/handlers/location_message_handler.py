@@ -118,8 +118,8 @@ def handle_location_message(event):
             },
         )
 
-        # (a) 位置釘發在接送群 → reply 到院通知（免費）+ [✅ 收到] + 建事件
-        #（節流按司機分開：同司機 20 分鐘窗內不重發；多車各自通知）；不走下面的 Flex 卡
+        # (a) 位置釘發在接送群 → reply 到院通知（免費）+ [✅ 收到] + 登記次數
+        #（節流按司機分開：同司機 30 秒冷卻內不重發；多車各自通知）；不走下面的 Flex 卡
         if relay_work_id:
             try:
                 from modules.handlers.arrival_relay_handler import notify_relay_by_reply
@@ -162,7 +162,7 @@ def handle_location_message(event):
             reply_text(event.reply_token, text + f"\n地圖：{maps_url}")
 
         # (b) 位置釘發在有綁定接送群的工作群 → 工作群照常回 ETA（上面已回），
-        # 另 push 一則通知到綁定的接送群（fallback，吃額度；同司機過節流才推）
+        # 另 push 一則通知到綁定的接送群（fallback，吃額度；同司機過 30 秒冷卻才推）
         try:
             from modules.services.group_location_meta_service import get_relay_of
             from modules.handlers.arrival_relay_handler import notify_relay_by_push
