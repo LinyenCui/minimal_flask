@@ -14,7 +14,7 @@ from collections import defaultdict
 from typing import List, Optional
 from rewrite.tools.completed_trip import CompletedTripView
 # 司機編號的列表顯示規則單一來源（不加 🚗，見該 helper 的說明）
-from rewrite.views.trip_flex import driver_label
+from rewrite.views.trip_flex import driver_label, DRIVER_ICON
 
 
 # 主題色
@@ -511,7 +511,8 @@ def render_grouped_stat_card(view, *, title: str = "📊 分組統計") -> dict:
         for gc in group_cols:
             v = r.get(gc)
             if gc == 'driver_id':
-                parts.append(f"🚗{v}" if v is not None else "🚗?")
+                # 這張卡不擠，但圖示跟列表共用一個常數，不要兩種車
+                parts.append(f"{DRIVER_ICON}{v}" if v is not None else f"{DRIVER_ICON}?")
             elif gc == 'has_fare':
                 parts.append("已記錄" if v else "未記錄")
             elif gc == 'is_leave':
