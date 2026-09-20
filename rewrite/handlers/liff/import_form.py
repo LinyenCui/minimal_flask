@@ -197,6 +197,9 @@ def _import_broadcast_text(data: dict, operator_user_id: str | None) -> str:
         lines.append(f"🔄 覆蓋：{data['overwritten']} 筆")
     if data.get('purged_past', 0) > 0:
         lines.append(f"🗑️ 清過去週：{data['purged_past']} 筆")
+    if data.get('purged_stale', 0) > 0:
+        # 不分類別的殘留（已完成／註銷）— 沒清會卡住序號歸位
+        lines.append(f"🧹 清過去週殘留（已完成／註銷）：{data['purged_stale']} 筆")
     if data.get('skipped_dup', 0) > 0:
         lines.append(f"⏭️ 跳過重複：{data['skipped_dup']} 筆")
     if data.get('seq_reset_from'):

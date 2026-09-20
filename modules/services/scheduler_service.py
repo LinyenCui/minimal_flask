@@ -758,16 +758,6 @@ def cleanup_expired_conversation_states():
                 user_states.pop(key, None)
                 cleaned_total += 1
 
-        # 3. sequence_fix_states (admin 工具的 state)
-        try:
-            from modules.handlers.sequence_fix_handler import sequence_fix_states
-            if len(sequence_fix_states) > 50:
-                keys_to_remove = list(sequence_fix_states.keys())[:-25]
-                for key in keys_to_remove:
-                    sequence_fix_states.pop(key, None)
-                    cleaned_total += 1
-        except ImportError:
-            pass
 
         # 4. rewrite/conversation_state（trip_status_picker / leave_input /
         #    SANDBOX_ACTIVE / acct_ledger_range_input 等）— 主動 sweep 過期 state

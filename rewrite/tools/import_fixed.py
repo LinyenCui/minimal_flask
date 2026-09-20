@@ -30,34 +30,81 @@ VALID_IMPORT_CATEGORIES = ('診所', '東洋', '臨時')
 """類別必須在 enum 內 — 跟 legacy import_handler 一致"""
 
 SEQ_RESET_THRESHOLD = 5000
-"""trips 序號自動歸位門檻 — 週更清空後序號超過此值才歸 1。
+"""trips 序號自動歸位門檻。
 
 不設成每週歸 1 的原因：聊天室裡舊班次卡片的按鈕帶著 trip_id，
 週週重用 id 會讓「上週的請假按鈕」打到「本週的同號班次」。
-門檻制讓 id 重用約 8-10 個月才發生一次，舊按鈕早已沉底。
-（completed_trips 的 id 是歷史累積、被 #N 指令引用，永不重置。）"""
+門檻制讓 id 重用約 7 個月才發生一次（每週 ~170 筆），舊按鈕早已沉底。
+
+⚠️ 2026-09-20 改條件：原本要「trips 表清空」才歸位，但那永遠不會成立 ——
+匯入是分類別的（匯診所時東洋還在）、預約叫車的未來班次一直在、
+別的類別掉進過去態後屍體留在 trips。結果門檻早過了（5190）卻從沒歸位。
+現在的條件是 **所有還活著的列 id 都 ≥ 門檻**（見 trips_sequence_can_reset），
+跟「表清空」一樣安全，但真的會成立。
+（completed_trips 的歸位走「歸檔清理」，見 scripts/archive_check.py。）"""
+
+
+def trips_sequence_can_reset(*, min_live_id, next_val,
+                             threshold: int = SEQ_RESET_THRESHOLD) -> bool:
+    """trips 序號現在歸 1 安不安全 —— 純函數，匯入自動歸位與手動指令共用。
+
+    歸 1 之後新 id 從 1 往上長，唯一會撞的是**還活著**的舊列。
+    只要活著的最小 id ≥ 門檻，就有 ≥ 門檻個號碼的跑道（~30 週），
+    那時舊列早清光了。表空的話當然也安全。
+
+    Args:
+        min_live_id: MIN(trip_id)，表空給 None
+        next_val:    序號目前的值，None 視為不能歸
+    """
+    if next_val is None or next_val < threshold:
+        return False          # 還沒墊高，沒必要歸
+    return min_live_id is None or min_live_id >= threshold
+
+
+def _trips_sequence_state(session) -> tuple:
+    """回 (seq_name, next_val, min_live_id, live_count)；seq_name 找不到回 None。"""
+    seq_name = session.execute(text(
+        "SELECT pg_get_serial_sequence('trips', 'trip_id')")).scalar()
+    if not seq_name:
+        return None, None, None, 0
+    next_val = session.execute(text(f"SELECT last_value FROM {seq_name}")).scalar()
+    min_id, cnt = session.execute(
+        text("SELECT MIN(trip_id), COUNT(*) FROM trips")).fetchone()
+    return seq_name, (int(next_val) if next_val is not None else None), \
+        (int(min_id) if min_id is not None else None), int(cnt or 0)
+
+
+def _purge_stale_trips(*, session, before) -> int:
+    """清掉過去週的殘留：`date < before` 且狀態是 已完成／註銷，**不分類別**。
+
+    已完成的早就在 completed_trips、註銷的沒意義 —— 留在 trips 只會
+    卡住序號歸位（它們的 id 壓低了 MIN(trip_id)）。
+    `before` 給**本週**的週日，不是匯入目標週：匯下週時本週的列一律不碰。
+    """
+    r = session.execute(text("""
+        DELETE FROM trips
+        WHERE date < :before AND status IN ('已完成', '註銷')
+    """), {'before': before})
+    return r.rowcount or 0
 
 
 def reset_trips_sequence(*, session) -> ToolResult:
-    """手動重置 trips 序號 — 僅當 trips 已清空才執行（防誤用）。
+    """手動重置 trips 序號（維護用）。跟匯入的自動歸位用同一條規則。
 
     Triggers: 「重置班次序號」。
     setval 立即生效且不受 rollback 保護，故不吃 auto_commit 參數。
     """
-    count = session.execute(text("SELECT COUNT(*) FROM trips")).scalar()
-    seq_name = session.execute(text(
-        "SELECT pg_get_serial_sequence('trips', 'trip_id')"
-    )).scalar()
+    seq_name, next_val, min_id, cnt = _trips_sequence_state(session)
     if not seq_name:
         return ToolResult.fail("找不到 trips 的序號 sequence")
-    next_val = session.execute(
-        text(f"SELECT last_value FROM {seq_name}")).scalar()
-    if count and count > 0:
+    if not trips_sequence_can_reset(min_live_id=min_id, next_val=next_val):
+        if next_val is not None and next_val < SEQ_RESET_THRESHOLD:
+            return ToolResult.fail(
+                f"序號才到 #{next_val}，還沒超過門檻 {SEQ_RESET_THRESHOLD}，不必歸位")
         return ToolResult.fail(
-            f"trips 還有 {count} 筆班次（目前序號 #{next_val}），"
-            f"清空本週班次後才能重置。序號會在匯入清空時自動歸位，"
-            f"通常不需手動操作"
-        )
+            f"trips 還有 {cnt} 筆班次，最小 id #{min_id} < 門檻 {SEQ_RESET_THRESHOLD}"
+            f"（目前序號 #{next_val}）。歸 1 會撞到它們 —— 等那些班次清掉後"
+            f"（週匯入會自動處理），序號就會自己歸位")
     session.execute(text("SELECT setval(:s, 1, false)"), {'s': seq_name})
     session.commit()
     return ToolResult.success(data={
@@ -276,27 +323,27 @@ def import_fixed_to_trips(
         """), {'before': dates[0], 'category': category})
         purged_count = result.rowcount
 
+    # === 清過去週的殘留（不分類別）===
+    # 上面的 purge_past 只清「這次匯入的類別」，別的類別掉進過去態後的屍體
+    # 會留著（實際發生：臨時 2 筆 7/30 的已完成卡了兩個月），把 MIN(trip_id)
+    # 壓低、序號永遠歸不了位。已完成／註銷是死資料，每次匯入順手清。
+    # 界線用**本週**週日（不是匯入目標週）：匯下週時本週的列一律不碰。
+    this_week_start, _, _ = calculate_target_week(today, 0)
+    purged_stale = _purge_stale_trips(session=session, before=this_week_start)
+
     # === 序號自動歸位 ===
-    # 週更清完舊班次後，trips 若已清空且序號墊高過門檻 → 歸 1（用戶需求：
-    # 序號不要無限堆高）。⚠️ setval 不受 rollback 保護 — 先 commit 上面的
-    # DELETE 再 reset，之後 INSERT 若失敗回滾，也不會出現「舊班次還在、
-    # 序號卻歸 1」的 PK 撞擊（重匯即可，fixed_schedules 是資料來源）。
+    # 條件 = 所有活著的列 id 都 ≥ 門檻（trips_sequence_can_reset）。
+    # ⚠️ setval 不受 rollback 保護 — 先 commit 上面的 DELETE 再 reset，之後
+    # INSERT 若失敗回滾，也不會出現「舊班次還在、序號卻歸 1」的 PK 撞擊
+    # （重匯即可，fixed_schedules 是資料來源）。
     seq_reset_from = None
     if auto_commit:  # 測試的 rollback 模式（auto_commit=False）不動序號
-        remaining = session.execute(text("SELECT COUNT(*) FROM trips")).scalar()
-        if remaining == 0:
-            seq_name = session.execute(text(
-                "SELECT pg_get_serial_sequence('trips', 'trip_id')"
-            )).scalar()
-            if seq_name:
-                next_val = session.execute(
-                    text(f"SELECT last_value FROM {seq_name}")).scalar()
-                if next_val and next_val >= SEQ_RESET_THRESHOLD:
-                    session.commit()   # 先落地 DELETE
-                    session.execute(text("SELECT setval(:s, 1, false)"),
-                                    {'s': seq_name})
-                    session.commit()
-                    seq_reset_from = int(next_val)
+        seq_name, next_val, min_id, _cnt = _trips_sequence_state(session)
+        if seq_name and trips_sequence_can_reset(min_live_id=min_id, next_val=next_val):
+            session.commit()   # 先落地 DELETE
+            session.execute(text("SELECT setval(:s, 1, false)"), {'s': seq_name})
+            session.commit()
+            seq_reset_from = next_val
 
     # week_offset 重算（防 user 給負/錯）
     week_offset_actual = (week_start - today).days // 7
@@ -397,6 +444,7 @@ def import_fixed_to_trips(
             'inserted': inserted,
             'overwritten': deleted_count,
             'purged_past': purged_count,
+            'purged_stale': purged_stale,
         },
         changed_fields=None,
         extra={
@@ -425,6 +473,7 @@ def import_fixed_to_trips(
             'inserted': inserted,
             'overwritten': deleted_count,
             'purged_past': purged_count,
+            'purged_stale': purged_stale,
             'leave_count': leave_count,
             'zero_surcharge_leave': zero_surcharge_leave,
             'normal_count': normal_count,

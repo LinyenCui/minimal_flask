@@ -382,13 +382,6 @@ def memory_stats():
     except Exception as e:
         stats['user_states'] = {'error': str(e)}
 
-    # admin 工具狀態（sequence_fix）
-    try:
-        from modules.handlers.sequence_fix_handler import sequence_fix_states
-        stats['sequence_fix_states'] = {'count': len(sequence_fix_states)}
-    except Exception:
-        pass
-
     # rewrite v0.1 conversation states
     try:
         from rewrite.conversation_state import state_count

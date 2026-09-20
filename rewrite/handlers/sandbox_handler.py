@@ -674,7 +674,8 @@ def try_handle_sandbox(event) -> bool:
         logger.info(f"[rewrite sandbox] {short_uid} → help ({text[:20]!r})")
         return True
 
-    # 0b''''. 手動重置班次序號（維護指令；trips 非空會被工具拒絕，防誤用）
+    # 0b''''. 手動重置班次序號（維護指令；活著的最小 id 未過門檻會被工具拒絕，
+    #        跟週匯入的自動歸位同一條規則 — import_fixed.trips_sequence_can_reset）
     # 歸檔清理：直接刪 Render 舊班次（免手貼 Adminer）。兩段式：
     #   「歸檔清理 [YYYY-MM-DD]」→ 檢查+預覽+確認鈕 →「確認清理」→ 真正執行
     # 安全欄杆在 scripts/archive_check.purge_render：備份不完整拒絕、
@@ -707,7 +708,9 @@ def try_handle_sandbox(event) -> bool:
                            chat_id=get_chat_id_from_event(event))
             reply_message(event.reply_token, {
                 'type': 'quick_reply',
-                'text': f"{_report}\n\n⚠️ 確認要刪除 Render 上這些資料嗎？",
+                'text': (f"{_report}\n\n⚠️ 確認要刪除 Render 上這些資料嗎？\n"
+                         f"清理後剩餘班次會重編為 #1 起，舊訊息裡的 #編號作廢，"
+                         f"之後操作前請重新查詢"),
                 'items': [
                     {'label': '🧹 確認清理', 'text': '確認清理'},
                     {'label': '❌ 取消', 'text': '取消清理'},
