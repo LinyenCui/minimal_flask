@@ -20,6 +20,27 @@ MUTED = "#999999"
 BLACK = "#333333"
 TEMP_TINT = "#FFF8E1"   # 預約(temp)班次在列表 row 的淡底色標記(非紅綠、不加字)
 
+
+def driver_label(driver_id) -> str:
+    """列表欄位用的司機編號文字 —— **不加 🚗**。
+
+    2026-09-20 用戶回報：列表裡司機編號被截成「28…」「61…」，要求
+    「想辦法把司機編號全部顯示出來，但不可以動到金額顯示」。
+
+    為什麼拿掉圖示而不是縮字：
+      · carousel 的 bubble 是 kilo（260px），一行要塞
+        編號/時間/路線/司機(/金額)，司機欄只分到 ~35px
+      · 司機編號最長 5 碼（28530 / 61153 / 61353 / 61367 / 61379 / 61553），
+        xxs 下約 30px；🚗 本身就吃掉約 2 個字寬（~13px）→ 剛好溢出
+      · size 已經是 xxs，**沒有更小的關鍵字可用**（xxs 是最小級），
+        再小要寫死 px，手機上會讀不動
+    所以圖示是這一欄唯一可以讓出來的東西；它每列都一樣，本來就不帶資訊。
+    欄位位置固定（永遠在路線之後、金額之前）＋灰色，不會跟別的數字混淆。
+
+    詳情卡、分組統計卡那種**不擠**的地方仍保留 🚗，不套這個 helper。
+    """
+    return str(driver_id) if driver_id else '?'
+
 # 狀態著色
 STATUS_COLOR = {
     '準備': SUCCESS,
@@ -376,7 +397,7 @@ def _render_day_bubble(d, trips_of_day: List[TripView], *,
 def _trip_row(t: TripView) -> dict:
     """Carousel 內一行班次（可 tap）"""
     time_text = str(t.time)[:5] if t.time else '—:—'
-    driver_text = f"🚗{t.driver_id}" if t.driver_id else "🚗?"
+    driver_text = driver_label(t.driver_id)
     sp, _, ep = t.display_route()
     route_text = f"{sp or '?'}→{ep or '?'}"
     color = STATUS_COLOR.get(t.display_status, BLACK)
@@ -399,9 +420,11 @@ def _trip_row(t: TripView) -> dict:
              "color": color, "weight": "bold"},
             {"type": "text", "text": time_text, "flex": 2, "size": "xxs",
              "color": BLACK},
-            {"type": "text", "text": route_text, "flex": 5, "size": "xxs",
+            # 路線 5→4、司機 2→3：把一格寬度讓給司機欄，5 碼編號才不會被截
+            # （用戶同意「犧牲一點行程的版面」換完整編號）
+            {"type": "text", "text": route_text, "flex": 4, "size": "xxs",
              "color": BLACK, "wrap": False},
-            {"type": "text", "text": driver_text, "flex": 2, "size": "xxs",
+            {"type": "text", "text": driver_text, "flex": 3, "size": "xxs",
              "color": MUTED, "align": "end"},
         ]
     }

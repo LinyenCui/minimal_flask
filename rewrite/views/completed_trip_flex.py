@@ -13,6 +13,8 @@ import json
 from collections import defaultdict
 from typing import List, Optional
 from rewrite.tools.completed_trip import CompletedTripView
+# 司機編號的列表顯示規則單一來源（不加 🚗，見該 helper 的說明）
+from rewrite.views.trip_flex import driver_label
 
 
 # 主題色
@@ -279,7 +281,7 @@ def _render_day_bubble(d, cts_of_day: List[CompletedTripView], *,
 
 def _ct_row(ct: CompletedTripView) -> dict:
     """Carousel 內一行已完成班次（可 tap 至詳情）"""
-    driver_text = f"🚗{ct.driver_id}" if ct.driver_id else "🚗?"
+    driver_text = driver_label(ct.driver_id)
     route_text = _short_route(ct)
     # 金額恆顯示（請假列可能是負數加成，如 -30，照顯示）。
     # ⚠️ 判斷用 has_fare 而不是 `if ct.computed_total` —— 0 是 falsy，
@@ -309,9 +311,11 @@ def _ct_row(ct: CompletedTripView) -> dict:
         "contents": [
             {"type": "text", "text": f"#{ct.id}", "flex": 2, "size": "xxs",
              "color": ACCENT_DARK, "weight": "bold"},
-            {"type": "text", "text": route_text, "flex": 6, "size": "xxs",
+            # 路線 6→5、司機 2→3：寬度從路線讓給司機欄（5 碼編號要完整顯示）。
+            # ⚠️ 金額欄的 flex 與字級一律不動 —— 用戶明講「不可以動到金額顯示」。
+            {"type": "text", "text": route_text, "flex": 5, "size": "xxs",
              "color": BLACK, "wrap": False},
-            {"type": "text", "text": driver_text, "flex": 2, "size": "xxs",
+            {"type": "text", "text": driver_text, "flex": 3, "size": "xxs",
              "color": MUTED, "align": "end"},
             {"type": "text", "text": fare_text, "flex": 2, "size": "xxs",
              "color": fare_color, "align": "end", "weight": "bold"},

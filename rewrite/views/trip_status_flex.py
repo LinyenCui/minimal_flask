@@ -17,7 +17,7 @@ from typing import List
 from rewrite.tools.trip import TripView
 from rewrite.views.trip_flex import (
     PRIMARY, ACCENT, DANGER, SUCCESS, MUTED, BLACK, STATUS_COLOR,
-    _format_date_with_weekday,
+    _format_date_with_weekday, driver_label,
 )
 
 
@@ -60,7 +60,7 @@ def _status_row(t: TripView) -> dict:
     sp, _, ep = t.display_route()
     route_text = f"{sp or '?'}→{ep or '?'}"
     status_text, status_color = _status_label(t)
-    driver_text = f"🚗{t.driver_id}" if t.driver_id else "🚗?"
+    driver_text = driver_label(t.driver_id)   # 全站一致：列表不加車子圖示
 
     row = {
         'type': 'box',
