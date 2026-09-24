@@ -272,12 +272,23 @@ def build_trip_list_batch_quick_reply(
     批次 LIFF 用單一 GET /liff/trips/batch 一次撈(Alternative A),避開 iOS
     WebView 多次 fetch bug。
 
-    篩掉「已完成 / 30 分鐘鎖內」的 trip(不可操作)。
+    只篩掉「已完成」—— **30 分鐘鎖內的照樣帶進去**。
+
+    ⚠️ 2026-09-24 用戶回報：11:11 打「今天診所班次」列出 #5139（11:30），
+    點「對這批做狀態管理」卻沒撈到。原因是這裡把鎖內的也篩掉了 ——
+    那條是批次表單「只能改狀態」時代寫的，當時鎖內確實什麼都不能做。
+    後來批次表單加了**指派／撤銷指派**（allow_in_lock=True，快到點了才更需要派車），
+    LIFF 端也已經會處理鎖內的列（打 ⏰、可勾但預設不勾、狀態類動作自動跳過），
+    只有這個入口沒跟著改，鎖內的班次直接消失、連看都看不到。
+
+    對照：單筆的 build_trip_quick_reply 仍篩鎖內 —— 那張表單只有
+    請假／註銷／衝突／改回準備，全是鎖內不能做的，篩掉是對的。
+
     無可操作 trip / LIFF_ID 未設 → 回 None。
     """
     actionable_ids = [
         t.trip_id for t in trips
-        if t.display_status != '已完成' and not getattr(t, 'is_locked', False)
+        if t.display_status != '已完成'
     ]
     if not actionable_ids:
         return None

@@ -134,12 +134,20 @@ try:
     # ========================================================
     banner('T4: 手動重置 — 有活著的低 id → 拒絕，序號不動')
     # ========================================================
-    low = mk(10, d=next_week, status='準備')     # 一筆 id=10 活著（低於門檻）
+    # 找一個門檻以下的空號當阻擋者 —— ⚠️ 不要寫死（例如 10）：
+    # 2026-09-20 prod 真的歸位了，同步下來後本地 #1〜#36 全是真班次，
+    # 寫死 10 就撞 PK（交接檔 4.8「測試不要靠現成資料」）。
+    free_low = s.execute(text("""
+        SELECT MIN(g) FROM generate_series(1, :t - 1) g
+        WHERE g NOT IN (SELECT trip_id FROM trips)
+    """), {'t': T}).scalar()
+    assert free_low, f'1〜{T - 1} 全被佔滿（不可能）'
+    low = mk(free_low, d=next_week, status='準備')   # 一筆低號活著（低於門檻）
     before_seq = s.execute(text(f'SELECT last_value FROM {seq_name}')).scalar()
     r = reset_trips_sequence(session=s)
     ok(not r.ok, f'拒絕：{(r.error or "")[:60]}')
-    ok('最小 id #10' in (r.error or '') or '門檻' in (r.error or ''),
-       '訊息講清楚是哪筆低 id 擋住、以及門檻')
+    ok('門檻' in (r.error or '') and '最小 id #' in (r.error or ''),
+       '訊息講清楚最小 id 與門檻')
     after_seq = s.execute(text(f'SELECT last_value FROM {seq_name}')).scalar()
     ok(before_seq == after_seq, f'序號沒被動（{before_seq} → {after_seq}）')
 
