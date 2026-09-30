@@ -146,8 +146,18 @@ try:
     before_seq = s.execute(text(f'SELECT last_value FROM {seq_name}')).scalar()
     r = reset_trips_sequence(session=s)
     ok(not r.ok, f'拒絕：{(r.error or "")[:60]}')
-    ok('門檻' in (r.error or '') and '最小 id #' in (r.error or ''),
-       '訊息講清楚最小 id 與門檻')
+    # 拒絕有兩條路，走哪條看「當下序號」—— 不能寫死其中一條：
+    #   · 序號 < 門檻 → 「還沒超過門檻，不必歸位」
+    #   · 序號 ≥ 門檻 但有活著的低 id → 「最小 id #N < 門檻」
+    # 2026-09-30 本地序號已經歸位過（#186），寫死第二條就紅了。
+    # setval 不受 rollback 保護，不能為了測試把序號墊高 → 兩條都認，
+    # 決策本身由 T1 的純函數完整覆蓋。
+    if before_seq is not None and before_seq < T:
+        ok('還沒超過門檻' in (r.error or ''),
+           f'序號 #{before_seq} < 門檻 → 訊息說「還沒超過門檻」')
+    else:
+        ok('最小 id #' in (r.error or '') and '門檻' in (r.error or ''),
+           f'序號 #{before_seq} ≥ 門檻 → 訊息講清楚最小 id 與門檻')
     after_seq = s.execute(text(f'SELECT last_value FROM {seq_name}')).scalar()
     ok(before_seq == after_seq, f'序號沒被動（{before_seq} → {after_seq}）')
 

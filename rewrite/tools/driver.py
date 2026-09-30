@@ -602,12 +602,16 @@ def query_driver_week_fares(*, session, driver_id: int,
     # 本週看到今天為止；過去週看完整一週（週日~週六）
     week_end = today if week_offset >= 0 else week_start + timedelta(days=6)
 
+    # ⚠️ 兩段 SELECT 都**必須**撈 modification_reason —— 下面 _pack 用它判斷
+    #    「填過沒」（改車資 豁免）。2026-08-05 接好了 _pack 卻漏了這欄，
+    #    d.get() 永遠拿到 None，於是週列表判「待補」、待補清單判「已填」，
+    #    司機看到待補卻沒地方補（2026-09-30 用戶回報，#4344）。
     trip_rows = session.execute(
         text(f"""
             SELECT trip_id, date, time, category, meter_fare, extra_fare,
                    start_point, via_point, end_point,
                    custom_start_point, custom_via_point, custom_end_point,
-                   trip_type, passenger_name
+                   trip_type, passenger_name, modification_reason
             FROM trips
             WHERE driver_id = :did
               AND date BETWEEN :ws AND :we
@@ -622,7 +626,8 @@ def query_driver_week_fares(*, session, driver_id: int,
     completed_rows = session.execute(
         text(f"""
             SELECT id, date, category, meter_fare, extra_fare,
-                   start_point, via_point, end_point, passenger_name
+                   start_point, via_point, end_point, passenger_name,
+                   modification_reason
             FROM completed_trips
             WHERE driver_id = :did
               AND date BETWEEN :ws AND :we

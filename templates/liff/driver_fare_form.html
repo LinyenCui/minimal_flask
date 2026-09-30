@@ -88,10 +88,13 @@
     .subtot .swatch.cat-e { background: #4a6fb5; }
     .subtot .swatch.cat-diag { background: #4f8fd6; }
     .row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
-    .row label { width: 74px; flex: 0 0 74px; font-size: 19px; font-weight: 700; }
+    /* 輸入框、送出鈕不特別放大（2026-09-30 用戶：司機已經在手機系統把字體加大，
+       這裡再寫死 24px 會疊加成兩倍大）。跟內文同一級（1em），讓系統字級決定大小。
+       ⚠️ 不要低於 16px：iOS 對 <16px 的輸入框會在點下去時自動縮放整頁。 */
+    .row label { width: 4em; flex: 0 0 4em; font-size: 1em; font-weight: 700; }
     .row input {
-      flex: 1; min-width: 0; height: 56px; padding: 8px 12px;
-      font-size: 24px; text-align: right;
+      flex: 1; min-width: 0; padding: .5em .7em;
+      font-size: 1em; text-align: right;
       border: 2px solid #cfd5dc; border-radius: 10px; background: #fbfcfd; color: #111;
     }
     .row input:focus {
@@ -113,7 +116,7 @@
     }
     .footer .inner { max-width: 640px; margin: 0 auto; }
     #btn-submit {
-      width: 100%; min-height: 64px; font-size: 24px; font-weight: 700;
+      width: 100%; padding: .7em; font-size: 1em; font-weight: 700;
       border: 0; border-radius: 12px; background: #06c755; color: #fff; cursor: pointer;
       box-shadow: 0 3px 10px rgba(6,199,85,.35);
     }
@@ -368,6 +371,10 @@
         `;
         cardsEl.appendChild(card);
       });
+      // 切到「看前 14 天」時空清單也要跟著改口，不然會寫「今天沒有」卻是在看 14 天
+      emptyEl.textContent = DAYS > 1
+        ? `最近 ${DAYS} 天沒有需要補車資的班次 👍`
+        : '今天沒有需要補車資的班次 👍';
       emptyEl.hidden = trips.length > 0;
       footerEl.hidden = trips.length === 0;
       moreLink.textContent = DAYS > 1 ? '只看今天' : '看前 14 天';

@@ -65,8 +65,16 @@ print('=' * 60)
 src = inspect.getsource(query_driver_week_fares)
 ok('_NOT_LEAVE' not in src,
    '週查詢不再用 _NOT_LEAVE 排除請假班次')
-ok('modification_reason' in src,
-   'SELECT 有撈 modification_reason（判定「已填」要用）')
+# ⚠️ 不能只檢查 'modification_reason' in src —— 這條原本就這樣寫，
+#    被 `d.get('modification_reason')` 那個字串騙過去，SELECT 其實沒撈，
+#    判定永遠拿到 None（2026-09-30 用戶回報 #4344：週列表「待補」、待補清單卻沒有）。
+#    改成逐段抓 SELECT … FROM 的欄位清單來驗。
+import re as _re_sel
+_selects = _re_sel.findall(r'SELECT(.*?)FROM\s+(\w+)', src, flags=_re_sel.S)
+ok(len(_selects) == 2, f'週查詢有兩段 SELECT（trips + completed_trips）→ {len(_selects)}')
+for _cols, _tbl in _selects:
+    ok('modification_reason' in _cols,
+       f'{_tbl} 的 SELECT 欄位清單有 modification_reason（不是只有 d.get 裡有）')
 ok('is_fare_filled(' in src,
    '用共用的 is_fare_filled，不再自己寫一套 meter != 0')
 ok(src.count('is_fare_filled(') == 1,
