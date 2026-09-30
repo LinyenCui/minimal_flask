@@ -119,10 +119,37 @@ try:
     answers = {(week_has[k], k in pend_ids) for k in k4344}
     ok(len(answers) == 1,
        f'現在態與過去態對這種班次的判定一致 → {answers}')
+    ok(answers == {(False, True)},
+       '兩邊都說「待補」，司機補得到（2026-09-30 用戶選 2：清成 0 = 要重報）')
 
 finally:
     s.rollback()
     s.close()
+
+# ============================================================
+banner('司機送 0 要擋 —— 不然送出後又被判沒填，無限迴圈')
+# ============================================================
+from rewrite.handlers.liff import driver_fare as _df
+
+for (m, e), want_block, note in [
+    ((0, None), True,  '錶價 0、加成沒填'),
+    ((0, 0),    True,  '錶價 0、加成 0'),
+    ((None, 0), True,  '只填加成 0'),
+    ((220, None), False, '正常錶價'),
+    ((0, -55),  False, '錶價 0、加成非 0（衝帳，已填）'),
+    ((140, -140), False, '沖帳（淨額 0 但錶價非 0，已填）'),
+]:
+    err = _df._zero_fare_error(m, e)
+    ok(bool(err) is want_block,
+       f'{note} → {"擋" if err else "放行"}')
+    if want_block:
+        # 被擋的組合一定是「送完仍然沒填」—— 擋的條件必須跟 fare_rules 同語意
+        from rewrite.tools.fare_rules import is_fare_filled as _iff
+        ok(not _iff(m, e), f'{note}：送完 is_fare_filled 仍為 False（擋對了）')
+
+ok('請假或註銷' in _df.ZERO_FARE_ERROR, '錯誤訊息告訴司機該找誰、走哪條路')
+_hsrc = __import__('inspect').getsource(_df.driver_fare_submit)
+ok('_zero_fare_error(' in _hsrc, '送出流程真的有呼叫這個檢查')
 
 print('\n' + '=' * 62)
 print('✅ 全部通過 — 週列表與待補清單對每一筆的判定一致')

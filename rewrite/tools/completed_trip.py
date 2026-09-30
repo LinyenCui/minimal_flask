@@ -86,10 +86,11 @@ class CompletedTripView:
             d['computed_total'] = None
         else:
             d['computed_total'] = (meter or 0) + (extra or 0)
-        # 沖帳（錶價 140 / 加成 −140 → 淨額 0，備註「改車資…」）算**已填**：
-        # 它是有人決定過的結果，不是漏填。用「總額>0」判會誤判成未記錄
-        # （PROD 有 64 筆這種）。判定在 fare_rules，跟 SQL 那份同源。
-        d['has_fare'] = is_fare_filled(meter, extra, d.get('modification_reason'))
+        # 沖帳（錶價 140 / 加成 −140 → 淨額 0）算**已填** —— 錶價非 0 就是填過，
+        # 用「總額>0」判會誤判成未記錄（PROD 有 64 筆這種）。
+        # 錶價加成都 0 → 沒填，不看備註（2026-09-30：清成 0 = 要重報）。
+        # 判定在 fare_rules，跟 SQL 那份同源。
+        d['has_fare'] = is_fare_filled(meter, extra)
         d['is_leave'] = bool(d.get('passenger_leave_reason'))
 
         valid = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
@@ -368,8 +369,8 @@ def aggregate_completed_trips(
         SELECT
             COUNT(*) AS total_count,
             -- 「填過沒」跟顯示層/查詢過濾/司機待補清單同源（fare_rules）。
-            -- 以前這裡自己寫「總額 > 0」，於是沖帳班次（140/−140 → 淨額 0，
-            -- 備註有「改車資」）被算進「未記錄」，跟列表顯示講不同的話。
+            -- 以前這裡自己寫「總額 > 0」，於是沖帳班次（140/−140 → 淨額 0）
+            -- 被算進「未記錄」，跟列表顯示講不同的話。
             COUNT(CASE WHEN {FILLED_SQL} THEN 1 END) AS filled_count,
             COUNT(CASE WHEN {MISSING_SQL} THEN 1 END) AS unfilled_count,
             COALESCE(SUM(CASE

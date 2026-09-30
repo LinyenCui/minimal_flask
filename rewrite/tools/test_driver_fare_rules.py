@@ -38,24 +38,29 @@ print('# T1: is_fare_filled —— 必須跟待補清單 _MISSING_FARE 同語意
 print('=' * 60)
 
 CASES = [
-    # (錶價, 加成, 修改備註), 期望, 說明
+    # (錶價, 加成, 修改備註（只當說明，判定不看它）), 期望, 說明
     ((200, -95, None), True,
      '請假班次（錶價 200、加成 −95）→ 車有跑，算已填'),
     ((0, -55, '[1] 改車資: 錶價 220→0 (這樣才對)'), True,
-     '衝帳：錶價被人工改成 0、只留 −55 加成'),
-    ((0, 0, '[1] 改車資: 錶價 220→0'), True,
-     '衝帳：錶價加成都 0，但有「改車資」紀錄 → 不該再叫司機補'),
+     '衝帳：錶價被人工改成 0、只留 −55 加成 → 加成非 0，已填'),
+    ((0, 0, '[1] 改路線: 終點 久保田家→南紡購物中心; [2] 改車資: 錶價 360→0'), False,
+     '★ #4344：改路線後把錶價清成 0 → **要重報**（2026-09-30 用戶選 2）'),
+    ((0, 0, '[1] 改車資: 錶價 220→0'), False,
+     '錶價加成都 0，備註有「改車資」也一樣算沒填（不看備註）'),
     ((220, -220, '[1] 改車資: 加成 0→-220 (住院請假)'), True,
      '淨額 0 但錶價非 0 → 已填（顯示 0 元是對的）'),
     ((385, 50, None), True, '正常填好'),
     ((None, None, None), False, '真的沒填'),
     ((0, 0, None), False, '真的沒填（都 0、沒動過）'),
     ((0, None, ''), False, '真的沒填（空字串備註）'),
-    ((None, 0, '指派司機 5386'), False,
-     '有備註但不是「改車資」→ 仍算沒填'),
+    ((None, 0, '指派司機 5386'), False, '有備註也一樣，都 0 就是沒填'),
 ]
-for (m, e, r), want, note in CASES:
-    ok(is_fare_filled(m, e, r) is want, f'{note}')
+for (m, e, _note_only), want, note in CASES:
+    ok(is_fare_filled(m, e) is want, f'{note}')
+
+import inspect as _ins_sig
+ok(list(_ins_sig.signature(is_fare_filled).parameters) == ['meter', 'extra'],
+   '判定只吃錶價與加成 —— 不收備註參數（備註不該影響「填過沒」）')
 
 print()
 print('=' * 60)
@@ -65,16 +70,12 @@ print('=' * 60)
 src = inspect.getsource(query_driver_week_fares)
 ok('_NOT_LEAVE' not in src,
    '週查詢不再用 _NOT_LEAVE 排除請假班次')
-# ⚠️ 不能只檢查 'modification_reason' in src —— 這條原本就這樣寫，
-#    被 `d.get('modification_reason')` 那個字串騙過去，SELECT 其實沒撈，
-#    判定永遠拿到 None（2026-09-30 用戶回報 #4344：週列表「待補」、待補清單卻沒有）。
-#    改成逐段抓 SELECT … FROM 的欄位清單來驗。
-import re as _re_sel
-_selects = _re_sel.findall(r'SELECT(.*?)FROM\s+(\w+)', src, flags=_re_sel.S)
-ok(len(_selects) == 2, f'週查詢有兩段 SELECT（trips + completed_trips）→ {len(_selects)}')
-for _cols, _tbl in _selects:
-    ok('modification_reason' in _cols,
-       f'{_tbl} 的 SELECT 欄位清單有 modification_reason（不是只有 d.get 裡有）')
+# 註：2026-09-30 之前這裡驗「SELECT 有撈 modification_reason」——
+# 舊斷言是 'modification_reason' in src，被 d.get(...) 那個字騙過，SELECT 其實
+# 沒撈，週列表與待補清單判定相反（#4344）。規則改成不看備註後這欄就不需要了；
+# 兩邊一致性改由 test_driver_fare_consistency 直接驗不變量。
+ok('modification_reason' not in src,
+   '週查詢不再碰 modification_reason（規則不看備註，撈了也用不到）')
 ok('is_fare_filled(' in src,
    '用共用的 is_fare_filled，不再自己寫一套 meter != 0')
 ok(src.count('is_fare_filled(') == 1,
@@ -110,12 +111,10 @@ from rewrite.tools import query_spec as _qs
 from rewrite.views import completed_trip_flex as _flex
 from rewrite.tools import driver as _drv
 
-# 沖帳：錶價 140 / 加成 −140 → 淨額 0，但備註有「改車資」→ 已填
-ok(is_fare_filled(140, -140, '[1] 改車資: 加成 0→-140 (遲到自己騎車回)'),
-   '沖帳（140/−140，備註有改車資）算已填')
-ok(is_fare_filled(0, 0, '[1] 改車資: 錶價 220→0'), '錶價被抵成 0 但動過 → 已填')
-ok(not is_fare_filled(0, 0, None), '真的沒填才是沒填')
-ok(not is_fare_filled(None, None, '指派司機 5386'), '備註不是「改車資」→ 仍沒填')
+# 沖帳：錶價 140 / 加成 −140 → 淨額 0，錶價非 0 → 已填（不靠備註）
+ok(is_fare_filled(140, -140), '沖帳（140/−140）算已填')
+ok(not is_fare_filled(0, 0), '錶價清成 0 → 要重報（2026-09-30 用戶選 2，不看備註）')
+ok(not is_fare_filled(None, None), '真的沒填才是沒填')
 
 # View 的 has_fare 要用共用判定，不能自己算「總額 > 0」
 _vsrc = _ins.getsource(_ct.CompletedTripView.from_row)
@@ -156,7 +155,9 @@ ok('if ct.has_fare:' in _ins.getsource(_flex._ct_row),
 
 # SQL 兩份必須是嚴格反面，不可能各自漂移
 ok(_fr.MISSING_SQL == f'NOT {_fr.FILLED_SQL}', 'MISSING_SQL 是 FILLED_SQL 的反面')
-ok('%%' in _fr.FILLED_SQL, "SQL 裡的 % 有寫成 %%（text() 帶參數時 psycopg2 會炸）")
+ok('%' not in _fr.FILLED_SQL,
+   "SQL 裡沒有 %（不再用 LIKE 比對備註；有 % 的話 text() 帶參數時要寫 %%）")
+ok('modification_reason' not in _fr.FILLED_SQL, 'SQL 版判定也不看備註')
 
 # 端到端：假一筆沖帳的 View，列表那格要顯示 0
 _v = _ct.CompletedTripView.from_row(type('R', (), {'_mapping': {
@@ -167,6 +168,16 @@ _v = _ct.CompletedTripView.from_row(type('R', (), {'_mapping': {
 ok(_v.has_fare is True and _v.computed_total == 0, '沖帳 View：has_fare=True、淨額 0')
 _cell = [c.get('text') for c in _flex._ct_row(_v)['contents']][-1]
 ok(_cell == '0', f'列表顯示 0 而不是「未記錄」（實際 {_cell!r}）')
+
+# 端到端：#4344 那種（錶價清成 0）→ 已完成列表要顯示「未記錄」，不是 0
+_v2 = _ct.CompletedTripView.from_row(type('R', (), {'_mapping': {
+    'id': 4344, 'meter_fare': 0, 'extra_fare': 0,
+    'modification_reason': '[1] 改路線: 終點 久保田家→南紡購物中心; [2] 改車資: 錶價 360→0',
+    'start_point': '東洋後門', 'end_point': '南紡購物中心', 'passenger_leave_reason': None,
+}})())
+ok(_v2.has_fare is False, '#4344 View：has_fare=False')
+_cell2 = [c.get('text') for c in _flex._ct_row(_v2)['contents']][-1]
+ok(_cell2 == '未記錄', f'#4344 在已完成列表顯示「未記錄」（實際 {_cell2!r}）')
 
 print('\n' + '=' * 60)
 print('✅ 全部通過 — 車資判定規則單一來源（五個使用者同源）')

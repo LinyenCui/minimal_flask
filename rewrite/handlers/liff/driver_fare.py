@@ -61,6 +61,26 @@ def _to_int_or_none(v):
         return None
 
 
+ZERO_FARE_ERROR = '車資不能是 0 —— 這趟沒收錢的話請跟老闆說（請假或註銷），不用在這裡填'
+
+
+def _zero_fare_error(meter, extra):
+    """司機送出的錶價與加成都是 0 → 回錯誤訊息；否則 None。
+
+    為什麼要擋（2026-09-30）：「填過沒」的規則改成只看錶價與加成
+    （fare_rules：兩個都 0 = 沒填），不再看備註。如果放行 0，
+    送出會顯示成功，但下次打開又被判成「沒填」、跑回待補清單 —— 無限迴圈。
+    沒收錢的班次（乘客沒搭、取消）走請假或註銷，不是填 0。
+    PROD 至今沒有司機在 LIFF 送過 0，擋掉不影響既有習慣。
+
+    只看送上來的值：待補清單裡的班次本來就是錶價加成都 0／空，
+    所以「送上來的都是 0」就等於「送完還是 0」。
+    """
+    if (meter or 0) == 0 and (extra or 0) == 0:
+        return ZERO_FARE_ERROR
+    return None
+
+
 def _driver_json(view) -> dict:
     """DriverView → 前端要的最小欄位（不外洩 line_user_id）"""
     return {
@@ -302,6 +322,10 @@ def driver_fare_submit():
                 continue
             if meter is None and extra is None:
                 results.append({**base, 'ok': False, 'error': '請填車資'})
+                continue
+            zero_err = _zero_fare_error(meter, extra)
+            if zero_err:
+                results.append({**base, 'ok': False, 'error': zero_err})
                 continue
 
             owns = driver_tools.check_driver_owns_record(

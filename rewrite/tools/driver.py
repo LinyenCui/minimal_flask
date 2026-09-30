@@ -422,13 +422,11 @@ def set_driver_active(
 # 司機自助回報車資：待補清單 + 授權檢查
 # ============================================================
 
-# 「缺車資」：錶價空或 0（加成不算 —— 加成常態就是 0）
-# 「還沒填車資」的判定（2026-08-03 依真實資料校正）：
-#   錶價空或 0 **且** 加成空或 0 **且** 沒被明確改過車資。
+# 「還沒填車資」= 錶價空或 0 **且** 加成空或 0（判定本體在 fare_rules）。
 # 為什麼不只看錶價：衝帳／夜間加成這類是「錶價 0、加成非 0」，
-# 錢已經處理過了，舊規則會把它們當「0 元待補」丟給司機重填（實測 #3102 -55、
+# 錢已經處理過了，只看錶價會把它們當「0 元待補」丟給司機重填（實測 #3102 -55、
 # #3101 -45、#1745 +2250）。加成非 0 一律代表有人動過這筆的錢。
-# 「改車資」關鍵字則涵蓋「刻意填 0」的免費車，否則它會永遠賴在待補清單。
+# ⚠️ 不看備註：2026-09-30 拿掉「備註有改車資就算填過」—— 見 fare_rules 說明。
 from rewrite.tools.fare_rules import MISSING_SQL as _MISSING_FARE
 # 請假班次的車資由老闆用加成處理，司機沒跑不用回報 → 不列入待補
 _NOT_LEAVE = "(passenger_leave_reason IS NULL OR passenger_leave_reason = '')"
@@ -602,16 +600,12 @@ def query_driver_week_fares(*, session, driver_id: int,
     # 本週看到今天為止；過去週看完整一週（週日~週六）
     week_end = today if week_offset >= 0 else week_start + timedelta(days=6)
 
-    # ⚠️ 兩段 SELECT 都**必須**撈 modification_reason —— 下面 _pack 用它判斷
-    #    「填過沒」（改車資 豁免）。2026-08-05 接好了 _pack 卻漏了這欄，
-    #    d.get() 永遠拿到 None，於是週列表判「待補」、待補清單判「已填」，
-    #    司機看到待補卻沒地方補（2026-09-30 用戶回報，#4344）。
     trip_rows = session.execute(
         text(f"""
             SELECT trip_id, date, time, category, meter_fare, extra_fare,
                    start_point, via_point, end_point,
                    custom_start_point, custom_via_point, custom_end_point,
-                   trip_type, passenger_name, modification_reason
+                   trip_type, passenger_name
             FROM trips
             WHERE driver_id = :did
               AND date BETWEEN :ws AND :we
@@ -626,8 +620,7 @@ def query_driver_week_fares(*, session, driver_id: int,
     completed_rows = session.execute(
         text(f"""
             SELECT id, date, category, meter_fare, extra_fare,
-                   start_point, via_point, end_point, passenger_name,
-                   modification_reason
+                   start_point, via_point, end_point, passenger_name
             FROM completed_trips
             WHERE driver_id = :did
               AND date BETWEEN :ws AND :we
@@ -637,13 +630,13 @@ def query_driver_week_fares(*, session, driver_id: int,
         {'did': driver_id, 'ws': week_start, 'we': week_end},
     ).fetchall()
 
-    def _pack(*, source, rid, d, tm, route, category, meter, extra,
-              mod_reason=None) -> dict:
+    def _pack(*, source, rid, d, tm, route, category, meter, extra) -> dict:
         # 「已填」必須跟待補清單（_MISSING_FARE）同一套判定，否則同一筆會
-        # 「不在待補清單、卻在週列表被當成待補」，而且金額被靜默漏掉。
-        # 未填 = 錶價和加成都空/0 **而且** 沒有「改車資」紀錄；
-        # 反過來說有動過車資的（例：人工把錶價改成 0 的衝帳）就算已填。
-        has_fare = is_fare_filled(meter, extra, mod_reason)
+        # 「在週列表顯示待補、待補清單卻沒有」—— 司機看得到卻沒地方補。
+        # 2026-09-30 真的發生過（#4344）：當時規則還看備註，這裡的 SELECT
+        # 卻沒撈備註欄。現在規則只看錶價與加成，兩邊結構上不可能再分歧；
+        # test_driver_fare_consistency 直接驗「週列表已填 == 不在待補清單」。
+        has_fare = is_fare_filled(meter, extra)
         return {
             'source': source,
             'id': rid,
@@ -669,7 +662,6 @@ def query_driver_week_fares(*, session, driver_id: int,
             tm=d['time'].strftime('%H:%M') if d.get('time') else None,
             route=_route_of(sp, vp, ep), category=d.get('category'),
             meter=d.get('meter_fare'), extra=d.get('extra_fare'),
-            mod_reason=d.get('modification_reason'),
         ))
     for r in completed_rows:
         d = dict(r._mapping)
@@ -679,7 +671,6 @@ def query_driver_week_fares(*, session, driver_id: int,
             route=_route_of(d.get('start_point'), d.get('via_point'), d.get('end_point')),
             category=d.get('category'),
             meter=d.get('meter_fare'), extra=d.get('extra_fare'),
-            mod_reason=d.get('modification_reason'),
         ))
 
     items.sort(key=lambda it: (it['date'] or '', it['time'] or '99:99', it['id']))
